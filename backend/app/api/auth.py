@@ -81,7 +81,9 @@ async def _db_login(db: AsyncSession, body: LoginRequest) -> Optional[dict]:
         logger.warning("Auth DB query failed (falling back to mock): %s", exc)
         return None
 
-    if not user or not user.is_active:
+    if not user:
+        return None
+    if not user.is_active:
         raise HTTPException(401, "用户名或密码错误")
     if not verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "用户名或密码错误")

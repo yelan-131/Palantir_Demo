@@ -41,44 +41,9 @@ from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 @router.get("/overview")
 async def get_overview():
-    """运营总览数据 — 图优先."""
+    """运营总览数据 — PG优先（图不可用时快速跳过）."""
 
-    async def _graph_overview():
-        from app.services.graph_service import graph_service
-        stats = await graph_service.get_stats()
-        label_counts = {r["label"]: r["count"] for r in stats["nodes_by_label"]}
-
-        eq_running = await graph_service.count_by_label_and_property("Equipment", "status", "running")
-        lines_running = await graph_service.count_by_label_and_property("ProductionLine", "status", "running")
-        wo_in_progress = await graph_service.count_by_label_and_property("WorkOrder", "status", "in_progress")
-        wo_completed = await graph_service.count_by_label_and_property("WorkOrder", "status", "completed")
-
-        eq_total = label_counts.get("Equipment", 0)
-        return {
-            "factories": {"count": label_counts.get("Factory", 0)},
-            "equipment": {
-                "total": eq_total,
-                "running": eq_running,
-                "utilization_rate": round(eq_running / max(eq_total, 1), 3),
-            },
-            "production_lines": {"total": label_counts.get("ProductionLine", 0), "running": lines_running},
-            "work_orders": {
-                "total": label_counts.get("WorkOrder", 0),
-                "in_progress": wo_in_progress,
-                "completed": wo_completed,
-            },
-            "quality": {"defect_count": label_counts.get("Defect", 0)},
-            "avg_equipment_health": 0.785,
-        }
-
-    def _mock_overview():
-        return MOCK_OVERVIEW
-
-    result = await try_graph_or_mock(_graph_overview, _mock_overview)
-    if result != MOCK_OVERVIEW:
-        return result
-
-    # PG fallback
+    # PG fallback first (fast, always works)
     result = await _try_db(lambda db: _query_overview(db))
     if result is not None:
         return result
