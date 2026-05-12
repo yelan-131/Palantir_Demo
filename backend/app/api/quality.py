@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.services.graph_fallback import try_graph_or_mock
+
 router = APIRouter()
 
 
@@ -197,6 +199,28 @@ async def list_defects(
 
     result = await _try_db(_query)
     if result is not None:
+        # Graph enrichment: best-effort add inspector_name from INSPECTS relationship
+        try:
+            from app.services.graph_service import graph_service
+            for defect in result.get("data", []):
+                inspection_id = defect.get("inspection_id")
+                if inspection_id is None:
+                    continue
+                try:
+                    rels = await graph_service.get_relationships(
+                        entity_id=inspection_id, rel_type="INSPECTS", limit=10,
+                    )
+                    for rel in rels:
+                        # Worker -> INSPECTS -> Inspection: look for source node of type Worker
+                        src = rel.get("source", {})
+                        if isinstance(src, dict) and src.get("labels") and "Worker" in src.get("labels", []):
+                            props = src.get("properties", src)
+                            defect["inspector_name"] = props.get("name", props.get("pg_id"))
+                            break
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return result
 
     # Mock fallback
@@ -205,6 +229,29 @@ async def list_defects(
         filtered = [d for d in filtered if d["severity"] == severity]
     offset = (page - 1) * page_size
     page_data = filtered[offset:offset + page_size]
+
+    # Graph enrichment on mock data: best-effort
+    try:
+        from app.services.graph_service import graph_service
+        for defect in page_data:
+            inspection_id = defect.get("inspection_id")
+            if inspection_id is None:
+                continue
+            try:
+                rels = await graph_service.get_relationships(
+                    entity_id=inspection_id, rel_type="INSPECTS", limit=10,
+                )
+                for rel in rels:
+                    src = rel.get("source", {})
+                    if isinstance(src, dict) and src.get("labels") and "Worker" in src.get("labels", []):
+                        props = src.get("properties", src)
+                        defect["inspector_name"] = props.get("name", props.get("pg_id"))
+                        break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     return {
         "data": page_data,
         "total": len(filtered),
@@ -216,6 +263,42 @@ async def list_defects(
 @router.get("/defects/pareto")
 async def defect_pareto_analysis(days: int = Query(30, ge=1, le=365)):
     """缺陷帕累托分析."""
+    # Graph-first: try Cypher aggregation on Neo4j
+    try:
+        from app.services.graph_service import graph_service
+        graph_service._check_driver()
+        async def _graph_pareto():
+            from app.database import neo4j_driver
+            async with neo4j_driver.session() as session:
+                result = await session.run(
+                    "MATCH (d:Defect) "
+                    "RETURN d.defect_type AS type, count(*) AS count "
+                    "ORDER BY count DESC"
+                )
+                records = await result.data()
+                if not records:
+                    return None
+                total = sum(r["count"] for r in records)
+                cumulative = 0
+                pareto_data = []
+                for r in records:
+                    count = r["count"]
+                    cumulative += count
+                    pareto_data.append({
+                        "defect_type": r["type"],
+                        "count": count,
+                        "percentage": round(count / max(total, 1) * 100, 1),
+                        "cumulative_percentage": round(cumulative / max(total, 1) * 100, 1),
+                    })
+                return {"data": pareto_data, "total_defects": total}
+
+        graph_result = await _graph_pareto()
+        if graph_result is not None:
+            return graph_result
+    except Exception:
+        pass
+
+    # PG fallback
     async def _query(db):
         from app.models.relational import Defect
         from sqlalchemy import func, select
@@ -253,7 +336,79 @@ async def quality_traceability(
     entity_id: int,
     entity_type: str = Query("product", enum=["product", "equipment", "material"]),
 ):
-    """质量追溯链."""
+    """质量追溯链 — graph-first via trace_chain, then PG, then mock."""
+
+    # ── Graph-first: try trace_chain on Neo4j ──
+    try:
+        from app.services.graph_service import graph_service
+        trace_records = await graph_service.trace_chain(
+            entity_id=entity_id, max_hops=5, limit=100,
+        )
+        if trace_records:
+            trace = []
+            for rec in trace_records:
+                # Each record may contain 'nodes' and 'relationships' from the path
+                nodes = rec.get("nodes", [])
+                rels = rec.get("relationships", rec.get("rels", []))
+                if nodes:
+                    # Build a flattened trace from path nodes
+                    for node in nodes:
+                        labels = node.get("labels", [])
+                        props = node.get("properties", node)
+                        step_type = "unknown"
+                        step_label = "节点"
+                        # Map graph labels to trace step types
+                        if "Inspection" in labels:
+                            insp_type = props.get("inspection_type", "")
+                            step_label = (
+                                "来料检验" if insp_type == "incoming"
+                                else "过程检验" if insp_type == "in_process"
+                                else "成品检验"
+                            )
+                            step_type = "inspection"
+                        elif "Defect" in labels:
+                            step_label = f"缺陷: {props.get('defect_type', '')}"
+                            step_type = "defect"
+                        elif "Equipment" in labels:
+                            step_label = f"设备: {props.get('name', props.get('pg_id', ''))}"
+                            step_type = "equipment"
+                        elif "Material" in labels:
+                            step_label = f"物料: {props.get('name', props.get('pg_id', ''))}"
+                            step_type = "material"
+                        elif "Product" in labels:
+                            step_label = f"产品: {props.get('name', props.get('pg_id', ''))}"
+                            step_type = "product"
+                        elif "WorkOrder" in labels:
+                            step_label = f"工单: {props.get('pg_id', '')}"
+                            step_type = "operation"
+
+                        entry = {
+                            "step": step_label,
+                            "type": step_type,
+                            "id": props.get("pg_id", props.get("id")),
+                        }
+                        # Carry over relevant fields
+                        if props.get("result"):
+                            entry["result"] = props["result"]
+                        if props.get("inspected_at") or props.get("timestamp"):
+                            entry["timestamp"] = props.get("inspected_at") or props.get("timestamp")
+                        if props.get("inspector_id"):
+                            entry["inspector_id"] = props["inspector_id"]
+                        if props.get("equipment_id"):
+                            entry["equipment_id"] = props["equipment_id"]
+                        trace.append(entry)
+
+                    if trace:
+                        return {
+                            "entity_id": entity_id,
+                            "entity_type": entity_type,
+                            "trace": trace,
+                            "source": "graph",
+                        }
+    except Exception:
+        pass
+
+    # ── PG fallback: existing relational query logic ──
     async def _query(db):
         from app.models.relational import Inspection, Defect
         from sqlalchemy import select

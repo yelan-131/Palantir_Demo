@@ -92,7 +92,7 @@ from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 @router.get("/suppliers")
 async def list_suppliers(rating_min: float | None = None):
-    """供应商列表."""
+    """供应商列表 — 附加上游 SUPPLIES 关系数据."""
     async def _query(db):
         from app.models.relational import Supplier
         from sqlalchemy import select
@@ -101,19 +101,32 @@ async def list_suppliers(rating_min: float | None = None):
             query = query.where(Supplier.rating >= rating_min)
         result = await db.execute(query)
         suppliers = result.scalars().all()
-        return {
-            "data": [
-                {
-                    "id": s.id,
-                    "name": s.name,
-                    "location": s.location,
-                    "rating": s.rating,
-                    "lead_time_days": s.lead_time_days,
-                    "contact": s.contact,
-                }
-                for s in suppliers
-            ]
-        }
+        data = [
+            {
+                "id": s.id,
+                "name": s.name,
+                "location": s.location,
+                "rating": s.rating,
+                "lead_time_days": s.lead_time_days,
+                "contact": s.contact,
+            }
+            for s in suppliers
+        ]
+        # Enrich with graph SUPPLIES relationships
+        try:
+            from app.services.graph_service import graph_service
+            for s in data:
+                rels = await graph_service.get_relationships(s["id"], "SUPPLIES", 20)
+                supplied = []
+                for r in rels:
+                    if r.get("direction") == "outgoing":
+                        tgt = r.get("target", {})
+                        supplied.append({"name": tgt.get("name", ""), "id": r.get("target", {}).get("pg_id")})
+                if supplied:
+                    s["supplied_materials"] = supplied
+        except Exception:
+            pass
+        return {"data": data}
 
     result = await _try_db(_query)
     if result is not None:
@@ -220,7 +233,7 @@ async def list_shipments(status: str | None = None):
 
 @router.get("/risk-assessment")
 async def risk_assessment():
-    """供应链风险评估."""
+    """供应链风险评估 — 用图影响分析评估连锁风险."""
     async def _query(db):
         from app.models.relational import Supplier
         from sqlalchemy import select
@@ -232,7 +245,7 @@ async def risk_assessment():
         for s in suppliers:
             risk_score = round(100 - s.rating * 20 + random.uniform(-5, 5), 1)
             risk_score = max(0, min(100, risk_score))
-            risks.append({
+            entry = {
                 "supplier_id": s.id,
                 "supplier_name": s.name,
                 "location": s.location,
@@ -245,7 +258,28 @@ async def risk_assessment():
                     "geopolitical_risk": round(random.uniform(10, 70), 1),
                 },
                 "recommendation": _get_risk_recommendation(risk_score),
-            })
+            }
+            # Enrich with graph impact analysis
+            try:
+                from app.services.graph_service import graph_service
+                impact = await graph_service.impact_analysis(s.id, max_hops=4, limit=50)
+                affected_products = set()
+                affected_orders = set()
+                for record in impact:
+                    node = record.get("affected", {})
+                    labels = node.get("labels", [])
+                    if "Product" in labels:
+                        affected_products.add(node.get("name", ""))
+                    elif "SalesOrder" in labels or "WorkOrder" in labels:
+                        affected_orders.add(node.get("order_no", node.get("name", "")))
+                if affected_products:
+                    entry["affected_products"] = list(affected_products)
+                if affected_orders:
+                    entry["affected_orders"] = list(affected_orders)
+                entry["cascade_impact_count"] = len(impact)
+            except Exception:
+                pass
+            risks.append(entry)
 
         risks.sort(key=lambda x: x["risk_score"], reverse=True)
         return {"data": risks}

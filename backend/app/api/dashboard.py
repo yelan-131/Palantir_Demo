@@ -1,4 +1,4 @@
-"""Dashboard / Overview API — with fallback to mock data when DB unavailable."""
+"""Dashboard / Overview API — graph-first with fallback to PG then mock."""
 
 import random
 from datetime import datetime, timedelta
@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.relational import Defect, Equipment, Factory, ProductionLine, WorkOrder
+from app.services.graph_fallback import try_graph_or_mock
 
 router = APIRouter()
 
@@ -40,7 +41,44 @@ from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 @router.get("/overview")
 async def get_overview():
-    """运营总览数据."""
+    """运营总览数据 — 图优先."""
+
+    async def _graph_overview():
+        from app.services.graph_service import graph_service
+        stats = await graph_service.get_stats()
+        label_counts = {r["label"]: r["count"] for r in stats["nodes_by_label"]}
+
+        eq_running = await graph_service.count_by_label_and_property("Equipment", "status", "running")
+        lines_running = await graph_service.count_by_label_and_property("ProductionLine", "status", "running")
+        wo_in_progress = await graph_service.count_by_label_and_property("WorkOrder", "status", "in_progress")
+        wo_completed = await graph_service.count_by_label_and_property("WorkOrder", "status", "completed")
+
+        eq_total = label_counts.get("Equipment", 0)
+        return {
+            "factories": {"count": label_counts.get("Factory", 0)},
+            "equipment": {
+                "total": eq_total,
+                "running": eq_running,
+                "utilization_rate": round(eq_running / max(eq_total, 1), 3),
+            },
+            "production_lines": {"total": label_counts.get("ProductionLine", 0), "running": lines_running},
+            "work_orders": {
+                "total": label_counts.get("WorkOrder", 0),
+                "in_progress": wo_in_progress,
+                "completed": wo_completed,
+            },
+            "quality": {"defect_count": label_counts.get("Defect", 0)},
+            "avg_equipment_health": 0.785,
+        }
+
+    def _mock_overview():
+        return MOCK_OVERVIEW
+
+    result = await try_graph_or_mock(_graph_overview, _mock_overview)
+    if result != MOCK_OVERVIEW:
+        return result
+
+    # PG fallback
     result = await _try_db(lambda db: _query_overview(db))
     if result is not None:
         return result
@@ -169,7 +207,7 @@ async def _query_alerts(db, limit):
     alerts = []
     for eq in low_health:
         severity = "critical" if eq.health_score < 40 else "warning"
-        alerts.append({
+        alert = {
             "id": f"alert-eq-{eq.id}",
             "type": "equipment_health",
             "severity": severity,
@@ -178,5 +216,22 @@ async def _query_alerts(db, limit):
             "entity_id": eq.id,
             "entity_type": "Equipment",
             "timestamp": eq.updated_at.isoformat() if eq.updated_at else None,
-        })
+        }
+        # Try to get hierarchy path from graph
+        try:
+            from app.services.graph_service import graph_service
+            neighbors = await graph_service.get_neighbors(eq.id, limit=10)
+            location_parts = [eq.name]
+            for n in neighbors:
+                node_data = n.get("n", n.get("m", {}))
+                rel_type = n.get("rel_type", "")
+                label = node_data.get("labels", [""])[0] if isinstance(node_data, dict) else ""
+                name = node_data.get("name", "")
+                if rel_type == "CONTAINS" and name:
+                    location_parts.append(name)
+            if len(location_parts) > 1:
+                alert["location_path"] = " > ".join(reversed(location_parts))
+        except Exception:
+            pass
+        alerts.append(alert)
     return {"data": alerts, "total": len(alerts)}

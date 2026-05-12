@@ -66,6 +66,20 @@ export const getSubgraph = (entityId: number, depth?: number) =>
   api.get(`/graph/subgraph/${entityId}`, { params: { depth } });
 export const getGraphStats = () => api.get('/graph/stats');
 
+// Graph — new endpoints (Phase 2)
+export const getGraphEntity = (label: string, entityId: number) =>
+  api.get(`/graph/entity/${label}/${entityId}`);
+export const getGraphRelationships = (label: string, entityId: number, params?: Record<string, unknown>) =>
+  api.get(`/graph/entity/${label}/${entityId}/relationships`, { params });
+export const getImpactAnalysis = (entityId: number, maxHops?: number) =>
+  api.get(`/graph/impact-analysis/${entityId}`, { params: { max_hops: maxHops } });
+export const getTraceChain = (entityId: number, maxHops?: number) =>
+  api.get(`/graph/trace/${entityId}`, { params: { max_hops: maxHops } });
+export const getCentrality = (limit?: number) =>
+  api.get('/graph/analytics/centrality', { params: { limit } });
+export const getEntityRelationships = (entityType: string, entityId: number, relType?: string) =>
+  api.get(`/ontology/entities/${entityType}/instances/${entityId}/relationships`, { params: { rel_type: relType } });
+
 // Pipeline
 export const listPipelines = () => api.get('/pipelines');
 export const createPipeline = (data: Record<string, unknown>) => api.post('/pipelines', data);

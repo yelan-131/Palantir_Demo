@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.services.graph_fallback import try_graph_or_mock
+
 router = APIRouter()
 
 
@@ -82,6 +84,33 @@ async def equipment_health_overview():
 
     result = await _try_db(_query)
     if result is not None:
+        # Enrich each equipment item with graph context
+        for eq_item in result.get("equipment", []):
+            try:
+                from app.services.graph_service import graph_service
+                neighbors = await graph_service.get_neighbors(eq_item["id"], limit=20)
+                # Extract location_path from CONTAINS chain
+                location_parts = []
+                for nb in neighbors:
+                    if nb.get("rel_type") == "CONTAINS":
+                        m = nb.get("m", {})
+                        if isinstance(m, dict):
+                            name = m.get("name", "")
+                        else:
+                            name = ""
+                        if name:
+                            location_parts.append(name)
+                eq_item["location_path"] = " > ".join(location_parts) if location_parts else None
+                # Count FEEDS relationships to sensors
+                eq_item["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
+                # Collect MAINTAINS workers
+                eq_item["assigned_workers"] = [
+                    nb.get("m", {}).get("name", "")
+                    for nb in neighbors
+                    if nb.get("rel_type") == "MAINTAINS" and nb.get("m", {}).get("name")
+                ]
+            except Exception:
+                pass
         return result
 
     # Mock fallback
@@ -142,6 +171,33 @@ async def single_equipment_health(equipment_id: int):
 
     result = await _try_db(_query)
     if result is not None:
+        # Enrich with graph context
+        try:
+            from app.services.graph_service import graph_service
+            neighbors = await graph_service.get_neighbors(equipment_id, limit=20)
+            location_parts = []
+            related_work_orders = []
+            for nb in neighbors:
+                if nb.get("rel_type") == "CONTAINS":
+                    m = nb.get("m", {})
+                    if isinstance(m, dict):
+                        name = m.get("name", "")
+                        if name:
+                            location_parts.append(name)
+                if nb.get("rel_type") == "FEEDS" and isinstance(nb.get("m"), dict):
+                    related_work_orders.append(nb["m"].get("pg_id"))
+            result["location_path"] = " > ".join(location_parts) if location_parts else None
+            result["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
+            result["related_work_orders"] = related_work_orders if related_work_orders else None
+        except Exception:
+            pass
+        # Cascade risk from impact analysis
+        try:
+            from app.services.graph_service import graph_service
+            impacted = await graph_service.impact_analysis(equipment_id, max_hops=3, limit=30)
+            result["cascade_risk"] = len(impacted) if impacted else 0
+        except Exception:
+            pass
         return result
 
     # Mock fallback - find matching mock equipment
@@ -180,7 +236,7 @@ async def single_equipment_health(equipment_id: int):
         "wear": round(random.uniform(50, 95), 1),
     }
 
-    return {
+    result = {
         "id": eq_mock["id"],
         "name": eq_mock["name"],
         "model": eq_mock["model"],
@@ -191,6 +247,35 @@ async def single_equipment_health(equipment_id: int):
         "breakdown": breakdown,
         "recommendation": _get_recommendation(eq_mock["health_score"]),
     }
+
+    # Enrich mock result with graph context
+    try:
+        from app.services.graph_service import graph_service
+        neighbors = await graph_service.get_neighbors(equipment_id, limit=20)
+        location_parts = []
+        related_work_orders = []
+        for nb in neighbors:
+            if nb.get("rel_type") == "CONTAINS":
+                m = nb.get("m", {})
+                if isinstance(m, dict):
+                    name = m.get("name", "")
+                    if name:
+                        location_parts.append(name)
+            if nb.get("rel_type") == "FEEDS" and isinstance(nb.get("m"), dict):
+                related_work_orders.append(nb["m"].get("pg_id"))
+        result["location_path"] = " > ".join(location_parts) if location_parts else None
+        result["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
+        result["related_work_orders"] = related_work_orders if related_work_orders else None
+    except Exception:
+        pass
+    try:
+        from app.services.graph_service import graph_service
+        impacted = await graph_service.impact_analysis(equipment_id, max_hops=3, limit=30)
+        result["cascade_risk"] = len(impacted) if impacted else 0
+    except Exception:
+        pass
+
+    return result
 
 
 @router.get("/predictions")
@@ -226,13 +311,52 @@ async def fault_predictions(
 
     result = await _try_db(_query)
     if result is not None:
+        # Enrich predictions with graph cascade analysis
+        for pred in result.get("data", []):
+            try:
+                from app.services.graph_service import graph_service
+                impacted = await graph_service.impact_analysis(pred["equipment_id"], max_hops=3, limit=30)
+                affected_lines = []
+                affected_orders = []
+                for item in (impacted or []):
+                    affected = item.get("affected", {})
+                    if isinstance(affected, dict):
+                        labels = affected.get("labels", [])
+                        if "ProductionLine" in str(labels):
+                            affected_lines.append(affected.get("name", ""))
+                        if "WorkOrder" in str(labels):
+                            affected_orders.append(affected.get("order_no", affected.get("pg_id")))
+                pred["affected_production_lines"] = affected_lines if affected_lines else None
+                pred["affected_work_orders"] = affected_orders if affected_orders else None
+            except Exception:
+                pass
         return result
 
     # Mock fallback
     filtered = MOCK_PREDICTIONS
     if risk_level:
         filtered = [p for p in filtered if p["risk_level"] == risk_level]
-    return {"data": filtered[:limit]}
+    filtered = filtered[:limit]
+    # Enrich mock predictions with graph cascade analysis
+    for pred in filtered:
+        try:
+            from app.services.graph_service import graph_service
+            impacted = await graph_service.impact_analysis(pred["equipment_id"], max_hops=3, limit=30)
+            affected_lines = []
+            affected_orders = []
+            for item in (impacted or []):
+                affected = item.get("affected", {})
+                if isinstance(affected, dict):
+                    labels = affected.get("labels", [])
+                    if "ProductionLine" in str(labels):
+                        affected_lines.append(affected.get("name", ""))
+                    if "WorkOrder" in str(labels):
+                        affected_orders.append(affected.get("order_no", affected.get("pg_id")))
+            pred["affected_production_lines"] = affected_lines if affected_lines else None
+            pred["affected_work_orders"] = affected_orders if affected_orders else None
+        except Exception:
+            pass
+    return {"data": filtered}
 
 
 @router.get("/work-orders")
