@@ -260,3 +260,43 @@ async def delete_role(role_id: int):
 
     result = await _try_db(_query)
     return result or {"ok": True}
+
+
+# ── Audit Logs ──────────────────────────────────────────
+
+@router.get("/audit-logs")
+async def list_audit_logs(
+    resource_type: Optional[str] = None,
+    action: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """审计日志查询."""
+    async def _query(db):
+        from sqlalchemy import func as sa_func
+        from app.models.relational import AuditLog
+        q = select(AuditLog).order_by(AuditLog.timestamp.desc())
+        if resource_type:
+            q = q.where(AuditLog.resource_type == resource_type)
+        if action:
+            q = q.where(AuditLog.action == action)
+        count_q = select(sa_func.count()).select_from(q.subquery())
+        total = await db.scalar(count_q)
+        q = q.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(q)
+        logs = result.scalars().all()
+        return {
+            "data": [
+                {
+                    "id": l.id, "user_id": l.user_id, "action": l.action,
+                    "resource_type": l.resource_type, "resource_id": l.resource_id,
+                    "old_values": l.old_values, "new_values": l.new_values,
+                    "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+                }
+                for l in logs
+            ],
+            "total": total, "page": page, "page_size": page_size,
+        }
+
+    result = await _try_db(_query)
+    return result or {"data": [], "total": 0, "page": page, "page_size": page_size}

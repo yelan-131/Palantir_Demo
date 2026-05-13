@@ -217,7 +217,7 @@ export default function AIAssistantPage() {
           <Card
             size="small"
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-            bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}
+            styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' } }}
           >
             {/* Messages */}
             <div

@@ -1,30 +1,32 @@
-import React from 'react';
-import { Form, Input, InputNumber, Select, Switch, Divider, Typography, Space, Button, message } from 'antd';
-import type { WidgetInstance } from '../ReportWidgets/types';
+import { useEffect, useState } from 'react';
+import { Form, Input, InputNumber, Select, Divider, Typography, Space } from 'antd';
+import type { WidgetInstance, WidgetFieldConfig } from '../ReportWidgets/types';
+import { listModels } from '@/services/api';
+
+interface ModelOption {
+  id: number;
+  name: string;
+  label: string;
+  fields: { field_name: string; label: string; field_type: string }[];
+}
 
 interface Props {
   widget: WidgetInstance | null;
   onChange: (updated: WidgetInstance) => void;
 }
 
-const API_ENDPOINTS = [
-  { label: '运营总览', value: '/api/v1/dashboard/overview' },
-  { label: '生产统计', value: '/api/v1/dashboard/production' },
-  { label: 'OEE 分析', value: '/api/v1/dashboard/oee' },
-  { label: '告警列表', value: '/api/v1/dashboard/alerts' },
-  { label: '设备健康', value: '/api/v1/maintenance/equipment-health' },
-  { label: '故障预测', value: '/api/v1/maintenance/predictions' },
-  { label: '工单列表', value: '/api/v1/maintenance/work-orders' },
-  { label: 'SPC 数据', value: '/api/v1/quality/spc/temperature' },
-  { label: '缺陷列表', value: '/api/v1/quality/defects' },
-  { label: '帕累托分析', value: '/api/v1/quality/defects/pareto' },
-  { label: '供应商', value: '/api/v1/supply-chain/suppliers' },
-  { label: '库存', value: '/api/v1/supply-chain/inventory' },
-  { label: '风险评估', value: '/api/v1/supply-chain/risk-assessment' },
-  { label: '供应链分析', value: '/api/v1/supply-chain/analytics' },
-];
-
 export default function ConfigPanel({ widget, onChange }: Props) {
+  const [models, setModels] = useState<ModelOption[]>([]);
+
+  useEffect(() => {
+    listModels()
+      .then((res) => {
+        const data = res.data?.data || [];
+        setModels(data);
+      })
+      .catch(() => {});
+  }, []);
+
   if (!widget) {
     return (
       <div style={{ padding: 16, textAlign: 'center', color: '#999' }}>
@@ -34,6 +36,8 @@ export default function ConfigPanel({ widget, onChange }: Props) {
   }
 
   const ds = widget.dataSource || { endpoint: '', path: '', params: {} };
+  const fc = widget.fieldConfig || {};
+  const isFormWidget = widget.type.startsWith('form-');
 
   const handleFieldChange = (field: string, value: unknown) => {
     onChange({ ...widget, [field]: value });
@@ -59,6 +63,16 @@ export default function ConfigPanel({ widget, onChange }: Props) {
       position: { ...widget.position, [field]: value },
     });
   };
+
+  const handleFieldConfigChange = (field: keyof WidgetFieldConfig, value: unknown) => {
+    onChange({
+      ...widget,
+      fieldConfig: { ...widget.fieldConfig, [field]: value },
+    });
+  };
+
+  const selectedModel = models.find((m) => m.name === fc.model_name);
+  const modelFields = selectedModel?.fields || [];
 
   return (
     <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
@@ -86,33 +100,78 @@ export default function ConfigPanel({ widget, onChange }: Props) {
           </Form.Item>
         </Space>
 
-        <Divider orientation="left" plain style={{ margin: '8px 0', fontSize: 12 }}>数据源</Divider>
+        {isFormWidget && (
+          <>
+            <Divider orientation="left" plain style={{ margin: '8px 0', fontSize: 12 }}>字段绑定</Divider>
 
-        <Form.Item label="API 端点">
-          <Select
-            showSearch
-            allowClear
-            placeholder="选择或输入 API 端点"
-            value={ds.endpoint || undefined}
-            onChange={(v) => handleDsChange('endpoint', v || '')}
-            options={API_ENDPOINTS}
-            filterOption={(input, option) => (option?.label ?? '').includes(input)}
-          />
-        </Form.Item>
-        <Form.Item label="自定义端点">
-          <Input
-            placeholder="如 /api/v1/dashboard/overview"
-            value={ds.endpoint || ''}
-            onChange={(e) => handleDsChange('endpoint', e.target.value)}
-          />
-        </Form.Item>
-        <Form.Item label="数据路径">
-          <Input
-            placeholder="如 equipment.total"
-            value={ds.path || ''}
-            onChange={(e) => handleDsChange('path', e.target.value)}
-          />
-        </Form.Item>
+            <Form.Item label="绑定模型">
+              <Select
+                showSearch
+                allowClear
+                placeholder="选择关联的模型"
+                value={fc.model_name || undefined}
+                onChange={(v) => {
+                  handleFieldConfigChange('model_name', v);
+                  handleFieldConfigChange('field_name', undefined);
+                }}
+                options={models.map((m) => ({ label: m.label || m.name, value: m.name }))}
+                filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+              />
+            </Form.Item>
+
+            {fc.model_name && (
+              <Form.Item label="绑定字段">
+                <Select
+                  showSearch
+                  allowClear
+                  placeholder="选择绑定的字段"
+                  value={fc.field_name || undefined}
+                  onChange={(v) => {
+                    const f = modelFields.find((x) => x.field_name === v);
+                    handleFieldConfigChange('field_name', v);
+                    if (f) {
+                      handleFieldConfigChange('label', f.label);
+                      handleFieldConfigChange('field_type', f.field_type);
+                    }
+                  }}
+                  options={modelFields.map((f) => ({ label: `${f.label} (${f.field_type})`, value: f.field_name }))}
+                  filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                />
+              </Form.Item>
+            )}
+
+            {fc.field_name && (
+              <Form.Item label="字段标签">
+                <Input
+                  value={fc.label || ''}
+                  onChange={(e) => handleFieldConfigChange('label', e.target.value)}
+                  placeholder="显示名称"
+                />
+              </Form.Item>
+            )}
+          </>
+        )}
+
+        {!isFormWidget && (
+          <>
+            <Divider orientation="left" plain style={{ margin: '8px 0', fontSize: 12 }}>数据源</Divider>
+
+            <Form.Item label="API 端点">
+              <Input
+                placeholder="/api/v1/dashboard/overview"
+                value={ds.endpoint || ''}
+                onChange={(e) => handleDsChange('endpoint', e.target.value)}
+              />
+            </Form.Item>
+            <Form.Item label="数据路径">
+              <Input
+                placeholder="如 equipment.total"
+                value={ds.path || ''}
+                onChange={(e) => handleDsChange('path', e.target.value)}
+              />
+            </Form.Item>
+          </>
+        )}
 
         {widget.type === 'kpi-card' && (
           <>

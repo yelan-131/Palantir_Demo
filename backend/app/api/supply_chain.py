@@ -112,20 +112,8 @@ async def list_suppliers(rating_min: float | None = None):
             }
             for s in suppliers
         ]
-        # Enrich with graph SUPPLIES relationships
-        try:
-            from app.services.graph_service import graph_service
-            for s in data:
-                rels = await graph_service.get_relationships(s["id"], "SUPPLIES", 20)
-                supplied = []
-                for r in rels:
-                    if r.get("direction") == "outgoing":
-                        tgt = r.get("target", {})
-                        supplied.append({"name": tgt.get("name", ""), "id": r.get("target", {}).get("pg_id")})
-                if supplied:
-                    s["supplied_materials"] = supplied
-        except Exception:
-            pass
+        # Note: Neo4j SUPPLIES relationship enrichment removed to avoid timeout
+        # when Neo4j is slow/unavailable. The core supplier data from PG is sufficient.
         return {"data": data}
 
     result = await _try_db(_query)
@@ -259,26 +247,8 @@ async def risk_assessment():
                 },
                 "recommendation": _get_risk_recommendation(risk_score),
             }
-            # Enrich with graph impact analysis
-            try:
-                from app.services.graph_service import graph_service
-                impact = await graph_service.impact_analysis(s.id, max_hops=4, limit=50)
-                affected_products = set()
-                affected_orders = set()
-                for record in impact:
-                    node = record.get("affected", {})
-                    labels = node.get("labels", [])
-                    if "Product" in labels:
-                        affected_products.add(node.get("name", ""))
-                    elif "SalesOrder" in labels or "WorkOrder" in labels:
-                        affected_orders.add(node.get("order_no", node.get("name", "")))
-                if affected_products:
-                    entry["affected_products"] = list(affected_products)
-                if affected_orders:
-                    entry["affected_orders"] = list(affected_orders)
-                entry["cascade_impact_count"] = len(impact)
-            except Exception:
-                pass
+            # Note: Neo4j impact analysis enrichment removed to avoid timeout.
+            # The risk score and factors from PG data are sufficient.
             risks.append(entry)
 
         risks.sort(key=lambda x: x["risk_score"], reverse=True)

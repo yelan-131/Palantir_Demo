@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Table, Button, Space, Input, Modal, Form, Tag, Spin, message, Popconfirm, Typography, Select } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ArrowLeftOutlined } from '@ant-design/icons';
-import { getPageByName, getModelData, createModelData, updateModelData, deleteModelData } from '@/services/api';
+import {
+  Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
+  Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
+} from 'antd';
+import {
+  PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ArrowLeftOutlined,
+} from '@ant-design/icons';
+import dayjs from 'dayjs';
+import {
+  getPageByName, getModelData, createModelData, updateModelData, deleteModelData,
+  listModels,
+} from '@/services/api';
+import RelationPicker from '@/components/FormWidgets/RelationPicker';
 
 interface FieldDef {
   field_name: string;
@@ -14,6 +24,7 @@ interface FieldDef {
   visible_in_list: boolean;
   visible_in_form: boolean;
   enum_values?: string;
+  relation_config?: string;
 }
 
 interface PageConfig {
@@ -30,6 +41,133 @@ interface PageConfig {
   };
 }
 
+function renderFormField(field: FieldDef) {
+  switch (field.field_type) {
+    case 'int':
+    case 'float':
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请输入${field.label}` }]}
+        >
+          <InputNumber style={{ width: '100%' }} placeholder={`请输入${field.label}`} />
+        </Form.Item>
+      );
+    case 'enum': {
+      let opts: { label: string; value: string }[] = [];
+      if (field.enum_values) {
+        try {
+          const parsed = JSON.parse(field.enum_values);
+          opts = (Array.isArray(parsed) ? parsed : []).map((o: string) => ({ label: o, value: o }));
+        } catch { /* ignore */ }
+      }
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请选择${field.label}` }]}
+        >
+          <Select options={opts} placeholder={`请选择${field.label}`} allowClear />
+        </Form.Item>
+      );
+    }
+    case 'date':
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请选择${field.label}` }]}
+          getValueProps={(v) => ({ value: v ? dayjs(v) : undefined })}
+        >
+          <DatePicker style={{ width: '100%' }} placeholder={`请选择${field.label}`} />
+        </Form.Item>
+      );
+    case 'boolean':
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          valuePropName="checked"
+        >
+          <Switch />
+        </Form.Item>
+      );
+    case 'text':
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请输入${field.label}` }]}
+        >
+          <Input.TextArea rows={3} placeholder={`请输入${field.label}`} />
+        </Form.Item>
+      );
+    case 'relation': {
+      let targetModel = '';
+      if (field.relation_config) {
+        try {
+          const config = JSON.parse(field.relation_config);
+          targetModel = config.target_model || config.target_table || '';
+        } catch { /* ignore */ }
+      }
+      if (!targetModel) {
+        return (
+          <Form.Item
+            key={field.field_name}
+            name={field.field_name}
+            label={field.label}
+            rules={[{ required: field.required, message: `请输入${field.label}` }]}
+          >
+            <Input placeholder={`请输入${field.label}`} />
+          </Form.Item>
+        );
+      }
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请选择${field.label}` }]}
+        >
+          <RelationPicker
+            modelName={targetModel}
+            placeholder={`请选择${field.label}`}
+          />
+        </Form.Item>
+      );
+    }
+    default:
+      return (
+        <Form.Item
+          key={field.field_name}
+          name={field.field_name}
+          label={field.label}
+          rules={[{ required: field.required, message: `请输入${field.label}` }]}
+        >
+          <Input placeholder={`请输入${field.label}`} />
+        </Form.Item>
+      );
+  }
+}
+
+function formFieldsToPayload(values: Record<string, unknown>, fields: FieldDef[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(values)) {
+    if (dayjs.isDayjs(val)) {
+      payload[key] = val.format('YYYY-MM-DD');
+    } else {
+      payload[key] = val;
+    }
+  }
+  return payload;
+}
+
 export default function DynamicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
@@ -40,6 +178,11 @@ export default function DynamicPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<Record<string, any> | null>(null);
+  const [form] = Form.useForm();
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!slug || !pageConfig) return;
@@ -59,6 +202,16 @@ export default function DynamicPage() {
         const res = await getPageByName(slug);
         const pc = res.data;
         setPageConfig(pc);
+        if (pc?.model_id) {
+          try {
+            const modelsRes = await listModels();
+            const models = modelsRes.data?.data || [];
+            const model = models.find((m: any) => m.id === pc.model_id || m.name === pc.model_name);
+            if (model?.fields) {
+              setFields(model.fields);
+            }
+          } catch { /* fields will remain empty, fallback to config */ }
+        }
       } catch {
         message.error('页面配置不存在');
       }
@@ -69,6 +222,13 @@ export default function DynamicPage() {
 
   const listFields = pageConfig?.config?.list_fields ||
     fields.filter(f => f.visible_in_list).map(f => f.field_name);
+
+  const formFieldNames = pageConfig?.config?.form_fields ||
+    fields.filter(f => f.visible_in_form).map(f => f.field_name);
+
+  const formFields = formFieldNames
+    .map(fn => fields.find(f => f.field_name === fn))
+    .filter((f): f is FieldDef => !!f);
 
   const tableColumns = listFields.map(field_name => {
     const f = fields.find(x => x.field_name === field_name);
@@ -98,7 +258,7 @@ export default function DynamicPage() {
     title: '操作', width: 120, fixed: 'right',
     render: (_val: any, record: any) => (
       <Space size={4}>
-        <Button size="small" icon={<EditOutlined />} onClick={() => showEditModal(record)} />
+        <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
         <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
           <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
@@ -106,80 +266,47 @@ export default function DynamicPage() {
     ),
   });
 
-  const showCreateModal = () => {
-    const formFields = pageConfig?.config?.form_fields ||
-      fields.filter(f => f.visible_in_form).map(f => f.field_name);
-    Modal.confirm({
-      title: '新建记录',
-      width: 600,
-      content: (
-        <Form layout="vertical" size="small" style={{ marginTop: 16 }}>
-          {formFields.map(fn => {
-            const f = fields.find(x => x.field_name === fn);
-            if (!f) return null;
-            if (f.field_type === 'enum' && f.enum_values) {
-              const opts = JSON.parse(f.enum_values);
-              return (
-                <Form.Item key={fn} label={f.label} required={f.required}>
-                  <Select id={`df-${fn}`} options={opts.map((o: string) => ({ label: o, value: o }))} placeholder={`选择${f.label}`} />
-                </Form.Item>
-              );
-            }
-            return (
-              <Form.Item key={fn} label={f.label} required={f.required}>
-                <Input id={`df-${fn}`} placeholder={f.label} />
-              </Form.Item>
-            );
-          })}
-        </Form>
-      ),
-      onOk: async () => {
-        const body: Record<string, any> = {};
-        for (const fn of formFields) {
-          const el = document.getElementById(`df-${fn}`) as any;
-          if (el) body[fn] = el.value ?? el.checked;
-        }
-        try {
-          await createModelData(pageConfig!.model_name, body);
-          message.success('创建成功');
-          loadData();
-        } catch { message.error('创建失败'); }
-      },
-    });
+  const openCreateModal = () => {
+    setEditingRecord(null);
+    form.resetFields();
+    setModalOpen(true);
   };
 
-  const showEditModal = (record: any) => {
-    const formFields = pageConfig?.config?.form_fields ||
-      fields.filter(f => f.visible_in_form).map(f => f.field_name);
-    Modal.confirm({
-      title: '编辑记录',
-      width: 600,
-      content: (
-        <Form layout="vertical" size="small" style={{ marginTop: 16 }}>
-          {formFields.map(fn => {
-            const f = fields.find(x => x.field_name === fn);
-            if (!f) return null;
-            return (
-              <Form.Item key={fn} label={f.label}>
-                <Input id={`df-${fn}`} defaultValue={String(record[fn] ?? '')} />
-              </Form.Item>
-            );
-          })}
-        </Form>
-      ),
-      onOk: async () => {
-        const body: Record<string, any> = {};
-        for (const fn of formFields) {
-          const el = document.getElementById(`df-${fn}`) as HTMLInputElement;
-          if (el) body[fn] = el.value;
-        }
-        try {
-          await updateModelData(pageConfig!.model_name, record.id, body);
-          message.success('更新成功');
-          loadData();
-        } catch { message.error('更新失败'); }
-      },
-    });
+  const openEditModal = (record: Record<string, any>) => {
+    setEditingRecord(record);
+    const formValues: Record<string, any> = {};
+    for (const fn of formFieldNames) {
+      const f = fields.find(x => x.field_name === fn);
+      if (f?.field_type === 'date' && record[fn]) {
+        formValues[fn] = dayjs(record[fn]);
+      } else {
+        formValues[fn] = record[fn] ?? undefined;
+      }
+    }
+    form.setFieldsValue(formValues);
+    setModalOpen(true);
+  };
+
+  const handleModalOk = async () => {
+    try {
+      const values = await form.validateFields();
+      const payload = formFieldsToPayload(values, fields);
+      setConfirmLoading(true);
+      if (editingRecord) {
+        await updateModelData(pageConfig!.model_name, editingRecord.id, payload);
+        message.success('更新成功');
+      } else {
+        await createModelData(pageConfig!.model_name, payload);
+        message.success('创建成功');
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e: any) {
+      if (e?.errorFields) return; // form validation error
+      message.error(editingRecord ? '更新失败' : '创建失败');
+    } finally {
+      setConfirmLoading(false);
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -209,7 +336,7 @@ export default function DynamicPage() {
             style={{ width: 200 }}
             onSearch={setSearch}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={showCreateModal}>新建</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建</Button>
         </Space>
       </div>
 
@@ -228,6 +355,25 @@ export default function DynamicPage() {
           onChange: (p) => setPage(p),
         }}
       />
+
+      <Modal
+        title={editingRecord ? '编辑记录' : '新建记录'}
+        open={modalOpen}
+        onOk={handleModalOk}
+        onCancel={() => setModalOpen(false)}
+        confirmLoading={confirmLoading}
+        width={640}
+        styles={{ body: { paddingTop: 16 } }}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          size="middle"
+          style={{ marginTop: 16 }}
+        >
+          {formFields.map(f => renderFormField(f))}
+        </Form>
+      </Modal>
     </div>
   );
 }

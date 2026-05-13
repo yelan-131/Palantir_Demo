@@ -87,6 +87,14 @@ export const getPipeline = (id: number) => api.get(`/pipelines/${id}`);
 export const runPipeline = (id: number) => api.post(`/pipelines/${id}/run`);
 export const listPipelineRuns = (id: number) => api.get(`/pipelines/${id}/runs`);
 
+// Analytics — Chart Binding (Phase 3)
+export const getAggregate = (params: Record<string, unknown>) =>
+  api.get('/analytics/aggregate', { params });
+export const getTimeseries = (params: Record<string, unknown>) =>
+  api.get('/analytics/timeseries', { params });
+export const getDistribution = (params: Record<string, unknown>) =>
+  api.get('/analytics/distribution', { params });
+
 // Maintenance
 export const getEquipmentHealth = () => api.get('/maintenance/equipment-health');
 export const getSingleEquipmentHealth = (id: number) => api.get(`/maintenance/equipment/${id}/health`);
@@ -152,6 +160,14 @@ export const updateModelData = (modelName: string, id: number, data: Record<stri
 export const deleteModelData = (modelName: string, id: number) =>
   api.delete(`/model-driven/data/${modelName}/${id}`);
 
+export const getFieldOptions = (
+  modelName: string,
+  params?: { label_field?: string; cascade_from?: string; cascade_value?: string | number },
+) => api.get(`/model-driven/data/${modelName}/options`, { params });
+
+export const getChildren = (modelName: string, recordId: number, childTable: string) =>
+  api.get(`/model-driven/data/${modelName}/${recordId}/children/${childTable}`);
+
 export const listMenus = () => api.get('/model-driven/menus');
 export const createMenu = (data: Record<string, unknown>) => api.post('/model-driven/menus', data);
 export const updateMenu = (id: number, data: Record<string, unknown>) => api.put(`/model-driven/menus/${id}`, data);
@@ -173,6 +189,9 @@ export const adminCreateRole = (data: Record<string, unknown>) => api.post('/adm
 export const adminDeleteRole = (id: number) => api.delete(`/admin/roles/${id}`);
 export const adminSetPermissions = (data: Record<string, unknown>) => api.put('/admin/roles/0/permissions', data);
 
+// Audit Logs
+export const listAuditLogs = (params?: Record<string, unknown>) => api.get('/admin/audit-logs', { params });
+
 // Workflow (Phase 3)
 export const wfListDefinitions = () => api.get('/workflow/definitions');
 export const wfGetDefinition = (id: number) => api.get(`/workflow/definitions/${id}`);
@@ -193,5 +212,53 @@ export const wfMarkNotificationRead = (id: number) =>
   api.post(`/workflow/notifications/${id}/read`);
 export const wfMarkAllRead = (userId: number) =>
   api.post('/workflow/notifications/read-all', null, { params: { user_id: userId } });
+
+// Notifications (Phase 3)
+export const listNotifications = (params?: Record<string, unknown>) =>
+  api.get('/notifications', { params });
+export const createNotification = (data: Record<string, unknown>) =>
+  api.post('/notifications', data);
+export const markNotificationRead = (id: number) =>
+  api.post(`/notifications/${id}/read`);
+export const markAllNotificationsRead = (userId: number) =>
+  api.post('/notifications/read-all', { user_id: userId });
+export const getUnreadCount = (userId: number) =>
+  api.get('/notifications/unread-count', { params: { user_id: userId } });
+export const deleteNotification = (id: number) =>
+  api.delete(`/notifications/${id}`);
+
+// Rules Engine (Phase 3)
+export const listRules = (params?: Record<string, unknown>) => api.get('/rules', { params });
+export const createRule = (data: Record<string, unknown>) => api.post('/rules', data);
+export const updateRule = (id: number, data: Record<string, unknown>) => api.put(`/rules/${id}`, data);
+export const deleteRule = (id: number) => api.delete(`/rules/${id}`);
+export const validateRule = (id: number) => api.post(`/rules/${id}/validate`);
+
+// Template Marketplace (Phase 4)
+export const listTemplates = () => api.get('/templates');
+export const getTemplate = (id: number) => api.get(`/templates/${id}`);
+export const instantiateTemplate = (id: number, data?: Record<string, unknown>) =>
+  api.post(`/templates/${id}/instantiate`, data || {});
+
+// Configuration Import/Export (Phase 4)
+export const exportConfig = () => api.get('/config/export');
+export const exportModelConfig = (modelName: string) => api.get(`/config/export/${modelName}`);
+export const importConfig = (config: Record<string, unknown>, mode?: string) =>
+  api.post('/config/import', { config, mode: mode || 'merge' });
+
+// Scheduler (Phase 4)
+export const listScheduledJobs = () => api.get('/scheduler/jobs');
+export const createScheduledJob = (data: Record<string, unknown>) => api.post('/scheduler/jobs', data);
+export const updateScheduledJob = (id: number, data: Record<string, unknown>) => api.put(`/scheduler/jobs/${id}`, data);
+export const deleteScheduledJob = (id: number) => api.delete(`/scheduler/jobs/${id}`);
+export const triggerJob = (id: number) => api.post(`/scheduler/jobs/${id}/trigger`);
+
+// Full-Text Search (Phase 4)
+export const crossEntitySearch = (q: string, models?: string) =>
+  api.get('/search', { params: { q, models } });
+
+// AI Builder (Phase 4)
+export const suggestModel = (description: string) => api.post('/ai-builder/suggest-model', { description });
+export const suggestPage = (modelName: string) => api.post('/ai-builder/suggest-page', { model_name: modelName });
 
 export default api;

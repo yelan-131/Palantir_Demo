@@ -1,5 +1,6 @@
 """Predictive Maintenance API — with fallback to mock data when DB unavailable."""
 
+import asyncio
 import random
 from datetime import datetime, timedelta
 
@@ -84,33 +85,8 @@ async def equipment_health_overview():
 
     result = await _try_db(_query)
     if result is not None:
-        # Enrich each equipment item with graph context
-        for eq_item in result.get("equipment", []):
-            try:
-                from app.services.graph_service import graph_service
-                neighbors = await graph_service.get_neighbors(eq_item["id"], limit=20)
-                # Extract location_path from CONTAINS chain
-                location_parts = []
-                for nb in neighbors:
-                    if nb.get("rel_type") == "CONTAINS":
-                        m = nb.get("m", {})
-                        if isinstance(m, dict):
-                            name = m.get("name", "")
-                        else:
-                            name = ""
-                        if name:
-                            location_parts.append(name)
-                eq_item["location_path"] = " > ".join(location_parts) if location_parts else None
-                # Count FEEDS relationships to sensors
-                eq_item["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
-                # Collect MAINTAINS workers
-                eq_item["assigned_workers"] = [
-                    nb.get("m", {}).get("name", "")
-                    for nb in neighbors
-                    if nb.get("rel_type") == "MAINTAINS" and nb.get("m", {}).get("name")
-                ]
-            except Exception:
-                pass
+        # Note: Neo4j per-equipment get_neighbors enrichment removed to avoid timeout.
+        # Location path, sensor count, and assigned workers are non-essential for overview.
         return result
 
     # Mock fallback
@@ -171,10 +147,13 @@ async def single_equipment_health(equipment_id: int):
 
     result = await _try_db(_query)
     if result is not None:
-        # Enrich with graph context
+        # Enrich with graph context (with timeout to avoid cascade)
         try:
             from app.services.graph_service import graph_service
-            neighbors = await graph_service.get_neighbors(equipment_id, limit=20)
+            neighbors = await asyncio.wait_for(
+                graph_service.get_neighbors(equipment_id, limit=20),
+                timeout=3,
+            )
             location_parts = []
             related_work_orders = []
             for nb in neighbors:
@@ -189,13 +168,20 @@ async def single_equipment_health(equipment_id: int):
             result["location_path"] = " > ".join(location_parts) if location_parts else None
             result["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
             result["related_work_orders"] = related_work_orders if related_work_orders else None
+        except asyncio.TimeoutError:
+            pass
         except Exception:
             pass
-        # Cascade risk from impact analysis
+        # Cascade risk from impact analysis (with timeout)
         try:
             from app.services.graph_service import graph_service
-            impacted = await graph_service.impact_analysis(equipment_id, max_hops=3, limit=30)
+            impacted = await asyncio.wait_for(
+                graph_service.impact_analysis(equipment_id, max_hops=3, limit=30),
+                timeout=3,
+            )
             result["cascade_risk"] = len(impacted) if impacted else 0
+        except asyncio.TimeoutError:
+            pass
         except Exception:
             pass
         return result
@@ -248,10 +234,13 @@ async def single_equipment_health(equipment_id: int):
         "recommendation": _get_recommendation(eq_mock["health_score"]),
     }
 
-    # Enrich mock result with graph context
+    # Enrich mock result with graph context (with timeout)
     try:
         from app.services.graph_service import graph_service
-        neighbors = await graph_service.get_neighbors(equipment_id, limit=20)
+        neighbors = await asyncio.wait_for(
+            graph_service.get_neighbors(equipment_id, limit=20),
+            timeout=3,
+        )
         location_parts = []
         related_work_orders = []
         for nb in neighbors:
@@ -266,12 +255,19 @@ async def single_equipment_health(equipment_id: int):
         result["location_path"] = " > ".join(location_parts) if location_parts else None
         result["sensor_count"] = sum(1 for nb in neighbors if nb.get("rel_type") == "FEEDS")
         result["related_work_orders"] = related_work_orders if related_work_orders else None
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
     try:
         from app.services.graph_service import graph_service
-        impacted = await graph_service.impact_analysis(equipment_id, max_hops=3, limit=30)
+        impacted = await asyncio.wait_for(
+            graph_service.impact_analysis(equipment_id, max_hops=3, limit=30),
+            timeout=3,
+        )
         result["cascade_risk"] = len(impacted) if impacted else 0
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -311,25 +307,8 @@ async def fault_predictions(
 
     result = await _try_db(_query)
     if result is not None:
-        # Enrich predictions with graph cascade analysis
-        for pred in result.get("data", []):
-            try:
-                from app.services.graph_service import graph_service
-                impacted = await graph_service.impact_analysis(pred["equipment_id"], max_hops=3, limit=30)
-                affected_lines = []
-                affected_orders = []
-                for item in (impacted or []):
-                    affected = item.get("affected", {})
-                    if isinstance(affected, dict):
-                        labels = affected.get("labels", [])
-                        if "ProductionLine" in str(labels):
-                            affected_lines.append(affected.get("name", ""))
-                        if "WorkOrder" in str(labels):
-                            affected_orders.append(affected.get("order_no", affected.get("pg_id")))
-                pred["affected_production_lines"] = affected_lines if affected_lines else None
-                pred["affected_work_orders"] = affected_orders if affected_orders else None
-            except Exception:
-                pass
+        # Note: Neo4j per-prediction impact_analysis enrichment removed to avoid timeout.
+        # Affected production lines and work orders are non-essential for prediction list.
         return result
 
     # Mock fallback
@@ -337,25 +316,6 @@ async def fault_predictions(
     if risk_level:
         filtered = [p for p in filtered if p["risk_level"] == risk_level]
     filtered = filtered[:limit]
-    # Enrich mock predictions with graph cascade analysis
-    for pred in filtered:
-        try:
-            from app.services.graph_service import graph_service
-            impacted = await graph_service.impact_analysis(pred["equipment_id"], max_hops=3, limit=30)
-            affected_lines = []
-            affected_orders = []
-            for item in (impacted or []):
-                affected = item.get("affected", {})
-                if isinstance(affected, dict):
-                    labels = affected.get("labels", [])
-                    if "ProductionLine" in str(labels):
-                        affected_lines.append(affected.get("name", ""))
-                    if "WorkOrder" in str(labels):
-                        affected_orders.append(affected.get("order_no", affected.get("pg_id")))
-            pred["affected_production_lines"] = affected_lines if affected_lines else None
-            pred["affected_work_orders"] = affected_orders if affected_orders else None
-        except Exception:
-            pass
     return {"data": filtered}
 
 

@@ -434,9 +434,11 @@ class MetaModel(TimestampMixin, Base):
     table_name: Mapped[str] = mapped_column(String(200))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
 
     fields: Mapped[list["MetaField"]] = relationship(back_populates="model", cascade="all, delete-orphan")
     page_configs: Mapped[list["PageConfig"]] = relationship(back_populates="model")
+    model_versions: Mapped[list["ModelVersion"]] = relationship(back_populates="model", cascade="all, delete-orphan")
 
 
 class MetaField(TimestampMixin, Base):
@@ -603,4 +605,67 @@ class Notification(TimestampMixin, Base):
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     type: Mapped[str] = mapped_column(String(50), default="info")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    resource_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     link: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+
+# ── 模型版本族 (Phase 3) ──────────────────────────────────
+
+class ModelVersion(Base):
+    __tablename__ = "model_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_id: Mapped[int] = mapped_column(Integer, ForeignKey("meta_models.id"))
+    version: Mapped[int] = mapped_column(Integer)
+    snapshot: Mapped[str] = mapped_column(Text)  # JSON snapshot of model + fields
+    change_description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    model: Mapped["MetaModel"] = relationship(back_populates="model_versions")
+
+
+# ── 审计日志 ──────────────────────────────────────────────
+
+# ── 校验规则族 (Phase 3) ────────────────────────────────────
+
+class Rule(Base):
+    __tablename__ = "rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_id: Mapped[int] = mapped_column(Integer, ForeignKey("meta_models.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    rule_type: Mapped[str] = mapped_column(String(20))  # 'validation' | 'trigger' | 'visibility'
+    field_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # target field
+    condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: {operator, value, field}
+    action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: {type, params}
+    message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # error message
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(String(50))
+    resource_type: Mapped[str] = mapped_column(String(100))
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    old_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScheduledJob(TimestampMixin, Base):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    cron: Mapped[str] = mapped_column(String(50))
+    job_type: Mapped[str] = mapped_column(String(20))
+    config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

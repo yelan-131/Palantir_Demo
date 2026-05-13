@@ -1,5 +1,6 @@
 """Ontology Management API — graph-first with fallback to PG then mock."""
 
+import asyncio
 import re
 
 from fastapi import APIRouter, HTTPException, Query
@@ -176,7 +177,7 @@ async def list_entity_instances(
     if entity_type not in ENTITY_SCHEMAS:
         raise HTTPException(404, f"Entity type '{entity_type}' not found")
 
-    # Graph-first query
+    # Graph-first query (try_graph_then_db already has timeout via graph_fallback)
     async def _graph_fn():
         from app.services.graph_service import graph_service
         return await graph_service.get_entities(entity_type, page, page_size)
@@ -240,14 +241,16 @@ async def create_entity_instance(
     if entity_type not in ENTITY_SCHEMAS:
         raise HTTPException(404, f"Entity type '{entity_type}' not found")
 
-    # Try graph-first creation
+    # Try graph-first creation (with timeout)
     pg_id = None
     try:
         from app.services.graph_service import graph_service
         # Generate ID: max pg_id + 1
-        count = await graph_service.count_by_label(entity_type)
+        count = await asyncio.wait_for(graph_service.count_by_label(entity_type), timeout=3)
         pg_id = count + 1
-        await graph_service.create_entity(entity_type, pg_id, body.properties)
+        await asyncio.wait_for(graph_service.create_entity(entity_type, pg_id, body.properties), timeout=3)
+    except asyncio.TimeoutError:
+        pg_id = None
     except Exception:
         # Fall back to PG creation
         pg_id = None
@@ -304,18 +307,25 @@ async def create_relation(body: RelationCreate):
     try:
         from app.database import neo4j_driver
         if neo4j_driver:
-            async with neo4j_driver.session() as neo4j_session:
-                cypher = CYPHER_TEMPLATES["create_relation"].format(
-                    src_label=body.source_type,
-                    tgt_label=body.target_type,
-                    rel_type=body.relation_type,
-                )
-                await neo4j_session.run(
-                    cypher,
-                    src_id=body.source_id,
-                    tgt_id=body.target_id,
-                    props=body.properties or {},
-                )
+            async def _create():
+                async with neo4j_driver.session() as neo4j_session:
+                    cypher = CYPHER_TEMPLATES["create_relation"].format(
+                        src_label=body.source_type,
+                        tgt_label=body.target_type,
+                        rel_type=body.relation_type,
+                    )
+                    await neo4j_session.run(
+                        cypher,
+                        src_id=body.source_id,
+                        tgt_id=body.target_id,
+                        props=body.properties or {},
+                    )
+            await asyncio.wait_for(_create(), timeout=5)
+    except asyncio.TimeoutError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Neo4j relation creation timed out (%s -> %s)", body.source_id, body.target_id,
+        )
     except Exception as exc:  # noqa: BLE001 — Neo4j is best-effort here
         import logging
         logging.getLogger(__name__).warning(
@@ -336,10 +346,17 @@ async def get_entity_timeline(
     try:
         from app.database import neo4j_driver
         if neo4j_driver:
-            async with neo4j_driver.session() as neo4j_session:
-                cypher = CYPHER_TEMPLATES["entity_timeline"].format()
-                result = await neo4j_session.run(cypher, entity_id=entity_id, timestamp=ts)
-                records = await result.data()
+            async def _timeline():
+                async with neo4j_driver.session() as neo4j_session:
+                    cypher = CYPHER_TEMPLATES["entity_timeline"].format()
+                    result = await neo4j_session.run(cypher, entity_id=entity_id, timestamp=ts)
+                    return await result.data()
+            records = await asyncio.wait_for(_timeline(), timeout=5)
+    except asyncio.TimeoutError:
+        records = [
+            {"timestamp": "2026-04-21T09:00:00", "property": "status", "old_value": "idle", "new_value": "running"},
+            {"timestamp": "2026-04-20T14:30:00", "property": "health_score", "old_value": "85.2", "new_value": "88.5"},
+        ]
     except Exception as exc:  # noqa: BLE001 — fall back to mock timeline
         import logging
         logging.getLogger(__name__).warning(
@@ -365,8 +382,10 @@ async def get_entity_relationships(
 
     try:
         from app.services.graph_service import graph_service
-        data = await graph_service.get_relationships(entity_id, rel_type, limit)
+        data = await asyncio.wait_for(graph_service.get_relationships(entity_id, rel_type, limit), timeout=5)
         return {"data": data, "entity_id": entity_id, "entity_type": entity_type}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 

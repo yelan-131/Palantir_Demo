@@ -156,9 +156,9 @@ async def get_production_stats(days: int = Query(7, ge=1, le=90)):
 
 
 @router.get("/alerts")
-async def get_alerts(limit: int = Query(20, ge=1, le=100)):
+async def get_alerts(limit: int = Query(10, ge=1, le=100)):
     """告警列表."""
-    result = await _try_db(lambda db: _query_alerts(db, limit))
+    result = await _try_db(lambda db: _query_alerts(db, min(limit, 10)))
     if result is not None:
         return result
     return {"data": MOCK_ALERTS[:limit], "total": len(MOCK_ALERTS[:limit])}
@@ -170,6 +170,7 @@ async def _query_alerts(db, limit):
     )
     low_health = result.scalars().all()
     alerts = []
+
     for eq in low_health:
         severity = "critical" if eq.health_score < 40 else "warning"
         alert = {
@@ -182,21 +183,6 @@ async def _query_alerts(db, limit):
             "entity_type": "Equipment",
             "timestamp": eq.updated_at.isoformat() if eq.updated_at else None,
         }
-        # Try to get hierarchy path from graph
-        try:
-            from app.services.graph_service import graph_service
-            neighbors = await graph_service.get_neighbors(eq.id, limit=10)
-            location_parts = [eq.name]
-            for n in neighbors:
-                node_data = n.get("n", n.get("m", {}))
-                rel_type = n.get("rel_type", "")
-                label = node_data.get("labels", [""])[0] if isinstance(node_data, dict) else ""
-                name = node_data.get("name", "")
-                if rel_type == "CONTAINS" and name:
-                    location_parts.append(name)
-            if len(location_parts) > 1:
-                alert["location_path"] = " > ".join(reversed(location_parts))
-        except Exception:
-            pass
+        # Note: Neo4j location lookup skipped to avoid timeout when Neo4j is unavailable.
         alerts.append(alert)
     return {"data": alerts, "total": len(alerts)}

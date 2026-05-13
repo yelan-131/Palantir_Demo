@@ -4,6 +4,7 @@ Cypher safety: `/query` accepts EITHER a whitelisted template name
 (`template`) with `params`, OR a free-form `query` string that passes a
 read-only static check (no CREATE/DELETE/SET/MERGE/REMOVE/DROP/CALL).
 """
+import asyncio
 import re
 from typing import Optional
 
@@ -115,7 +116,7 @@ MOCK_STATS = {
 
 
 async def _try_neo4j(fn):
-    """Try Neo4j query; logs and returns None on failure."""
+    """Try Neo4j query; logs and returns None on failure or timeout."""
     try:
         from app.database import get_neo4j
         neo4j_session = None
@@ -124,7 +125,10 @@ async def _try_neo4j(fn):
             break
         if neo4j_session is None:
             return None
-        return await fn(neo4j_session)
+        return await asyncio.wait_for(fn(neo4j_session), timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("Neo4j query timed out (5s), falling back to mock")
+        return None
     except Exception as exc:  # noqa: BLE001 — fallback to mock with log
         logger.warning("Neo4j query failed, falling back to mock: %s", exc)
         return None
@@ -320,9 +324,11 @@ async def get_graph_entity(label: str, entity_id: int):
 
     try:
         from app.services.graph_service import graph_service
-        node = await graph_service.get_entity(label, entity_id)
+        node = await asyncio.wait_for(graph_service.get_entity(label, entity_id), timeout=5)
         if node:
             return {"data": node}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -347,8 +353,10 @@ async def get_graph_relationships(
 
     try:
         from app.services.graph_service import graph_service
-        data = await graph_service.get_relationships(entity_id, rel_type, limit)
+        data = await asyncio.wait_for(graph_service.get_relationships(entity_id, rel_type, limit), timeout=5)
         return {"data": data}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -378,8 +386,10 @@ async def impact_analysis(
     """多跳影响分析 — 追踪下游影响."""
     try:
         from app.services.graph_service import graph_service
-        data = await graph_service.impact_analysis(entity_id, max_hops, limit)
+        data = await asyncio.wait_for(graph_service.impact_analysis(entity_id, max_hops, limit), timeout=5)
         return {"data": data, "entity_id": entity_id}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -408,8 +418,10 @@ async def trace_chain(
     """全链路追溯 — 双向遍历."""
     try:
         from app.services.graph_service import graph_service
-        data = await graph_service.trace_chain(entity_id, max_hops, limit)
+        data = await asyncio.wait_for(graph_service.trace_chain(entity_id, max_hops, limit), timeout=5)
         return {"data": data, "entity_id": entity_id}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -439,8 +451,10 @@ async def centrality_analysis(limit: int = Query(20, ge=1, le=100)):
     """中心度分析 — 哪些实体连接最多."""
     try:
         from app.services.graph_service import graph_service
-        data = await graph_service.centrality(limit)
+        data = await asyncio.wait_for(graph_service.centrality(limit), timeout=5)
         return {"data": data}
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 

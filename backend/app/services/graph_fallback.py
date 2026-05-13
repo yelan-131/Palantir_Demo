@@ -2,8 +2,12 @@
 
 Provides a unified query pattern: try Neo4j graph first,
 fall back to PostgreSQL/SQLite, then to mock data.
+
+All graph queries are wrapped with asyncio.wait_for to prevent
+timeout cascades when Neo4j is slow or unavailable.
 """
 
+import asyncio
 from typing import Any, Callable, Coroutine, TypeVar
 
 from app.core.logging import get_logger
@@ -11,6 +15,9 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+# Default timeout for individual Neo4j graph queries (seconds).
+GRAPH_TIMEOUT = 3
 
 
 class GraphUnavailableError(Exception):
@@ -29,11 +36,13 @@ async def try_graph_then_db(
         db_fn: Async function that queries PostgreSQL/SQLite.
         default: Fallback value if both fail.
     """
-    # Try graph first
+    # Try graph first (with timeout)
     try:
-        result = await graph_fn()
+        result = await asyncio.wait_for(graph_fn(), timeout=GRAPH_TIMEOUT)
         if result is not None:
             return result
+    except asyncio.TimeoutError:
+        logger.debug("Graph query timed out (%ss), falling back to DB", GRAPH_TIMEOUT)
     except (RuntimeError, Exception) as exc:
         logger.debug("Graph query failed, falling back to DB: %s", exc)
 
@@ -59,9 +68,11 @@ async def try_graph_or_mock(
         mock_fn: Sync function that returns mock data.
     """
     try:
-        result = await graph_fn()
+        result = await asyncio.wait_for(graph_fn(), timeout=GRAPH_TIMEOUT)
         if result is not None:
             return result
+    except asyncio.TimeoutError:
+        logger.debug("Graph query timed out (%ss), using mock", GRAPH_TIMEOUT)
     except (RuntimeError, Exception) as exc:
         logger.debug("Graph query failed, using mock: %s", exc)
 

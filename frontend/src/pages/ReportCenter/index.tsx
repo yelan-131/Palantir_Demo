@@ -11,7 +11,7 @@ import {
   listReports, getReport, createReport, updateReport,
   deleteReport, createSnapshot, listSnapshots,
 } from '@/services/api';
-import ReportEditor from './ReportEditor';
+import PageDesigner from './PageDesigner';
 
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
   production: { label: '生产', color: '#1677ff' },
@@ -115,7 +115,7 @@ export default function ReportCenter() {
 
   if (view === 'edit' && currentReport) {
     return (
-      <ReportEditor
+      <PageDesigner
         report={currentReport}
         onSave={handleSave}
         onBack={handleBack}
@@ -125,7 +125,7 @@ export default function ReportCenter() {
 
   if (view === 'preview' && currentReport) {
     return (
-      <ReportEditor
+      <PageDesigner
         report={currentReport}
         onSave={handleSave}
         onBack={handleBack}

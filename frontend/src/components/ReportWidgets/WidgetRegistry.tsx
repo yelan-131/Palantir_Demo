@@ -7,16 +7,22 @@ import PieChartWidget from './PieChartWidget';
 import GaugeWidget from './GaugeWidget';
 import DataTableWidget from './DataTableWidget';
 import TextWidget from './TextWidget';
+import FormWidget from '../FormWidgets';
 import WidgetWrapper from './WidgetWrapper';
 
-export { WIDGET_REGISTRY } from './types';
-export type { WidgetInstance, ReportConfig, DataSourceConfig } from './types';
+export { WIDGET_REGISTRY, WIDGET_CATEGORIES } from './types';
+export type { WidgetInstance, ReportConfig, DataSourceConfig, WidgetFieldConfig } from './types';
 
 export async function fetchDataFromApi(ds: DataSourceConfig): Promise<any> {
   const resp = await fetch(ds.endpoint);
   if (!resp.ok) throw new Error(`API ${ds.endpoint} returned ${resp.status}`);
   return resp.json();
 }
+
+const FORM_WIDGET_TYPES = new Set([
+  'form-input', 'form-number', 'form-select', 'form-date',
+  'form-switch', 'form-textarea', 'form-relation',
+]);
 
 interface RegistryProps {
   widget: WidgetInstance;
@@ -28,6 +34,15 @@ interface RegistryProps {
 
 export function renderWidget({ widget, isEditing, isSelected, onSelect, onDelete }: RegistryProps) {
   const inner = (() => {
+    if (FORM_WIDGET_TYPES.has(widget.type)) {
+      return (
+        <FormWidget
+          type={widget.type}
+          fieldConfig={widget.fieldConfig}
+          isEditing={isEditing}
+        />
+      );
+    }
     switch (widget.type) {
       case 'kpi-card': return <KPICardWidget widget={widget} isEditing={isEditing} />;
       case 'line-chart': return <LineChartWidget widget={widget} isEditing={isEditing} />;

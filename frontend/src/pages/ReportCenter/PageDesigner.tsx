@@ -22,7 +22,7 @@ interface Props {
   readOnly?: boolean;
 }
 
-export default function ReportEditor({ report, onSave, onBack, readOnly }: Props) {
+export default function PageDesigner({ report, onSave, onBack, readOnly }: Props) {
   const [config, setConfig] = useState<ReportConfig>(
     report.config || { canvas: { gridSize: 8 }, widgets: [], filters: [] }
   );

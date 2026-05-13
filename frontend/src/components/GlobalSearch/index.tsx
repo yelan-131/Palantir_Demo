@@ -65,8 +65,7 @@ export default function GlobalSearch({ open, onClose }: { open: boolean; onClose
       closable={false}
       width={520}
       style={{ top: 120 }}
-      bodyStyle={{ padding: 0 }}
-      destroyOnClose
+      styles={{ body: { padding: 0 } }}
     >
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
         <Input

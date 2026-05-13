@@ -12,91 +12,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.config import settings
+from app.core.seed_config import (
+    SEED_TABLE_COLUMNS,
+    convert_datetimes,
+    make_insert_sql,
+)
 from app.services.graph_service import graph_service
-
 
 SEED_DIR = Path(__file__).resolve().parent.parent / "data" / "seed"
 
-# Table name → (JSON file, insert SQL template)
-TABLE_CONFIGS = {
-    "factories": (
-        "factories.json",
-        "INSERT INTO factories (id, name, location, capacity, status, description) "
-        "VALUES (:id, :name, :location, :capacity, :status, :description)",
-    ),
-    "workshops": (
-        "workshops.json",
-        "INSERT INTO workshops (id, name, factory_id, area, workshop_type) "
-        "VALUES (:id, :name, :factory_id, :area, :workshop_type)",
-    ),
-    "production_lines": (
-        "production_lines.json",
-        "INSERT INTO production_lines (id, name, workshop_id, capacity, oee_target, status) "
-        "VALUES (:id, :name, :workshop_id, :capacity, :oee_target, :status)",
-    ),
-    "equipment": (
-        "equipment.json",
-        "INSERT INTO equipment (id, name, line_id, model, manufacturer, install_date, status, health_score) "
-        "VALUES (:id, :name, :line_id, :model, :manufacturer, :install_date, :status, :health_score)",
-    ),
-    "sensors": (
-        "sensors.json",
-        "INSERT INTO sensors (id, name, equipment_id, sensor_type, unit, sampling_rate) "
-        "VALUES (:id, :name, :equipment_id, :sensor_type, :unit, :sampling_rate)",
-    ),
-    "products": (
-        "products.json",
-        "INSERT INTO products (id, name, sku, category, specs, unit) "
-        "VALUES (:id, :name, :sku, :category, :specs, :unit)",
-    ),
-    "materials": (
-        "materials.json",
-        "INSERT INTO materials (id, name, material_type, specs, unit, safety_stock) "
-        "VALUES (:id, :name, :material_type, :specs, :unit, :safety_stock)",
-    ),
-    "suppliers": (
-        "suppliers.json",
-        "INSERT INTO suppliers (id, name, location, rating, lead_time_days, contact) "
-        "VALUES (:id, :name, :location, :rating, :lead_time_days, :contact)",
-    ),
-    "customers": (
-        "customers.json",
-        "INSERT INTO customers (id, name, industry, region) "
-        "VALUES (:id, :name, :industry, :region)",
-    ),
-    "workers": (
-        "workers.json",
-        "INSERT INTO workers (id, name, role, department) "
-        "VALUES (:id, :name, :role, :department)",
-    ),
-    "sales_orders": (
-        "sales_orders.json",
-        "INSERT INTO sales_orders (id, order_no, customer_id, product_id, quantity, due_date, priority, status) "
-        "VALUES (:id, :order_no, :customer_id, :product_id, :quantity, :due_date, :priority, :status)",
-    ),
-    "work_orders": (
-        "work_orders.json",
-        "INSERT INTO work_orders (id, order_no, sales_order_id, line_id, planned_start, planned_end, "
-        "actual_start, actual_end, quantity, completed_quantity, status) "
-        "VALUES (:id, :order_no, :sales_order_id, :line_id, :planned_start, :planned_end, "
-        ":actual_start, :actual_end, :quantity, :completed_quantity, :status)",
-    ),
-    "inspections": (
-        "inspections.json",
-        "INSERT INTO inspections (id, inspection_type, target_type, target_id, result, inspector_id, inspected_at) "
-        "VALUES (:id, :inspection_type, :target_type, :target_id, :result, :inspector_id, :inspected_at)",
-    ),
-    "defects": (
-        "defects.json",
-        "INSERT INTO defects (id, inspection_id, defect_type, severity, description, root_cause, correction) "
-        "VALUES (:id, :inspection_id, :defect_type, :severity, :description, :root_cause, :correction)",
-    ),
-    "spc_points": (
-        "spc_points.json",
-        "INSERT INTO spc_points (id, parameter, value, ucl, lcl, cl, equipment_id, timestamp) "
-        "VALUES (:id, :parameter, :value, :ucl, :lcl, :cl, :equipment_id, :timestamp)",
-    ),
-}
+# Tables processed in order (sensor_readings handled separately due to size)
+_SEED_TABLE_ORDER = [
+    t for t in SEED_TABLE_COLUMNS if t != "sensor_readings"
+]
 
 
 async def create_tables(engine):
@@ -111,14 +39,17 @@ async def seed_postgresql(engine):
     """Load JSON seed data into PostgreSQL."""
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
-    for table_name, (json_file, sql) in TABLE_CONFIGS.items():
-        file_path = SEED_DIR / json_file
+    for table_name in _SEED_TABLE_ORDER:
+        file_path = SEED_DIR / f"{table_name}.json"
         if not file_path.exists():
-            print(f"  SKIP {table_name}: {json_file} not found")
+            print(f"  SKIP {table_name}: file not found")
             continue
 
         with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
+
+        data = convert_datetimes(table_name, data)
+        sql = make_insert_sql(table_name)
 
         async with async_session() as session:
             try:
@@ -129,23 +60,19 @@ async def seed_postgresql(engine):
                 print(f"  ERROR {table_name}: {e}")
                 await session.rollback()
 
-    # Handle sensor_readings separately (large file)
+    # Handle sensor_readings separately (large file, batch insert)
     readings_path = SEED_DIR / "sensor_readings.json"
     if readings_path.exists():
         with open(readings_path, encoding="utf-8") as f:
             readings = json.load(f)
 
-        # Batch insert (1000 at a time)
         batch_size = 1000
-        reading_sql = (
-            "INSERT INTO sensor_readings (id, sensor_id, value, timestamp) "
-            "VALUES (:id, :sensor_id, :value, :timestamp)"
-        )
+        readings_sql = make_insert_sql("sensor_readings")
         async with async_session() as session:
             for i in range(0, len(readings), batch_size):
-                batch = readings[i:i + batch_size]
+                batch = convert_datetimes("sensor_readings", readings[i:i + batch_size])
                 try:
-                    await session.execute(text(reading_sql), batch)
+                    await session.execute(text(readings_sql), batch)
                     await session.commit()
                 except Exception as e:
                     print(f"  ERROR sensor_readings batch {i}: {e}")

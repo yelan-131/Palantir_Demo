@@ -81,7 +81,6 @@ export function getAdminMenus(user: UserInfo | null) {
     { key: '/data-sources', label: '数据源管理' },
     { key: '/ontology', label: '本体建模' },
     { key: '/graph', label: '关系图谱' },
-    { key: '/model-driven', label: '模型驱动' },
     { key: '/system-admin', label: '系统管理' },
   ];
 }

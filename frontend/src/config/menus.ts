@@ -13,11 +13,27 @@ export interface BusinessMenuMeta {
   label: string;
 }
 
+export interface LowCodeMenuItem {
+  key: string;
+  icon: string;
+  label: string;
+}
+
 export const BUSINESS_MENUS: BusinessMenuMeta[] = [
   { key: '/', icon: 'DashboardOutlined', label: '运营总览' },
   { key: '/maintenance', icon: 'ToolOutlined', label: '预测性维护' },
   { key: '/quality', icon: 'SafetyCertificateOutlined', label: '质量管理' },
   { key: '/supply-chain', icon: 'ShopOutlined', label: '供应链协同' },
+];
+
+export const LOWCODE_MENUS: LowCodeMenuItem[] = [
+  { key: '/model-driven', icon: 'DatabaseOutlined', label: '模型设计' },
+  { key: '/reports', icon: 'LayoutOutlined', label: '页面设计' },
+  { key: '/templates', icon: 'AppstoreOutlined', label: '模板市场' },
+  { key: '/rules', icon: 'ThunderboltOutlined', label: '规则引擎' },
+];
+
+export const TOOL_MENUS: BusinessMenuMeta[] = [
   { key: '/ai-assistant', icon: 'RobotOutlined', label: 'AI 助手' },
   { key: '/reports', icon: 'BarChartOutlined', label: '报表中心' },
 ];
@@ -37,13 +53,15 @@ export const BREADCRUMB_MAP: Record<string, string> = {
   '/maintenance': '预测性维护',
   '/quality': '质量管理',
   '/supply-chain': '供应链协同',
+  '/model-driven': '模型设计',
+  '/reports': '页面设计',
+  '/templates': '模板市场',
+  '/rules': '规则引擎',
   '/ai-assistant': 'AI 助手',
-  '/reports': '报表中心',
   '/data-sources': '数据源管理',
   '/ontology': '本体建模',
   '/graph': '关系图谱',
   '/pipeline': '数据管线',
-  '/model-driven': '模型驱动',
   '/system-admin': '系统管理',
   '/workflow': '审批流程设计',
   '/my-applications': '我的申请',

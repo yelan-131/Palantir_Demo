@@ -22,25 +22,31 @@ router = APIRouter()
 
 
 # ── Mock users for demo (used when DB is unreachable) ─────
-_MOCK_USERS = [
+# Passwords are hashed at module load time — plaintext never stored at runtime.
+_MOCK_USERS_RAW = [
     {
         "id": 1, "username": "admin", "display_name": "系统管理员",
         "email": "admin@manufoundry.local", "is_active": True, "is_admin": True,
-        "password": "admin123",
+        "plain_password": "admin123",
         "roles": [{"id": 1, "name": "admin", "label": "管理员"}],
     },
     {
         "id": 2, "username": "zhangsan", "display_name": "张三",
         "email": "zhangsan@manufoundry.local", "is_active": True, "is_admin": False,
-        "password": "123456",
+        "plain_password": "123456",
         "roles": [{"id": 2, "name": "production_manager", "label": "生产主管"}],
     },
     {
         "id": 3, "username": "lisi", "display_name": "李四",
         "email": "lisi@manufoundry.local", "is_active": True, "is_admin": False,
-        "password": "123456",
+        "plain_password": "123456",
         "roles": [{"id": 3, "name": "quality_inspector", "label": "质检员"}],
     },
+]
+
+_MOCK_USERS = [
+    {**u, "hashed_password": hash_password(u.pop("plain_password"))}
+    for u in [dict(u) for u in _MOCK_USERS_RAW]
 ]
 
 
@@ -107,7 +113,7 @@ async def _db_login(db: AsyncSession, body: LoginRequest) -> Optional[dict]:
 
 def _mock_login(body: LoginRequest) -> dict:
     for u in _MOCK_USERS:
-        if u["username"] == body.username and u["password"] == body.password:
+        if u["username"] == body.username and verify_password(body.password, u["hashed_password"]):
             return _build_token_and_user(
                 u["id"], u["username"], u["is_admin"],
                 {

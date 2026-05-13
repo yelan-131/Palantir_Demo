@@ -1,5 +1,6 @@
 """Quality Management API — with fallback to mock data when DB unavailable."""
 
+import asyncio
 import math
 import random
 from datetime import datetime, timedelta
@@ -199,28 +200,8 @@ async def list_defects(
 
     result = await _try_db(_query)
     if result is not None:
-        # Graph enrichment: best-effort add inspector_name from INSPECTS relationship
-        try:
-            from app.services.graph_service import graph_service
-            for defect in result.get("data", []):
-                inspection_id = defect.get("inspection_id")
-                if inspection_id is None:
-                    continue
-                try:
-                    rels = await graph_service.get_relationships(
-                        entity_id=inspection_id, rel_type="INSPECTS", limit=10,
-                    )
-                    for rel in rels:
-                        # Worker -> INSPECTS -> Inspection: look for source node of type Worker
-                        src = rel.get("source", {})
-                        if isinstance(src, dict) and src.get("labels") and "Worker" in src.get("labels", []):
-                            props = src.get("properties", src)
-                            defect["inspector_name"] = props.get("name", props.get("pg_id"))
-                            break
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        # Note: Neo4j INSPECTS relationship enrichment removed to avoid timeout
+        # when Neo4j is slow/unavailable. Inspector name is non-essential.
         return result
 
     # Mock fallback
@@ -229,28 +210,6 @@ async def list_defects(
         filtered = [d for d in filtered if d["severity"] == severity]
     offset = (page - 1) * page_size
     page_data = filtered[offset:offset + page_size]
-
-    # Graph enrichment on mock data: best-effort
-    try:
-        from app.services.graph_service import graph_service
-        for defect in page_data:
-            inspection_id = defect.get("inspection_id")
-            if inspection_id is None:
-                continue
-            try:
-                rels = await graph_service.get_relationships(
-                    entity_id=inspection_id, rel_type="INSPECTS", limit=10,
-                )
-                for rel in rels:
-                    src = rel.get("source", {})
-                    if isinstance(src, dict) and src.get("labels") and "Worker" in src.get("labels", []):
-                        props = src.get("properties", src)
-                        defect["inspector_name"] = props.get("name", props.get("pg_id"))
-                        break
-            except Exception:
-                pass
-    except Exception:
-        pass
 
     return {
         "data": page_data,
@@ -263,7 +222,7 @@ async def list_defects(
 @router.get("/defects/pareto")
 async def defect_pareto_analysis(days: int = Query(30, ge=1, le=365)):
     """缺陷帕累托分析."""
-    # Graph-first: try Cypher aggregation on Neo4j
+    # Graph-first: try Cypher aggregation on Neo4j (with timeout)
     try:
         from app.services.graph_service import graph_service
         graph_service._check_driver()
@@ -292,9 +251,11 @@ async def defect_pareto_analysis(days: int = Query(30, ge=1, le=365)):
                     })
                 return {"data": pareto_data, "total_defects": total}
 
-        graph_result = await _graph_pareto()
+        graph_result = await asyncio.wait_for(_graph_pareto(), timeout=3)
         if graph_result is not None:
             return graph_result
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 
@@ -338,11 +299,12 @@ async def quality_traceability(
 ):
     """质量追溯链 — graph-first via trace_chain, then PG, then mock."""
 
-    # ── Graph-first: try trace_chain on Neo4j ──
+    # ── Graph-first: try trace_chain on Neo4j (with timeout) ──
     try:
         from app.services.graph_service import graph_service
-        trace_records = await graph_service.trace_chain(
-            entity_id=entity_id, max_hops=5, limit=100,
+        trace_records = await asyncio.wait_for(
+            graph_service.trace_chain(entity_id=entity_id, max_hops=5, limit=100),
+            timeout=3,
         )
         if trace_records:
             trace = []
@@ -405,6 +367,8 @@ async def quality_traceability(
                             "trace": trace,
                             "source": "graph",
                         }
+    except asyncio.TimeoutError:
+        pass
     except Exception:
         pass
 

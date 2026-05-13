@@ -93,19 +93,35 @@ export default function DashboardPage() {
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [overviewRes, oeeRes, prodRes, alertsRes] = await Promise.all([
+      const results = await Promise.allSettled([
         getOverview(),
         getOEE(),
         getProductionStats(7),
-        getAlerts(20),
+        getAlerts(10),
       ]);
-      setOverview(overviewRes.data?.data ?? overviewRes.data);
-      setOeeData(oeeRes.data?.data ?? []);
-      setProductionData(prodRes.data?.data ?? []);
-      setAlerts(alertsRes.data?.data ?? []);
-    } catch (err) {
-      console.error('Dashboard data fetch failed:', err);
-      message.error('数据加载失败，请稍后重试');
+      const [overviewRes, oeeRes, prodRes, alertsRes] = results;
+
+      if (overviewRes.status === 'fulfilled') {
+        setOverview(overviewRes.value.data?.data ?? overviewRes.value.data);
+      }
+      if (oeeRes.status === 'fulfilled') {
+        setOeeData(oeeRes.value.data?.data ?? []);
+      }
+      if (prodRes.status === 'fulfilled') {
+        setProductionData(prodRes.value.data?.data ?? []);
+      }
+      if (alertsRes.status === 'fulfilled') {
+        setAlerts(alertsRes.value.data?.data ?? []);
+      }
+
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0 && failed < 4) {
+        message.warning(`${failed} 个数据源加载失败`);
+      } else if (failed === 4) {
+        message.error('数据加载失败，请稍后重试');
+      }
+    } catch {
+      message.error('数据加载失败');
     } finally {
       setLoading(false);
     }

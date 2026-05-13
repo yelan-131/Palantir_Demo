@@ -81,18 +81,25 @@ async def health():
 from app.api import (  # noqa: E402
     admin,
     ai_assistant,
+    ai_builder,
     analytics,
     auth,
+    config_io,
     dashboard,
     data_sources,
     graph,
     maintenance,
     model_driven,
+    notifications,
     ontology,
     pipeline,
     quality,
     reports,
+    rules,
+    scheduler,
+    search,
     supply_chain,
+    templates,
     workflow,
 )
 
@@ -116,3 +123,12 @@ app.include_router(ai_assistant.router, prefix="/api/v1/ai", tags=["AI助手"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["运营总览"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["报表中心"])
 app.include_router(model_driven.router, prefix="/api/v1/model-driven", tags=["模型驱动"])
+app.include_router(rules.router, prefix="/api/v1/rules", tags=["校验规则"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["通知"])
+app.include_router(templates.router, prefix="/api/v1/templates", tags=["模板市场"])
+app.include_router(config_io.router, prefix="/api/v1/config", tags=["配置管理"])
+
+# Phase 4 — Scheduler, Search, AI Builder
+app.include_router(scheduler.router, prefix="/api/v1/scheduler", tags=["定时任务"])
+app.include_router(search.router, prefix="/api/v1/search", tags=["全文搜索"])
+app.include_router(ai_builder.router, prefix="/api/v1/ai-builder", tags=["AI增强"])

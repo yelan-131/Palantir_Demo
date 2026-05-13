@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text as sa_text
 
 from app.api._model_driven_shared import (
     ENTITY_TABLE_MAP,
@@ -41,6 +41,7 @@ async def list_models():
             out.append({
                 "id": m.id, "name": m.name, "label": m.label, "icon": m.icon,
                 "table_name": m.table_name, "description": m.description, "is_system": m.is_system,
+                "version": getattr(m, "version", 1),
                 "fields": [
                     {"id": f.id, "field_name": f.field_name, "label": f.label, "field_type": f.field_type,
                      "required": f.required, "searchable": f.searchable, "sortable": f.sortable,
@@ -304,3 +305,228 @@ async def delete_page(page_id: int):
 
     result = await try_db(_query)
     return result or {"ok": True}
+
+
+# ── Version Management ────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+
+class PublishRequest(_BaseModel):
+    change_description: str = ""
+
+
+@router.get("/models/{model_id}/versions")
+async def list_model_versions(model_id: int):
+    """模型版本历史."""
+    async def _query(db):
+        from app.models.relational import MetaField, MetaModel, ModelVersion
+        m = await db.get(MetaModel, model_id)
+        if not m:
+            return None
+
+        result = await db.execute(
+            select(ModelVersion)
+            .where(ModelVersion.model_id == model_id)
+            .order_by(ModelVersion.version.desc())
+        )
+        versions = result.scalars().all()
+
+        # If no version history yet, synthesize one from the current model
+        if not versions:
+            fields_result = await db.execute(
+                select(MetaField).where(MetaField.model_id == model_id).order_by(MetaField.sort_order)
+            )
+            fields = fields_result.scalars().all()
+            snapshot = json.dumps({
+                "name": m.name, "label": m.label, "table_name": m.table_name,
+                "description": m.description,
+                "fields": [
+                    {"field_name": f.field_name, "label": f.label, "field_type": f.field_type,
+                     "required": f.required, "sort_order": f.sort_order}
+                    for f in fields
+                ],
+            }, ensure_ascii=False)
+            return {"data": [{
+                "version": getattr(m, "version", 1),
+                "changes": "Current version",
+                "snapshot": json.loads(snapshot),
+                "created_at": m.updated_at.isoformat() if m.updated_at else None,
+            }]}
+
+        return {"data": [
+            {
+                "version": v.version,
+                "changes": v.change_description or "",
+                "snapshot": json.loads(v.snapshot) if isinstance(v.snapshot, str) else v.snapshot,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            }
+            for v in versions
+        ]}
+
+    result = await try_db(_query)
+    if result is not None:
+        return result
+
+    # Mock fallback: return a synthetic version for mock models
+    for m in MOCK_MODELS:
+        if m["id"] == model_id:
+            return {"data": [{
+                "version": 1,
+                "changes": "Initial version",
+                "snapshot": {"name": m["name"], "label": m["label"], "fields": m["fields"]},
+                "created_at": None,
+            }]}
+    raise HTTPException(404, "Model not found")
+
+
+@router.post("/models/{model_id}/publish")
+async def publish_model(model_id: int, body: PublishRequest):
+    """发布模型版本 (bump version + record snapshot)."""
+    async def _query(db):
+        from app.models.relational import MetaField, MetaModel, ModelVersion
+        m = await db.get(MetaModel, model_id)
+        if not m:
+            return None
+
+        # Build snapshot from current model + fields
+        fields_result = await db.execute(
+            select(MetaField).where(MetaField.model_id == model_id).order_by(MetaField.sort_order)
+        )
+        fields = fields_result.scalars().all()
+        snapshot = json.dumps({
+            "name": m.name, "label": m.label, "table_name": m.table_name,
+            "description": m.description,
+            "fields": [
+                {"field_name": f.field_name, "label": f.label, "field_type": f.field_type,
+                 "required": f.required, "sort_order": f.sort_order}
+                for f in fields
+            ],
+        }, ensure_ascii=False)
+
+        # Bump version
+        current_version = getattr(m, "version", 1)
+        new_version = current_version + 1
+        m.version = new_version
+
+        # Create version record
+        version_record = ModelVersion(
+            model_id=model_id,
+            version=new_version,
+            snapshot=snapshot,
+            change_description=body.change_description,
+        )
+        db.add(version_record)
+        await db.commit()
+        await db.refresh(version_record)
+
+        return {
+            "id": version_record.id,
+            "model_id": model_id,
+            "version": new_version,
+            "change_description": body.change_description,
+        }
+
+    result = await try_db(_query)
+    if result is not None:
+        return result
+
+    # Mock fallback
+    for m in MOCK_MODELS:
+        if m["id"] == model_id:
+            return {
+                "id": 100,
+                "model_id": model_id,
+                "version": 2,
+                "change_description": body.change_description,
+            }
+    raise HTTPException(404, "Model not found")
+
+
+@router.get("/models/{model_id}/impact")
+async def detect_impact(model_id: int):
+    """检测模型变更影响范围."""
+    async def _query(db):
+        from app.models.relational import MetaField, MetaModel, ModelVersion, PageConfig
+
+        m = await db.get(MetaModel, model_id)
+        if not m:
+            return None
+
+        # Find pages referencing this model
+        pages_result = await db.execute(
+            select(PageConfig).where(PageConfig.model_id == model_id)
+        )
+        pages = pages_result.scalars().all()
+
+        affected_pages = [
+            {"id": p.id, "name": p.name, "title": p.title, "route_path": p.route_path}
+            for p in pages
+        ]
+
+        # Find forms (pages with paradigm containing 'form')
+        affected_forms = [
+            {"id": p.id, "name": p.name, "title": p.title}
+            for p in pages if "form" in (p.paradigm or "").lower()
+        ]
+
+        # Check rules referencing this model (if rules table exists)
+        affected_rules = []
+        try:
+            rule_result = await db.execute(
+                sa_text("SELECT id, name, rule_type FROM rules WHERE model_id = :mid"),
+                {"mid": model_id},
+            )
+            for row in rule_result.fetchall():
+                affected_rules.append({"id": row[0], "name": row[1], "rule_type": row[2]})
+        except Exception:
+            pass  # rules table may not exist yet
+
+        # Data migration flag: true if fields were removed or type changed
+        data_migration = False
+        try:
+            latest = await db.scalar(
+                select(ModelVersion)
+                .where(ModelVersion.model_id == model_id)
+                .order_by(ModelVersion.version.desc())
+                .limit(1)
+            )
+            if latest:
+                old_snapshot = json.loads(latest.snapshot) if isinstance(latest.snapshot, str) else latest.snapshot
+                old_fields = {f["field_name"]: f["field_type"] for f in old_snapshot.get("fields", [])}
+                current_fields = {}
+                fields_result = await db.execute(
+                    select(MetaField).where(MetaField.model_id == model_id)
+                )
+                for f in fields_result.scalars().all():
+                    current_fields[f.field_name] = f.field_type
+                # Check for removed or type-changed fields
+                for fname, ftype in old_fields.items():
+                    if fname not in current_fields:
+                        data_migration = True
+                        break
+                    if current_fields[fname] != ftype:
+                        data_migration = True
+                        break
+        except Exception:
+            pass
+
+        return {
+            "forms": affected_forms,
+            "pages": affected_pages,
+            "rules": affected_rules,
+            "data_migration": data_migration,
+        }
+
+    result = await try_db(_query)
+    if result is not None:
+        return result
+
+    # Mock fallback
+    mock_pages = [p for p in MOCK_PAGES if p["model_id"] == model_id]
+    return {
+        "forms": [],
+        "pages": [{"id": p["id"], "name": p["name"], "title": p["title"], "route_path": p["route_path"]} for p in mock_pages],
+        "rules": [],
+        "data_migration": False,
+    }

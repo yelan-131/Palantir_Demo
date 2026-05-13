@@ -8,6 +8,7 @@ Strategy:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -63,7 +64,9 @@ try:
     neo4j_driver = AsyncGraphDatabase.driver(
         settings.NEO4J_URI,
         auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+        connection_timeout=2,
     )
+    logger.info("Neo4j driver created (connection verified on first query)")
 except ImportError:
     logger.info("neo4j driver not installed; graph features disabled")
 except Exception as exc:
@@ -144,8 +147,8 @@ async def _build_graph_from_seed() -> None:
 
     logger.info("Building graph from %d seed files ...", len(seed_data))
     try:
-        await graph_service.ensure_constraints()
-        await graph_service.build_from_seed(seed_data)
+        await asyncio.wait_for(graph_service.ensure_constraints(), timeout=10)
+        await asyncio.wait_for(graph_service.build_from_seed(seed_data), timeout=60)
         logger.info("Graph build from seed completed")
     except Exception as exc:
         logger.warning("Graph build failed: %s", exc)
@@ -158,6 +161,12 @@ async def _seed_sqlite(session: AsyncSession) -> None:
 
     from sqlalchemy import text
 
+    from app.core.seed_config import (
+        SEED_TABLE_COLUMNS,
+        convert_datetimes,
+        make_insert_sql,
+    )
+
     seed_dir = Path(__file__).resolve().parent.parent.parent / "data" / "seed"
     if not seed_dir.exists():
         logger.info("No seed data found at %s; skipping", seed_dir)
@@ -165,31 +174,17 @@ async def _seed_sqlite(session: AsyncSession) -> None:
 
     logger.info("Seeding SQLite from %s ...", seed_dir)
 
-    tables_sql = {
-        "factories": "INSERT OR IGNORE INTO factories (id, name, location, capacity, status, description) VALUES (:id, :name, :location, :capacity, :status, :description)",
-        "workshops": "INSERT OR IGNORE INTO workshops (id, name, factory_id, area, workshop_type) VALUES (:id, :name, :factory_id, :area, :workshop_type)",
-        "production_lines": "INSERT OR IGNORE INTO production_lines (id, name, workshop_id, capacity, oee_target, status) VALUES (:id, :name, :workshop_id, :capacity, :oee_target, :status)",
-        "equipment": "INSERT OR IGNORE INTO equipment (id, name, line_id, model, manufacturer, install_date, status, health_score) VALUES (:id, :name, :line_id, :model, :manufacturer, :install_date, :status, :health_score)",
-        "sensors": "INSERT OR IGNORE INTO sensors (id, name, equipment_id, sensor_type, unit, sampling_rate) VALUES (:id, :name, :equipment_id, :sensor_type, :unit, :sampling_rate)",
-        "products": "INSERT OR IGNORE INTO products (id, name, sku, category, specs, unit) VALUES (:id, :name, :sku, :category, :specs, :unit)",
-        "materials": "INSERT OR IGNORE INTO materials (id, name, material_type, specs, unit, safety_stock) VALUES (:id, :name, :material_type, :specs, :unit, :safety_stock)",
-        "suppliers": "INSERT OR IGNORE INTO suppliers (id, name, location, rating, lead_time_days, contact) VALUES (:id, :name, :location, :rating, :lead_time_days, :contact)",
-        "customers": "INSERT OR IGNORE INTO customers (id, name, industry, region) VALUES (:id, :name, :industry, :region)",
-        "workers": "INSERT OR IGNORE INTO workers (id, name, role, department) VALUES (:id, :name, :role, :department)",
-        "sales_orders": "INSERT OR IGNORE INTO sales_orders (id, order_no, customer_id, product_id, quantity, due_date, priority, status) VALUES (:id, :order_no, :customer_id, :product_id, :quantity, :due_date, :priority, :status)",
-        "work_orders": "INSERT OR IGNORE INTO work_orders (id, order_no, sales_order_id, line_id, planned_start, planned_end, actual_start, actual_end, quantity, completed_quantity, status) VALUES (:id, :order_no, :sales_order_id, :line_id, :planned_start, :planned_end, :actual_start, :actual_end, :quantity, :completed_quantity, :status)",
-        "inspections": "INSERT OR IGNORE INTO inspections (id, inspection_type, target_type, target_id, result, inspector_id, inspected_at) VALUES (:id, :inspection_type, :target_type, :target_id, :result, :inspector_id, :inspected_at)",
-        "defects": "INSERT OR IGNORE INTO defects (id, inspection_id, defect_type, severity, description, root_cause, correction) VALUES (:id, :inspection_id, :defect_type, :severity, :description, :root_cause, :correction)",
-        "spc_points": "INSERT OR IGNORE INTO spc_points (id, parameter, value, ucl, lcl, cl, equipment_id, timestamp) VALUES (:id, :parameter, :value, :ucl, :lcl, :cl, :equipment_id, :timestamp)",
-    }
-
     total_rows = 0
-    for table_name, sql in tables_sql.items():
+    for table_name in SEED_TABLE_COLUMNS:
+        if table_name == "sensor_readings":
+            continue
         fpath = seed_dir / f"{table_name}.json"
         if not fpath.exists():
             continue
         with open(fpath, encoding="utf-8") as f:
             rows = json.load(f)
+        rows = convert_datetimes(table_name, rows)
+        sql = make_insert_sql(table_name, conflict="OR IGNORE")
         try:
             await session.execute(text(sql), rows)
             await session.commit()
@@ -203,13 +198,10 @@ async def _seed_sqlite(session: AsyncSession) -> None:
     if readings_path.exists():
         with open(readings_path, encoding="utf-8") as f:
             readings = json.load(f)
-        readings_sql = (
-            "INSERT OR IGNORE INTO sensor_readings (id, sensor_id, value, timestamp) "
-            "VALUES (:id, :sensor_id, :value, :timestamp)"
-        )
+        readings_sql = make_insert_sql("sensor_readings", conflict="OR IGNORE")
         batch_size = 5000
         for i in range(0, len(readings), batch_size):
-            batch = readings[i:i + batch_size]
+            batch = convert_datetimes("sensor_readings", readings[i:i + batch_size])
             try:
                 await session.execute(text(readings_sql), batch)
                 await session.commit()

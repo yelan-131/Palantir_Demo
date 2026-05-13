@@ -4,7 +4,7 @@ import {
   RobotOutlined, BarChartOutlined, AppstoreOutlined, BellOutlined, UserOutlined,
   LogoutOutlined, SettingOutlined, CheckOutlined, CloseOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined,
-  HomeOutlined,
+  HomeOutlined, DatabaseOutlined, LayoutOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo } from 'react';
@@ -21,6 +21,7 @@ import {
 import {
   ROLE_MENU_MAP as ROLE_MENU_MAP_CFG,
   BREADCRUMB_MAP as BREADCRUMB_MAP_CFG,
+  LOWCODE_MENUS as LOWCODE_MENUS_CFG,
 } from './config/menus';
 
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
@@ -39,6 +40,8 @@ const SystemAdminPage = lazy(() => import('./pages/SystemAdmin'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const LoginPage = lazy(() => import('./pages/Login'));
 const MyApplicationsPage = lazy(() => import('./pages/Workflow/MyApplications'));
+const TemplateMarketPage = lazy(() => import('./pages/TemplateMarket'));
+const RuleEnginePage = lazy(() => import('./pages/RuleEngine'));
 
 const { Header, Sider, Content } = Layout;
 
@@ -48,8 +51,30 @@ const businessMenuItems = [
   { key: '/maintenance', icon: <ToolOutlined />, label: '预测性维护' },
   { key: '/quality', icon: <SafetyCertificateOutlined />, label: '质量管理' },
   { key: '/supply-chain', icon: <ShopOutlined />, label: '供应链协同' },
+];
+
+// Icon mapping for low-code menus
+const lowCodeIconMap: Record<string, React.ReactNode> = {
+  DatabaseOutlined: <DatabaseOutlined />,
+  LayoutOutlined: <LayoutOutlined />,
+  AppstoreOutlined: <AppstoreOutlined />,
+  ThunderboltOutlined: <ThunderboltOutlined />,
+};
+
+const lowCodeMenuItems = {
+  key: 'lowcode-group',
+  icon: <AppstoreOutlined />,
+  label: '低代码平台',
+  children: LOWCODE_MENUS_CFG.map((m) => ({
+    key: m.key,
+    icon: lowCodeIconMap[m.icon] || <AppstoreOutlined />,
+    label: m.label,
+  })),
+};
+
+// Tool menus
+const toolMenuItems = [
   { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI 助手' },
-  { key: '/reports', icon: <BarChartOutlined />, label: '报表中心' },
 ];
 
 // Pulled from src/config/menus.ts (single source of truth)
@@ -176,7 +201,14 @@ function AppContent() {
     return allowed.includes(menu.key);
   });
 
-  const allMenuItems = [...visibleBusinessMenus, ...dynamicMenus];
+  const allMenuItems = [
+    ...visibleBusinessMenus,
+    { type: 'divider' as const },
+    lowCodeMenuItems,
+    { type: 'divider' as const },
+    ...toolMenuItems,
+    ...dynamicMenus,
+  ];
   const adminMenus = getAdminMenus(user);
 
   // Breadcrumb items
@@ -366,6 +398,8 @@ function AppContent() {
                 <Route path="/system-admin" element={<SystemAdminPage />} />
                 <Route path="/workflow" element={<WorkflowPage />} />
                 <Route path="/my-applications" element={<MyApplicationsPage />} />
+                <Route path="/templates" element={<TemplateMarketPage />} />
+                <Route path="/rules" element={<RuleEnginePage />} />
               </Routes>
             </Suspense>
           </ErrorBoundary>
