@@ -1,9 +1,28 @@
-import React, { useState } from 'react';
-import { Form, Input, Button, Card, message, Typography, Divider } from 'antd';
-import { LockOutlined, UserOutlined } from '@ant-design/icons';
+import { Button, Card, Divider, Form, Input, Select, Space, Tag, Typography, message } from 'antd';
+import {
+  ApiOutlined,
+  CheckCircleOutlined,
+  ClusterOutlined,
+  LockOutlined,
+  SafetyCertificateOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '@/stores/authStore';
+import { useState } from 'react';
 import { authLogin } from '@/services/api';
+import { useAuthStore } from '@/stores/authStore';
+
+const demoAccounts = [
+  { name: 'admin', label: '平台管理员', pass: 'admin123' },
+  { name: 'zhangsan', label: '生产经理', pass: '123456' },
+  { name: 'lisi', label: '质量工程师', pass: '123456' },
+];
+
+const statusItems = [
+  { icon: <ApiOutlined />, label: '数据连接', value: '18 online' },
+  { icon: <ClusterOutlined />, label: '模型服务', value: 'healthy' },
+  { icon: <SafetyCertificateOutlined />, label: '安全策略', value: 'SSO ready' },
+];
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -19,64 +38,82 @@ export default function LoginPage() {
       message.success(`欢迎，${data.user.display_name}`);
       navigate('/');
     } catch {
-      message.error('用户名或密码错误');
+      message.error('账号或密码不正确');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-    }}>
-      <Card
-        style={{ width: 400, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
-        styles={{ body: { padding: 40 } }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 16, margin: '0 auto 16px',
-            background: 'linear-gradient(135deg, #1677ff, #4096ff)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 28, fontWeight: 700,
-          }}>MF</div>
-          <Typography.Title level={3} style={{ margin: 0, color: '#1a1a2e' }}>制造数智平台</Typography.Title>
-          <Typography.Text type="secondary">制造业数据操作系统</Typography.Text>
+    <div className="identity-shell">
+      <div className="identity-grid" />
+      <section className="identity-intro">
+        <Tag className="system-tag">Low-code Analytics Platform</Tag>
+        <Typography.Title level={1}>ManuFoundry</Typography.Title>
+        <Typography.Paragraph>
+          面向制造业数据资产、分析应用和流程协同的低代码工作台。
+        </Typography.Paragraph>
+        <div className="identity-status">
+          {statusItems.map((item) => (
+            <div className="identity-status-item" key={item.label}>
+              <span className="identity-status-icon">{item.icon}</span>
+              <div>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </div>
+            </div>
+          ))}
         </div>
+      </section>
 
-        <Form onFinish={handleLogin} size="large" initialValues={{ username: 'admin', password: 'admin123' }}>
-          <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+      <Card className="identity-card" bordered={false}>
+        <Space direction="vertical" size={4} className="identity-card-head">
+          <div className="brand-mark">MF</div>
+          <Typography.Title level={3}>进入分析工作台</Typography.Title>
+          <Typography.Text type="secondary">选择环境并验证身份</Typography.Text>
+        </Space>
+
+        <Form
+          layout="vertical"
+          onFinish={handleLogin}
+          initialValues={{ environment: 'demo', username: 'admin', password: 'admin123' }}
+        >
+          <Form.Item name="environment" label="组织环境">
+            <Select
+              options={[
+                { value: 'demo', label: 'Demo Workspace / 制造业演示空间' },
+                { value: 'sandbox', label: 'Sandbox / 配置沙箱' },
+                { value: 'prod', label: 'Production / 生产环境' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" />
           </Form.Item>
-          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+          <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} placeholder="密码" />
           </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block
-              style={{ height: 44, borderRadius: 8, fontSize: 16 }}>
-              登 录
-            </Button>
-          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={loading} block className="identity-submit">
+            登录工作台
+          </Button>
         </Form>
 
-        <Divider style={{ margin: '16px 0' }} />
-        <div style={{ textAlign: 'center' }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            演示账号
-          </Typography.Text>
-          <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-            {[
-              { name: 'admin', label: '管理员', pass: 'admin123' },
-              { name: 'zhangsan', label: '生产主管', pass: '123456' },
-              { name: 'lisi', label: '质检员', pass: '123456' },
-            ].map((a) => (
-              <Button key={a.name} size="small" type="link" onClick={() => {
-                handleLogin({ username: a.name, password: a.pass });
-              }}>
-                {a.label}
+        <Divider />
+        <div className="demo-account-row">
+          <Typography.Text type="secondary">演示账号</Typography.Text>
+          <Space wrap>
+            {demoAccounts.map((account) => (
+              <Button
+                key={account.name}
+                size="small"
+                type="text"
+                icon={<CheckCircleOutlined />}
+                onClick={() => handleLogin({ username: account.name, password: account.pass })}
+              >
+                {account.label}
               </Button>
             ))}
-          </div>
+          </Space>
         </div>
       </Card>
     </div>

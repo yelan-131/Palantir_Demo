@@ -1,15 +1,12 @@
 /**
  * Centralized menu / breadcrumb / role-mapping config.
- * Extract from App.tsx to keep the layout component small and to make
- * adding new business modules a config-only change.
+ * App.tsx defines the visual shell, while this file remains a readable source
+ * for modules that need labels or permission metadata.
  */
 
 export interface BusinessMenuMeta {
-  /** Route path serving as menu key */
   key: string;
-  /** Lucide / Antd icon name (resolved by App.tsx) */
   icon: string;
-  /** Display label (i18n-ready in the future) */
   label: string;
 }
 
@@ -20,56 +17,57 @@ export interface LowCodeMenuItem {
 }
 
 export const BUSINESS_MENUS: BusinessMenuMeta[] = [
-  { key: '/', icon: 'DashboardOutlined', label: '运营总览' },
-  { key: '/maintenance', icon: 'ToolOutlined', label: '预测性维护' },
-  { key: '/quality', icon: 'SafetyCertificateOutlined', label: '质量管理' },
-  { key: '/supply-chain', icon: 'ShopOutlined', label: '供应链协同' },
+  { key: '/', icon: 'HomeOutlined', label: '我的工作台' },
+  { key: '/dashboard', icon: 'DashboardOutlined', label: '生产态势' },
+  { key: '/maintenance', icon: 'ToolOutlined', label: '设备维护' },
+  { key: '/quality', icon: 'SafetyCertificateOutlined', label: '质量分析' },
+  { key: '/supply-chain', icon: 'ShopOutlined', label: '供应链风险' },
 ];
 
 export const LOWCODE_MENUS: LowCodeMenuItem[] = [
-  { key: '/model-driven', icon: 'DatabaseOutlined', label: '模型设计' },
-  { key: '/reports', icon: 'LayoutOutlined', label: '页面设计' },
-  { key: '/templates', icon: 'AppstoreOutlined', label: '模板市场' },
-  { key: '/rules', icon: 'ThunderboltOutlined', label: '规则引擎' },
+  { key: '/model-driven', icon: 'LayoutOutlined', label: 'App Builder' },
+  { key: '/ontology', icon: 'ApartmentOutlined', label: 'Data Modeler' },
+  { key: '/reports', icon: 'BarChartOutlined', label: 'Report Designer' },
+  { key: '/rules', icon: 'ThunderboltOutlined', label: 'Rule Builder' },
+  { key: '/data-sources', icon: 'ApiOutlined', label: 'Data Sources' },
+  { key: '/pipeline', icon: 'DatabaseOutlined', label: 'Data Pipeline' },
+  { key: '/graph', icon: 'NodeIndexOutlined', label: 'Graph Explorer' },
 ];
 
 export const TOOL_MENUS: BusinessMenuMeta[] = [
-  { key: '/ai-assistant', icon: 'RobotOutlined', label: 'AI 助手' },
-  { key: '/reports', icon: 'BarChartOutlined', label: '报表中心' },
+  { key: '/ai-assistant', icon: 'RobotOutlined', label: 'AI Assistant' },
+  { key: '/templates', icon: 'AppstoreOutlined', label: '模板市场' },
 ];
 
-/**
- * Role → allowed business-menu keys.
- * `null` means "all menus visible". Admin role uses `null` by convention.
- */
 export const ROLE_MENU_MAP: Record<string, string[] | null> = {
-  production_manager: ['/', '/maintenance', '/quality', '/reports', '/ai-assistant'],
-  quality_inspector: ['/', '/quality', '/supply-chain', '/ai-assistant'],
+  production_manager: ['/', '/dashboard', '/maintenance', '/quality', '/reports', '/ai-assistant'],
+  quality_inspector: ['/', '/dashboard', '/quality', '/supply-chain', '/ai-assistant'],
   admin: null,
 };
 
 export const BREADCRUMB_MAP: Record<string, string> = {
-  '/': '运营总览',
-  '/maintenance': '预测性维护',
-  '/quality': '质量管理',
-  '/supply-chain': '供应链协同',
-  '/model-driven': '模型设计',
-  '/reports': '页面设计',
+  '/': '我的工作台',
+  '/dashboard': '生产态势',
+  '/maintenance': '设备维护',
+  '/quality': '质量分析',
+  '/supply-chain': '供应链风险',
+  '/model-driven': 'App Builder',
+  '/reports': 'Report Designer',
   '/templates': '模板市场',
-  '/rules': '规则引擎',
-  '/ai-assistant': 'AI 助手',
-  '/data-sources': '数据源管理',
-  '/ontology': '本体建模',
-  '/graph': '关系图谱',
-  '/pipeline': '数据管线',
+  '/rules': 'Rule Builder',
+  '/ai-assistant': 'AI Assistant',
+  '/data-sources': 'Data Sources',
+  '/ontology': 'Data Modeler',
+  '/graph': 'Graph Explorer',
+  '/pipeline': 'Data Pipeline',
   '/system-admin': '系统管理',
-  '/workflow': '审批流程设计',
+  '/workflow': '流程中心',
   '/my-applications': '我的申请',
 };
 
 export const APPROVAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pending: { label: '审批中', color: 'orange' },
+  pending: { label: '待审批', color: 'orange' },
   approved: { label: '已通过', color: 'green' },
   rejected: { label: '已驳回', color: 'red' },
-  cancelled: { label: '已撤销', color: 'default' },
+  cancelled: { label: '已取消', color: 'default' },
 };

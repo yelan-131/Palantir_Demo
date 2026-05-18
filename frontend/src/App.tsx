@@ -1,29 +1,58 @@
-import { Layout, Menu, Badge, Dropdown, Avatar, Space, Modal, Button, Input, Tag, Breadcrumb } from 'antd';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  DashboardOutlined, ToolOutlined, SafetyCertificateOutlined, ShopOutlined,
-  RobotOutlined, BarChartOutlined, AppstoreOutlined, BellOutlined, UserOutlined,
-  LogoutOutlined, SettingOutlined, CheckOutlined, CloseOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined,
-  HomeOutlined, DatabaseOutlined, LayoutOutlined, ThunderboltOutlined,
+  Avatar,
+  Badge,
+  Breadcrumb,
+  Button,
+  Dropdown,
+  Input,
+  Layout,
+  Menu,
+  Modal,
+  Segmented,
+  Space,
+  Spin,
+  Typography,
+  message,
+} from 'antd';
+import type { MenuProps } from 'antd';
+import {
+  ApartmentOutlined,
+  ApiOutlined,
+  AppstoreOutlined,
+  BarChartOutlined,
+  BellOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  HomeOutlined,
+  LayoutOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  NodeIndexOutlined,
+  RobotOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  ShopOutlined,
+  ThunderboltOutlined,
+  ToolOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
-import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo } from 'react';
-import { Spin, message, Typography } from 'antd';
-import { useAuthStore, getAdminMenus } from './stores/authStore';
 import GlobalSearch from './components/GlobalSearch';
+import { useAuthStore } from './stores/authStore';
 import {
   listMenus,
-  wfListNotifications,
   wfApproveOrReject,
+  wfListNotifications,
   wfMarkAllRead,
   wfMarkNotificationRead,
 } from './services/api';
-import {
-  ROLE_MENU_MAP as ROLE_MENU_MAP_CFG,
-  BREADCRUMB_MAP as BREADCRUMB_MAP_CFG,
-  LOWCODE_MENUS as LOWCODE_MENUS_CFG,
-} from './config/menus';
 
+const WorkspacePage = lazy(() => import('./pages/Workspace'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const DataSourcePage = lazy(() => import('./pages/DataSource'));
 const OntologyPage = lazy(() => import('./pages/Ontology'));
@@ -45,54 +74,75 @@ const RuleEnginePage = lazy(() => import('./pages/RuleEngine'));
 
 const { Header, Sider, Content } = Layout;
 
-// Business menus
-const businessMenuItems = [
-  { key: '/', icon: <DashboardOutlined />, label: '运营总览' },
-  { key: '/maintenance', icon: <ToolOutlined />, label: '预测性维护' },
-  { key: '/quality', icon: <SafetyCertificateOutlined />, label: '质量管理' },
-  { key: '/supply-chain', icon: <ShopOutlined />, label: '供应链协同' },
+type Density = 'compact' | 'standard' | 'relaxed';
+
+interface DynamicMenu {
+  id: number;
+  parent_id: number | null;
+  title: string;
+  route_path: string;
+  is_visible: boolean;
+}
+
+const businessMenuItems: MenuProps['items'] = [
+  { key: '/', icon: <HomeOutlined />, label: '我的工作台' },
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '生产态势' },
+  { key: '/maintenance', icon: <ToolOutlined />, label: '设备维护' },
+  { key: '/quality', icon: <SafetyCertificateOutlined />, label: '质量分析' },
+  { key: '/supply-chain', icon: <ShopOutlined />, label: '供应链风险' },
 ];
 
-// Icon mapping for low-code menus
-const lowCodeIconMap: Record<string, React.ReactNode> = {
-  DatabaseOutlined: <DatabaseOutlined />,
-  LayoutOutlined: <LayoutOutlined />,
-  AppstoreOutlined: <AppstoreOutlined />,
-  ThunderboltOutlined: <ThunderboltOutlined />,
-};
-
-const lowCodeMenuItems = {
-  key: 'lowcode-group',
-  icon: <AppstoreOutlined />,
-  label: '低代码平台',
-  children: LOWCODE_MENUS_CFG.map((m) => ({
-    key: m.key,
-    icon: lowCodeIconMap[m.icon] || <AppstoreOutlined />,
-    label: m.label,
-  })),
-};
-
-// Tool menus
-const toolMenuItems = [
-  { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI 助手' },
+const lowCodeMenuItems: MenuProps['items'] = [
+  {
+    key: 'lowcode-group',
+    icon: <AppstoreOutlined />,
+    label: '低代码配置',
+    children: [
+      { key: '/model-driven', icon: <LayoutOutlined />, label: 'App Builder' },
+      { key: '/ontology', icon: <ApartmentOutlined />, label: 'Data Modeler' },
+      { key: '/reports', icon: <BarChartOutlined />, label: 'Report Designer' },
+      { key: '/rules', icon: <ThunderboltOutlined />, label: 'Rule Builder' },
+      { key: '/data-sources', icon: <ApiOutlined />, label: 'Data Sources' },
+      { key: '/pipeline', icon: <DatabaseOutlined />, label: 'Data Pipeline' },
+      { key: '/graph', icon: <NodeIndexOutlined />, label: 'Graph Explorer' },
+    ],
+  },
 ];
 
-// Pulled from src/config/menus.ts (single source of truth)
-const ROLE_MENU_MAP = ROLE_MENU_MAP_CFG;
-const BREADCRUMB_MAP = BREADCRUMB_MAP_CFG;
+const toolMenuItems: MenuProps['items'] = [
+  { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Assistant' },
+  { key: '/templates', icon: <AppstoreOutlined />, label: '模板市场' },
+];
 
-// Status tag component for my-applications
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pending: { label: '审批中', color: 'orange' },
-  approved: { label: '已通过', color: 'green' },
-  rejected: { label: '已驳回', color: 'red' },
-  cancelled: { label: '已撤销', color: 'default' },
+const adminMenuItems: MenuProps['items'] = [
+  { key: '/workflow', icon: <CheckOutlined />, label: '流程中心' },
+  { key: '/system-admin', icon: <SettingOutlined />, label: '系统管理' },
+];
+
+const breadcrumbMap: Record<string, string> = {
+  '/': '我的工作台',
+  '/dashboard': '生产态势',
+  '/maintenance': '设备维护',
+  '/quality': '质量分析',
+  '/supply-chain': '供应链风险',
+  '/model-driven': 'App Builder',
+  '/ontology': 'Data Modeler',
+  '/reports': 'Report Designer',
+  '/templates': '模板市场',
+  '/rules': 'Rule Builder',
+  '/ai-assistant': 'AI Assistant',
+  '/data-sources': 'Data Sources',
+  '/graph': 'Graph Explorer',
+  '/pipeline': 'Data Pipeline',
+  '/system-admin': '系统管理',
+  '/workflow': '流程中心',
+  '/my-applications': '我的申请',
 };
 
 function PageLoader() {
   return (
     <div style={{ padding: 40 }}>
-      <Spin size="large" tip="加载中...">
+      <Spin size="large" tip="加载工作台...">
         <div style={{ minHeight: 200 }} />
       </Spin>
     </div>
@@ -101,13 +151,15 @@ function PageLoader() {
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   state = { error: null as string | null };
-  static getDerivedStateFromError(err: Error) { return { error: err.message }; }
+  static getDerivedStateFromError(err: Error) {
+    return { error: err.message };
+  }
   render() {
     if (this.state.error) {
       return (
         <div style={{ padding: 40 }}>
-          <Typography.Title level={4} type="danger">页面渲染错误</Typography.Title>
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fafafa', padding: 16, borderRadius: 8 }}>
+          <Typography.Title level={4} type="danger">页面渲染失败</Typography.Title>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fff', padding: 16, borderRadius: 6 }}>
             {this.state.error}
           </pre>
           <Button type="primary" onClick={() => window.location.reload()}>刷新页面</Button>
@@ -118,26 +170,27 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 
-interface DynamicMenu {
-  id: number; parent_id: number | null; title: string; icon: string;
-  route_path: string; sort_order: number; is_visible: boolean;
-}
-
-function buildMenuTree(items: DynamicMenu[]) {
+function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
   const map = new Map<number, any>();
   const roots: any[] = [];
   for (const item of items) {
-    map.set(item.id, { key: item.route_path || `dyn-${item.id}`, icon: <AppstoreOutlined />, label: item.title, children: [] });
+    map.set(item.id, {
+      key: item.route_path || `dynamic-${item.id}`,
+      icon: <AppstoreOutlined />,
+      label: item.title,
+      children: [],
+    });
   }
   for (const item of items) {
-    const node = map.get(item.id)!;
+    const node = map.get(item.id);
+    if (!node) continue;
     if (item.parent_id && map.has(item.parent_id)) {
-      map.get(item.parent_id)!.children.push(node);
+      map.get(item.parent_id).children.push(node);
     } else if (item.route_path) {
       roots.push(node);
     }
   }
-  return roots;
+  return roots.map((node) => (node.children?.length ? node : { ...node, children: undefined }));
 }
 
 function AppContent() {
@@ -147,15 +200,19 @@ function AppContent() {
   const logout = useAuthStore((s) => s.logout);
 
   const [collapsed, setCollapsed] = useState(false);
-  const [dynamicMenus, setDynamicMenus] = useState<any[]>([]);
+  const [dynamicMenus, setDynamicMenus] = useState<MenuProps['items']>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unread, setUnread] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [density, setDensity] = useState<Density>(() => (localStorage.getItem('mf_density') as Density) || 'standard');
 
-  // Ctrl+K global search shortcut
+  useEffect(() => {
+    localStorage.setItem('mf_density', density);
+  }, [density]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen(true);
       }
@@ -164,18 +221,16 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Load dynamic menus
   useEffect(() => {
     listMenus()
       .then((res) => {
         const items = (res.data?.data || []).filter((m: DynamicMenu) => m.is_visible);
-        setDynamicMenus(buildMenuTree(items));
+        setDynamicMenus(buildDynamicMenuTree(items));
       })
-      .catch(() => {});
+      .catch(() => setDynamicMenus([]));
   }, []);
 
-  // Poll notifications
-  const loadNotifs = useCallback(() => {
+  const loadNotifications = useCallback(() => {
     if (!user) return;
     wfListNotifications(user.id)
       .then((res) => {
@@ -187,97 +242,74 @@ function AppContent() {
   }, [user]);
 
   useEffect(() => {
-    loadNotifs();
-    const interval = setInterval(loadNotifs, 60000);
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 60000);
     return () => clearInterval(interval);
-  }, [loadNotifs]);
+  }, [loadNotifications]);
 
-  // Filter business menus by role
-  const visibleBusinessMenus = businessMenuItems.filter((menu) => {
-    if (!user) return false;
-    if (user.is_admin) return true;
-    const allowed = ROLE_MENU_MAP[user.roles?.[0]?.name || ''];
-    if (!allowed) return true;
-    return allowed.includes(menu.key);
-  });
-
-  const allMenuItems = [
-    ...visibleBusinessMenus,
-    { type: 'divider' as const },
-    lowCodeMenuItems,
-    { type: 'divider' as const },
-    ...toolMenuItems,
-    ...dynamicMenus,
-  ];
-  const adminMenus = getAdminMenus(user);
-
-  // Breadcrumb items
-  const breadcrumbItems = useMemo(() => {
-    const path = location.pathname;
-    const crumbs: { title: React.ReactNode }[] = [{ title: <a onClick={() => navigate('/')}><HomeOutlined /></a> }];
-
-    // Dynamic pages: /dynamic/slug
-    if (path.startsWith('/dynamic/')) {
-      crumbs.push({ title: '动态页面' });
-      const slug = path.replace('/dynamic/', '');
-      const dynMenu = dynamicMenus.find((m: any) => m.key === path);
-      if (dynMenu) crumbs.push({ title: dynMenu.label });
-      else crumbs.push({ title: slug });
-    } else if (BREADCRUMB_MAP[path]) {
-      crumbs.push({ title: BREADCRUMB_MAP[path] });
+  const allMenuItems = useMemo<MenuProps['items']>(() => {
+    const items: MenuProps['items'] = [
+      ...(businessMenuItems || []),
+      { type: 'divider' },
+      ...(lowCodeMenuItems || []),
+      { type: 'divider' },
+      ...(toolMenuItems || []),
+    ];
+    if (user?.is_admin) {
+      items.push({ type: 'divider' }, ...(adminMenuItems || []));
     }
+    if (dynamicMenus?.length) {
+      items.push({ type: 'divider' }, ...dynamicMenus);
+    }
+    return items;
+  }, [dynamicMenus, user?.is_admin]);
 
-    return crumbs;
-  }, [location.pathname, navigate, dynamicMenus]);
+  const selectedKey = location.pathname === '/dashboard' ? '/dashboard' : location.pathname;
+  const breadcrumbItems = useMemo(() => {
+    const title = location.pathname.startsWith('/dynamic/')
+      ? '动态应用'
+      : breadcrumbMap[location.pathname] || '工作台';
+    return [
+      { title: <a onClick={() => navigate('/')}><HomeOutlined /></a> },
+      { title },
+    ];
+  }, [location.pathname, navigate]);
 
-  // Page title from breadcrumb
-  const pageTitle = useMemo(() => {
-    const crumbs = breadcrumbItems;
-    return crumbs.length > 1 ? (crumbs[crumbs.length - 1].title as string) : '';
-  }, [breadcrumbItems]);
-
-  // Approval action — capture textarea value via React ref instead of DOM lookup
   const handleApproval = (instId: number, action: string) => {
     const commentRef = React.createRef<any>();
     Modal.confirm({
       title: action === 'approve' ? '审批通过' : '驳回申请',
-      content: <Input.TextArea ref={commentRef} rows={3} placeholder="审批意见（可选）" />,
+      content: <Input.TextArea ref={commentRef} rows={3} placeholder="填写审批意见" />,
       onOk: async () => {
         const comment = commentRef.current?.resizableTextArea?.textArea?.value
           ?? commentRef.current?.input?.value
           ?? '';
         try {
           await wfApproveOrReject(instId, { action, comment });
-          message.success(action === 'approve' ? '已通过' : '已驳回');
-          loadNotifs();
+          message.success(action === 'approve' ? '已审批通过' : '已驳回');
+          loadNotifications();
         } catch {
-          message.error('操作失败');
+          message.error('审批操作失败');
         }
       },
     });
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
-  // Notification dropdown
-  const notifMenuItems = {
+  const notificationMenu: MenuProps = {
     items: [
-      { key: 'header', label: <span style={{ fontWeight: 600 }}>通知</span>, disabled: true },
-      { type: 'divider' as const },
+      { key: 'header', label: <strong>通知中心</strong>, disabled: true },
+      { type: 'divider' },
       ...(notifications.length === 0
-        ? [{ key: 'empty', label: <span style={{ color: '#999' }}>暂无通知</span>, disabled: true }]
+        ? [{ key: 'empty', label: '暂无通知', disabled: true }]
         : notifications.slice(0, 8).map((n: any) => ({
             key: String(n.id),
             label: (
-              <div style={{ opacity: n.is_read ? 0.5 : 1, maxWidth: 300 }}>
-                <div style={{ fontWeight: n.is_read ? 400 : 600, fontSize: 13 }}>{n.title}</div>
-                {n.content && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{n.content}</div>}
-                <div style={{ fontSize: 11, color: '#bbb', marginTop: 2 }}>{n.created_at?.slice(0, 16)}</div>
+              <div style={{ opacity: n.is_read ? 0.55 : 1, maxWidth: 320 }}>
+                <div style={{ fontWeight: n.is_read ? 500 : 700 }}>{n.title}</div>
+                {n.content && <div style={{ fontSize: 12, color: '#5d6972', marginTop: 2 }}>{n.content}</div>}
+                <div style={{ fontSize: 11, color: '#8a97a1', marginTop: 2 }}>{n.created_at?.slice(0, 16)}</div>
                 {n.type === 'approval' && !n.is_read && (
-                  <div style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 8 }}>
                     <Button size="small" type="primary" icon={<CheckOutlined />}
                       onClick={(e) => { e.stopPropagation(); handleApproval(n.related_id || n.id, 'approve'); }}>通过</Button>
                     <Button size="small" danger icon={<CloseOutlined />} style={{ marginLeft: 8 }}
@@ -288,10 +320,10 @@ function AppContent() {
             ),
           }))
       ),
-      { type: 'divider' as const },
+      { type: 'divider' },
       {
         key: 'mark-all',
-        label: '全部标为已读',
+        label: '全部标记已读',
         onClick: async () => {
           if (!user) return;
           await wfMarkAllRead(user.id);
@@ -300,7 +332,7 @@ function AppContent() {
         },
       },
     ],
-    onClick: ({ key }: { key: string }) => {
+    onClick: ({ key }) => {
       if (key === 'header' || key === 'empty' || key === 'mark-all') return;
       wfMarkNotificationRead(Number(key)).catch(() => {});
       setNotifications((prev) => prev.map((n) => (String(n.id) === key ? { ...n, is_read: true } : n)));
@@ -308,101 +340,121 @@ function AppContent() {
     },
   };
 
-  // Avatar dropdown — "我的申请" navigates to dedicated page
-  const userMenuItems = {
+  const userMenu: MenuProps = {
     items: [
       { key: 'my-apps', label: '我的申请', icon: <AppstoreOutlined />, onClick: () => navigate('/my-applications') },
-      { type: 'divider' as const },
-      ...(adminMenus.map((m: any) => ({
-        key: m.key, label: m.label, icon: <SettingOutlined />,
-        onClick: () => navigate(m.key),
-      }))),
-      ...(adminMenus.length > 0 ? [{ type: 'divider' as const }] : []),
-      { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, danger: true, onClick: handleLogout },
+      { key: 'workflow', label: '流程中心', icon: <CheckOutlined />, onClick: () => navigate('/workflow') },
+      { type: 'divider' },
+      ...(user?.is_admin
+        ? [{ key: 'admin', label: '系统管理', icon: <SettingOutlined />, onClick: () => navigate('/system-admin') }]
+        : []),
+      { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, danger: true, onClick: () => { logout(); navigate('/login'); } },
     ],
   };
 
-  const siderWidth = collapsed ? 64 : 200;
+  const siderWidth = collapsed ? 68 : 236;
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className={`app-shell density-${density}`}>
       <Sider
-        width={200}
-        collapsedWidth={64}
+        width={236}
+        collapsedWidth={68}
         collapsed={collapsed}
         trigger={null}
-        theme="dark"
-        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0 }}
+        theme="light"
+        className="app-sider"
+        style={{ height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0 }}
       >
-        <div style={{
-          height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontSize: collapsed ? 20 : 18, fontWeight: 700, whiteSpace: 'nowrap',
-          overflow: 'hidden', transition: 'all 0.2s',
-        }}>
-          {collapsed ? 'MF' : '制造数智平台'}
+        <div className="app-brand">
+          <span className="app-brand-mark">MF</span>
+          {!collapsed && (
+            <span className="app-brand-title">
+              <strong>ManuFoundry</strong>
+              <span>Low-code Analytics</span>
+            </span>
+          )}
         </div>
-        <Menu theme="dark" mode="inline" selectedKeys={[location.pathname]} items={allMenuItems}
-          onClick={({ key }) => navigate(key)} />
+        <Menu
+          className="app-menu"
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          defaultOpenKeys={['lowcode-group']}
+          items={allMenuItems}
+          onClick={({ key }) => navigate(String(key))}
+        />
       </Sider>
+
       <Layout style={{ marginLeft: siderWidth, transition: 'margin-left 0.2s' }}>
-        <Header style={{
-          background: '#fff', padding: '0 24px', borderBottom: '1px solid #f0f0f0',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <Space size={16} align="center">
+        <Header className="app-header">
+          <Space size={14} align="center">
             <Button
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
-              style={{ fontSize: 16, width: 40, height: 40 }}
             />
             <Breadcrumb items={breadcrumbItems} />
           </Space>
-          <Space size={20}>
+
+          <Space size={12} align="center">
             <Button
-              type="text"
+              className="app-search-button"
               icon={<SearchOutlined />}
               onClick={() => setSearchOpen(true)}
-              style={{ fontSize: 16, color: '#666' }}
-              title="全局搜索 (Ctrl+K)"
+            >
+              搜索应用、数据资产或配置 Ctrl+K
+            </Button>
+            <Segmented
+              size="small"
+              value={density}
+              options={[
+                { label: 'Compact', value: 'compact' },
+                { label: 'Standard', value: 'standard' },
+                { label: 'Relaxed', value: 'relaxed' },
+              ]}
+              onChange={(value) => setDensity(value as Density)}
             />
-            <Dropdown menu={notifMenuItems} trigger={['click']}>
+            <Dropdown menu={notificationMenu} trigger={['click']}>
               <Badge count={unread} size="small">
-                <BellOutlined style={{ fontSize: 18, cursor: 'pointer' }} />
+                <Button type="text" icon={<BellOutlined />} />
               </Badge>
             </Dropdown>
-            <Dropdown menu={userMenuItems} trigger={['click']}>
+            <Dropdown menu={userMenu} trigger={['click']}>
               <Space style={{ cursor: 'pointer' }}>
-                <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-                <span style={{ fontSize: 13 }}>{user?.display_name || '用户'}</span>
+                <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#2f5f73' }} />
+                <span style={{ fontSize: 13, color: '#273640' }}>{user?.display_name || '用户'}</span>
               </Space>
             </Dropdown>
           </Space>
         </Header>
-        <Content style={{ margin: 16, padding: 24, background: '#fff', borderRadius: 8, minHeight: 400, overflow: 'auto' }}>
-          <ErrorBoundary>
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/data-sources" element={<DataSourcePage />} />
-                <Route path="/ontology" element={<OntologyPage />} />
-                <Route path="/graph" element={<GraphExplorerPage />} />
-                <Route path="/pipeline" element={<PipelinePage />} />
-                <Route path="/maintenance" element={<MaintenancePage />} />
-                <Route path="/quality" element={<QualityPage />} />
-                <Route path="/supply-chain" element={<SupplyChainPage />} />
-                <Route path="/ai-assistant" element={<AIAssistantPage />} />
-                <Route path="/reports" element={<ReportCenterPage />} />
-                <Route path="/model-driven" element={<ModelDrivenPage />} />
-                <Route path="/dynamic/:slug" element={<DynamicPage />} />
-                <Route path="/system-admin" element={<SystemAdminPage />} />
-                <Route path="/workflow" element={<WorkflowPage />} />
-                <Route path="/my-applications" element={<MyApplicationsPage />} />
-                <Route path="/templates" element={<TemplateMarketPage />} />
-                <Route path="/rules" element={<RuleEnginePage />} />
-              </Routes>
-            </Suspense>
-          </ErrorBoundary>
+
+        <Content className="app-content">
+          <div className="content-surface">
+            <ErrorBoundary>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/" element={<WorkspacePage />} />
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/data-sources" element={<DataSourcePage />} />
+                  <Route path="/ontology" element={<OntologyPage />} />
+                  <Route path="/graph" element={<GraphExplorerPage />} />
+                  <Route path="/pipeline" element={<PipelinePage />} />
+                  <Route path="/maintenance" element={<MaintenancePage />} />
+                  <Route path="/quality" element={<QualityPage />} />
+                  <Route path="/supply-chain" element={<SupplyChainPage />} />
+                  <Route path="/ai-assistant" element={<AIAssistantPage />} />
+                  <Route path="/reports" element={<ReportCenterPage />} />
+                  <Route path="/model-driven" element={<ModelDrivenPage />} />
+                  <Route path="/dynamic/:slug" element={<DynamicPage />} />
+                  <Route path="/system-admin" element={<SystemAdminPage />} />
+                  <Route path="/workflow" element={<WorkflowPage />} />
+                  <Route path="/my-applications" element={<MyApplicationsPage />} />
+                  <Route path="/templates" element={<TemplateMarketPage />} />
+                  <Route path="/rules" element={<RuleEnginePage />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         </Content>
       </Layout>
 
@@ -418,18 +470,17 @@ export default function App() {
   useEffect(() => {
     restore();
     setRestored(true);
-  }, []);
+  }, [restore]);
 
   if (!restored) return <PageLoader />;
 
   return (
     <Routes>
-      <Route path="/login" element={
-        isAuthenticated ? <Navigate to="/" replace /> : <Suspense fallback={<PageLoader />}><LoginPage /></Suspense>
-      } />
-      <Route path="/*" element={
-        isAuthenticated ? <AppContent /> : <Navigate to="/login" replace />
-      } />
+      <Route
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <Suspense fallback={<PageLoader />}><LoginPage /></Suspense>}
+      />
+      <Route path="/*" element={isAuthenticated ? <AppContent /> : <Navigate to="/login" replace />} />
     </Routes>
   );
 }

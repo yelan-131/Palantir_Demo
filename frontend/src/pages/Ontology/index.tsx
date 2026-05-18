@@ -36,6 +36,8 @@ const { Title, Text } = Typography;
 
 interface EntityType {
   name: string;
+  type?: string;
+  label?: string;
   display_name: string;
   description: string;
   icon: string;

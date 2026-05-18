@@ -78,7 +78,7 @@ export default function SubTableWidget({ parentModel, parentId, childTable, colu
     setEditValues({ ...record });
   };
 
-  const tableColumns = columns
+  const tableColumns: any[] = columns
     .filter((c) => c.editable !== false)
     .map((col) => ({
       title: col.label,

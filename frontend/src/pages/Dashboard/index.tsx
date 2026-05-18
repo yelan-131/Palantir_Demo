@@ -143,7 +143,7 @@ export default function DashboardPage() {
           const items = params as { seriesName: string; value: number; color: string }[];
           if (!Array.isArray(items)) return '';
           const total = items.reduce((s, i) => s + i.value, 0);
-          let html = `<strong>${(items as { axisValue: string }[])[0]?.axisValue ?? ''}</strong><br/>`;
+          let html = `<strong>${(items as unknown as { axisValue: string }[])[0]?.axisValue ?? ''}</strong><br/>`;
           items.forEach((item) => {
             html += `${item.seriesName}: <b>${(item.value ?? 0).toFixed(1)}%</b><br/>`;
           });

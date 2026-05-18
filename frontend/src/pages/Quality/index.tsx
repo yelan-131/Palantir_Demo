@@ -264,6 +264,7 @@ export default function QualityPage() {
           marker: string;
           seriesName: string;
           value: number;
+          dataIndex?: number;
         }[];
         if (!items || items.length === 0) return '';
         const idx = items[0].dataIndex ?? 0;

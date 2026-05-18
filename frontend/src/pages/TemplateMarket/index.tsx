@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Button, Modal, Tag, Empty, Spin, message,
   Space, Typography, Input, Tabs,
@@ -203,16 +203,16 @@ export default function TemplateMarket() {
             <Typography.Text strong>包含内容：</Typography.Text>
             <ul style={{ marginTop: 8, paddingLeft: 20 }}>
               {(selectedTemplate.config?.models?.length || 0) > 0 && (
-                <li>数据模型 {selectedTemplate.config.models.length} 个</li>
+                <li>数据模型 {selectedTemplate.config?.models?.length ?? 0} 个</li>
               )}
               {(selectedTemplate.config?.pages?.length || 0) > 0 && (
-                <li>业务页面 {selectedTemplate.config.pages.length} 个</li>
+                <li>业务页面 {selectedTemplate.config?.pages?.length ?? 0} 个</li>
               )}
               {(selectedTemplate.config?.rules?.length || 0) > 0 && (
-                <li>业务规则 {selectedTemplate.config.rules.length} 个</li>
+                <li>业务规则 {selectedTemplate.config?.rules?.length ?? 0} 个</li>
               )}
               {(selectedTemplate.config?.menus?.length || 0) > 0 && (
-                <li>菜单项 {selectedTemplate.config.menus.length} 个</li>
+                <li>菜单项 {selectedTemplate.config?.menus?.length ?? 0} 个</li>
               )}
             </ul>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>

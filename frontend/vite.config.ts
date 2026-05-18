@@ -1,12 +1,16 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+
+const srcAlias = decodeURIComponent(new URL('./src', import.meta.url).pathname).replace(
+  /^\/([A-Za-z]:\/)/,
+  '$1',
+);
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': srcAlias,
     },
   },
   server: {
