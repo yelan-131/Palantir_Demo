@@ -4,16 +4,20 @@ import {
   AppstoreAddOutlined,
   AppstoreOutlined,
   BranchesOutlined,
+  CheckCircleOutlined,
   DashboardOutlined,
   DeleteOutlined,
   DragOutlined,
   FolderOutlined,
   FormOutlined,
+  PlusOutlined,
   MenuOutlined,
   NodeIndexOutlined,
   SafetyCertificateOutlined,
   SaveOutlined,
+  SendOutlined,
   ShopOutlined,
+  StopOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
 import {
@@ -31,6 +35,7 @@ import {
   Select,
   Space,
   Switch,
+  Table,
   Tabs,
   Tag,
   Tree,
@@ -77,6 +82,22 @@ type FormRecord = {
   fields: number;
 };
 
+type FieldRecord = {
+  id: string;
+  label: string;
+  code: string;
+  columnName: string;
+  dataType: string;
+  length?: string;
+  allowNull: boolean;
+  unique: boolean;
+  indexed: boolean;
+  component: string;
+  list: boolean;
+  form: boolean;
+  search: boolean;
+};
+
 type AppFormConfig = {
   appId: number;
   formId: string;
@@ -105,6 +126,14 @@ const iconMap: Record<string, ReactNode> = {
   ShopOutlined: <ShopOutlined />,
   AppstoreOutlined: <AppstoreOutlined />,
 };
+
+const iconOptions = [
+  { value: 'DashboardOutlined', label: 'Dashboard' },
+  { value: 'ToolOutlined', label: 'Tool' },
+  { value: 'SafetyCertificateOutlined', label: 'Quality' },
+  { value: 'ShopOutlined', label: 'Supply Chain' },
+  { value: 'AppstoreOutlined', label: 'Application' },
+];
 
 const fallbackRoles: RoleRecord[] = [
   { id: 1, name: 'admin', label: '平台管理员' },
@@ -413,14 +442,150 @@ export default function AppMenuManagement() {
     } catch {
       message.success('应用配置已保存到演示状态');
     }
-    setAppDrawerOpen(false);
   };
 
   const saveForm = async () => {
     const values = await formForm.validateFields();
     setForms((prev) => prev.map((item) => (item.id === selectedForm.id ? { ...item, ...values } : item)));
     message.success('表单配置已保存');
-    setFormDrawerOpen(false);
+  };
+
+  const createDraftApp = () => {
+    const nextId = Math.max(...applications.map((app) => app.id), 0) + 1;
+    const nextApp: AppRecord = {
+      id: nextId,
+      name: '新建应用',
+      code: `app-${nextId}`,
+      description: '待配置的应用草稿',
+      icon: 'AppstoreOutlined',
+      default_route: '/',
+      sort_order: applications.length + 1,
+      status: 'draft',
+      is_pinned: false,
+      roles: [],
+    };
+    setApplications((prev) => [...prev, nextApp]);
+    setSelectedAppId(nextId);
+    message.success('已创建应用草稿');
+  };
+
+  const updateSelectedAppStatus = (status: string) => {
+    setApplications((prev) => prev.map((item) => (item.id === selectedApp.id ? { ...item, status } : item)));
+    appForm.setFieldValue('status', status);
+  };
+
+  const publishSelectedApp = async () => {
+    await saveApp();
+    updateSelectedAppStatus('published');
+    message.success('应用已发布');
+  };
+
+  const disableSelectedApp = () => {
+    updateSelectedAppStatus('disabled');
+    message.success('应用已停用，配置仍已保留');
+  };
+
+  const enableSelectedApp = () => {
+    updateSelectedAppStatus('published');
+    message.success('应用已启用');
+  };
+
+  const deleteSelectedDraftApp = () => {
+    if (selectedApp.status !== 'draft') {
+      message.warning('已发布或停用的应用不能直接删除，请先停用或归档');
+      return;
+    }
+    const nextApps = applications.filter((item) => item.id !== selectedApp.id);
+    setApplications(nextApps);
+    setSelectedAppId(nextApps[0]?.id ?? 0);
+    message.success('应用草稿已删除');
+  };
+
+  const copySelectedAppAsDraft = () => {
+    const nextId = Math.max(...applications.map((app) => app.id), 0) + 1;
+    const nextApp: AppRecord = {
+      ...selectedApp,
+      id: nextId,
+      name: `${selectedApp.name} Copy`,
+      code: `${selectedApp.code}-copy-${nextId}`,
+      status: 'draft',
+      is_pinned: false,
+    };
+    setApplications((prev) => [...prev, nextApp]);
+    setSelectedAppId(nextId);
+    message.success('已复制为新草稿');
+  };
+
+  const createDraftForm = () => {
+    const nextId = `form-${Date.now()}`;
+    const nextForm: FormRecord = {
+      id: nextId,
+      name: '新建表单',
+      code: nextId,
+      entity: 'NewEntity',
+      source: 'generated_table',
+      status: 'draft',
+      owner: '平台团队',
+      description: '待配置的表单草稿',
+      fields: 0,
+    };
+    setForms((prev) => [nextForm, ...prev]);
+    setSelectedFormId(nextId);
+    message.success('已创建表单草稿');
+  };
+
+  const updateSelectedFormStatus = (status: FormRecord['status']) => {
+    setForms((prev) => prev.map((item) => (item.id === selectedForm.id ? { ...item, status } : item)));
+    formForm.setFieldValue('status', status);
+  };
+
+  const publishSelectedForm = async () => {
+    await saveForm();
+    if ((selectedForm.fields ?? 0) <= 0) {
+      message.warning('表单需要至少一个字段才能发布');
+      return;
+    }
+    updateSelectedFormStatus('published');
+    message.success('表单已发布，数据库结构影响已记录');
+  };
+
+  const disableSelectedForm = () => {
+    updateSelectedFormStatus('disabled');
+    message.success('表单已停用，历史数据保留');
+  };
+
+  const enableSelectedForm = () => {
+    updateSelectedFormStatus('published');
+    message.success('表单已启用');
+  };
+
+  const deleteSelectedDraftForm = () => {
+    if (selectedForm.status !== 'draft') {
+      message.warning('已发布或停用的表单不能直接删除');
+      return;
+    }
+    if (configs.some((item) => item.formId === selectedForm.id)) {
+      message.warning('该表单已被应用装配使用，请先解除绑定');
+      return;
+    }
+    const nextForms = forms.filter((item) => item.id !== selectedForm.id);
+    setForms(nextForms);
+    setSelectedFormId(nextForms[0]?.id ?? '');
+    message.success('表单草稿已删除');
+  };
+
+  const copySelectedFormAsDraft = () => {
+    const nextId = `${selectedForm.id}-copy-${Date.now()}`;
+    const nextForm: FormRecord = {
+      ...selectedForm,
+      id: nextId,
+      name: `${selectedForm.name} Copy`,
+      code: nextId,
+      status: 'draft',
+    };
+    setForms((prev) => [nextForm, ...prev]);
+    setSelectedFormId(nextId);
+    message.success('已复制表单为新草稿');
   };
 
   const toggleBinding = (formId: string) => {
@@ -525,12 +690,19 @@ export default function AppMenuManagement() {
             key: 'apps',
             label: '应用管理',
             children: (
-              <AppManagement
+              <AppManagementPanel
                 apps={applications}
                 roles={roles}
                 selectedAppId={selectedApp.id}
                 onSelect={setSelectedAppId}
-                onOpenConfig={() => setAppDrawerOpen(true)}
+                form={appForm}
+                onCreate={createDraftApp}
+                onSave={saveApp}
+                onPublish={publishSelectedApp}
+                onDisable={disableSelectedApp}
+                onEnable={enableSelectedApp}
+                onDeleteDraft={deleteSelectedDraftApp}
+                onCopyDraft={copySelectedAppAsDraft}
               />
             ),
           },
@@ -538,11 +710,18 @@ export default function AppMenuManagement() {
             key: 'forms',
             label: '表单管理',
             children: (
-              <FormManagement
+              <FormManagementPanel
                 forms={forms}
                 selectedFormId={selectedForm.id}
                 onSelect={setSelectedFormId}
-                onOpenConfig={() => setFormDrawerOpen(true)}
+                form={formForm}
+                onCreate={createDraftForm}
+                onSave={saveForm}
+                onPublish={publishSelectedForm}
+                onDisable={disableSelectedForm}
+                onEnable={enableSelectedForm}
+                onDeleteDraft={deleteSelectedDraftForm}
+                onCopyDraft={copySelectedFormAsDraft}
               />
             ),
           },
@@ -560,10 +739,9 @@ export default function AppMenuManagement() {
                 selectedMenu={selectedMenu}
                 boundFormIds={boundFormIds}
                 onSelectApp={setSelectedAppId}
-                onOpenAppConfig={() => setAppDrawerOpen(true)}
+                onOpenAppConfig={() => setSelectedAppId(selectedApp.id)}
                 onOpenFormConfig={(formId) => {
                   setSelectedFormId(formId);
-                  setFormDrawerOpen(true);
                 }}
                 onToggleBinding={toggleBinding}
                 onAddFormToMenu={addFormToMenu}
@@ -583,6 +761,7 @@ export default function AppMenuManagement() {
         title="应用配置"
         open={appDrawerOpen}
         width={520}
+        destroyOnClose
         onClose={() => setAppDrawerOpen(false)}
         extra={<Button type="primary" icon={<SaveOutlined />} onClick={saveApp}>保存</Button>}
       >
@@ -593,12 +772,294 @@ export default function AppMenuManagement() {
         title="表单配置"
         open={formDrawerOpen}
         width={560}
+        destroyOnClose
         onClose={() => setFormDrawerOpen(false)}
         extra={<Button type="primary" icon={<SaveOutlined />} onClick={saveForm}>保存</Button>}
       >
         <FormConfigForm form={formForm} />
       </Drawer>
     </div>
+  );
+}
+
+function AppManagementPanel({
+  apps,
+  roles,
+  selectedAppId,
+  onSelect,
+  form,
+  onCreate,
+  onSave,
+  onPublish,
+  onDisable,
+  onEnable,
+  onDeleteDraft,
+  onCopyDraft,
+}: {
+  apps: AppRecord[];
+  roles: RoleRecord[];
+  selectedAppId: number;
+  onSelect: (id: number) => void;
+  form: ReturnType<typeof Form.useForm>[0];
+  onCreate: () => void;
+  onSave: () => void;
+  onPublish: () => void;
+  onDisable: () => void;
+  onEnable: () => void;
+  onDeleteDraft: () => void;
+  onCopyDraft: () => void;
+}) {
+  const selected = apps.find((item) => item.id === selectedAppId) ?? apps[0];
+  const status = Form.useWatch('status', form) ?? selected?.status;
+  const watchedIcon = Form.useWatch('icon', form) ?? selected?.icon;
+  const watchedName = Form.useWatch('name', form) ?? selected?.name;
+  const watchedDescription = Form.useWatch('description', form) ?? selected?.description;
+
+  return (
+    <Row gutter={[16, 16]} className="config-management-grid">
+      <Col xs={24} lg={7} xl={6}>
+        <Card
+          title="应用列表"
+          className="config-list-card"
+          extra={<Button size="small" icon={<PlusOutlined />} onClick={onCreate}>新增</Button>}
+        >
+          <List
+            dataSource={apps}
+            renderItem={(app) => (
+              <List.Item
+                className={`admin-config-list-item ${app.id === selectedAppId ? 'active' : ''}`}
+                onClick={() => onSelect(app.id)}
+              >
+                <span className="application-icon">{renderIcon(app.icon)}</span>
+                <div>
+                  <strong>{app.name}</strong>
+                  <small>{app.code}</small>
+                  <Space size={4} wrap>
+                    <Tag color={statusColor(app.status)}>{statusText(app.status)}</Tag>
+                    {app.is_pinned && <Tag color="processing">置顶</Tag>}
+                  </Space>
+                </div>
+              </List.Item>
+            )}
+          />
+        </Card>
+      </Col>
+      <Col xs={24} lg={17} xl={18}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card
+            className="config-editor-card"
+            title="应用基础信息"
+            extra={(
+              <LifecycleActions
+                status={status}
+                onSave={onSave}
+                onPublish={onPublish}
+                onDisable={onDisable}
+                onEnable={onEnable}
+                onDeleteDraft={onDeleteDraft}
+                onCopyDraft={onCopyDraft}
+              />
+            )}
+          >
+            <div className="config-preview-strip">
+              <span className="config-preview-icon">{renderIcon(watchedIcon)}</span>
+              <div>
+                <Typography.Text strong>{watchedName || '-'}</Typography.Text>
+                <Typography.Text type="secondary">{watchedDescription || '暂无描述'}</Typography.Text>
+              </div>
+              <Tag color={statusColor(status)}>{statusText(status)}</Tag>
+            </div>
+            <AppConfigForm form={form} roles={roles} />
+          </Card>
+
+          <Card className="config-editor-card" title="访问与入口">
+            <Row gutter={[12, 12]}>
+              <Col xs={24} md={12}>
+                <InfoBlock label="默认路由" value={selected?.default_route ?? '-'} />
+              </Col>
+              <Col xs={24} md={12}>
+                <InfoBlock label="可见角色" value={(selected?.roles ?? roles).map((role) => role.label).join(' / ') || '未配置'} />
+              </Col>
+              <Col xs={24} md={12}>
+                <InfoBlock label="排序" value={`${selected?.sort_order ?? 0}`} />
+              </Col>
+              <Col xs={24} md={12}>
+                <InfoBlock label="应用范围" value="当前租户 / 工厂范围后续扩展" />
+              </Col>
+            </Row>
+          </Card>
+        </Space>
+      </Col>
+    </Row>
+  );
+}
+
+function FormManagementPanel({
+  forms,
+  selectedFormId,
+  onSelect,
+  form,
+  onCreate,
+  onSave,
+  onPublish,
+  onDisable,
+  onEnable,
+  onDeleteDraft,
+  onCopyDraft,
+}: {
+  forms: FormRecord[];
+  selectedFormId: string;
+  onSelect: (id: string) => void;
+  form: ReturnType<typeof Form.useForm>[0];
+  onCreate: () => void;
+  onSave: () => void;
+  onPublish: () => void;
+  onDisable: () => void;
+  onEnable: () => void;
+  onDeleteDraft: () => void;
+  onCopyDraft: () => void;
+}) {
+  const selected = forms.find((item) => item.id === selectedFormId) ?? forms[0];
+  const status = Form.useWatch('status', form) ?? selected?.status;
+  const fields = useMemo(() => buildFieldRows(selected), [selected]);
+
+  return (
+    <Row gutter={[16, 16]} className="config-management-grid">
+      <Col xs={24} lg={7} xl={6}>
+        <Card
+          title="表单列表"
+          className="config-list-card"
+          extra={<Button size="small" icon={<PlusOutlined />} onClick={onCreate}>新增</Button>}
+        >
+          <List
+            dataSource={forms}
+            renderItem={(item) => (
+              <List.Item
+                className={`admin-config-list-item ${item.id === selectedFormId ? 'active' : ''}`}
+                onClick={() => onSelect(item.id)}
+              >
+                <span className="application-icon"><FormOutlined /></span>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{item.entity} / {item.source}</small>
+                  <Space size={4} wrap>
+                    <Tag>{item.fields} fields</Tag>
+                    <Tag color={statusColor(item.status)}>{statusText(item.status)}</Tag>
+                  </Space>
+                </div>
+              </List.Item>
+            )}
+          />
+        </Card>
+      </Col>
+      <Col xs={24} lg={17} xl={18}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card
+            className="config-editor-card"
+            title="表单基础信息"
+            extra={(
+              <LifecycleActions
+                status={status}
+                onSave={onSave}
+                onPublish={onPublish}
+                onDisable={onDisable}
+                onEnable={onEnable}
+                onDeleteDraft={onDeleteDraft}
+                onCopyDraft={onCopyDraft}
+              />
+            )}
+          >
+            <FormConfigForm form={form} />
+          </Card>
+
+          <Card
+            className="config-editor-card"
+            title="字段结构"
+            extra={(
+              <Space>
+                <Button size="small" icon={<BranchesOutlined />}>同步字段</Button>
+                <Button size="small" icon={<PlusOutlined />}>新增字段</Button>
+                <Button size="small" icon={<FormOutlined />}>进入表单设计</Button>
+              </Space>
+            )}
+          >
+            <Table<FieldRecord>
+              rowKey="id"
+              size="small"
+              pagination={false}
+              dataSource={fields}
+              scroll={{ x: 980 }}
+              columns={[
+                { title: '字段名', dataIndex: 'label', fixed: 'left', width: 140 },
+                { title: '编码', dataIndex: 'code', width: 130 },
+                { title: '列名', dataIndex: 'columnName', width: 130 },
+                { title: '类型', dataIndex: 'dataType', width: 100 },
+                { title: '长度', dataIndex: 'length', width: 90 },
+                { title: '允许为空', dataIndex: 'allowNull', width: 90, render: boolTag },
+                { title: '唯一', dataIndex: 'unique', width: 70, render: boolTag },
+                { title: '索引', dataIndex: 'indexed', width: 70, render: boolTag },
+                { title: '组件', dataIndex: 'component', width: 110 },
+                { title: '列表', dataIndex: 'list', width: 70, render: boolTag },
+                { title: '表单', dataIndex: 'form', width: 70, render: boolTag },
+                { title: '搜索', dataIndex: 'search', width: 70, render: boolTag },
+              ]}
+            />
+            <div className="database-impact-note">
+              发布表单时再确认建表、字段、索引、唯一约束和可空性变化；保存草稿只保存元数据。
+            </div>
+          </Card>
+        </Space>
+      </Col>
+    </Row>
+  );
+}
+
+function LifecycleActions({
+  status,
+  onSave,
+  onPublish,
+  onDisable,
+  onEnable,
+  onDeleteDraft,
+  onCopyDraft,
+}: {
+  status: string;
+  onSave: () => void;
+  onPublish: () => void;
+  onDisable: () => void;
+  onEnable: () => void;
+  onDeleteDraft: () => void;
+  onCopyDraft: () => void;
+}) {
+  if (status === 'published') {
+    return (
+      <Space wrap>
+        <Button icon={<SaveOutlined />} onClick={onSave}>保存变更</Button>
+        <Button icon={<AppstoreAddOutlined />} onClick={onCopyDraft}>复制为草稿</Button>
+        <Popconfirm title="确认停用？" onConfirm={onDisable}>
+          <Button danger icon={<StopOutlined />}>停用</Button>
+        </Popconfirm>
+      </Space>
+    );
+  }
+
+  if (status === 'disabled') {
+    return (
+      <Space wrap>
+        <Button icon={<SaveOutlined />} onClick={onSave}>保存配置</Button>
+        <Button type="primary" icon={<CheckCircleOutlined />} onClick={onEnable}>启用</Button>
+      </Space>
+    );
+  }
+
+  return (
+    <Space wrap>
+      <Button icon={<SaveOutlined />} onClick={onSave}>保存草稿</Button>
+      <Button type="primary" icon={<SendOutlined />} onClick={onPublish}>发布</Button>
+      <Popconfirm title="确认删除草稿？" onConfirm={onDeleteDraft}>
+        <Button danger icon={<DeleteOutlined />}>删除草稿</Button>
+      </Popconfirm>
+    </Space>
   );
 }
 
@@ -999,7 +1460,20 @@ function AppConfigForm({ form, roles }: { form: ReturnType<typeof Form.useForm>[
       <Row gutter={12}>
         <Col span={12}>
           <Form.Item name="icon" label="应用图标">
-            <Select options={Object.keys(iconMap).map((key) => ({ label: key, value: key }))} />
+            <Select
+              optionLabelProp="label"
+              options={iconOptions.map((item) => ({
+                value: item.value,
+                label: item.label,
+                display: (
+                  <Space>
+                    <span className="icon-option-preview">{renderIcon(item.value)}</span>
+                    <span>{item.label}</span>
+                  </Space>
+                ),
+              }))}
+              optionRender={(option) => option.data.display}
+            />
           </Form.Item>
         </Col>
         <Col span={12}>
@@ -1102,6 +1576,43 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
       <Typography.Text strong>{value}</Typography.Text>
     </div>
   );
+}
+
+function boolTag(value: boolean) {
+  return value ? <Tag color="success">是</Tag> : <Tag>否</Tag>;
+}
+
+function statusColor(status: string) {
+  if (status === 'published') return 'success';
+  if (status === 'draft') return 'warning';
+  if (status === 'disabled') return 'default';
+  if (status === 'archived') return 'default';
+  return 'processing';
+}
+
+function buildFieldRows(form?: FormRecord): FieldRecord[] {
+  if (!form || form.fields <= 0) return [];
+  const presets = [
+    { label: '名称', code: 'name', dataType: 'string', length: '100', component: 'Text', list: true, form: true, search: true, allowNull: false, unique: false, indexed: true },
+    { label: '编码', code: 'code', dataType: 'string', length: '64', component: 'Text', list: true, form: true, search: true, allowNull: false, unique: true, indexed: true },
+    { label: '状态', code: 'status', dataType: 'enum', length: '-', component: 'Select', list: true, form: true, search: true, allowNull: false, unique: false, indexed: true },
+    { label: '负责人', code: 'owner', dataType: 'string', length: '80', component: 'Text', list: true, form: true, search: false, allowNull: true, unique: false, indexed: false },
+    { label: '描述', code: 'description', dataType: 'text', length: '-', component: 'Textarea', list: false, form: true, search: false, allowNull: true, unique: false, indexed: false },
+    { label: '创建时间', code: 'created_at', dataType: 'datetime', length: '-', component: 'DateTime', list: true, form: false, search: true, allowNull: false, unique: false, indexed: true },
+    { label: '更新时间', code: 'updated_at', dataType: 'datetime', length: '-', component: 'DateTime', list: true, form: false, search: false, allowNull: false, unique: false, indexed: true },
+  ];
+
+  return Array.from({ length: form.fields }, (_, index) => {
+    const preset = presets[index % presets.length];
+    const code = index < presets.length ? preset.code : `${form.code.replace(/-/g, '_')}_field_${index + 1}`;
+    return {
+      ...preset,
+      id: `${form.id}-${code}`,
+      label: index < presets.length ? preset.label : `扩展字段 ${index + 1}`,
+      code,
+      columnName: code,
+    };
+  });
 }
 
 function statusText(status: string) {

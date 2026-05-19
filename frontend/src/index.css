@@ -1491,6 +1491,122 @@ button {
   margin-bottom: 16px;
 }
 
+.config-management-grid {
+  min-height: calc(100vh - 294px);
+}
+
+.config-management-grid > .ant-col {
+  display: flex;
+}
+
+.config-management-grid > .ant-col > .ant-card,
+.config-management-grid > .ant-col > .ant-space {
+  width: 100%;
+}
+
+.config-list-card,
+.config-editor-card {
+  border: 1px solid var(--mf-border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.config-list-card {
+  height: max(560px, calc(100vh - 360px));
+}
+
+.config-list-card .ant-card-body {
+  max-height: calc(100vh - 430px);
+  overflow: auto;
+}
+
+.admin-config-list-item {
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start !important;
+  padding: 10px !important;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.admin-config-list-item + .admin-config-list-item {
+  margin-top: 8px;
+}
+
+.admin-config-list-item:hover,
+.admin-config-list-item.active {
+  border-color: var(--mf-primary);
+  background: #eef6f9;
+}
+
+.admin-config-list-item strong,
+.admin-config-list-item small {
+  display: block;
+}
+
+.admin-config-list-item strong {
+  color: var(--mf-text);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.admin-config-list-item small {
+  margin: 2px 0 6px;
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
+.config-editor-card .ant-card-head {
+  background: #fbfcfd;
+}
+
+.config-preview-strip {
+  margin-bottom: 16px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 38px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--mf-border);
+  border-radius: 6px;
+  background: var(--mf-panel-soft);
+}
+
+.config-preview-strip .ant-typography {
+  display: block;
+  margin: 0;
+}
+
+.config-preview-icon,
+.icon-option-preview {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #dfecef;
+  color: var(--mf-primary);
+}
+
+.icon-option-preview {
+  width: 26px;
+  height: 26px;
+}
+
+.database-impact-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d7e4e9;
+  border-radius: 6px;
+  background: #f4f8fa;
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
 .app-assembly-workspace {
   display: flex;
   flex-direction: column;
