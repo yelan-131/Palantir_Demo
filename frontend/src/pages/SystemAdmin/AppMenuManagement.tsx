@@ -5,6 +5,7 @@ import {
   AppstoreOutlined,
   BranchesOutlined,
   DashboardOutlined,
+  DeleteOutlined,
   DragOutlined,
   FolderOutlined,
   FormOutlined,
@@ -25,6 +26,7 @@ import {
   Form,
   Input,
   List,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -470,6 +472,31 @@ export default function AppMenuManagement() {
     setSelectedMenuKey(nextNode.key);
   };
 
+  const deleteSelectedMenuNode = () => {
+    if (!selectedMenu) return;
+    const target = selectedMenu;
+    const nextTree = removeMenuNodePromoteChildren(currentMenus, selectedMenuKey);
+    const nextKeys = collectMenuKeys(nextTree);
+    setMenusByApp((prev) => ({
+      ...prev,
+      [selectedApp.id]: nextTree,
+    }));
+    setSelectedMenuKey(nextKeys[0] ?? '');
+
+    if (target.formId && !hasFormInMenus(nextTree, target.formId)) {
+      setConfigs((prev) => prev.filter((item) => !(item.appId === selectedApp.id && item.formId === target.formId)));
+      message.success('已删除菜单入口，并解除该表单与当前应用的绑定');
+      return;
+    }
+
+    if (!target.formId && (target.children?.length ?? 0) > 0) {
+      message.success('已删除分组，分组下的节点已提升到同级');
+      return;
+    }
+
+    message.success('菜单节点已删除');
+  };
+
   const saveMenuNode = async () => {
     const values = await menuForm.validateFields();
     setMenusByApp((prev) => ({
@@ -545,6 +572,7 @@ export default function AppMenuManagement() {
                 onDropMenu={onDropMenu}
                 menuForm={menuForm}
                 onSaveMenu={saveMenuNode}
+                onDeleteMenu={deleteSelectedMenuNode}
               />
             ),
           },
@@ -721,6 +749,7 @@ function AssemblyWorkspace({
   onDropMenu,
   menuForm,
   onSaveMenu,
+  onDeleteMenu,
 }: {
   apps: AppRecord[];
   forms: FormRecord[];
@@ -740,6 +769,7 @@ function AssemblyWorkspace({
   onDropMenu: (info: any) => void;
   menuForm: ReturnType<typeof Form.useForm>[0];
   onSaveMenu: () => void;
+  onDeleteMenu: () => void;
 }) {
   const selectedApp = apps.find((item) => item.id === selectedAppId) ?? apps[0];
   const currentAppForms = forms.filter((form) => boundFormIds.has(form.id));
@@ -918,12 +948,30 @@ function AssemblyWorkspace({
                     <Form.Item name="defaultEntry" label="默认入口" valuePropName="checked">
                       <Switch />
                     </Form.Item>
-                    <Button type="primary" block icon={<SaveOutlined />} onClick={onSaveMenu}>
-                      保存节点
-                    </Button>
+                    <Space.Compact block>
+                      <Button type="primary" icon={<SaveOutlined />} onClick={onSaveMenu}>
+                        保存节点
+                      </Button>
+                      <Popconfirm
+                        title={selectedMenu.formId ? '删除这个表单入口？' : '删除这个分组？'}
+                        description={
+                          selectedMenu.formId
+                            ? '如果这是该表单在当前应用里的最后一个菜单入口，会同步解除应用与表单的绑定。'
+                            : '分组下的表单不会被删除，会自动提升到同级菜单。'
+                        }
+                        okText="删除"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={onDeleteMenu}
+                      >
+                        <Button danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </Space.Compact>
                     <Divider />
                     <Typography.Text type="secondary">
-                      菜单节点负责导航展示，它可以绑定一个表单，也可以只是父级分组。
+                      菜单节点负责导航展示。删除表单节点会移除当前菜单入口；删除分组会保留子节点并上移。
                     </Typography.Text>
                   </Form>
                 ) : (
@@ -1108,6 +1156,17 @@ function findMenuNodeByForm(nodes: MenuNode[], formId: string): MenuNode | undef
 
 function collectMenuKeys(nodes: MenuNode[]): string[] {
   return nodes.flatMap((node) => [node.key, ...collectMenuKeys(node.children ?? [])]);
+}
+
+function hasFormInMenus(nodes: MenuNode[], formId: string): boolean {
+  return nodes.some((node) => node.formId === formId || hasFormInMenus(node.children ?? [], formId));
+}
+
+function removeMenuNodePromoteChildren(nodes: MenuNode[], key: string): MenuNode[] {
+  return nodes.flatMap((node) => {
+    if (node.key === key) return node.children ?? [];
+    return [{ ...node, children: removeMenuNodePromoteChildren(node.children ?? [], key) }];
+  });
 }
 
 function updateMenuNode(nodes: MenuNode[], key: string, values: any): MenuNode[] {
