@@ -12,32 +12,29 @@ import {
   Modal,
   Space,
   Spin,
+  Tag,
   Typography,
   message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  ApartmentOutlined,
-  ApiOutlined,
   AppstoreOutlined,
-  BarChartOutlined,
   BellOutlined,
   CheckOutlined,
   CloseOutlined,
   DashboardOutlined,
-  DatabaseOutlined,
+  DownloadOutlined,
   HomeOutlined,
-  LayoutOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  NodeIndexOutlined,
+  PlusOutlined,
+  ReloadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
   SettingOutlined,
   ShopOutlined,
-  ThunderboltOutlined,
   ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -89,23 +86,6 @@ const businessMenuItems: MenuProps['items'] = [
   { key: '/supply-chain', icon: <ShopOutlined />, label: '供应链风险' },
 ];
 
-const lowCodeMenuItems: MenuProps['items'] = [
-  {
-    key: 'lowcode-group',
-    icon: <AppstoreOutlined />,
-    label: '低代码配置',
-    children: [
-      { key: '/model-driven', icon: <LayoutOutlined />, label: 'App Builder' },
-      { key: '/ontology', icon: <ApartmentOutlined />, label: 'Data Modeler' },
-      { key: '/reports', icon: <BarChartOutlined />, label: 'Report Designer' },
-      { key: '/rules', icon: <ThunderboltOutlined />, label: 'Rule Builder' },
-      { key: '/data-sources', icon: <ApiOutlined />, label: 'Data Sources' },
-      { key: '/pipeline', icon: <DatabaseOutlined />, label: 'Data Pipeline' },
-      { key: '/graph', icon: <NodeIndexOutlined />, label: 'Graph Explorer' },
-    ],
-  },
-];
-
 const toolMenuItems: MenuProps['items'] = [
   { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Assistant' },
   { key: '/templates', icon: <AppstoreOutlined />, label: '模板市场' },
@@ -116,24 +96,24 @@ const adminMenuItems: MenuProps['items'] = [
   { key: '/system-admin', icon: <SettingOutlined />, label: '系统管理' },
 ];
 
-const breadcrumbMap: Record<string, string> = {
+const pageTitleMap: Record<string, string> = {
   '/': '我的工作台',
   '/dashboard': '生产态势',
   '/maintenance': '设备维护',
   '/quality': '质量分析',
   '/supply-chain': '供应链风险',
-  '/model-driven': 'App Builder',
-  '/ontology': 'Data Modeler',
-  '/reports': 'Report Designer',
+  '/model-driven': '表单配置中心',
+  '/ontology': '数据模型',
+  '/reports': '报表中心',
   '/templates': '模板市场',
-  '/rules': 'Rule Builder',
+  '/rules': '规则引擎',
   '/ai-assistant': 'AI Assistant',
-  '/data-sources': 'Data Sources',
-  '/graph': 'Graph Explorer',
-  '/pipeline': 'Data Pipeline',
+  '/data-sources': '数据源管理',
+  '/graph': '图谱探索',
+  '/pipeline': '数据管道',
   '/system-admin': '系统管理',
   '/workflow': '流程中心',
-  '/my-applications': '我的申请',
+  '/my-applications': '我的应用',
 };
 
 function PageLoader() {
@@ -148,9 +128,11 @@ function PageLoader() {
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   state = { error: null as string | null };
+
   static getDerivedStateFromError(err: Error) {
     return { error: err.message };
   }
+
   render() {
     if (this.state.error) {
       return (
@@ -159,7 +141,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
           <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fff', padding: 16, borderRadius: 6 }}>
             {this.state.error}
           </pre>
-          <Button type="primary" onClick={() => window.location.reload()}>刷新页面</Button>
+          <Button type="primary" onClick={() => window.location.reload()}>重新加载页面</Button>
         </div>
       );
     }
@@ -243,8 +225,6 @@ function AppContent() {
     const items: MenuProps['items'] = [
       ...(businessMenuItems || []),
       { type: 'divider' },
-      ...(lowCodeMenuItems || []),
-      { type: 'divider' },
       ...(toolMenuItems || []),
     ];
     if (user?.is_admin) {
@@ -256,16 +236,25 @@ function AppContent() {
     return items;
   }, [dynamicMenus, user?.is_admin]);
 
-  const selectedKey = location.pathname === '/dashboard' ? '/dashboard' : location.pathname;
-  const canConfigureCurrentPage = location.pathname !== '/';
+  const studioTarget = location.pathname === '/model-driven'
+    ? decodeURIComponent(new URLSearchParams(location.search).get('target') || '')
+    : '';
+  const selectedKey = studioTarget || location.pathname;
+  const isStudioPage = location.pathname === '/model-driven';
+  const showRuntimePageBar = location.pathname !== '/' && !isStudioPage;
+  const runtimeTitle = location.pathname.startsWith('/dynamic/')
+    ? '动态业务表单'
+    : pageTitleMap[location.pathname] || '业务页面';
+
   const configureCurrentPage = () => {
     const target = encodeURIComponent(location.pathname);
     navigate(`/model-driven?target=${target}`);
   };
+
   const breadcrumbItems = useMemo(() => {
     const title = location.pathname.startsWith('/dynamic/')
-      ? '动态应用'
-      : breadcrumbMap[location.pathname] || '工作台';
+      ? '动态业务表单'
+      : pageTitleMap[location.pathname] || '业务页面';
     return [
       { title: <a onClick={() => navigate('/')}><HomeOutlined /></a> },
       { title },
@@ -276,7 +265,7 @@ function AppContent() {
     const commentRef = React.createRef<any>();
     Modal.confirm({
       title: action === 'approve' ? '审批通过' : '驳回申请',
-      content: <Input.TextArea ref={commentRef} rows={3} placeholder="填写审批意见" />,
+      content: <Input.TextArea ref={commentRef} rows={3} placeholder="请输入审批意见" />,
       onOk: async () => {
         const comment = commentRef.current?.resizableTextArea?.textArea?.value
           ?? commentRef.current?.input?.value
@@ -294,7 +283,7 @@ function AppContent() {
 
   const notificationMenu: MenuProps = {
     items: [
-      { key: 'header', label: <strong>通知中心</strong>, disabled: true },
+      { key: 'header', label: <strong>待办通知</strong>, disabled: true },
       { type: 'divider' },
       ...(notifications.length === 0
         ? [{ key: 'empty', label: '暂无通知', disabled: true }]
@@ -307,10 +296,29 @@ function AppContent() {
                 <div style={{ fontSize: 11, color: '#8a97a1', marginTop: 2 }}>{n.created_at?.slice(0, 16)}</div>
                 {n.type === 'approval' && !n.is_read && (
                   <div style={{ marginTop: 8 }}>
-                    <Button size="small" type="primary" icon={<CheckOutlined />}
-                      onClick={(e) => { e.stopPropagation(); handleApproval(n.related_id || n.id, 'approve'); }}>通过</Button>
-                    <Button size="small" danger icon={<CloseOutlined />} style={{ marginLeft: 8 }}
-                      onClick={(e) => { e.stopPropagation(); handleApproval(n.related_id || n.id, 'reject'); }}>驳回</Button>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<CheckOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleApproval(n.related_id || n.id, 'approve');
+                      }}
+                    >
+                      通过
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      icon={<CloseOutlined />}
+                      style={{ marginLeft: 8 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleApproval(n.related_id || n.id, 'reject');
+                      }}
+                    >
+                      驳回
+                    </Button>
                   </div>
                 )}
               </div>
@@ -320,7 +328,7 @@ function AppContent() {
       { type: 'divider' },
       {
         key: 'mark-all',
-        label: '全部标记已读',
+        label: '全部标记为已读',
         onClick: async () => {
           if (!user) return;
           await wfMarkAllRead(user.id);
@@ -339,13 +347,23 @@ function AppContent() {
 
   const userMenu: MenuProps = {
     items: [
-      { key: 'my-apps', label: '我的申请', icon: <AppstoreOutlined />, onClick: () => navigate('/my-applications') },
+      { key: 'my-apps', label: '我的应用', icon: <AppstoreOutlined />, onClick: () => navigate('/my-applications') },
+      { key: 'form-studio', label: '表单配置中心', icon: <SettingOutlined />, onClick: () => navigate('/model-driven') },
       { key: 'workflow', label: '流程中心', icon: <CheckOutlined />, onClick: () => navigate('/workflow') },
       { type: 'divider' },
       ...(user?.is_admin
         ? [{ key: 'admin', label: '系统管理', icon: <SettingOutlined />, onClick: () => navigate('/system-admin') }]
         : []),
-      { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, danger: true, onClick: () => { logout(); navigate('/login'); } },
+      {
+        key: 'logout',
+        label: '退出登录',
+        icon: <LogoutOutlined />,
+        danger: true,
+        onClick: () => {
+          logout();
+          navigate('/login');
+        },
+      },
     ],
   };
 
@@ -375,7 +393,6 @@ function AppContent() {
           className="app-menu"
           mode="inline"
           selectedKeys={[selectedKey]}
-          defaultOpenKeys={['lowcode-group']}
           items={allMenuItems}
           onClick={({ key }) => navigate(String(key))}
         />
@@ -393,14 +410,6 @@ function AppContent() {
           </Space>
 
           <Space size={12} align="center">
-            {canConfigureCurrentPage && (
-              <Button
-                icon={<SettingOutlined />}
-                onClick={configureCurrentPage}
-              >
-                配置当前页面
-              </Button>
-            )}
             <Button
               className="app-search-button"
               icon={<SearchOutlined />}
@@ -416,7 +425,7 @@ function AppContent() {
             <Dropdown menu={userMenu} trigger={['click']}>
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#2f5f73' }} />
-                <span style={{ fontSize: 13, color: '#273640' }}>{user?.display_name || '用户'}</span>
+                <span style={{ fontSize: 13, color: '#273640' }}>{user?.display_name || '系统管理员'}</span>
               </Space>
             </Dropdown>
           </Space>
@@ -424,6 +433,22 @@ function AppContent() {
 
         <Content className="app-content">
           <div className="content-surface">
+            {showRuntimePageBar && (
+              <div className="runtime-page-bar">
+                <div>
+                  <Tag className="system-tag">Runtime Page</Tag>
+                  <Typography.Title level={3}>{runtimeTitle}</Typography.Title>
+                </div>
+                <Space wrap>
+                  <Button icon={<PlusOutlined />}>新增</Button>
+                  <Button icon={<ReloadOutlined />}>刷新</Button>
+                  <Button icon={<DownloadOutlined />}>导出</Button>
+                  <Button type="primary" icon={<SettingOutlined />} onClick={configureCurrentPage}>
+                    设置
+                  </Button>
+                </Space>
+              </div>
+            )}
             <ErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
@@ -471,10 +496,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <Suspense fallback={<PageLoader />}><LoginPage /></Suspense>}
-      />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/*" element={isAuthenticated ? <AppContent /> : <Navigate to="/login" replace />} />
     </Routes>
   );

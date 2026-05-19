@@ -169,6 +169,30 @@ button {
   min-height: 420px;
 }
 
+.runtime-page-bar {
+  min-height: 66px;
+  margin-bottom: var(--density-gap);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: 6px;
+  background: var(--mf-panel);
+}
+
+.runtime-page-bar h3 {
+  margin: 4px 0 0 !important;
+  color: var(--mf-text) !important;
+  font-size: 20px !important;
+  line-height: 26px !important;
+}
+
+.runtime-page-bar .ant-space {
+  flex-shrink: 0;
+}
+
 .ant-card {
   border-color: var(--mf-border) !important;
   box-shadow: none;
@@ -1116,6 +1140,11 @@ button {
   }
 
   .workspace-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .runtime-page-bar {
     align-items: flex-start;
     flex-direction: column;
   }

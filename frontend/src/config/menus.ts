@@ -1,16 +1,10 @@
 /**
  * Centralized menu / breadcrumb / role-mapping config.
- * App.tsx defines the visual shell, while this file remains a readable source
- * for modules that need labels or permission metadata.
+ * The sidebar keeps business entry points only. Low-code configuration is
+ * reached from each page's runtime toolbar or from the user menu.
  */
 
 export interface BusinessMenuMeta {
-  key: string;
-  icon: string;
-  label: string;
-}
-
-export interface LowCodeMenuItem {
   key: string;
   icon: string;
   label: string;
@@ -22,16 +16,6 @@ export const BUSINESS_MENUS: BusinessMenuMeta[] = [
   { key: '/maintenance', icon: 'ToolOutlined', label: '设备维护' },
   { key: '/quality', icon: 'SafetyCertificateOutlined', label: '质量分析' },
   { key: '/supply-chain', icon: 'ShopOutlined', label: '供应链风险' },
-];
-
-export const LOWCODE_MENUS: LowCodeMenuItem[] = [
-  { key: '/model-driven', icon: 'LayoutOutlined', label: 'App Builder' },
-  { key: '/ontology', icon: 'ApartmentOutlined', label: 'Data Modeler' },
-  { key: '/reports', icon: 'BarChartOutlined', label: 'Report Designer' },
-  { key: '/rules', icon: 'ThunderboltOutlined', label: 'Rule Builder' },
-  { key: '/data-sources', icon: 'ApiOutlined', label: 'Data Sources' },
-  { key: '/pipeline', icon: 'DatabaseOutlined', label: 'Data Pipeline' },
-  { key: '/graph', icon: 'NodeIndexOutlined', label: 'Graph Explorer' },
 ];
 
 export const TOOL_MENUS: BusinessMenuMeta[] = [
@@ -51,18 +35,18 @@ export const BREADCRUMB_MAP: Record<string, string> = {
   '/maintenance': '设备维护',
   '/quality': '质量分析',
   '/supply-chain': '供应链风险',
-  '/model-driven': 'App Builder',
-  '/reports': 'Report Designer',
+  '/model-driven': '表单配置中心',
+  '/reports': '报表中心',
   '/templates': '模板市场',
-  '/rules': 'Rule Builder',
+  '/rules': '规则引擎',
   '/ai-assistant': 'AI Assistant',
-  '/data-sources': 'Data Sources',
-  '/ontology': 'Data Modeler',
-  '/graph': 'Graph Explorer',
-  '/pipeline': 'Data Pipeline',
+  '/data-sources': '数据源管理',
+  '/ontology': '数据模型',
+  '/graph': '图谱探索',
+  '/pipeline': '数据管道',
   '/system-admin': '系统管理',
   '/workflow': '流程中心',
-  '/my-applications': '我的申请',
+  '/my-applications': '我的应用',
 };
 
 export const APPROVAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
