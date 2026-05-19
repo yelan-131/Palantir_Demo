@@ -1654,6 +1654,10 @@ button {
   background: #fff;
 }
 
+.assembly-menu-dropzone {
+  min-height: 100%;
+}
+
 .assembly-menu-card .ant-tree-node-content-wrapper {
   min-height: 34px;
   padding: 5px 8px;

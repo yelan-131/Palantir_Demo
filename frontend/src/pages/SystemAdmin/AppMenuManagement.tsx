@@ -446,6 +446,12 @@ export default function AppMenuManagement() {
   };
 
   const addFormToMenu = (form: FormRecord) => {
+    const existingNode = findMenuNodeByForm(currentMenus, form.id);
+    if (existingNode) {
+      setSelectedMenuKey(existingNode.key);
+      if (!boundFormIds.has(form.id)) toggleBinding(form.id);
+      return;
+    }
     const nextNode = menuNode(`${selectedApp.id}-${form.id}-${Date.now()}`, form.name, form.id);
     setMenusByApp((prev) => ({
       ...prev,
@@ -474,6 +480,7 @@ export default function AppMenuManagement() {
   };
 
   const onDropMenu = (info: any) => {
+    if (!info?.dragNode?.key || !info?.node?.key) return;
     const dragKey = info.dragNode.key;
     const dropKey = info.node.key;
     const dropPosition = info.dropPosition;
@@ -737,6 +744,21 @@ function AssemblyWorkspace({
   const selectedApp = apps.find((item) => item.id === selectedAppId) ?? apps[0];
   const currentAppForms = forms.filter((form) => boundFormIds.has(form.id));
   const otherForms = forms.filter((form) => !boundFormIds.has(form.id));
+  const [mouseDraggingFormId, setMouseDraggingFormId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const finishMouseDrag = (event: MouseEvent) => {
+      if (!mouseDraggingFormId) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+      if (target?.closest('.assembly-menu-card')) {
+        const form = forms.find((item) => item.id === mouseDraggingFormId);
+        if (form) onAddFormToMenu(form);
+      }
+      setMouseDraggingFormId(null);
+    };
+    document.addEventListener('mouseup', finishMouseDrag);
+    return () => document.removeEventListener('mouseup', finishMouseDrag);
+  }, [forms, mouseDraggingFormId, onAddFormToMenu]);
 
   const renderFormCard = (form: FormRecord) => {
     const config = configs.find((item) => item.formId === form.id);
@@ -746,7 +768,17 @@ function AssemblyWorkspace({
         className={`assembly-form-card ${bound ? 'bound' : ''}`}
         draggable
         key={form.id}
-        onDragStart={(event) => event.dataTransfer.setData('application/x-form-id', form.id)}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'copy';
+          event.dataTransfer.setData('application/x-form-id', form.id);
+          event.dataTransfer.setData('text/plain', form.id);
+        }}
+        onDragEnd={(event) => {
+          const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+          if (target?.closest('.assembly-menu-card')) onAddFormToMenu(form);
+          setMouseDraggingFormId(null);
+        }}
+        onMouseDown={() => setMouseDraggingFormId(form.id)}
       >
         <FormOutlined className="assembly-row-icon" />
         <Typography.Text strong ellipsis>{config?.alias ?? form.name}</Typography.Text>
@@ -754,11 +786,14 @@ function AssemblyWorkspace({
     );
   };
   const dropFormIntoMenu = (event: React.DragEvent) => {
+    const formId = event.dataTransfer.getData('application/x-form-id') || event.dataTransfer.getData('text/plain');
+    if (!formId) return;
     event.preventDefault();
-    const formId = event.dataTransfer.getData('application/x-form-id');
+    event.stopPropagation();
     const form = forms.find((item) => item.id === formId);
     if (form) onAddFormToMenu(form);
   };
+  const expandedMenuKeys = collectMenuKeys(menus);
 
   return (
     <div className="app-assembly-workspace">
@@ -842,15 +877,23 @@ function AssemblyWorkspace({
                 onDrop={dropFormIntoMenu}
               >
                 {menus.length ? (
-                  <Tree
-                    draggable
-                    blockNode
-                    treeData={menus}
-                    selectedKeys={[selectedMenuKey]}
-                    defaultExpandAll
-                    onSelect={(keys) => onSelectMenu(String(keys[0] ?? selectedMenuKey))}
-                    onDrop={onDropMenu}
-                  />
+                  <div
+                    className="assembly-menu-dropzone"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDropCapture={dropFormIntoMenu}
+                  >
+                    <Tree
+                      key={`${selectedAppId}-${expandedMenuKeys.join('|')}`}
+                      draggable
+                      blockNode
+                      treeData={menus}
+                      selectedKeys={[selectedMenuKey]}
+                      defaultExpandAll
+                      defaultExpandedKeys={expandedMenuKeys}
+                      onSelect={(keys) => onSelectMenu(String(keys[0] ?? selectedMenuKey))}
+                      onDrop={onDropMenu}
+                    />
+                  </div>
                 ) : (
                   <Empty description="把中间表单加到菜单结构里" />
                 )}
@@ -1052,6 +1095,19 @@ function findMenuNode(nodes: MenuNode[], key: string): MenuNode | undefined {
     if (child) return child;
   }
   return undefined;
+}
+
+function findMenuNodeByForm(nodes: MenuNode[], formId: string): MenuNode | undefined {
+  for (const node of nodes) {
+    if (node.formId === formId) return node;
+    const child = findMenuNodeByForm(node.children ?? [], formId);
+    if (child) return child;
+  }
+  return undefined;
+}
+
+function collectMenuKeys(nodes: MenuNode[]): string[] {
+  return nodes.flatMap((node) => [node.key, ...collectMenuKeys(node.children ?? [])]);
 }
 
 function updateMenuNode(nodes: MenuNode[], key: string, values: any): MenuNode[] {
