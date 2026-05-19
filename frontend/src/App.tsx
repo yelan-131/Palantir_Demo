@@ -10,7 +10,6 @@ import {
   Layout,
   Menu,
   Modal,
-  Segmented,
   Space,
   Spin,
   Typography,
@@ -73,8 +72,6 @@ const TemplateMarketPage = lazy(() => import('./pages/TemplateMarket'));
 const RuleEnginePage = lazy(() => import('./pages/RuleEngine'));
 
 const { Header, Sider, Content } = Layout;
-
-type Density = 'compact' | 'standard' | 'relaxed';
 
 interface DynamicMenu {
   id: number;
@@ -204,11 +201,6 @@ function AppContent() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unread, setUnread] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [density, setDensity] = useState<Density>(() => (localStorage.getItem('mf_density') as Density) || 'standard');
-
-  useEffect(() => {
-    localStorage.setItem('mf_density', density);
-  }, [density]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -265,6 +257,11 @@ function AppContent() {
   }, [dynamicMenus, user?.is_admin]);
 
   const selectedKey = location.pathname === '/dashboard' ? '/dashboard' : location.pathname;
+  const canConfigureCurrentPage = location.pathname !== '/';
+  const configureCurrentPage = () => {
+    const target = encodeURIComponent(location.pathname);
+    navigate(`/model-driven?target=${target}`);
+  };
   const breadcrumbItems = useMemo(() => {
     const title = location.pathname.startsWith('/dynamic/')
       ? '动态应用'
@@ -355,7 +352,7 @@ function AppContent() {
   const siderWidth = collapsed ? 68 : 236;
 
   return (
-    <Layout className={`app-shell density-${density}`}>
+    <Layout className="app-shell density-standard">
       <Sider
         width={236}
         collapsedWidth={68}
@@ -396,6 +393,14 @@ function AppContent() {
           </Space>
 
           <Space size={12} align="center">
+            {canConfigureCurrentPage && (
+              <Button
+                icon={<SettingOutlined />}
+                onClick={configureCurrentPage}
+              >
+                配置当前页面
+              </Button>
+            )}
             <Button
               className="app-search-button"
               icon={<SearchOutlined />}
@@ -403,16 +408,6 @@ function AppContent() {
             >
               搜索应用、数据资产或配置 Ctrl+K
             </Button>
-            <Segmented
-              size="small"
-              value={density}
-              options={[
-                { label: 'Compact', value: 'compact' },
-                { label: 'Standard', value: 'standard' },
-                { label: 'Relaxed', value: 'relaxed' },
-              ]}
-              onChange={(value) => setDensity(value as Density)}
-            />
             <Dropdown menu={notificationMenu} trigger={['click']}>
               <Badge count={unread} size="small">
                 <Button type="text" icon={<BellOutlined />} />

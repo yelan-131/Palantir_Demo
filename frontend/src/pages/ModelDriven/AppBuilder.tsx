@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   BarChartOutlined,
   BellOutlined,
@@ -96,6 +97,8 @@ const dataSources = [
 ];
 
 export default function AppBuilder() {
+  const [searchParams] = useSearchParams();
+  const targetPage = searchParams.get('target');
   const [components, setComponents] = useState<BuilderComponent[]>(initialComponents);
   const [selectedId, setSelectedId] = useState(initialComponents[0]?.id ?? '');
 
@@ -151,7 +154,9 @@ export default function AppBuilder() {
           <Tag className="system-tag">Schema-driven Builder</Tag>
           <Typography.Title level={3}>低代码分析应用配置器</Typography.Title>
           <Typography.Paragraph>
-            用组件、数据绑定和属性面板配置分析应用，Python 后端只负责数据与分析执行。
+            {targetPage
+              ? `正在配置当前页面：${targetPage}。可调整表单字段、布局、数据绑定、规则和权限。`
+              : '用组件、数据绑定和属性面板配置分析应用，Python 后端只负责数据与分析执行。'}
           </Typography.Paragraph>
         </div>
         <Space>
