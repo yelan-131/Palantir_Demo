@@ -70,6 +70,12 @@
   line-height: 1;
 }
 
+.designer-title-meta {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .form-designer-title .ant-tag {
   margin-inline-end: 0;
   padding: 0;
@@ -306,6 +312,25 @@
   font-weight: 600;
 }
 
+.designer-field-control {
+  position: relative;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.designer-field-control label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.designer-field-control label > span {
+  color: #34444e;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .create-form-wide {
   grid-column: 1 / -1;
 }
@@ -317,6 +342,7 @@
 
 .designer-placeholder-control,
 .designer-table-control {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -324,6 +350,34 @@
   border: 1px solid #e4eaf0;
   border-radius: 6px;
   background: #fbfcfd;
+}
+
+.designer-control-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 1px;
+  border: 1px solid #dce3ea;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08);
+}
+
+.designer-field-control:hover .designer-control-actions,
+.designer-placeholder-control:hover .designer-control-actions,
+.designer-table-control:hover .designer-control-actions,
+.canvas-field-active .designer-control-actions {
+  display: inline-flex;
+}
+
+.designer-control-actions .ant-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
 }
 
 .designer-placeholder-control span,
@@ -361,6 +415,29 @@
   border: 1px dashed #dce3ea;
   border-radius: 6px;
   background: #f8fafc;
+}
+
+.designer-prop-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f5;
+}
+
+.designer-prop-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.designer-prop-section-title {
+  color: #172026;
+  font-size: 12px;
+}
+
+.designer-shortcuts {
+  color: #8a98a5;
+  font-size: 12px;
 }
 
 .create-form-actions {
