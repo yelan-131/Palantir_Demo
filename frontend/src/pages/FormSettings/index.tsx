@@ -239,6 +239,9 @@ const componentGroups: Array<{ category: string; items: ComponentDefinition[] }>
   },
 ];
 
+const fieldTypeComponentGroups = componentGroups.slice(0, 1);
+const generalComponentGroups = componentGroups.slice(1);
+
 function fieldInput(field: DesignerField) {
   if (field.type.includes('下拉') || field.type.includes('人员') || field.type.includes('关联')) {
     return <Select placeholder={field.placeholder} options={[{ value: 'demo', label: field.placeholder }]} />;
@@ -289,6 +292,7 @@ export default function FormSettingsPage() {
   const { formId } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<DesignerTab>('form');
+  const [componentPanel, setComponentPanel] = useState<ComponentPanel>('components');
   const [version, setVersion] = useState('v0.1');
   const baseConfig = (formId && configs[formId]) || { ...defaultConfig, id: formId || defaultConfig.id };
   const [layoutControls, setLayoutControls] = useState<LayoutControl[]>(baseConfig.fields.map(makeFieldControl));
@@ -546,30 +550,42 @@ export default function FormSettingsPage() {
           </div>
 
           {activeTab === 'form' ? (
-            <div className="designer-component-library">
-              {componentGroups.map((group) => (
-                <section className="designer-component-group" key={group.category}>
-                  <div className="designer-group-title">{group.category}</div>
-                  <div className="designer-component-list">
-                    {group.items.map((item) => (
-                      <div
-                        className="designer-component"
-                        draggable
-                        key={item.key}
-                        onClick={() => addComponentToCanvas(item)}
-                        onDragStart={(event) => event.dataTransfer.setData('componentKey', item.key)}
-                      >
-                        <span className="designer-component-icon">{item.icon}</span>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <small>{item.desc}</small>
+            <>
+              <Segmented
+                block
+                className="designer-library-switch"
+                value={componentPanel}
+                onChange={(value) => setComponentPanel(value as ComponentPanel)}
+                options={[
+                  { label: '各种组件', value: 'components' },
+                  { label: '字段种类', value: 'fieldTypes' },
+                ]}
+              />
+              <div className="designer-component-library">
+                {(componentPanel === 'components' ? generalComponentGroups : fieldTypeComponentGroups).map((group) => (
+                  <section className="designer-component-group" key={group.category}>
+                    <div className="designer-group-title">{group.category}</div>
+                    <div className="designer-component-list">
+                      {group.items.map((item) => (
+                        <div
+                          className="designer-component"
+                          draggable
+                          key={item.key}
+                          onClick={() => addComponentToCanvas(item)}
+                          onDragStart={(event) => event.dataTransfer.setData('componentKey', item.key)}
+                        >
+                          <span className="designer-component-icon">{item.icon}</span>
+                          <div>
+                            <strong>{item.name}</strong>
+                            <small>{item.desc}</small>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="designer-component-list">
               <div className="designer-component">

@@ -153,6 +153,14 @@
   gap: 12px;
 }
 
+.designer-library-switch {
+  margin-bottom: 10px;
+}
+
+.designer-library-switch .ant-segmented-item {
+  font-size: 12px;
+}
+
 .designer-component-group {
   display: flex;
   flex-direction: column;
