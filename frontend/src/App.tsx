@@ -65,6 +65,7 @@ const AIAssistantPage = lazy(() => import('./pages/AIAssistant'));
 const AccountCenterPage = lazy(() => import('./pages/AccountCenter'));
 const ReportCenterPage = lazy(() => import('./pages/ReportCenter'));
 const DynamicPage = lazy(() => import('./pages/DynamicPage'));
+const AppProgramPage = lazy(() => import('./pages/AppPrograms'));
 const SystemAdminPage = lazy(() => import('./pages/SystemAdmin'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const LoginPage = lazy(() => import('./pages/Login'));
@@ -125,34 +126,34 @@ const fallbackMenusByApplication: Record<number, DynamicMenu[]> = {
 const richFallbackMenusByApplication: Record<number, DynamicMenu[]> = {
   1: [
     { id: 1100, parent_id: null, title: '生产态势', icon: 'DashboardOutlined', route_path: '/dashboard', is_visible: true, children: [
-      { id: 1101, parent_id: 1100, title: '生产总览', icon: 'DashboardOutlined', route_path: '/dashboard?view=overview', is_visible: true },
-      { id: 1102, parent_id: 1100, title: '产线状态', icon: 'DashboardOutlined', route_path: '/dashboard?view=lines', is_visible: true },
-      { id: 1103, parent_id: 1100, title: '设备运行', icon: 'ToolOutlined', route_path: '/dashboard?view=equipment', is_visible: true },
-      { id: 1104, parent_id: 1100, title: '活动告警', icon: 'SafetyCertificateOutlined', route_path: '/dashboard?view=alerts', is_visible: true },
+      { id: 1101, parent_id: 1100, title: '生产总览', icon: 'DashboardOutlined', route_path: '/program/production-overview', is_visible: true },
+      { id: 1102, parent_id: 1100, title: '产线状态', icon: 'DashboardOutlined', route_path: '/program/line-status', is_visible: true },
+      { id: 1103, parent_id: 1100, title: '设备运行', icon: 'ToolOutlined', route_path: '/program/device-health', is_visible: true },
+      { id: 1104, parent_id: 1100, title: '活动告警', icon: 'SafetyCertificateOutlined', route_path: '/program/alert-center', is_visible: true },
     ] },
   ],
   2: [
     { id: 1200, parent_id: null, title: '预测性维护', icon: 'ToolOutlined', route_path: '/maintenance', is_visible: true, children: [
-      { id: 1201, parent_id: 1200, title: '设备健康', icon: 'ToolOutlined', route_path: '/maintenance?view=health', is_visible: true },
-      { id: 1202, parent_id: 1200, title: '故障预测', icon: 'ToolOutlined', route_path: '/maintenance?view=prediction', is_visible: true },
-      { id: 1203, parent_id: 1200, title: '维修工单', icon: 'AppstoreOutlined', route_path: '/maintenance?view=work-orders', is_visible: true },
-      { id: 1204, parent_id: 1200, title: '告警中心', icon: 'SafetyCertificateOutlined', route_path: '/maintenance?view=alerts', is_visible: true },
+      { id: 1201, parent_id: 1200, title: '设备健康', icon: 'ToolOutlined', route_path: '/program/device-health', is_visible: true },
+      { id: 1202, parent_id: 1200, title: '故障预测', icon: 'ToolOutlined', route_path: '/program/fault-prediction', is_visible: true },
+      { id: 1203, parent_id: 1200, title: '维修工单', icon: 'AppstoreOutlined', route_path: '/program/maintenance-order', is_visible: true },
+      { id: 1204, parent_id: 1200, title: '告警中心', icon: 'SafetyCertificateOutlined', route_path: '/program/alert-center', is_visible: true },
     ] },
   ],
   3: [
     { id: 1300, parent_id: null, title: '质量分析', icon: 'SafetyCertificateOutlined', route_path: '/quality', is_visible: true, children: [
-      { id: 1301, parent_id: 1300, title: '质量总览', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=overview', is_visible: true },
-      { id: 1302, parent_id: 1300, title: '检验批次', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=inspections', is_visible: true },
-      { id: 1303, parent_id: 1300, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=defects', is_visible: true },
-      { id: 1304, parent_id: 1300, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/quality?view=capa', is_visible: true },
+      { id: 1301, parent_id: 1300, title: '质量总览', icon: 'SafetyCertificateOutlined', route_path: '/program/quality-overview', is_visible: true },
+      { id: 1302, parent_id: 1300, title: '检验批次', icon: 'SafetyCertificateOutlined', route_path: '/program/inspection-batch', is_visible: true },
+      { id: 1303, parent_id: 1300, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/program/defect-analysis', is_visible: true },
+      { id: 1304, parent_id: 1300, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
     ] },
   ],
   4: [
     { id: 1400, parent_id: null, title: '供应链风险', icon: 'ShopOutlined', route_path: '/supply-chain', is_visible: true, children: [
-      { id: 1401, parent_id: 1400, title: '风险总览', icon: 'ShopOutlined', route_path: '/supply-chain?view=overview', is_visible: true },
-      { id: 1402, parent_id: 1400, title: '供应商风险', icon: 'ShopOutlined', route_path: '/supply-chain?view=suppliers', is_visible: true },
-      { id: 1403, parent_id: 1400, title: '物料影响', icon: 'AppstoreOutlined', route_path: '/supply-chain?view=materials', is_visible: true },
-      { id: 1404, parent_id: 1400, title: '风险复核', icon: 'SafetyCertificateOutlined', route_path: '/supply-chain?view=review', is_visible: true },
+      { id: 1401, parent_id: 1400, title: '风险总览', icon: 'ShopOutlined', route_path: '/program/supply-overview', is_visible: true },
+      { id: 1402, parent_id: 1400, title: '供应商风险', icon: 'ShopOutlined', route_path: '/program/supplier-risk', is_visible: true },
+      { id: 1403, parent_id: 1400, title: '物料影响', icon: 'AppstoreOutlined', route_path: '/program/material-impact', is_visible: true },
+      { id: 1404, parent_id: 1400, title: '风险复核', icon: 'SafetyCertificateOutlined', route_path: '/program/risk-review', is_visible: true },
     ] },
   ],
 };
@@ -161,48 +162,48 @@ const groupedFallbackMenusByApplication: Record<number, DynamicMenu[]> = {
   1: [
     { id: 1100, parent_id: null, title: '生产态势', icon: 'DashboardOutlined', route_path: '/dashboard', is_visible: true, children: [
       { id: 1110, parent_id: 1100, title: '生产监控', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1111, parent_id: 1110, title: '生产总览', icon: 'DashboardOutlined', route_path: '/dashboard?view=overview', is_visible: true },
-        { id: 1112, parent_id: 1110, title: '产线状态', icon: 'DashboardOutlined', route_path: '/dashboard?view=lines', is_visible: true },
-        { id: 1113, parent_id: 1110, title: '设备运行', icon: 'ToolOutlined', route_path: '/dashboard?view=equipment', is_visible: true },
+        { id: 1111, parent_id: 1110, title: '生产总览', icon: 'DashboardOutlined', route_path: '/program/production-overview', is_visible: true },
+        { id: 1112, parent_id: 1110, title: '产线状态', icon: 'DashboardOutlined', route_path: '/program/line-status', is_visible: true },
+        { id: 1113, parent_id: 1110, title: '设备运行', icon: 'ToolOutlined', route_path: '/program/device-health', is_visible: true },
       ] },
       { id: 1120, parent_id: 1100, title: '异常处理', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1121, parent_id: 1120, title: '活动告警', icon: 'SafetyCertificateOutlined', route_path: '/dashboard?view=alerts', is_visible: true },
+        { id: 1121, parent_id: 1120, title: '活动告警', icon: 'SafetyCertificateOutlined', route_path: '/program/alert-center', is_visible: true },
       ] },
     ] },
   ],
   2: [
     { id: 1200, parent_id: null, title: '预测性维护', icon: 'ToolOutlined', route_path: '/maintenance', is_visible: true, children: [
       { id: 1210, parent_id: 1200, title: '健康与预测', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1211, parent_id: 1210, title: '设备健康', icon: 'ToolOutlined', route_path: '/maintenance?view=health', is_visible: true },
-        { id: 1212, parent_id: 1210, title: '故障预测', icon: 'ToolOutlined', route_path: '/maintenance?view=prediction', is_visible: true },
+        { id: 1211, parent_id: 1210, title: '设备健康', icon: 'ToolOutlined', route_path: '/program/device-health', is_visible: true },
+        { id: 1212, parent_id: 1210, title: '故障预测', icon: 'ToolOutlined', route_path: '/program/fault-prediction', is_visible: true },
       ] },
       { id: 1220, parent_id: 1200, title: '维护执行', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1221, parent_id: 1220, title: '维修工单', icon: 'AppstoreOutlined', route_path: '/maintenance?view=work-orders', is_visible: true },
-        { id: 1222, parent_id: 1220, title: '告警中心', icon: 'SafetyCertificateOutlined', route_path: '/maintenance?view=alerts', is_visible: true },
+        { id: 1221, parent_id: 1220, title: '维修工单', icon: 'AppstoreOutlined', route_path: '/program/maintenance-order', is_visible: true },
+        { id: 1222, parent_id: 1220, title: '告警中心', icon: 'SafetyCertificateOutlined', route_path: '/program/alert-center', is_visible: true },
       ] },
     ] },
   ],
   3: [
     { id: 1300, parent_id: null, title: '质量分析', icon: 'SafetyCertificateOutlined', route_path: '/quality', is_visible: true, children: [
       { id: 1310, parent_id: 1300, title: '质量监控', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1311, parent_id: 1310, title: '质量总览', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=overview', is_visible: true },
-        { id: 1312, parent_id: 1310, title: '检验批次', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=inspections', is_visible: true },
+        { id: 1311, parent_id: 1310, title: '质量总览', icon: 'SafetyCertificateOutlined', route_path: '/program/quality-overview', is_visible: true },
+        { id: 1312, parent_id: 1310, title: '检验批次', icon: 'SafetyCertificateOutlined', route_path: '/program/inspection-batch', is_visible: true },
       ] },
       { id: 1320, parent_id: 1300, title: '问题改进', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1321, parent_id: 1320, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/quality?view=defects', is_visible: true },
-        { id: 1322, parent_id: 1320, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/quality?view=capa', is_visible: true },
+        { id: 1321, parent_id: 1320, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/program/defect-analysis', is_visible: true },
+        { id: 1322, parent_id: 1320, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
       ] },
     ] },
   ],
   4: [
     { id: 1400, parent_id: null, title: '供应链风险', icon: 'ShopOutlined', route_path: '/supply-chain', is_visible: true, children: [
       { id: 1410, parent_id: 1400, title: '风险监控', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1411, parent_id: 1410, title: '风险总览', icon: 'ShopOutlined', route_path: '/supply-chain?view=overview', is_visible: true },
-        { id: 1412, parent_id: 1410, title: '供应商风险', icon: 'ShopOutlined', route_path: '/supply-chain?view=suppliers', is_visible: true },
+        { id: 1411, parent_id: 1410, title: '风险总览', icon: 'ShopOutlined', route_path: '/program/supply-overview', is_visible: true },
+        { id: 1412, parent_id: 1410, title: '供应商风险', icon: 'ShopOutlined', route_path: '/program/supplier-risk', is_visible: true },
       ] },
       { id: 1420, parent_id: 1400, title: '影响与复核', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
-        { id: 1421, parent_id: 1420, title: '物料影响', icon: 'AppstoreOutlined', route_path: '/supply-chain?view=materials', is_visible: true },
-        { id: 1422, parent_id: 1420, title: '风险复核', icon: 'SafetyCertificateOutlined', route_path: '/supply-chain?view=review', is_visible: true },
+        { id: 1421, parent_id: 1420, title: '物料影响', icon: 'AppstoreOutlined', route_path: '/program/material-impact', is_visible: true },
+        { id: 1422, parent_id: 1420, title: '风险复核', icon: 'SafetyCertificateOutlined', route_path: '/program/risk-review', is_visible: true },
       ] },
     ] },
   ],
@@ -227,6 +228,36 @@ const pageTitleMap: Record<string, string> = {
   '/workflow': '流程中心',
 };
 
+const programTitleMap: Record<string, string> = {
+  'production-overview': '生产总览',
+  'oee-trend-report': 'OEE 趋势报表',
+  'line-status': '产线状态',
+  'line-load-analysis': '产线负荷分析',
+  'production-plan-entry': '生产计划填报',
+  'device-health': '设备健康',
+  'fault-prediction': '故障预测',
+  'maintenance-order': '维修工单',
+  'alert-center': '告警中心',
+  'quality-overview': '质量总览',
+  'inspection-batch': '检验批次',
+  'defect-analysis': '缺陷分析',
+  'quality-event': '质量事件',
+  'supplier-risk': '供应商风险',
+  'supply-overview': '供应总览',
+  'material-impact': '物料影响',
+  'risk-review': '风险复核',
+};
+
+function getRuntimePageTitle(pathname: string): string {
+  if (pathname.startsWith('/dynamic/')) {
+    return '动态页面';
+  }
+  if (pathname.startsWith('/program/')) {
+    const programId = pathname.split('/').filter(Boolean)[1];
+    return programTitleMap[programId] || '业务页面';
+  }
+  return pageTitleMap[pathname] || '业务页面';
+}
 function iconFor(name?: string) {
   const icons: Record<string, React.ReactNode> = {
     DashboardOutlined: <DashboardOutlined />,
@@ -427,15 +458,11 @@ function AppContent() {
   }, [allMenuItems]);
   const selectedKey = location.pathname;
   const showRuntimePageBar = !['/', '/workflow', '/system-admin', '/account-center'].includes(location.pathname);
-  const runtimeTitle = location.pathname.startsWith('/dynamic/')
-    ? '动态业务表单'
-    : pageTitleMap[location.pathname] || '业务页面';
+  const runtimeTitle = getRuntimePageTitle(location.pathname);
 
 
   const breadcrumbItems = useMemo(() => {
-    const title = location.pathname.startsWith('/dynamic/')
-      ? '动态业务表单'
-      : pageTitleMap[location.pathname] || '业务页面';
+    const title = getRuntimePageTitle(location.pathname);
     return [
       { title: <a onClick={() => navigate('/')}><HomeOutlined /></a> },
       { title },
@@ -678,6 +705,7 @@ function AppContent() {
                   <Route path="/account-center" element={<AccountCenterPage currentApplication={currentApplication} />} />
                   <Route path="/reports" element={<ReportCenterPage />} />
                   <Route path="/dynamic/:slug" element={<DynamicPage />} />
+                  <Route path="/program/:programId" element={<AppProgramPage />} />
                   <Route path="/system-admin" element={<SystemAdminPage />} />
                   <Route path="/workflow" element={<WorkflowPage />} />
                   <Route path="/templates" element={<TemplateMarketPage />} />

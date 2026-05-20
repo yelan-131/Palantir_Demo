@@ -21,20 +21,29 @@ export const APP_ASSEMBLY_MENUS_STORAGE_KEY = 'mf_app_assembly_menus';
 export const APP_ASSEMBLY_MENU_EVENT = 'mf-app-assembly-menus-updated';
 
 const formRouteMap: Record<string, { route: string; icon: string }> = {
-  'production-overview': { route: '/dashboard?view=overview', icon: 'DashboardOutlined' },
-  'line-status': { route: '/dashboard?view=lines', icon: 'DashboardOutlined' },
-  'device-health': { route: '/maintenance?view=health', icon: 'ToolOutlined' },
-  'fault-prediction': { route: '/maintenance?view=prediction', icon: 'ToolOutlined' },
-  'maintenance-order': { route: '/maintenance?view=work-orders', icon: 'AppstoreOutlined' },
-  'alert-center': { route: '/maintenance?view=alerts', icon: 'SafetyCertificateOutlined' },
-  'quality-overview': { route: '/quality?view=overview', icon: 'SafetyCertificateOutlined' },
-  'inspection-batch': { route: '/quality?view=inspections', icon: 'SafetyCertificateOutlined' },
-  'defect-analysis': { route: '/quality?view=defects', icon: 'SafetyCertificateOutlined' },
-  'quality-event': { route: '/quality?view=capa', icon: 'SafetyCertificateOutlined' },
-  'supplier-risk': { route: '/supply-chain?view=suppliers', icon: 'ShopOutlined' },
-  'supply-overview': { route: '/supply-chain?view=overview', icon: 'ShopOutlined' },
-  'material-impact': { route: '/supply-chain?view=materials', icon: 'ShopOutlined' },
-  'risk-review': { route: '/supply-chain?view=review', icon: 'SafetyCertificateOutlined' },
+  'production-overview': { route: '/program/production-overview', icon: 'DashboardOutlined' },
+  'oee-trend-report': { route: '/program/oee-trend-report', icon: 'DashboardOutlined' },
+  'line-status': { route: '/program/line-status', icon: 'DashboardOutlined' },
+  'line-load-analysis': { route: '/program/line-load-analysis', icon: 'DashboardOutlined' },
+  'production-plan-entry': { route: '/program/production-plan-entry', icon: 'AppstoreOutlined' },
+  'device-health': { route: '/program/device-health', icon: 'ToolOutlined' },
+  'fault-prediction': { route: '/program/fault-prediction', icon: 'ToolOutlined' },
+  'maintenance-order': { route: '/program/maintenance-order', icon: 'AppstoreOutlined' },
+  'alert-center': { route: '/program/alert-center', icon: 'SafetyCertificateOutlined' },
+  'quality-overview': { route: '/program/quality-overview', icon: 'SafetyCertificateOutlined' },
+  'inspection-batch': { route: '/program/inspection-batch', icon: 'SafetyCertificateOutlined' },
+  'defect-analysis': { route: '/program/defect-analysis', icon: 'SafetyCertificateOutlined' },
+  'quality-event': { route: '/program/quality-event', icon: 'SafetyCertificateOutlined' },
+  'supplier-risk': { route: '/program/supplier-risk', icon: 'ShopOutlined' },
+  'supply-overview': { route: '/program/supply-overview', icon: 'ShopOutlined' },
+  'material-impact': { route: '/program/material-impact', icon: 'ShopOutlined' },
+  'risk-review': { route: '/program/risk-review', icon: 'SafetyCertificateOutlined' },
+};
+
+const menuKeyRouteMap: Record<string, { route: string; icon: string }> = {
+  'prod-oee-report': { route: '/program/oee-trend-report', icon: 'DashboardOutlined' },
+  'prod-line-report': { route: '/program/line-load-analysis', icon: 'DashboardOutlined' },
+  'prod-plan-entry': { route: '/program/production-plan-entry', icon: 'AppstoreOutlined' },
 };
 
 function numericId(appId: number, key: string): number {
@@ -69,7 +78,7 @@ export function savedAssemblyMenusToDynamicMenus(
   return nodes
     .filter((node) => node.visible !== false)
     .map((node) => {
-      const routeInfo = node.formId ? formRouteMap[node.formId] : undefined;
+      const routeInfo = menuKeyRouteMap[node.key] || (node.formId ? formRouteMap[node.formId] : undefined);
       const children = node.children?.length
         ? savedAssemblyMenusToDynamicMenus(appId, node.children)
         : undefined;
