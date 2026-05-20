@@ -1,90 +1,108 @@
-# ManuFoundry 文档
+# ManuFoundry Documentation
 
-> 制造业低代码分析平台文档索引  
-> 最后更新：2026-05-19
+Last updated: 2026-05-20
 
-## 当前重点
+This directory contains the software documentation for the ManuFoundry manufacturing low-code analytics platform prototype.
 
-当前项目已经从“制造业分析 Demo”演进为“浅色 Foundry 风格的低代码分析平台原型”。最新设计重点是：
+## Read This First
 
-- 普通用户通过顶部应用下拉切换业务应用。
-- 左侧菜单只显示当前应用下的菜单结构。
-- 系统管理中维护应用、表单、菜单装配、数据资产、本体、用户和角色。
-- 应用和表单是 N:N 关系，菜单结构是应用内的导航组织方式。
-- 当前“应用装配”交互仍是前端 Demo 状态，下一阶段需要落库。
+1. [Architecture Overview](architecture/overview.md)
+2. [Current Framework](architecture/current-framework.md)
+3. [Low-Code Platform Design](architecture/low-code-platform.md)
+4. [Palantir-Style Role Workbench](architecture/palantir-style-role-workbench.md)
+5. [AIP / Foundry / Gotham Relationship Map](architecture/palantir-platform-relationship-map.md)
+6. [Foundry-Style Foundation](architecture/foundry-style-foundation.md)
+7. [AIP-Style Intelligence Layer](architecture/aip-style-intelligence-layer.md)
+8. [Gotham-Style Command UI](architecture/gotham-style-command-ui.md)
+9. [Data Model](architecture/data-model.md)
+10. [Platform Database Landing Plan](architecture/platform-database.md)
+11. [Frontend Development](development/frontend.md)
+12. [Backend Development](development/backend.md)
+13. [API Reference](development/api-reference.md)
+14. [Deployment](operations/deployment.md)
+15. [Testing](operations/testing.md)
 
-## 推荐阅读顺序
+## Current Product Shape
 
-1. [当前代码框架说明](architecture/current-framework.md)
-2. [低代码平台架构](architecture/low-code-platform.md)
-3. [架构总览](architecture/overview.md)
-4. [数据模型与本体](architecture/data-model.md)
-5. [前端开发指南](development/frontend.md)
-6. [后端开发指南](development/backend.md)
-7. [API 参考](development/api-reference.md)
+The current codebase implements a Foundry-style application workbench:
 
-## 文档结构
+- Login-protected React shell.
+- Workspace home at `/`.
+- Top application switcher.
+- Current-application side menu.
+- Configurable business pages under `/program/:programId`.
+- Model-driven pages under `/dynamic/:slug`.
+- System administration for applications, forms/menu assembly, semantic assets, users, roles, and permissions.
+- Backend API modules for auth, admin, workflow, applications, data sources, ontology, graph, pipelines, analytics, maintenance, quality, supply chain, AI, reports, model-driven data, rules, notifications, templates, config import/export, scheduler, search, and AI builder.
+
+## Code And Documentation Differences Found
+
+The following mismatches were found during the review and should guide future document maintenance:
+
+| Area | Old or stale documentation | Current code/config |
+| --- | --- | --- |
+| Data source API | `/api/v1/datasources` | `/api/v1/data-sources` |
+| Operations API | `/api/v1/operations/*` | split across `/dashboard`, `/analytics`, `/maintenance`, `/quality`, `/supply-chain` |
+| Production compose file | `docker/docker-compose.prod-full.yml` | `docker/docker-compose.yml` plus `docker/docker-compose.prod.yml` |
+| Production nginx config | `frontend/nginx-prod.conf` | `frontend/nginx.conf` |
+| Production frontend port | unclear or inherited dev port | host `80` to container `80` |
+| AI stack | Prophet/LangChain described as active | currently commented as optional/future in `backend/requirements.txt`; active AI assistant API is implemented directly |
+| Auth token lifetime | some docs say 2 hours | code default is `ACCESS_TOKEN_EXPIRE_MINUTES=480`, or 8 hours |
+
+## Documentation Structure
 
 ```text
 docs/
   README.md
   architecture/
-    current-framework.md       # 当前代码框架、已实现能力、前端 Demo 状态、落库计划
-    overview.md                # 整体架构总览
-    low-code-platform.md       # 低代码平台设计
-    data-model.md              # 数据模型与本体设计
+    overview.md
+    current-framework.md
+    low-code-platform.md
+    platform-database.md
+    data-model.md
+    application-management.md
+    configuration-lifecycle.md
+    form-management.md
+    workbench-notification-center.md
+    ai-capability-map.md
+    palantir-style-role-workbench.md
+    palantir-platform-relationship-map.md
+    foundry-style-foundation.md
+    aip-style-intelligence-layer.md
+    gotham-style-command-ui.md
   development/
-    frontend.md                # 前端开发指南
-    backend.md                 # 后端开发指南
-    api-reference.md           # API 参考
+    frontend.md
+    backend.md
+    api-reference.md
   operations/
-    deployment.md              # 部署说明
-    testing.md                 # 测试说明
+    deployment.md
+    testing.md
   business/
-    user-guide.md              # 用户手册
-    integration.md             # 外部系统集成
+    user-guide.md
+    integration.md
   archive/
-    ...                        # 历史文档归档
+    historical documents
 ```
 
-## 当前实现状态
+## Documentation Maintenance Rules
 
-| 模块 | 状态 | 说明 |
-| --- | --- | --- |
-| 登录页 | 已实现 UI 原型 | 后续还会继续优化视觉。 |
-| 工作台 | 已实现 | 登录后 `/` 展示个人分析工作台。 |
-| 顶部应用切换 | 已实现 | 可切换生产态势、预测性维护、质量分析、供应链风险等应用。 |
-| 左侧菜单 | 已实现 | 显示“我的工作台 + 当前应用菜单结构”，支持分组展示。 |
-| 系统管理 | 已实现入口 | 包含应用与菜单、数据资产与本体、用户管理、角色权限。 |
-| 应用装配 | 前端 Demo 闭环 | 支持应用选择、表单拖拽、菜单分组、删除、解绑。 |
-| 应用基础 API | 已有后端雏形 | `applications`、`application_menus`、`application_roles` 已有基础模型和接口。 |
-| 表单装配落库 | 待实现 | `forms`、`application_forms`、`application_menu_nodes` 下一阶段实现。 |
-| 本体/图谱 | 已有入口和 API 原型 | 后续需要与表单字段配置强绑定。 |
+- Update API docs from `backend/app/main.py` and files under `backend/app/api/`.
+- Update frontend route docs from `frontend/src/App.tsx`.
+- Update local development docs from `frontend/package.json`, `frontend/vite.config.ts`, `backend/requirements.txt`, and `backend/app/config.py`.
+- Update deployment docs from `docker/docker-compose.yml`, `docker/docker-compose.prod.yml`, `frontend/Dockerfile`, `frontend/nginx.conf`, and `backend/Dockerfile`.
+- Keep archived documents for history, but do not treat them as the source of truth.
 
-## 当前数据边界
+## Verification Commands
 
-现在需要特别注意：系统管理里的“应用装配”虽然交互已经能跑通，但表单、应用-表单绑定、菜单树仍主要在前端状态中维护。刷新页面会回到初始 Demo 数据。
-
-下一阶段数据库开发应优先解决：
-
-- 表单主数据持久化
-- 应用与表单 N:N 绑定持久化
-- 应用菜单树持久化
-- 分组层级持久化
-- 删除表单入口时的解绑规则后端化
-- 当前应用菜单接口返回完整分组结构
-
-## 开发验证命令
-
-前端：
+Frontend:
 
 ```bash
 cd frontend
-npm.cmd run type-check
-npm.cmd run build
+npm run type-check
+npm run build
 ```
 
-后端：
+Backend:
 
 ```bash
 cd backend

@@ -10,12 +10,14 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - DEMO_AUTH_OPTIONAL=false
-    volumes: []   # override dev source mount
+    volumes: !override []   # override dev source mount
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    volumes: []
+    ports: !override
+      - "80:80"
+    volumes: !override []
     command: ["nginx", "-g", "daemon off;"]

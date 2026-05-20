@@ -9,8 +9,10 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -539,6 +541,167 @@ class ApplicationRole(TimestampMixin, Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
 
     application: Mapped["Application"] = relationship(back_populates="roles")
+
+
+class Form(TimestampMixin, Base):
+    __tablename__ = "forms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_models.id"), nullable=True)
+    table_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    storage_mode: Mapped[str] = mapped_column(String(50), default="dynamic")
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    applications: Mapped[list["ApplicationForm"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    fields: Mapped[list["FormField"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    layouts: Mapped[list["FormLayout"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    actions: Mapped[list["FormAction"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    permissions: Mapped[list["FormPermission"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    records: Mapped[list["DynamicRecord"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    workflow_bindings: Mapped[list["WorkflowBinding"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+
+
+class ApplicationForm(TimestampMixin, Base):
+    __tablename__ = "application_forms"
+    __table_args__ = (
+        UniqueConstraint("application_id", "form_id", name="uq_application_forms_application_form"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    alias: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_view: Mapped[str] = mapped_column(String(50), default="list")
+    data_scope: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    allow_create: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_edit: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_delete: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_export: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="applications")
+
+
+class ApplicationMenuNode(TimestampMixin, Base):
+    __tablename__ = "application_menu_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("application_menu_nodes.id"), nullable=True)
+    node_type: Mapped[str] = mapped_column(String(50), default="form")
+    title: Mapped[str] = mapped_column(String(200))
+    icon: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    form_id: Mapped[Optional[int]] = mapped_column(ForeignKey("forms.id"), nullable=True)
+    route_path: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_entry: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FormField(TimestampMixin, Base):
+    __tablename__ = "form_fields"
+    __table_args__ = (
+        UniqueConstraint("form_id", "field_name", name="uq_form_fields_form_field_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    meta_field_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_fields.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(200))
+    label: Mapped[str] = mapped_column(String(200))
+    field_type: Mapped[str] = mapped_column(String(50), default="string")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    visible_in_list: Mapped[bool] = mapped_column(Boolean, default=True)
+    visible_in_form: Mapped[bool] = mapped_column(Boolean, default=True)
+    searchable: Mapped[bool] = mapped_column(Boolean, default=False)
+    sortable: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_value: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    enum_values: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    validation: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ui_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="fields")
+
+
+class FormLayout(TimestampMixin, Base):
+    __tablename__ = "form_layouts"
+    __table_args__ = (
+        UniqueConstraint("form_id", "layout_type", name="uq_form_layouts_form_layout_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    layout_type: Mapped[str] = mapped_column(String(50), default="list")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    form: Mapped["Form"] = relationship(back_populates="layouts")
+
+
+class FormAction(TimestampMixin, Base):
+    __tablename__ = "form_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    action_key: Mapped[str] = mapped_column(String(100))
+    label: Mapped[str] = mapped_column(String(200))
+    action_type: Mapped[str] = mapped_column(String(50), default="builtin")
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="actions")
+
+
+class FormPermission(TimestampMixin, Base):
+    __tablename__ = "form_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
+    action: Mapped[str] = mapped_column(String(50))
+    effect: Mapped[str] = mapped_column(String(20), default="allow")
+    field_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="permissions")
+
+
+class DynamicRecord(TimestampMixin, Base):
+    __tablename__ = "dynamic_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_models.id"), nullable=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="records")
+
+
+class WorkflowBinding(TimestampMixin, Base):
+    __tablename__ = "workflow_bindings"
+    __table_args__ = (
+        UniqueConstraint("form_id", "workflow_id", "trigger_action", name="uq_workflow_bindings_form_workflow_trigger"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow_defs.id"))
+    trigger_action: Mapped[str] = mapped_column(String(50), default="submit")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="workflow_bindings")
 
 
 class User(TimestampMixin, Base):

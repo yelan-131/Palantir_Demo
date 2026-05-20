@@ -11,6 +11,14 @@ import dayjs from 'dayjs';
 import {
   getPageByName, getModelData, createModelData, updateModelData, deleteModelData,
   listModels,
+  getPlatformForm,
+  listPlatformForms,
+  listPlatformDynamicRecords,
+  createPlatformDynamicRecord,
+  updatePlatformDynamicRecord,
+  deletePlatformDynamicRecord,
+  type PlatformForm,
+  type PlatformFormField,
 } from '@/services/api';
 import RelationPicker from '@/components/FormWidgets/RelationPicker';
 
@@ -23,7 +31,7 @@ interface FieldDef {
   sortable: boolean;
   visible_in_list: boolean;
   visible_in_form: boolean;
-  enum_values?: string;
+  enum_values?: string | string[] | Record<string, unknown> | null;
   relation_config?: string;
 }
 
@@ -45,6 +53,9 @@ function renderFormField(field: FieldDef) {
   switch (field.field_type) {
     case 'int':
     case 'float':
+    case 'integer':
+    case 'number':
+    case 'decimal':
       return (
         <Form.Item
           key={field.field_name}
@@ -58,10 +69,17 @@ function renderFormField(field: FieldDef) {
     case 'enum': {
       let opts: { label: string; value: string }[] = [];
       if (field.enum_values) {
-        try {
-          const parsed = JSON.parse(field.enum_values);
-          opts = (Array.isArray(parsed) ? parsed : []).map((o: string) => ({ label: o, value: o }));
-        } catch { /* ignore */ }
+        const parsed = typeof field.enum_values === 'string' ? (() => {
+          try { return JSON.parse(field.enum_values || '[]'); } catch { return []; }
+        })() : field.enum_values;
+        const values = Array.isArray(parsed)
+          ? parsed
+          : Object.entries(parsed ?? {}).map(([value, label]) => ({ value, label }));
+        opts = values.map((item: any) => (
+          typeof item === 'string'
+            ? { label: item, value: item }
+            : { label: String(item.label ?? item.value), value: String(item.value ?? item.label) }
+        ));
       }
       return (
         <Form.Item
@@ -75,6 +93,7 @@ function renderFormField(field: FieldDef) {
       );
     }
     case 'date':
+    case 'datetime':
       return (
         <Form.Item
           key={field.field_name}
@@ -168,10 +187,39 @@ function formFieldsToPayload(values: Record<string, unknown>, fields: FieldDef[]
   return payload;
 }
 
+function mapPlatformField(field: PlatformFormField): FieldDef {
+  return {
+    field_name: field.field_name,
+    label: field.label,
+    field_type: field.field_type,
+    required: field.required,
+    searchable: field.searchable,
+    sortable: field.sortable,
+    visible_in_list: field.visible_in_list,
+    visible_in_form: field.visible_in_form,
+    enum_values: field.enum_values,
+  };
+}
+
+function unwrapApiData<T>(payload: unknown): T | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = (payload as { data?: unknown }).data;
+  if (data && typeof data === 'object' && 'data' in data) {
+    return (data as { data?: T }).data ?? null;
+  }
+  return (data as T) ?? null;
+}
+
+function unwrapApiList<T>(payload: unknown): T[] {
+  const data = unwrapApiData<unknown>(payload);
+  return Array.isArray(data) ? data as T[] : [];
+}
+
 export default function DynamicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
+  const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [total, setTotal] = useState(0);
@@ -185,22 +233,55 @@ export default function DynamicPage() {
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!slug || !pageConfig) return;
+    if (!slug || (!pageConfig && !platformForm)) return;
     setLoading(true);
     try {
-      const res = await getModelData(pageConfig.model_name, { page, page_size: 20, search: search || undefined });
-      setData(res.data?.data || []);
-      setTotal(res.data?.total || 0);
+      if (platformForm) {
+        const res = await listPlatformDynamicRecords(platformForm.id, { page, page_size: 20, search: search || undefined });
+        const records = unwrapApiList<any>(res);
+        setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status })));
+        setTotal(res.data?.total ?? records.length);
+      } else if (pageConfig) {
+        const res = await getModelData(pageConfig.model_name, { page, page_size: 20, search: search || undefined });
+        setData(res.data?.data || []);
+        setTotal(res.data?.total || 0);
+      }
     } catch { message.error('加载数据失败'); }
     finally { setLoading(false); }
-  }, [slug, pageConfig, page, search]);
+  }, [slug, pageConfig, platformForm, page, search]);
 
   useEffect(() => {
     (async () => {
       if (!slug) return;
       try {
+        const numericFormId = Number(slug);
+        let dbForm: PlatformForm | null = null;
+        if (!Number.isNaN(numericFormId)) {
+          dbForm = unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId));
+        } else {
+          dbForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
+        }
+        if (dbForm) {
+          setPlatformForm(dbForm);
+          setFields((dbForm.fields ?? []).filter((field) => !field.archived).map(mapPlatformField));
+          setPageConfig({
+            id: dbForm.id,
+            name: dbForm.code,
+            title: dbForm.name,
+            paradigm: 'platform_form',
+            model_id: dbForm.model_id ?? 0,
+            model_name: dbForm.code,
+            config: {
+              list_fields: dbForm.fields?.filter((field) => field.visible_in_list && !field.archived).map((field) => field.field_name),
+              form_fields: dbForm.fields?.filter((field) => field.visible_in_form && !field.archived).map((field) => field.field_name),
+              search_fields: dbForm.fields?.filter((field) => field.searchable && !field.archived).map((field) => field.field_name),
+            },
+          });
+          return;
+        }
         const res = await getPageByName(slug);
         const pc = res.data;
+        setPlatformForm(null);
         setPageConfig(pc);
         if (pc?.model_id) {
           try {
@@ -292,7 +373,13 @@ export default function DynamicPage() {
       const values = await form.validateFields();
       const payload = formFieldsToPayload(values, fields);
       setConfirmLoading(true);
-      if (editingRecord) {
+      if (platformForm && editingRecord) {
+        await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload);
+        message.success('Saved');
+      } else if (platformForm) {
+        await createPlatformDynamicRecord(platformForm.id, payload);
+        message.success('Created');
+      } else if (editingRecord) {
         await updateModelData(pageConfig!.model_name, editingRecord.id, payload);
         message.success('更新成功');
       } else {
@@ -311,7 +398,11 @@ export default function DynamicPage() {
 
   const handleDelete = async (id: number) => {
     try {
-      await deleteModelData(pageConfig!.model_name, id);
+      if (platformForm) {
+        await deletePlatformDynamicRecord(platformForm.id, id);
+      } else {
+        await deleteModelData(pageConfig!.model_name, id);
+      }
       message.success('已删除');
       loadData();
     } catch { message.error('删除失败'); }
@@ -327,7 +418,7 @@ export default function DynamicPage() {
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>返回</Button>
           <Typography.Title level={4} style={{ margin: 0 }}>{pageConfig.title}</Typography.Title>
-          <Tag color="blue">{pageConfig.model_name}</Tag>
+          <Tag color={platformForm ? 'green' : 'blue'}>{platformForm ? 'database form' : pageConfig.model_name}</Tag>
         </Space>
         <Space>
           <Input.Search

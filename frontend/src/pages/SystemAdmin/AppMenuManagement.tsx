@@ -49,11 +49,18 @@ import {
   adminListRoles,
   adminUpdateApplication,
   adminUpdateApplicationBindings,
+  createPlatformMenuNode,
+  deletePlatformMenuNode,
+  upsertApplicationFormBinding,
+  listPlatformForms,
+  listPlatformMenuNodes,
   listSemanticOntologyObjects,
+  updatePlatformMenuNode,
+  type PlatformForm,
+  type PlatformMenuNode,
 } from '@/services/api';
 import {
   loadAssemblyMenus,
-  saveAssemblyMenus,
   type SavedAssemblyMenuNode,
 } from '@/config/appAssemblyMenus';
 
@@ -134,9 +141,13 @@ type AppFormConfig = {
 type MenuNode = DataNode & {
   key: string;
   title: ReactNode;
+  dbId?: number;
+  parentDbId?: number | null;
   formId?: string;
+  routePath?: string;
   visible?: boolean;
   defaultEntry?: boolean;
+  sortOrder?: number;
   children?: MenuNode[];
 };
 
@@ -183,7 +194,7 @@ const fallbackApplications: AppRecord[] = [
     code: 'production-situation',
     description: '生产运行、OEE、产线状态和告警工作包。',
     icon: 'DashboardOutlined',
-    default_route: '/dashboard',
+    default_route: '/program/production-overview',
     sort_order: 1,
     status: 'published',
     is_pinned: true,
@@ -195,7 +206,7 @@ const fallbackApplications: AppRecord[] = [
     code: 'predictive-maintenance',
     description: '设备健康、故障预测和维修工单工作包。',
     icon: 'ToolOutlined',
-    default_route: '/maintenance',
+    default_route: '/program/device-health-dashboard',
     sort_order: 2,
     status: 'published',
     is_pinned: true,
@@ -207,7 +218,7 @@ const fallbackApplications: AppRecord[] = [
     code: 'quality-analytics',
     description: '质量事件、SPC、缺陷和 CAPA 工作包。',
     icon: 'SafetyCertificateOutlined',
-    default_route: '/quality',
+    default_route: '/program/quality-overview',
     sort_order: 3,
     status: 'published',
     is_pinned: false,
@@ -219,7 +230,7 @@ const fallbackApplications: AppRecord[] = [
     code: 'supply-chain-risk',
     description: '供应商、物料、交付和风险复核工作包。',
     icon: 'ShopOutlined',
-    default_route: '/supply-chain',
+    default_route: '/program/supply-overview',
     sort_order: 4,
     status: 'published',
     is_pinned: false,
@@ -229,7 +240,9 @@ const fallbackApplications: AppRecord[] = [
 
 const fallbackForms: FormRecord[] = [
   { id: "device-health", name: "\u4e1a\u52a1\u8868\u5355 1", code: "device-health", category: "interaction", mode: "detail_editor", structureLocked: true, entity: "Device", source: "equipment", status: "published", owner: "\u8bbe\u5907\u56e2\u961f", description: "\u7528\u4e8e\u4e1a\u52a1\u5f55\u5165\u548c\u8be6\u60c5\u7ef4\u62a4\u3002", fields: 8 },
+  { id: "device-health-dashboard", name: "\u8bbe\u5907\u5065\u5eb7\u770b\u677f", code: "device-health-dashboard", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "DeviceHealthDashboard", source: "equipment_health_summary", status: "published", owner: "\u8bbe\u5907\u56e2\u961f", description: "\u7528\u4e8e\u8bbe\u5907\u5065\u5eb7\u5ea6\u3001\u98ce\u9669\u5206\u5e03\u548c\u4fdd\u517b\u5efa\u8bae\u7684\u770b\u677f\u5c55\u793a\u3002", fields: 8 },
   { id: "fault-prediction", name: "\u5206\u6790\u62a5\u8868 1", code: "fault-prediction", category: "analytics", mode: "bi_report", structureLocked: true, entity: "Device", source: "equipment_health", status: "published", owner: "\u7b97\u6cd5\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u3001\u8d8b\u52bf\u548c\u62a5\u8868\u5206\u6790\u3002", fields: 10 },
+  { id: "failure-trend-analysis", name: "\u6545\u969c\u8d8b\u52bf\u5206\u6790", code: "failure-trend-analysis", category: "analytics", mode: "bi_report", structureLocked: true, entity: "FailureTrend", source: "maintenance_failures", status: "published", owner: "\u7ef4\u62a4\u56e2\u961f", description: "\u7528\u4e8e\u6545\u969c\u6b21\u6570\u3001\u4e3b\u8981\u7c7b\u578b\u548c\u8d8b\u52bf\u5206\u6790\u3002", fields: 9 },
   { id: "maintenance-order", name: "\u6d41\u7a0b\u8868\u5355 1", code: "maintenance-order", category: "interaction", mode: "workflow_form", structureLocked: true, entity: "WorkOrder", source: "work_orders", status: "published", owner: "\u7ef4\u62a4\u56e2\u961f", description: "\u7528\u4e8e\u5de5\u5355\u6d41\u8f6c\u548c\u4e1a\u52a1\u5904\u7406\u3002", fields: 12 },
   { id: "alert-center", name: "\u4e1a\u52a1\u8868\u5355 2", code: "alert-center", category: "interaction", mode: "entry_form", structureLocked: true, entity: "Alert", source: "alerts", status: "published", owner: "\u5e73\u53f0\u56e2\u961f", description: "\u7528\u4e8e\u4e1a\u52a1\u5f55\u5165\u548c\u5904\u7406\u3002", fields: 7 },
   { id: "supplier-risk", name: "\u6d41\u7a0b\u8868\u5355 2", code: "supplier-risk", category: "interaction", mode: "workflow_form", structureLocked: true, entity: "Supplier", source: "suppliers", status: "published", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u98ce\u9669\u590d\u6838\u548c\u4e1a\u52a1\u6d41\u7a0b\u3002", fields: 9 },
@@ -238,12 +251,19 @@ const fallbackForms: FormRecord[] = [
 
 const supplementalForms: FormRecord[] = [
   { id: "production-overview", name: "\u6307\u6807\u770b\u677f 1", code: "production-overview", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "ProductionOverview", source: "dashboard_summary", status: "published", owner: "\u751f\u4ea7\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u76d1\u63a7\u548c\u770b\u677f\u5c55\u793a\u3002", fields: 10 },
+  { id: "oee-trend-report", name: "OEE \u8d8b\u52bf\u62a5\u8868", code: "oee-trend-report", category: "analytics", mode: "bi_report", structureLocked: true, entity: "OeeTrend", source: "oee_daily", status: "published", owner: "\u751f\u4ea7\u56e2\u961f", description: "\u7528\u4e8e OEE \u8d8b\u52bf\u3001\u8fbe\u6210\u7387\u548c\u4ea7\u7ebf\u5bf9\u6bd4\u5206\u6790\u3002", fields: 8 },
   { id: "line-status", name: "\u5217\u8868\u5206\u6790 1", code: "line-status", category: "analytics", mode: "list_analysis", structureLocked: true, entity: "ProductionLine", source: "production_lines", status: "published", owner: "\u751f\u4ea7\u56e2\u961f", description: "\u7528\u4e8e\u5217\u8868\u67e5\u8be2\u548c\u7ef4\u5ea6\u5206\u6790\u3002", fields: 9 },
+  { id: "line-load-analysis", name: "\u4ea7\u7ebf\u8d1f\u8377\u5206\u6790", code: "line-load-analysis", category: "analytics", mode: "list_analysis", structureLocked: true, entity: "LineLoad", source: "line_load_snapshots", status: "published", owner: "\u751f\u4ea7\u56e2\u961f", description: "\u7528\u4e8e\u4ea7\u7ebf\u8d1f\u8377\u3001\u74f6\u9888\u548c\u73ed\u6b21\u5bf9\u6bd4\u3002", fields: 9 },
+  { id: "production-plan-entry", name: "\u751f\u4ea7\u8ba1\u5212\u586b\u62a5", code: "production-plan-entry", category: "interaction", mode: "entry_form", structureLocked: true, entity: "ProductionPlan", source: "production_plans", status: "published", owner: "\u751f\u4ea7\u56e2\u961f", description: "\u7528\u4e8e\u751f\u4ea7\u8ba1\u5212\u7684\u5f55\u5165\u3001\u8c03\u6574\u548c\u786e\u8ba4\u3002", fields: 11 },
   { id: "quality-overview", name: "\u6307\u6807\u770b\u677f 2", code: "quality-overview", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "QualityOverview", source: "quality_metrics", status: "published", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u76d1\u63a7\u548c\u770b\u677f\u5c55\u793a\u3002", fields: 8 },
   { id: "inspection-batch", name: "\u4e1a\u52a1\u8868\u5355 3", code: "inspection-batch", category: "interaction", mode: "entry_form", structureLocked: true, entity: "Inspection", source: "inspections", status: "published", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e\u4e1a\u52a1\u5f55\u5165\u548c\u7ed3\u679c\u8ffd\u8e2a\u3002", fields: 12 },
   { id: "defect-analysis", name: "\u5206\u6790\u62a5\u8868 2", code: "defect-analysis", category: "analytics", mode: "bi_report", structureLocked: true, entity: "Defect", source: "defects", status: "published", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u3001\u8d8b\u52bf\u548c\u62a5\u8868\u5206\u6790\u3002", fields: 11 },
+  { id: "defect-analysis-report", name: "\u7f3a\u9677\u5206\u6790\u62a5\u8868", code: "defect-analysis-report", category: "analytics", mode: "bi_report", structureLocked: true, entity: "DefectReport", source: "defect_reports", status: "published", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e\u7f3a\u9677 Pareto\u3001\u8d23\u4efb\u5de5\u4f4d\u548c\u6539\u5584\u6548\u679c\u5206\u6790\u3002", fields: 10 },
+  { id: "process-capability-dashboard", name: "\u8fc7\u7a0b\u80fd\u529b\u770b\u677f", code: "process-capability-dashboard", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "ProcessCapability", source: "spc_capability", status: "published", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e CPK\u3001PPK\u3001\u8fc7\u7a0b\u7a33\u5b9a\u6027\u548c\u8d85\u9650\u5206\u6790\u3002", fields: 8 },
   { id: "supply-overview", name: "\u6307\u6807\u770b\u677f 3", code: "supply-overview", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "SupplyOverview", source: "supply_summary", status: "published", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u76d1\u63a7\u548c\u770b\u677f\u5c55\u793a\u3002", fields: 8 },
   { id: "material-impact", name: "\u5206\u6790\u62a5\u8868 3", code: "material-impact", category: "analytics", mode: "bi_report", structureLocked: true, entity: "Material", source: "materials", status: "published", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u6307\u6807\u3001\u8d8b\u52bf\u548c\u62a5\u8868\u5206\u6790\u3002", fields: 10 },
+  { id: "material-impact-report", name: "\u7269\u6599\u5f71\u54cd\u62a5\u8868", code: "material-impact-report", category: "analytics", mode: "bi_report", structureLocked: true, entity: "MaterialImpactReport", source: "material_shortage_impacts", status: "published", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u7f3a\u6599\u5bf9\u4ea7\u7ebf\u3001\u5de5\u5355\u548c\u5ba2\u6237\u8ba2\u5355\u7684\u5f71\u54cd\u5206\u6790\u3002", fields: 10 },
+  { id: "supply-risk-dashboard", name: "\u4f9b\u5e94\u98ce\u9669\u770b\u677f", code: "supply-risk-dashboard", category: "analytics", mode: "metric_dashboard", structureLocked: true, entity: "SupplyRiskDashboard", source: "supply_risk_summary", status: "published", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u4f9b\u5e94\u98ce\u9669\u6307\u6807\u3001\u9ad8\u98ce\u9669\u54c1\u7c7b\u548c\u66ff\u4ee3\u65b9\u6848\u770b\u677f\u5c55\u793a\u3002", fields: 8 },
   { id: "risk-review", name: "\u6d41\u7a0b\u8868\u5355 4", code: "risk-review", category: "interaction", mode: "workflow_form", structureLocked: true, entity: "RiskReview", source: "risk_reviews", status: "draft", owner: "\u4f9b\u5e94\u94fe\u56e2\u961f", description: "\u7528\u4e8e\u98ce\u9669\u590d\u6838\u548c\u4e1a\u52a1\u6d41\u7a0b\u3002", fields: 9 },
   { id: "customer-complaint", name: "\u6d41\u7a0b\u8868\u5355 5", code: "customer-complaint", category: "interaction", mode: "workflow_form", structureLocked: true, entity: "CustomerComplaint", source: "customer_complaints", status: "draft", owner: "\u8d28\u91cf\u56e2\u961f", description: "\u7528\u4e8e\u5ba2\u6237\u6295\u8bc9\u548c\u95ee\u9898\u6539\u8fdb\u6d41\u7a0b\u3002", fields: 13 },
   { id: "change-request", name: "\u6d41\u7a0b\u8868\u5355 6", code: "change-request", category: "interaction", mode: "workflow_form", structureLocked: true, entity: "EngineeringChange", source: "engineering_changes", status: "draft", owner: "\u5de5\u7a0b\u56e2\u961f", description: "\u7528\u4e8e\u53d8\u66f4\u7533\u8bf7\u548c\u5ba1\u6279\u6d41\u7a0b\u3002", fields: 14 },
@@ -251,6 +271,7 @@ const supplementalForms: FormRecord[] = [
 
 const initialConfigs: AppFormConfig[] = [
   { appId: 2, formId: 'device-health', alias: '设备健康总览', enabled: true, defaultView: '列表 + 详情', dataScope: 'health_score < 95', allowCreate: false, allowEdit: true, allowExport: true },
+  { appId: 2, formId: 'device-health-dashboard', alias: '设备健康看板', enabled: true, defaultView: '健康 KPI + 风险排行', dataScope: 'current_factory', allowCreate: false, allowEdit: false, allowExport: true },
   { appId: 2, formId: 'fault-prediction', alias: '故障预测', enabled: true, defaultView: '风险看板', dataScope: 'risk_level >= medium', allowCreate: false, allowEdit: false, allowExport: true },
   { appId: 2, formId: 'maintenance-order', alias: '工单管理', enabled: true, defaultView: '列表', dataScope: 'current_app', allowCreate: true, allowEdit: true, allowExport: true },
   { appId: 2, formId: 'alert-center', alias: '告警中心', enabled: true, defaultView: '列表', dataScope: 'source = maintenance', allowCreate: false, allowEdit: true, allowExport: false },
@@ -334,8 +355,9 @@ const enhancedMenusByApp: Record<number, MenuNode[]> = {
       menuNode("prod-device", "\u8bbe\u5907\u8fd0\u884c", "device-health"),
     ], true),
     menuNode("prod-reports", "\u751f\u4ea7\u62a5\u8868", undefined, [
-      menuNode("prod-oee-report", "OEE \u8d8b\u52bf\u62a5\u8868", "production-overview"),
-      menuNode("prod-line-report", "\u4ea7\u7ebf\u8d1f\u8377\u5206\u6790", "line-status"),
+      menuNode("prod-oee-report", "OEE \u8d8b\u52bf\u62a5\u8868", "oee-trend-report"),
+      menuNode("prod-line-report", "\u4ea7\u7ebf\u8d1f\u8377\u5206\u6790", "line-load-analysis"),
+      menuNode("prod-plan-entry", "\u751f\u4ea7\u8ba1\u5212\u586b\u62a5", "production-plan-entry"),
     ]),
     menuNode("prod-exceptions", "\u5f02\u5e38\u5904\u7406", undefined, [
       menuNode("prod-alerts", "\u6d3b\u52a8\u544a\u8b66", "alert-center"),
@@ -347,8 +369,8 @@ const enhancedMenusByApp: Record<number, MenuNode[]> = {
       menuNode("pm-predict", "\u6545\u969c\u9884\u6d4b\u62a5\u8868", "fault-prediction"),
     ], true),
     menuNode("pm-report-group", "\u7ef4\u62a4\u62a5\u8868", undefined, [
-      menuNode("pm-failure-trend", "\u6545\u969c\u8d8b\u52bf\u5206\u6790", "fault-prediction"),
-      menuNode("pm-health-dashboard", "\u8bbe\u5907\u5065\u5eb7\u770b\u677f", "device-health"),
+      menuNode("pm-failure-trend", "\u6545\u969c\u8d8b\u52bf\u5206\u6790", "failure-trend-analysis"),
+      menuNode("pm-health-dashboard", "\u8bbe\u5907\u5065\u5eb7\u770b\u677f", "device-health-dashboard"),
     ]),
     menuNode("pm-execution-group", "\u7ef4\u62a4\u6267\u884c", undefined, [
       menuNode("pm-orders", "\u7ef4\u4fee\u5de5\u5355", "maintenance-order"),
@@ -361,8 +383,8 @@ const enhancedMenusByApp: Record<number, MenuNode[]> = {
       menuNode("quality-inspection", "\u68c0\u9a8c\u6279\u6b21", "inspection-batch"),
     ], true),
     menuNode("quality-report-group", "\u8d28\u91cf\u62a5\u8868", undefined, [
-      menuNode("quality-defect-report", "\u7f3a\u9677\u5206\u6790\u62a5\u8868", "defect-analysis"),
-      menuNode("quality-capability-report", "\u8fc7\u7a0b\u80fd\u529b\u770b\u677f", "quality-overview"),
+      menuNode("quality-defect-report", "\u7f3a\u9677\u5206\u6790\u62a5\u8868", "defect-analysis-report"),
+      menuNode("quality-capability-report", "\u8fc7\u7a0b\u80fd\u529b\u770b\u677f", "process-capability-dashboard"),
     ]),
     menuNode("quality-improve-group", "\u95ee\u9898\u6539\u8fdb", undefined, [
       menuNode("quality-defect", "\u7f3a\u9677\u5206\u6790", "defect-analysis"),
@@ -375,8 +397,8 @@ const enhancedMenusByApp: Record<number, MenuNode[]> = {
       menuNode("supply-risk", "\u4f9b\u5e94\u5546\u98ce\u9669", "supplier-risk"),
     ], true),
     menuNode("supply-report-group", "\u4f9b\u5e94\u94fe\u62a5\u8868", undefined, [
-      menuNode("supply-material-report", "\u7269\u6599\u5f71\u54cd\u62a5\u8868", "material-impact"),
-      menuNode("supply-risk-dashboard", "\u4f9b\u5e94\u98ce\u9669\u770b\u677f", "supply-overview"),
+      menuNode("supply-material-report", "\u7269\u6599\u5f71\u54cd\u62a5\u8868", "material-impact-report"),
+      menuNode("supply-risk-dashboard", "\u4f9b\u5e94\u98ce\u9669\u770b\u677f", "supply-risk-dashboard"),
     ]),
     menuNode("supply-impact-group", "\u5f71\u54cd\u4e0e\u590d\u6838", undefined, [
       menuNode("supply-material", "\u7269\u6599\u5f71\u54cd", "material-impact"),
@@ -430,6 +452,98 @@ function restoreMenuNodes(nodes: SavedAssemblyMenuNode[]): MenuNode[] {
   }));
 }
 
+function unwrapApiList<T>(payload: unknown): T[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const data = (payload as { data?: unknown }).data;
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)) {
+    return (data as { data: T[] }).data;
+  }
+  return [];
+}
+
+function unwrapApiItem<T>(payload: unknown): T | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = (payload as { data?: unknown }).data;
+  if (data && typeof data === 'object' && 'data' in data) {
+    return ((data as { data?: T }).data ?? null);
+  }
+  return (data as T) ?? null;
+}
+
+function mapPlatformFormToRecord(form: PlatformForm): FormRecord {
+  return {
+    id: String(form.id),
+    name: form.name,
+    code: form.code,
+    category: 'interaction',
+    mode: 'entry_form',
+    structureLocked: form.status !== 'draft',
+    entity: form.code,
+    source: form.table_name || 'dynamic_records',
+    status: form.status === 'active' ? 'published' : form.status === 'archived' ? 'disabled' : 'draft',
+    owner: form.owner_id ? String(form.owner_id) : 'system',
+    description: form.description || 'Database-backed platform form.',
+    fields: form.fields?.length ?? 0,
+  };
+}
+
+function mapPlatformMenuNodesToTree(nodes: PlatformMenuNode[]): MenuNode[] {
+  const byParent = new Map<number | null, PlatformMenuNode[]>();
+  nodes.forEach((node) => {
+    const parentId = node.parent_id ?? null;
+    byParent.set(parentId, [...(byParent.get(parentId) ?? []), node]);
+  });
+  byParent.forEach((items) => items.sort((left, right) => left.sort_order - right.sort_order || left.id - right.id));
+
+  const build = (parentId: number | null): MenuNode[] => (
+    (byParent.get(parentId) ?? []).map((node) => ({
+      ...menuNode(
+        `db-${node.id}`,
+        node.title,
+        node.form_id ? String(node.form_id) : undefined,
+        build(node.id),
+        node.default_entry,
+      ),
+      dbId: node.id,
+      parentDbId: node.parent_id ?? null,
+      routePath: node.route_path ?? undefined,
+      visible: node.visible,
+      defaultEntry: node.default_entry,
+      sortOrder: node.sort_order,
+    }))
+  );
+
+  return build(null);
+}
+
+function collectMenuFormIds(nodes: MenuNode[]): string[] {
+  return nodes.flatMap((node) => [
+    ...(node.formId ? [node.formId] : []),
+    ...collectMenuFormIds(node.children ?? []),
+  ]);
+}
+
+function getParentDbId(nodes: MenuNode[], key: string, parentDbId: number | null = null): number | null {
+  for (const node of nodes) {
+    if (node.key === key) return parentDbId;
+    const found = getParentDbId(node.children ?? [], key, node.dbId ?? null);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function getSiblingOrder(nodes: MenuNode[], parentDbId: number | null): MenuNode[] {
+  if (parentDbId === null) return nodes;
+  const parent = nodes.flatMap((node): MenuNode[] => [node, ...(node.children ? getAllMenuNodes(node.children) : [])])
+    .find((node) => node.dbId === parentDbId);
+  return parent?.children ?? [];
+}
+
+function getAllMenuNodes(nodes: MenuNode[]): MenuNode[] {
+  return nodes.flatMap((node) => [node, ...getAllMenuNodes(node.children ?? [])]);
+}
+
 export default function AppMenuManagement() {
   const [appForm] = Form.useForm();
   const [formForm] = Form.useForm();
@@ -444,6 +558,7 @@ export default function AppMenuManagement() {
   const [selectedMenuKey, setSelectedMenuKey] = useState('pm-health');
   const [appDrawerOpen, setAppDrawerOpen] = useState(false);
   const [formDrawerOpen, setFormDrawerOpen] = useState(false);
+  const [menuSyncing, setMenuSyncing] = useState(false);
 
   useEffect(() => {
     const stored = loadAssemblyMenus();
@@ -456,13 +571,6 @@ export default function AppMenuManagement() {
     });
   }, []);
 
-  useEffect(() => {
-    const serializable = Object.fromEntries(
-      Object.entries(menusByApp).map(([appId, nodes]) => [Number(appId), serializeMenuNodes(nodes)]),
-    );
-    saveAssemblyMenus(serializable);
-  }, [menusByApp]);
-
   const selectedApp = applications.find((item) => item.id === selectedAppId) ?? applications[0];
   const selectedForm = forms.find((item) => item.id === selectedFormId) ?? forms[0];
   const appConfigs = configs.filter((item) => item.appId === selectedApp.id);
@@ -470,13 +578,18 @@ export default function AppMenuManagement() {
   const selectedMenu = findMenuNode(currentMenus, selectedMenuKey);
 
   useEffect(() => {
-    Promise.all([adminListApplications(), adminListRoles(), listSemanticOntologyObjects()])
-      .then(([appsRes, rolesRes, objectsRes]) => {
+    Promise.all([adminListApplications(), adminListRoles(), listSemanticOntologyObjects(), listPlatformForms()])
+      .then(([appsRes, rolesRes, objectsRes, formsRes]) => {
         const apiApps = appsRes.data?.data ?? [];
         const apiRoles = rolesRes.data?.data ?? [];
         const ontologyObjects = objectsRes.data?.data ?? [];
+        const platformForms = unwrapApiList<PlatformForm>(formsRes);
         if (apiApps.length) setApplications(apiApps);
         if (apiRoles.length) setRoles(apiRoles);
+        if (platformForms.length) {
+          setForms(platformForms.map(mapPlatformFormToRecord));
+          setSelectedFormId(String(platformForms[0].id));
+        }
         if (ontologyObjects.length) {
           setForms((prev) => mergeOntologyForms(prev, ontologyObjects));
         }
@@ -485,6 +598,45 @@ export default function AppMenuManagement() {
         // Demo data is intentionally enough for this first product pass.
       });
   }, []);
+
+  useEffect(() => {
+    if (!selectedAppId) return;
+    setMenuSyncing(true);
+    listPlatformMenuNodes(selectedAppId)
+      .then((res) => {
+        const menuNodes = unwrapApiList<PlatformMenuNode>(res);
+        if (!menuNodes.length) return;
+        const tree = mapPlatformMenuNodesToTree(menuNodes);
+        setMenusByApp((prev) => ({ ...prev, [selectedAppId]: tree }));
+        setConfigs((prev) => {
+          const next = prev.filter((item) => item.appId !== selectedAppId);
+          collectMenuFormIds(tree).forEach((formId) => {
+            const form = forms.find((item) => item.id === formId);
+            next.push({
+              appId: selectedAppId,
+              formId,
+              alias: form?.name ?? formId,
+              enabled: true,
+              defaultView: 'list',
+              dataScope: 'current_app',
+              allowCreate: true,
+              allowEdit: true,
+              allowExport: true,
+            });
+          });
+          return next;
+        });
+        setSelectedMenuKey(tree[0]?.key ?? '');
+      })
+      .catch(() => {
+        const stored = loadAssemblyMenus();
+        const fallback = stored[selectedAppId];
+        if (fallback?.length) {
+          setMenusByApp((prev) => ({ ...prev, [selectedAppId]: restoreMenuNodes(fallback) }));
+        }
+      })
+      .finally(() => setMenuSyncing(false));
+  }, [forms, selectedAppId]);
 
   useEffect(() => {
     appForm.setFieldsValue({
@@ -520,7 +672,7 @@ export default function AppMenuManagement() {
     });
   }, [forms, menuForm, selectedMenu]);
 
-  const boundFormIds = new Set(appConfigs.map((item) => item.formId));
+  const boundFormIds = new Set(collectMenuFormIds(currentMenus));
 
   const saveApp = async () => {
     const values = await appForm.validateFields();
@@ -715,23 +867,95 @@ export default function AppMenuManagement() {
     ]);
   };
 
-  const addFormToMenu = (form: FormRecord) => {
+  const addFormToMenu = async (form: FormRecord) => {
     const existingNode = findMenuNodeByForm(currentMenus, form.id);
     if (existingNode) {
       setSelectedMenuKey(existingNode.key);
       if (!boundFormIds.has(form.id)) toggleBinding(form.id);
       return;
     }
-    const nextNode = menuNode(`${selectedApp.id}-${form.id}-${Date.now()}`, form.name, form.id);
-    setMenusByApp((prev) => ({
-      ...prev,
-      [selectedApp.id]: [...(prev[selectedApp.id] ?? []), nextNode],
-    }));
-    setSelectedMenuKey(nextNode.key);
-    if (!boundFormIds.has(form.id)) toggleBinding(form.id);
+    const numericFormId = Number(form.id);
+    if (Number.isNaN(numericFormId)) {
+      message.warning('Only database-backed forms can be added to database menus.');
+      return;
+    }
+    setMenuSyncing(true);
+    try {
+      const res = await createPlatformMenuNode(selectedApp.id, {
+        node_type: 'form',
+        title: form.name,
+        form_id: numericFormId,
+        visible: true,
+        default_entry: false,
+        sort_order: currentMenus.length,
+      });
+      const created = unwrapApiItem<PlatformMenuNode>(res);
+      if (!created) throw new Error('empty menu node response');
+      await upsertApplicationFormBinding(selectedApp.id, {
+        form_id: numericFormId,
+        alias: form.name,
+        enabled: true,
+        default_view: 'list',
+        data_scope: 'current_app',
+        allow_create: true,
+        allow_edit: true,
+        allow_delete: true,
+        allow_export: true,
+        sort_order: currentMenus.length,
+      });
+      const nextNode = mapPlatformMenuNodesToTree([created])[0];
+      setMenusByApp((prev) => ({
+        ...prev,
+        [selectedApp.id]: [...(prev[selectedApp.id] ?? []), nextNode],
+      }));
+      setConfigs((prev) => [
+        ...prev.filter((item) => !(item.appId === selectedApp.id && item.formId === form.id)),
+        {
+          appId: selectedApp.id,
+          formId: form.id,
+          alias: form.name,
+          enabled: true,
+          defaultView: 'list',
+          dataScope: 'current_app',
+          allowCreate: true,
+          allowEdit: true,
+          allowExport: true,
+        },
+      ]);
+      setSelectedMenuKey(nextNode.key);
+      message.success('Menu node saved to database.');
+    } catch {
+      message.error('Failed to save menu node to database.');
+    } finally {
+      setMenuSyncing(false);
+    }
   };
 
-  const addMenuGroup = () => {
+  const addMenuGroup = async () => {
+    setMenuSyncing(true);
+    try {
+      const res = await createPlatformMenuNode(selectedApp.id, {
+        node_type: 'group',
+        title: 'New Group',
+        visible: true,
+        default_entry: false,
+        sort_order: currentMenus.length,
+      });
+      const created = unwrapApiItem<PlatformMenuNode>(res);
+      if (!created) throw new Error('empty menu node response');
+      const nextNode = mapPlatformMenuNodesToTree([created])[0];
+      setMenusByApp((prev) => ({
+        ...prev,
+        [selectedApp.id]: [...(prev[selectedApp.id] ?? []), nextNode],
+      }));
+      setSelectedMenuKey(nextNode.key);
+      message.success('Menu group saved to database.');
+    } catch {
+      message.error('Failed to save menu group to database.');
+    } finally {
+      setMenuSyncing(false);
+    }
+    return;
     const nextNode = menuNode(`${selectedApp.id}-group-${Date.now()}`, '新建分组');
     setMenusByApp((prev) => ({
       ...prev,
@@ -740,9 +964,28 @@ export default function AppMenuManagement() {
     setSelectedMenuKey(nextNode.key);
   };
 
-  const deleteSelectedMenuNode = () => {
+  const deleteSelectedMenuNode = async () => {
     if (!selectedMenu) return;
     const target = selectedMenu;
+    if (target.dbId) {
+      setMenuSyncing(true);
+      try {
+        await Promise.all(
+          ((target.children ?? []) as MenuNode[])
+            .filter((child) => child.dbId)
+            .map((child, index) => updatePlatformMenuNode(selectedApp.id, child.dbId!, {
+              parent_id: target.parentDbId ?? null,
+              sort_order: index,
+            })),
+        );
+        await deletePlatformMenuNode(selectedApp.id, target.dbId);
+      } catch {
+        message.error('Failed to delete menu node from database.');
+        setMenuSyncing(false);
+        return;
+      }
+      setMenuSyncing(false);
+    }
     const nextTree = removeMenuNodePromoteChildren(currentMenus, selectedMenuKey);
     const nextKeys = collectMenuKeys(nextTree);
     setMenusByApp((prev) => ({
@@ -767,6 +1010,28 @@ export default function AppMenuManagement() {
 
   const saveMenuNode = async () => {
     const values = await menuForm.validateFields();
+    const numericFormId = values.formId ? Number(values.formId) : undefined;
+    if (values.formId && Number.isNaN(numericFormId)) {
+      message.warning('Only database-backed forms can be saved to application menus.');
+      return;
+    }
+    if (selectedMenu?.dbId) {
+      setMenuSyncing(true);
+      try {
+        await updatePlatformMenuNode(selectedApp.id, selectedMenu.dbId, {
+          title: values.title,
+          form_id: numericFormId,
+          node_type: numericFormId ? 'form' : 'group',
+          visible: values.visible,
+          default_entry: values.defaultEntry,
+        });
+      } catch {
+        message.error('Failed to update menu node in database.');
+        setMenuSyncing(false);
+        return;
+      }
+      setMenuSyncing(false);
+    }
     setMenusByApp((prev) => ({
       ...prev,
       [selectedApp.id]: updateMenuNode(prev[selectedApp.id] ?? [], selectedMenuKey, values),
@@ -774,7 +1039,7 @@ export default function AppMenuManagement() {
     message.success('菜单节点已更新');
   };
 
-  const onDropMenu = (info: any) => {
+  const onDropMenu = async (info: any) => {
     if (!info?.dragNode?.key || !info?.node?.key) return;
     const dragKey = info.dragNode.key;
     const dropKey = info.node.key;
@@ -782,10 +1047,26 @@ export default function AppMenuManagement() {
     const dropToGap = info.dropToGap;
     const nextTree = moveNode(currentMenus, dragKey, dropKey, dropPosition, dropToGap);
     setMenusByApp((prev) => ({ ...prev, [selectedApp.id]: nextTree }));
+    const dragged = findMenuNode(nextTree, dragKey);
+    if (!dragged?.dbId) return;
+    const parentDbId = getParentDbId(nextTree, dragKey);
+    const siblings = getSiblingOrder(nextTree, parentDbId);
+    setMenuSyncing(true);
+    try {
+      await Promise.all(
+        siblings
+          .filter((node) => node.dbId)
+          .map((node, index) => updatePlatformMenuNode(selectedApp.id, node.dbId!, { sort_order: index, parent_id: parentDbId })),
+      );
+    } catch {
+      message.error('Failed to persist menu order.');
+    } finally {
+      setMenuSyncing(false);
+    }
   };
 
   return (
-    <div className="app-admin-workspace">
+    <div className="app-admin-workspace" aria-busy={menuSyncing}>
       <Tabs
         defaultActiveKey="assembly"
         items={[
@@ -1879,8 +2160,8 @@ function hasFormInMenus(nodes: MenuNode[], formId: string): boolean {
 }
 
 function removeMenuNodePromoteChildren(nodes: MenuNode[], key: string): MenuNode[] {
-  return nodes.flatMap((node) => {
-    if (node.key === key) return node.children ?? [];
+  return nodes.flatMap((node): MenuNode[] => {
+    if (node.key === key) return ((node.children ?? []) as MenuNode[]).map((child) => ({ ...child, parentDbId: node.parentDbId ?? null }));
     return [{ ...node, children: removeMenuNodePromoteChildren(node.children ?? [], key) }];
   });
 }

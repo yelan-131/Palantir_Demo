@@ -126,6 +126,20 @@ def _menu_tree(items: list[dict]) -> list[dict]:
     return roots
 
 
+def _platform_menu_payload(node) -> dict:
+    return {
+        "id": node.id,
+        "parent_id": node.parent_id,
+        "title": node.title,
+        "icon": node.icon,
+        "route_path": node.route_path or (f"/dynamic/{node.form_id}" if node.form_id else ""),
+        "sort_order": node.sort_order,
+        "is_visible": node.visible,
+        "is_default": node.default_entry,
+        "form_id": node.form_id,
+    }
+
+
 def _mock_menu_by_route(route: str) -> dict | None:
     return next((m for m in DEFAULT_MENUS if m["route_path"] == route), None)
 
@@ -286,12 +300,19 @@ async def list_applications(
 @router.get("/{app_id}/menus")
 async def list_application_menus(app_id: int, user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     async def _query(session):
-        from app.models.relational import Application, ApplicationMenu, MenuItem
+        from app.models.relational import Application, ApplicationMenu, ApplicationMenuNode, MenuItem
 
         await _ensure_default_seed(session)
         app = await session.get(Application, app_id)
         if not app or app.status != "published":
             raise HTTPException(404, "Application not found")
+        platform_nodes = (await session.execute(
+            select(ApplicationMenuNode)
+            .where(ApplicationMenuNode.application_id == app_id, ApplicationMenuNode.visible.is_(True))
+            .order_by(ApplicationMenuNode.sort_order, ApplicationMenuNode.id)
+        )).scalars().all()
+        if platform_nodes:
+            return {"data": _menu_tree([_platform_menu_payload(node) for node in platform_nodes])}
         rows = await session.execute(
             select(MenuItem, ApplicationMenu)
             .join(ApplicationMenu, ApplicationMenu.menu_id == MenuItem.id)

@@ -27,16 +27,22 @@ const formRouteMap: Record<string, { route: string; icon: string }> = {
   'line-load-analysis': { route: '/program/line-load-analysis', icon: 'DashboardOutlined' },
   'production-plan-entry': { route: '/program/production-plan-entry', icon: 'AppstoreOutlined' },
   'device-health': { route: '/program/device-health', icon: 'ToolOutlined' },
+  'device-health-dashboard': { route: '/program/device-health-dashboard', icon: 'ToolOutlined' },
   'fault-prediction': { route: '/program/fault-prediction', icon: 'ToolOutlined' },
+  'failure-trend-analysis': { route: '/program/failure-trend-analysis', icon: 'ToolOutlined' },
   'maintenance-order': { route: '/program/maintenance-order', icon: 'AppstoreOutlined' },
   'alert-center': { route: '/program/alert-center', icon: 'SafetyCertificateOutlined' },
   'quality-overview': { route: '/program/quality-overview', icon: 'SafetyCertificateOutlined' },
   'inspection-batch': { route: '/program/inspection-batch', icon: 'SafetyCertificateOutlined' },
   'defect-analysis': { route: '/program/defect-analysis', icon: 'SafetyCertificateOutlined' },
+  'defect-analysis-report': { route: '/program/defect-analysis-report', icon: 'SafetyCertificateOutlined' },
+  'process-capability-dashboard': { route: '/program/process-capability-dashboard', icon: 'SafetyCertificateOutlined' },
   'quality-event': { route: '/program/quality-event', icon: 'SafetyCertificateOutlined' },
   'supplier-risk': { route: '/program/supplier-risk', icon: 'ShopOutlined' },
   'supply-overview': { route: '/program/supply-overview', icon: 'ShopOutlined' },
   'material-impact': { route: '/program/material-impact', icon: 'ShopOutlined' },
+  'material-impact-report': { route: '/program/material-impact-report', icon: 'ShopOutlined' },
+  'supply-risk-dashboard': { route: '/program/supply-risk-dashboard', icon: 'ShopOutlined' },
   'risk-review': { route: '/program/risk-review', icon: 'SafetyCertificateOutlined' },
 };
 
@@ -44,7 +50,45 @@ const menuKeyRouteMap: Record<string, { route: string; icon: string }> = {
   'prod-oee-report': { route: '/program/oee-trend-report', icon: 'DashboardOutlined' },
   'prod-line-report': { route: '/program/line-load-analysis', icon: 'DashboardOutlined' },
   'prod-plan-entry': { route: '/program/production-plan-entry', icon: 'AppstoreOutlined' },
+  'pm-failure-trend': { route: '/program/failure-trend-analysis', icon: 'ToolOutlined' },
+  'pm-health-dashboard': { route: '/program/device-health-dashboard', icon: 'ToolOutlined' },
+  'quality-defect-report': { route: '/program/defect-analysis-report', icon: 'SafetyCertificateOutlined' },
+  'quality-capability-report': { route: '/program/process-capability-dashboard', icon: 'SafetyCertificateOutlined' },
+  'supply-material-report': { route: '/program/material-impact-report', icon: 'ShopOutlined' },
+  'supply-risk-dashboard': { route: '/program/supply-risk-dashboard', icon: 'ShopOutlined' },
 };
+
+function routeInfoForNode(node: SavedAssemblyMenuNode): { route: string; icon: string } | undefined {
+  return menuKeyRouteMap[node.key] || (node.formId ? formRouteMap[node.formId] : undefined);
+}
+
+function findDefaultNodeRoute(nodes: SavedAssemblyMenuNode[]): string | undefined {
+  for (const node of nodes) {
+    if (node.visible === false) continue;
+    const routeInfo = routeInfoForNode(node);
+    if (node.defaultEntry && routeInfo?.route) {
+      return routeInfo.route;
+    }
+    const childRoute = node.children?.length ? findDefaultNodeRoute(node.children) : undefined;
+    if (childRoute) return childRoute;
+  }
+  return undefined;
+}
+
+function findFirstNodeRoute(nodes: SavedAssemblyMenuNode[]): string | undefined {
+  for (const node of nodes) {
+    if (node.visible === false) continue;
+    const routeInfo = routeInfoForNode(node);
+    if (routeInfo?.route) return routeInfo.route;
+    const childRoute = node.children?.length ? findFirstNodeRoute(node.children) : undefined;
+    if (childRoute) return childRoute;
+  }
+  return undefined;
+}
+
+export function getAssemblyMenuDefaultRoute(nodes: SavedAssemblyMenuNode[]): string | undefined {
+  return findDefaultNodeRoute(nodes) || findFirstNodeRoute(nodes);
+}
 
 function numericId(appId: number, key: string): number {
   let hash = appId * 1000;
@@ -78,7 +122,7 @@ export function savedAssemblyMenusToDynamicMenus(
   return nodes
     .filter((node) => node.visible !== false)
     .map((node) => {
-      const routeInfo = menuKeyRouteMap[node.key] || (node.formId ? formRouteMap[node.formId] : undefined);
+      const routeInfo = routeInfoForNode(node);
       const children = node.children?.length
         ? savedAssemblyMenusToDynamicMenus(appId, node.children)
         : undefined;

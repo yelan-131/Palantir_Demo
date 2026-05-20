@@ -28,13 +28,13 @@ import {
   MenuUnfoldOutlined,
   PlusOutlined,
   ReloadOutlined,
-  RobotOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
   ShopOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
 import AccountMenu from './components/AccountMenu';
+import AiChatWidget from './components/AiChatWidget';
 import GlobalSearch from './components/GlobalSearch';
 import { useAuthStore } from './stores/authStore';
 import {
@@ -48,6 +48,7 @@ import {
 import {
   APP_ASSEMBLY_MENU_EVENT,
   APP_ASSEMBLY_MENUS_STORAGE_KEY,
+  getAssemblyMenuDefaultRoute,
   loadAssemblyMenus,
   savedAssemblyMenusToDynamicMenus,
 } from './config/appAssemblyMenus';
@@ -61,11 +62,11 @@ const PipelinePage = lazy(() => import('./pages/Pipeline'));
 const MaintenancePage = lazy(() => import('./pages/Maintenance'));
 const QualityPage = lazy(() => import('./pages/Quality'));
 const SupplyChainPage = lazy(() => import('./pages/SupplyChain'));
-const AIAssistantPage = lazy(() => import('./pages/AIAssistant'));
 const AccountCenterPage = lazy(() => import('./pages/AccountCenter'));
 const ReportCenterPage = lazy(() => import('./pages/ReportCenter'));
 const DynamicPage = lazy(() => import('./pages/DynamicPage'));
 const AppProgramPage = lazy(() => import('./pages/AppPrograms'));
+const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
 const SystemAdminPage = lazy(() => import('./pages/SystemAdmin'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const LoginPage = lazy(() => import('./pages/Login'));
@@ -110,10 +111,10 @@ const workspaceMenuItem: NonNullable<MenuProps['items']>[number] = {
 };
 
 const fallbackApplications: ApplicationInfo[] = [
-  { id: 1, name: '生产态势', code: 'production-dashboard', description: '生产效率、OEE、产线告警和班次趋势。', icon: 'DashboardOutlined', default_route: '/dashboard', status: 'published', is_pinned: true },
-  { id: 2, name: '预测性维护', code: 'maintenance-analysis', description: '设备健康总览、健康分析、故障预测和工单管理。', icon: 'ToolOutlined', default_route: '/maintenance', status: 'published', is_pinned: true },
-  { id: 3, name: '质量分析', code: 'quality-control', description: '质量缺陷、检验批次、异常追溯和过程能力分析。', icon: 'SafetyCertificateOutlined', default_route: '/quality', status: 'published' },
-  { id: 4, name: '供应链风险', code: 'supply-risk', description: '供应商交付、库存水位、风险预警和替代方案。', icon: 'ShopOutlined', default_route: '/supply-chain', status: 'published' },
+  { id: 1, name: '生产态势', code: 'production-dashboard', description: '生产效率、OEE、产线告警和班次趋势。', icon: 'DashboardOutlined', default_route: '/program/production-overview', status: 'published', is_pinned: true },
+  { id: 2, name: '预测性维护', code: 'maintenance-analysis', description: '设备健康总览、健康分析、故障预测和工单管理。', icon: 'ToolOutlined', default_route: '/program/device-health-dashboard', status: 'published', is_pinned: true },
+  { id: 3, name: '质量分析', code: 'quality-control', description: '质量缺陷、检验批次、异常追溯和过程能力分析。', icon: 'SafetyCertificateOutlined', default_route: '/program/quality-overview', status: 'published' },
+  { id: 4, name: '供应链风险', code: 'supply-risk', description: '供应商交付、库存水位、风险预警和替代方案。', icon: 'ShopOutlined', default_route: '/program/supply-overview', status: 'published' },
 ];
 
 const fallbackMenusByApplication: Record<number, DynamicMenu[]> = {
@@ -224,6 +225,7 @@ const pageTitleMap: Record<string, string> = {
   '/data-sources': '数据源管理',
   '/graph': '图谱探索',
   '/pipeline': '数据管道',
+  '/form-settings': '表单设置',
   '/system-admin': '系统管理',
   '/workflow': '流程中心',
 };
@@ -235,15 +237,21 @@ const programTitleMap: Record<string, string> = {
   'line-load-analysis': '产线负荷分析',
   'production-plan-entry': '生产计划填报',
   'device-health': '设备健康',
+  'device-health-dashboard': '设备健康看板',
   'fault-prediction': '故障预测',
+  'failure-trend-analysis': '故障趋势分析',
   'maintenance-order': '维修工单',
   'alert-center': '告警中心',
   'quality-overview': '质量总览',
   'inspection-batch': '检验批次',
+  'defect-analysis-report': '缺陷分析报表',
+  'process-capability-dashboard': '过程能力看板',
   'defect-analysis': '缺陷分析',
   'quality-event': '质量事件',
   'supplier-risk': '供应商风险',
   'supply-overview': '供应总览',
+  'material-impact-report': '物料影响报表',
+  'supply-risk-dashboard': '供应风险看板',
   'material-impact': '物料影响',
   'risk-review': '风险复核',
 };
@@ -342,6 +350,25 @@ function unwrapApplicationMenuRoot(items: MenuProps['items']): MenuProps['items'
     }
   }
   return items;
+}
+
+function findFirstDynamicMenuRoute(items: DynamicMenu[]): string | undefined {
+  for (const item of items) {
+    if (item.is_visible === false) continue;
+    if (item.route_path) return item.route_path;
+    const childRoute = item.children?.length ? findFirstDynamicMenuRoute(item.children) : undefined;
+    if (childRoute) return childRoute;
+  }
+  return undefined;
+}
+
+function getFallbackApplicationDefaultRoute(app: ApplicationInfo): string {
+  const fallbackItems =
+    groupedFallbackMenusByApplication[app.id]
+    || richFallbackMenusByApplication[app.id]
+    || fallbackMenusByApplication[app.id]
+    || [];
+  return findFirstDynamicMenuRoute(fallbackItems) || app.default_route || '/';
 }
 
 function AppContent() {
@@ -457,7 +484,10 @@ function AppContent() {
       .filter(Boolean);
   }, [allMenuItems]);
   const selectedKey = location.pathname;
-  const showRuntimePageBar = !['/', '/workflow', '/system-admin', '/account-center'].includes(location.pathname);
+  const showRuntimePageBar =
+    !location.pathname.startsWith('/program/')
+    && !location.pathname.startsWith('/form-settings/')
+    && !['/', '/workflow', '/system-admin', '/account-center'].includes(location.pathname);
   const runtimeTitle = getRuntimePageTitle(location.pathname);
 
 
@@ -492,7 +522,11 @@ function AppContent() {
   const switchApplication = (app: ApplicationInfo) => {
     setCurrentApplication(app);
     localStorage.setItem('mf_current_app_id', String(app.id));
-    navigate(app.default_route || '/');
+    const localMenus = loadAssemblyMenus()[app.id];
+    const defaultRoute = localMenus?.length
+      ? getAssemblyMenuDefaultRoute(localMenus) || getFallbackApplicationDefaultRoute(app)
+      : getFallbackApplicationDefaultRoute(app);
+    navigate(defaultRoute);
   };
 
   const applicationMenu: MenuProps = {
@@ -701,11 +735,12 @@ function AppContent() {
                   <Route path="/maintenance" element={<MaintenancePage />} />
                   <Route path="/quality" element={<QualityPage />} />
                   <Route path="/supply-chain" element={<SupplyChainPage />} />
-                  <Route path="/ai-assistant" element={<AIAssistantPage />} />
+                  <Route path="/ai-assistant" element={<Navigate to="/" replace />} />
                   <Route path="/account-center" element={<AccountCenterPage currentApplication={currentApplication} />} />
                   <Route path="/reports" element={<ReportCenterPage />} />
                   <Route path="/dynamic/:slug" element={<DynamicPage />} />
                   <Route path="/program/:programId" element={<AppProgramPage />} />
+                  <Route path="/form-settings/:formId" element={<FormSettingsPage />} />
                   <Route path="/system-admin" element={<SystemAdminPage />} />
                   <Route path="/workflow" element={<WorkflowPage />} />
                   <Route path="/templates" element={<TemplateMarketPage />} />
@@ -718,14 +753,7 @@ function AppContent() {
         </Content>
       </Layout>
 
-      <Button
-        className="ai-floating-button"
-        type="primary"
-        shape="circle"
-        icon={<RobotOutlined />}
-        onClick={() => navigate('/ai-assistant')}
-        aria-label="AI Assistant"
-      />
+      <AiChatWidget pageTitle={runtimeTitle} applicationName={currentApplication?.name} />
 
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </Layout>

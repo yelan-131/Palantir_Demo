@@ -21,12 +21,14 @@ import {
   Form,
   Input,
   Radio,
+  Row,
   Select,
   Space,
   Switch,
   Tabs,
   Tag,
   Typography,
+  Col,
   message,
 } from 'antd';
 import { useAuthStore } from '../../stores/authStore';
@@ -76,7 +78,7 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         key: 'ai',
         label: 'AI 与平台设置',
         icon: <RobotOutlined />,
-        children: <AIPlatformPanel />,
+        children: <AIPlatformPanelV2 />,
       },
       {
         key: 'app-menu',
@@ -354,6 +356,300 @@ function AIPlatformPanel() {
           </Button>
         </Form>
       </Card>
+    </div>
+  );
+}
+
+function AIPlatformPanelV2() {
+  const [form] = Form.useForm();
+  const savedSettings = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('mf_ai_assistant_settings') || '{}');
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const defaultSettings = {
+    aiEnabled: true,
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    organization: '',
+    project: '',
+    chatModel: 'gpt-4o-mini',
+    reasoningModel: 'gpt-4o',
+    embeddingModel: 'text-embedding-3-small',
+    visionModel: 'gpt-4o',
+    temperature: 'strict',
+    maxTokens: 2048,
+    timeoutSeconds: 30,
+    retryCount: 2,
+    streaming: true,
+    qaEnabled: true,
+    assistEnabled: true,
+    proactiveEnabled: false,
+    agentMode: 'draft',
+    domains: ['production', 'quality', 'maintenance', 'supply-chain'],
+    tools: ['query', 'report', 'draft'],
+    highRiskConfirm: true,
+    sensitiveMasking: true,
+    forbiddenActions: ['auto_order', 'delete_data', 'change_permission'],
+    ragEnabled: false,
+    knowledgeScopes: ['project_docs', 'sop'],
+    topK: 5,
+    similarityThreshold: '0.72',
+    auditEnabled: true,
+    recordToolCalls: true,
+    retentionDays: 90,
+    dailyLimit: 1000,
+    userDailyLimit: 100,
+  };
+
+  const handleSave = () => {
+    localStorage.setItem('mf_ai_assistant_settings', JSON.stringify(form.getFieldsValue()));
+    message.success('AI 设置已保存到本地 Demo 配置');
+  };
+
+  return (
+    <div className="account-admin-section">
+      <div className="account-section-title">
+        <RobotOutlined />
+        <div>
+          <Title level={4}>AI 设置</Title>
+          <Text type="secondary">Demo 阶段先保存到浏览器本地，后续可迁移到后端配置、权限与审计服务。</Text>
+        </div>
+      </div>
+
+      <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }}>
+        <div className="account-center-grid three-columns">
+          <Card size="small" title="基础连接" className="account-panel-card">
+            <Form.Item name="aiEnabled" label="启用 AI" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="provider" label="模型服务商">
+              <Select options={[
+                { label: 'OpenAI Compatible', value: 'openai-compatible' },
+                { label: 'OpenAI', value: 'openai' },
+                { label: 'Azure OpenAI', value: 'azure-openai' },
+                { label: 'DeepSeek', value: 'deepseek' },
+                { label: 'Qwen', value: 'qwen' },
+                { label: 'Local Model', value: 'local' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="baseUrl" label="Base URL">
+              <Input placeholder="https://api.openai.com/v1" />
+            </Form.Item>
+            <Form.Item name="apiKey" label="API Key">
+              <Input.Password placeholder="Demo 可留空，正式环境由后端密钥库托管" />
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="organization" label="Organization">
+                  <Input placeholder="可选" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="project" label="Project">
+                  <Input placeholder="可选" />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
+          <Card size="small" title="模型选择" className="account-panel-card">
+            <Form.Item name="chatModel" label="默认聊天模型">
+              <Select options={[
+                { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+                { label: 'gpt-4o', value: 'gpt-4o' },
+                { label: 'deepseek-chat', value: 'deepseek-chat' },
+                { label: 'qwen-plus', value: 'qwen-plus' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="reasoningModel" label="推理/Agent 模型">
+              <Select options={[
+                { label: 'gpt-4o', value: 'gpt-4o' },
+                { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+                { label: 'deepseek-reasoner', value: 'deepseek-reasoner' },
+                { label: 'qwen-max', value: 'qwen-max' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="embeddingModel" label="嵌入模型">
+              <Select options={[
+                { label: 'text-embedding-3-small', value: 'text-embedding-3-small' },
+                { label: 'text-embedding-3-large', value: 'text-embedding-3-large' },
+                { label: 'bge-m3', value: 'bge-m3' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="visionModel" label="视觉模型">
+              <Select options={[
+                { label: 'gpt-4o', value: 'gpt-4o' },
+                { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+                { label: '暂不启用', value: 'disabled' },
+              ]} />
+            </Form.Item>
+          </Card>
+
+          <Card size="small" title="生成参数" className="account-panel-card">
+            <Form.Item name="temperature" label="回答风格">
+              <Radio.Group optionType="button" buttonStyle="solid">
+                <Radio.Button value="strict">严谨</Radio.Button>
+                <Radio.Button value="balanced">均衡</Radio.Button>
+                <Radio.Button value="creative">发散</Radio.Button>
+              </Radio.Group>
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="maxTokens" label="Max Tokens">
+                  <Input type="number" min={256} max={16000} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="timeoutSeconds" label="超时秒数">
+                  <Input type="number" min={5} max={180} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item name="retryCount" label="失败重试次数">
+              <Select options={[
+                { label: '0 次', value: 0 },
+                { label: '1 次', value: 1 },
+                { label: '2 次', value: 2 },
+                { label: '3 次', value: 3 },
+              ]} />
+            </Form.Item>
+            <Form.Item name="streaming" label="流式输出" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Card>
+        </div>
+
+        <div className="account-center-grid three-columns">
+          <Card size="small" title="能力开关" className="account-panel-card">
+            <Form.Item name="qaEnabled" label="问答型 AI" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="assistEnabled" label="辅助型 AI" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="proactiveEnabled" label="主动型 AI" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="agentMode" label="Agent 执行模式">
+              <Select options={[
+                { label: '关闭', value: 'off' },
+                { label: '只读查询', value: 'readonly' },
+                { label: '仅生成草稿', value: 'draft' },
+                { label: '确认后执行', value: 'confirm' },
+                { label: '自动执行', value: 'auto', disabled: true },
+              ]} />
+            </Form.Item>
+          </Card>
+
+          <Card size="small" title="业务范围与工具" className="account-panel-card">
+            <Form.Item name="domains" label="可访问业务域">
+              <Select mode="multiple" options={[
+                { label: '生产态势', value: 'production' },
+                { label: '质量分析', value: 'quality' },
+                { label: '设备维护', value: 'maintenance' },
+                { label: '供应链风险', value: 'supply-chain' },
+                { label: '工作流审批', value: 'workflow' },
+                { label: '低代码配置', value: 'low-code' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="tools" label="允许调用工具">
+              <Select mode="multiple" options={[
+                { label: '查询业务数据', value: 'query' },
+                { label: '生成报告', value: 'report' },
+                { label: '生成单据草稿', value: 'draft' },
+                { label: '发起审批', value: 'workflow' },
+                { label: '修改配置', value: 'config' },
+                { label: '创建订单', value: 'order', disabled: true },
+              ]} />
+            </Form.Item>
+          </Card>
+
+          <Card size="small" title="安全策略" className="account-panel-card">
+            <Form.Item name="highRiskConfirm" label="高风险动作必须二次确认" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="sensitiveMasking" label="敏感字段脱敏" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="forbiddenActions" label="禁止动作清单">
+              <Select mode="multiple" options={[
+                { label: '自动下单', value: 'auto_order' },
+                { label: '删除数据', value: 'delete_data' },
+                { label: '修改权限', value: 'change_permission' },
+                { label: '发布配置', value: 'publish_config' },
+              ]} />
+            </Form.Item>
+          </Card>
+        </div>
+
+        <div className="account-center-grid three-columns">
+          <Card size="small" title="知识库 / RAG" className="account-panel-card">
+            <Form.Item name="ragEnabled" label="启用知识库问答" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="knowledgeScopes" label="知识范围">
+              <Select mode="multiple" options={[
+                { label: '项目文档', value: 'project_docs' },
+                { label: '业务 SOP', value: 'sop' },
+                { label: '设备手册', value: 'equipment_manuals' },
+                { label: '供应商协议', value: 'supplier_contracts' },
+                { label: 'API 文档', value: 'api_docs' },
+              ]} />
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="topK" label="Top K">
+                  <Input type="number" min={1} max={20} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="similarityThreshold" label="相似度阈值">
+                  <Input />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
+          <Card size="small" title="审计与历史" className="account-panel-card">
+            <Form.Item name="auditEnabled" label="保存对话日志" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="recordToolCalls" label="记录工具调用" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="retentionDays" label="历史保留天数">
+              <Select options={[
+                { label: '30 天', value: 30 },
+                { label: '90 天', value: 90 },
+                { label: '180 天', value: 180 },
+                { label: '365 天', value: 365 },
+              ]} />
+            </Form.Item>
+          </Card>
+
+          <Card size="small" title="成本与额度" className="account-panel-card">
+            <Form.Item name="dailyLimit" label="平台每日调用上限">
+              <Input type="number" min={1} />
+            </Form.Item>
+            <Form.Item name="userDailyLimit" label="单用户每日调用上限">
+              <Input type="number" min={1} />
+            </Form.Item>
+            <Space>
+              <Button icon={<ApiOutlined />} onClick={() => message.success('Demo 连通性检查通过')}>
+                测试连接
+              </Button>
+              <Button type="primary" icon={<RobotOutlined />} onClick={handleSave}>
+                保存 AI 设置
+              </Button>
+            </Space>
+          </Card>
+        </div>
+      </Form>
     </div>
   );
 }

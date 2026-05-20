@@ -88,6 +88,7 @@ from app.api import (  # noqa: E402
     config_io,
     dashboard,
     data_sources,
+    forms,
     graph,
     maintenance,
     model_driven,
@@ -112,6 +113,7 @@ app.include_router(workflow.router, prefix="/api/v1/workflow", tags=["工作流"
 
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["applications"])
 app.include_router(applications.admin_router, prefix="/api/v1/admin", tags=["applications-admin"])
+app.include_router(forms.router, prefix="/api/v1/forms", tags=["forms"])
 
 # Data foundation
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["数据源管理"])

@@ -282,4 +282,192 @@ export const crossEntitySearch = (q: string, models?: string) =>
 export const suggestModel = (description: string) => api.post('/ai-builder/suggest-model', { description });
 export const suggestPage = (modelName: string) => api.post('/ai-builder/suggest-page', { model_name: modelName });
 
+// Platform Forms
+export type PlatformFormStatus = 'draft' | 'active' | 'archived';
+export type PlatformFieldType =
+  | 'string'
+  | 'text'
+  | 'number'
+  | 'integer'
+  | 'decimal'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'enum'
+  | 'json'
+  | 'relation';
+
+export interface PlatformFormField {
+  id: number;
+  form_id: number;
+  field_name: string;
+  label: string;
+  field_type: PlatformFieldType | string;
+  required: boolean;
+  visible_in_list: boolean;
+  visible_in_form: boolean;
+  searchable: boolean;
+  sortable: boolean;
+  archived: boolean;
+  default_value?: string | null;
+  enum_values?: Record<string, unknown> | null;
+  validation?: Record<string, unknown> | null;
+  ui_config?: Record<string, unknown> | null;
+  sort_order: number;
+}
+
+export interface PlatformForm {
+  id: number;
+  name: string;
+  code: string;
+  description?: string | null;
+  model_id?: number | null;
+  table_name?: string | null;
+  status: PlatformFormStatus | string;
+  config?: Record<string, unknown> | null;
+  owner_id?: number | null;
+  fields?: PlatformFormField[];
+  applications?: Array<Record<string, unknown>>;
+}
+
+export interface PlatformMenuNode {
+  id: number;
+  application_id: number;
+  parent_id?: number | null;
+  node_type: 'group' | 'form' | string;
+  title: string;
+  icon?: string | null;
+  form_id?: number | null;
+  route_path?: string | null;
+  visible: boolean;
+  default_entry: boolean;
+  sort_order: number;
+  config?: Record<string, unknown> | null;
+}
+
+export interface PlatformDynamicRecord {
+  id: number;
+  form_id: number;
+  data: Record<string, unknown>;
+  status: string;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PlatformApplicationFormBinding {
+  id: number;
+  application_id: number;
+  form_id: number;
+  alias?: string | null;
+  enabled: boolean;
+  default_view: string;
+  data_scope?: string | null;
+  allow_create: boolean;
+  allow_edit: boolean;
+  allow_delete: boolean;
+  allow_export: boolean;
+  sort_order: number;
+  form?: PlatformForm | null;
+}
+
+export const listPlatformForms = (params?: { application_id?: number }) =>
+  api.get('/forms', { params });
+export const createPlatformForm = (data: Record<string, unknown>) =>
+  api.post('/forms', data);
+export const getPlatformForm = (id: number | string) =>
+  api.get(`/forms/${id}`);
+export const updatePlatformForm = (id: number | string, data: Record<string, unknown>) =>
+  api.put(`/forms/${id}`, data);
+export const deletePlatformForm = (id: number | string) =>
+  api.delete(`/forms/${id}`);
+
+export const listApplicationFormBindings = (applicationId: number | string) =>
+  api.get(`/forms/applications/${applicationId}/forms`);
+export const upsertApplicationFormBinding = (applicationId: number | string, data: Record<string, unknown>) =>
+  api.put(`/forms/applications/${applicationId}/forms`, data);
+export const deleteApplicationFormBinding = (applicationId: number | string, formId: number | string) =>
+  api.delete(`/forms/applications/${applicationId}/forms/${formId}`);
+
+export const createPlatformFormField = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/fields`, data);
+export const updatePlatformFormField = (
+  formId: number | string,
+  fieldId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/fields/${fieldId}`, data);
+export const archivePlatformFormField = (formId: number | string, fieldId: number | string) =>
+  api.delete(`/forms/${formId}/fields/${fieldId}`);
+
+export const listPlatformFormLayouts = (formId: number | string) =>
+  api.get(`/forms/${formId}/layouts`);
+export const upsertPlatformFormLayout = (
+  formId: number | string,
+  layoutType: string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/layouts/${layoutType}`, data);
+
+export const listPlatformFormActions = (formId: number | string) =>
+  api.get(`/forms/${formId}/actions`);
+export const upsertPlatformFormAction = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/actions`, data);
+export const updatePlatformFormAction = (
+  formId: number | string,
+  actionId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/actions/${actionId}`, data);
+export const deletePlatformFormAction = (formId: number | string, actionId: number | string) =>
+  api.delete(`/forms/${formId}/actions/${actionId}`);
+
+export const listPlatformFormPermissions = (formId: number | string) =>
+  api.get(`/forms/${formId}/permissions`);
+export const upsertPlatformFormPermission = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/permissions`, data);
+export const updatePlatformFormPermission = (
+  formId: number | string,
+  permissionId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/permissions/${permissionId}`, data);
+export const deletePlatformFormPermission = (formId: number | string, permissionId: number | string) =>
+  api.delete(`/forms/${formId}/permissions/${permissionId}`);
+
+export const listPlatformDynamicRecords = (formId: number | string, params?: Record<string, unknown>) =>
+  api.get(`/forms/${formId}/records`, { params });
+export const createPlatformDynamicRecord = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/records`, { data });
+export const getPlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
+  api.get(`/forms/${formId}/records/${recordId}`);
+export const updatePlatformDynamicRecord = (
+  formId: number | string,
+  recordId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/records/${recordId}`, { data });
+export const deletePlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
+  api.delete(`/forms/${formId}/records/${recordId}`);
+
+export const listPlatformMenuNodes = (applicationId: number | string) =>
+  api.get(`/forms/applications/${applicationId}/menu-nodes`);
+export const createPlatformMenuNode = (applicationId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/applications/${applicationId}/menu-nodes`, data);
+export const updatePlatformMenuNode = (
+  applicationId: number | string,
+  nodeId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`, data);
+export const deletePlatformMenuNode = (applicationId: number | string, nodeId: number | string) =>
+  api.delete(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`);
+
+export const listWorkflowBindings = (formId: number | string) =>
+  api.get(`/forms/${formId}/workflow-bindings`);
+export const upsertWorkflowBinding = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/workflow-bindings`, data);
+export const updateWorkflowBinding = (
+  formId: number | string,
+  bindingId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/workflow-bindings/${bindingId}`, data);
+export const deleteWorkflowBinding = (formId: number | string, bindingId: number | string) =>
+  api.delete(`/forms/${formId}/workflow-bindings/${bindingId}`);
+
 export default api;
