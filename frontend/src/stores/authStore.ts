@@ -61,7 +61,7 @@ export function isAdmin(user: UserInfo | null): boolean {
 }
 
 export function getVisibleMenus(user: UserInfo | null) {
-  const adminOnly = new Set(['system-admin', 'model-driven']);
+  const adminOnly = new Set(['system-admin']);
   const techMenus = new Set(['data-sources', 'ontology', 'graph', 'pipeline']);
 
   return (menu: { key: string }) => {

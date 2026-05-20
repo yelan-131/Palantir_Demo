@@ -191,6 +191,50 @@ button {
   white-space: normal;
 }
 
+.user-menu-header {
+  width: 240px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.user-menu-header strong,
+.user-menu-header span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-header strong {
+  color: var(--mf-text);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.user-menu-header span {
+  margin-bottom: 6px;
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
+.account-drawer-head {
+  margin-bottom: 18px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.account-drawer-head h4 {
+  margin: 0 0 4px !important;
+}
+
+.settings-section-card + .settings-section-card {
+  margin-top: 14px;
+}
+
 .ai-floating-button {
   position: fixed;
   right: 24px;
@@ -1497,16 +1541,71 @@ button {
 }
 
 /* Application, form, and menu assembly */
+.system-admin-page {
+  height: calc(100vh / var(--app-ui-scale) - 64px - (var(--density-content-pad) * 2));
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+}
+
+.system-admin-page > .ant-tabs-content-holder,
+.system-admin-page > .ant-tabs-content-holder > .ant-tabs-content,
+.system-admin-page > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+}
+
+.system-admin-page > .ant-tabs-content-holder,
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder {
+  display: flex;
+  flex-direction: column;
+}
+
+.system-admin-page > .ant-tabs-content-holder > .ant-tabs-content,
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.system-admin-page > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
+}
+
 .app-admin-workspace {
-  --admin-panel-height: max(540px, calc(100vh - 330px));
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-admin-workspace .ant-tabs-nav {
   margin-bottom: 16px;
 }
 
+.app-admin-workspace > .ant-tabs,
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder,
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+}
+
+.app-admin-workspace > .ant-tabs {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-admin-workspace > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
+}
+
 .config-management-grid {
-  min-height: var(--admin-panel-height);
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .config-management-grid > .ant-col {
@@ -1528,8 +1627,8 @@ button {
 .config-list-card {
   display: flex;
   flex-direction: column;
-  height: var(--admin-panel-height);
-  min-height: 540px;
+  height: 100%;
+  min-height: 0;
 }
 
 .config-list-card .ant-card-body {
@@ -1603,8 +1702,8 @@ button {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: var(--admin-panel-height);
-  min-height: 540px;
+  height: 100%;
+  min-height: 0;
 }
 
 .config-editor-stack > .ant-space-item {
@@ -1717,10 +1816,11 @@ button {
 }
 
 .app-assembly-workspace {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: var(--admin-panel-height);
 }
 
 .assembly-help {
@@ -1743,8 +1843,8 @@ button {
 .assembly-property-card {
   display: flex;
   flex-direction: column;
-  height: var(--admin-panel-height);
-  min-height: 540px;
+  height: 100%;
+  min-height: 0;
   border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #fff;
@@ -1777,6 +1877,11 @@ button {
 
 .assembly-grid > .ant-col {
   display: flex;
+}
+
+.assembly-grid {
+  flex: 1;
+  min-height: 0;
 }
 
 .assembly-grid > .ant-col > .ant-card {
@@ -1958,4 +2063,561 @@ button {
   border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #fbfcfd;
+}
+
+
+.account-center-page {
+  height: calc(100vh / var(--app-ui-scale) - 64px - (var(--density-content-pad) * 2));
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-center-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border: 1px solid #e5ebef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.account-center-head h3 {
+  margin: 0 0 4px;
+}
+
+.account-center-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs > .ant-tabs-content-holder,
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+}
+
+.account-center-tabs > .ant-tabs-content-holder {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs .app-admin-workspace,
+.account-center-tabs .semantic-asset-center {
+  flex: 1;
+  min-height: 0;
+}
+
+.account-center-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.account-center-grid.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.account-center-grid.three-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-panel-card {
+  height: 100%;
+  border-radius: 8px;
+}
+
+.account-switch-list {
+  width: 100%;
+}
+
+.account-switch-list span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #273640;
+}
+
+@media (max-width: 1100px) {
+  .account-center-grid.two-columns,
+  .account-center-grid.three-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.account-admin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #e5ebef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.account-section-title > .anticon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #2f5f73;
+  background: #eef6f8;
+}
+
+.account-section-title h4 {
+  margin: 0 0 2px;
+}
+
+
+.personal-workspace-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-hero-row {
+  min-height: 74px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workspace-hero-row h3 {
+  margin: 0 0 4px !important;
+}
+
+.approval-bucket-card,
+.favorite-entry-card {
+  width: 100%;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+}
+
+.approval-bucket-card:hover,
+.favorite-entry-card:hover {
+  border-color: #8fb7c4;
+  box-shadow: 0 8px 22px rgba(31, 44, 52, 0.08);
+  transform: translateY(-1px);
+}
+
+.approval-bucket-card {
+  min-height: 158px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.approval-bucket-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.approval-bucket-head strong {
+  color: var(--mf-text);
+  font-size: 15px;
+}
+
+.approval-bucket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.approval-bucket-list em {
+  color: var(--mf-muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 18px;
+}
+
+.favorite-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.favorite-entry-card {
+  min-height: 116px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.favorite-entry-icon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #2f5f73;
+  background: #eef6f8;
+}
+
+.favorite-entry-card strong,
+.favorite-entry-card small,
+.favorite-entry-card em {
+  display: block;
+}
+
+.favorite-entry-card strong {
+  color: var(--mf-text);
+  font-size: 14px;
+}
+
+.favorite-entry-card small,
+.favorite-entry-card em {
+  color: var(--mf-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.favorite-entry-card em {
+  grid-column: 2 / 4;
+}
+
+.watched-metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.watched-metric-row .ant-progress {
+  grid-column: 1 / 3;
+}
+
+.recent-activity-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recent-activity-item {
+  padding: 12px;
+  border: 0;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 6px 10px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.recent-activity-item span {
+  color: #2f5f73;
+}
+
+.recent-activity-item strong {
+  color: var(--mf-text);
+  font-size: 13px;
+}
+
+.recent-activity-item em {
+  grid-column: 2;
+  color: var(--mf-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.notification-menu-item {
+  max-width: 340px;
+  min-width: 300px;
+}
+
+.workflow-page {
+  height: calc(100vh / var(--app-ui-scale) - 64px - (var(--density-content-pad) * 2));
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workflow-hero-row {
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-hero-row h3 {
+  margin: 0 0 4px !important;
+}
+
+.workflow-status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workflow-status-card {
+  min-height: 86px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+}
+
+.workflow-status-card:hover,
+.workflow-status-card.active {
+  border-color: #8fb7c4;
+  box-shadow: 0 8px 22px rgba(31, 44, 52, 0.08);
+  transform: translateY(-1px);
+}
+
+.workflow-status-icon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #2f5f73;
+  background: #eef6f8;
+}
+
+.workflow-status-card strong,
+.workflow-status-card small {
+  display: block;
+}
+
+.workflow-status-card strong {
+  color: var(--mf-text);
+  font-size: 15px;
+}
+
+.workflow-status-card small {
+  margin-top: 3px;
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
+.workflow-main-grid {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+}
+
+.workflow-list-card,
+.workflow-detail-card {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-list-card .ant-card-body,
+.workflow-detail-card .ant-card-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.workflow-list-card .ant-tabs {
+  margin-top: -8px;
+}
+
+.workflow-selected-row td {
+  background: #eef6f8 !important;
+}
+
+.workflow-detail-head {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  border-radius: 8px;
+  background: #f7fafb;
+}
+
+.workflow-detail-head > .anticon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #2f5f73;
+  background: #eef6f8;
+}
+
+.workflow-detail-head .ant-typography {
+  display: block;
+}
+
+.workflow-detail-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.workflow-detail-meta span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
+.workflow-detail-meta strong {
+  color: var(--mf-text);
+  font-size: 13px;
+}
+
+.workflow-step-item strong,
+.workflow-step-item span {
+  display: block;
+}
+
+.workflow-step-item strong {
+  color: var(--mf-text);
+  font-size: 13px;
+}
+
+.workflow-step-item span {
+  color: var(--mf-muted);
+  font-size: 12px;
+}
+
+.workflow-empty-detail {
+  height: 100%;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--mf-muted);
+}
+
+@media (max-width: 900px) {
+  .workspace-hero-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .recent-activity-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.approval-bucket-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.watched-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.recent-status-card {
+  height: 100%;
+}
+
+.recent-status-card .ant-card-body {
+  height: calc(100% - 46px);
+}
+
+.recent-activity-list.vertical {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recent-activity-list.vertical .recent-activity-item {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (max-width: 1280px) {
+  .approval-bucket-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .favorite-entry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workflow-main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .approval-bucket-grid,
+  .favorite-entry-grid,
+  .watched-metric-grid,
+  .workflow-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-page {
+    height: auto;
+  }
+
+  .workflow-hero-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

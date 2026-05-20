@@ -32,7 +32,6 @@ const SEARCH_ITEMS: SearchItem[] = [
   { key: '/maintenance', label: '设备维护', icon: <ToolOutlined />, category: '业务分析' },
   { key: '/quality', label: '质量分析', icon: <SafetyCertificateOutlined />, category: '业务分析' },
   { key: '/supply-chain', label: '供应链风险', icon: <ShopOutlined />, category: '业务分析' },
-  { key: '/model-driven', label: 'App Builder', icon: <AppstoreOutlined />, category: '低代码配置' },
   { key: '/ontology', label: 'Data Modeler', icon: <ApartmentOutlined />, category: '低代码配置' },
   { key: '/reports', label: 'Report Designer', icon: <BarChartOutlined />, category: '低代码配置' },
   { key: '/rules', label: 'Rule Builder', icon: <ThunderboltOutlined />, category: '低代码配置' },
@@ -41,7 +40,6 @@ const SEARCH_ITEMS: SearchItem[] = [
   { key: '/graph', label: 'Graph Explorer', icon: <NodeIndexOutlined />, category: '数据资产' },
   { key: '/ai-assistant', label: 'AI Assistant', icon: <RobotOutlined />, category: '工具' },
   { key: '/templates', label: '模板市场', icon: <AppstoreOutlined />, category: '工具' },
-  { key: '/my-applications', label: '我的申请', icon: <UserOutlined />, category: '个人空间' },
   { key: '/system-admin', label: '系统管理', icon: <SettingOutlined />, category: '管理' },
 ];
 

@@ -7,6 +7,7 @@ import UserManagement from './UserManagement';
 export default function SystemAdmin() {
   return (
     <Tabs
+      className="system-admin-page"
       defaultActiveKey="app-menu"
       items={[
         { key: 'app-menu', label: '应用与菜单', children: <AppMenuManagement /> },

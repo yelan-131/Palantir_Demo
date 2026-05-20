@@ -1,256 +1,126 @@
 import {
   AppstoreOutlined,
   BarChartOutlined,
-  CheckCircleOutlined,
   ClockCircleOutlined,
-  DatabaseOutlined,
-  EditOutlined,
-  ExperimentOutlined,
   FileDoneOutlined,
   FormOutlined,
-  LayoutOutlined,
-  NodeIndexOutlined,
+  ReloadOutlined,
   RocketOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
-  ThunderboltOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Col, Progress, Row, Space, Tag, Typography } from 'antd';
+import { Button, Card, Col, Empty, Progress, Row, Space, Tag, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
 
-const workspaceCards = [
-  { label: '流程中心', value: '9', detail: '4 个待审批', icon: <CheckCircleOutlined />, path: '/workflow' },
-  { label: '我的应用', value: '12', detail: '3 个本周更新', icon: <AppstoreOutlined />, path: '/my-applications' },
-  { label: '模板市场', value: '28', detail: '可复用页面模板', icon: <FileDoneOutlined />, path: '/templates' },
-  { label: '配置中心', value: '18', detail: '页面、流程、权限配置', icon: <SettingOutlined />, path: '/model-driven?target=/' },
+const approvalBuckets = [
+  { key: 'pending', title: '待审批', count: 6, tone: 'warning', path: '/workflow?tab=pending', items: ['设备维修审批 - 产线 A03', '质量异常复核 - Q-20260520', '供应商准入审批 - 星河精密'] },
+  { key: 'running', title: '审批中', count: 9, tone: 'processing', path: '/workflow?tab=running', items: ['物料采购申请 - MRO-1842', '设备点检补录 - EQ-331', '质量 CAPA 跟踪 - CAPA-072'] },
+  { key: 'done', title: '已审批', count: 24, tone: 'success', path: '/workflow?tab=done', items: ['维修工单关闭 - WO-771', '供应风险复核 - SR-096', '质量异常结案 - QA-581'] },
+  { key: 'draft', title: '草稿', count: 3, tone: 'default', path: '/workflow?tab=draft', items: ['设备巡检记录草稿', '供应商评分草稿', '质量复验申请草稿'] },
+  { key: 'returned', title: '退回待修改', count: 2, tone: 'error', path: '/workflow?tab=returned', items: ['维修申请退回 - 缺少照片', '采购申请退回 - 预算口径待补充'] },
 ];
 
-const formConfigs = [
-  {
-    name: '设备点检表单',
-    domain: '设备维护',
-    fields: 24,
-    layout: '两栏布局',
-    workflow: '点检审批',
-    status: '已发布',
-    path: '/model-driven?target=/maintenance',
-  },
-  {
-    name: '质量检验表单',
-    domain: '质量分析',
-    fields: 31,
-    layout: '分组表单',
-    workflow: '异常复核',
-    status: '配置中',
-    path: '/model-driven?target=/quality',
-  },
-  {
-    name: '供应商评估表单',
-    domain: '供应链风险',
-    fields: 18,
-    layout: '评分矩阵',
-    workflow: '准入审批',
-    status: '草稿',
-    path: '/model-driven?target=/supply-chain',
-  },
-  {
-    name: '生产态势页面',
-    domain: '生产管理',
-    fields: 7,
-    layout: '指标与图表',
-    workflow: '告警处置',
-    status: '已发布',
-    path: '/model-driven?target=/dashboard',
-  },
+const favoriteForms = [
+  { title: '设备维修申请', type: '业务交互类', app: '设备维护分析', recent: '今天 09:18', icon: <FormOutlined />, path: '/dynamic/device-repair-request' },
+  { title: '质量异常看板', type: '分析展示类', app: '质量控制', recent: '昨天 16:40', icon: <BarChartOutlined />, path: '/quality?view=defects' },
+  { title: '供应风险复核', type: '业务交互类', app: '供应链风险', recent: '周一 11:05', icon: <SafetyCertificateOutlined />, path: '/supply-chain?view=review' },
+  { title: '生产日报', type: '报表', app: '生产驾驶舱', recent: '5 月 19 日', icon: <FileDoneOutlined />, path: '/reports' },
 ];
 
-const builderEntries = [
-  {
-    title: '表单设置',
-    subtitle: '配置字段、控件、布局、显隐规则和数据绑定',
-    icon: <FormOutlined />,
-    path: '/model-driven?target=/maintenance',
-    nodes: ['字段', '布局', '规则'],
-  },
-  {
-    title: '数据模型',
-    subtitle: '为页面组件绑定实体、字段和关系',
-    icon: <NodeIndexOutlined />,
-    path: '/ontology',
-    nodes: ['Entity', 'Field', 'Relation'],
-  },
-  {
-    title: '分析页面',
-    subtitle: '把业务数据组合成指标、图表和报表',
-    icon: <BarChartOutlined />,
-    path: '/reports',
-    nodes: ['KPI', 'Chart', 'Filter'],
-  },
-  {
-    title: '流程与权限',
-    subtitle: '配置审批流、角色、发布范围和审计',
-    icon: <ThunderboltOutlined />,
-    path: '/rules',
-    nodes: ['Workflow', 'Role', 'Audit'],
-  },
+const watchedMetrics = [
+  { label: '设备健康率', value: 92, suffix: '%', tone: '#2f5f73' },
+  { label: '质量异常数', value: 7, suffix: ' 项', tone: '#c47f2c' },
+  { label: '供应风险数', value: 5, suffix: ' 项', tone: '#b54747' },
+  { label: '数据同步成功率', value: 98, suffix: '%', tone: '#3f7f5f' },
 ];
 
-const platformSignals = [
-  { label: '表单发布率', value: '72%', tone: 'good' },
-  { label: '模型同步', value: '12 min ago', tone: 'good' },
-  { label: '异常告警', value: '5', tone: 'warn' },
-  { label: '待审批配置', value: '4', tone: 'info' },
+const recentActivities = [
+  { title: '设备维修审批已进入主管复核', time: '10 分钟前', icon: <ClockCircleOutlined />, path: '/workflow?tab=running' },
+  { title: '质量异常看板收藏入口已更新', time: '38 分钟前', icon: <StarOutlined />, path: '/quality?view=defects' },
+  { title: 'AI 已生成供应风险摘要', time: '1 小时前', icon: <RocketOutlined />, path: '/ai-assistant' },
+  { title: '采购申请被退回，等待补充预算口径', time: '2 小时前', icon: <ClockCircleOutlined />, path: '/workflow?tab=returned' },
+  { title: '生产日报已完成生成', time: '昨天 17:30', icon: <FileDoneOutlined />, path: '/reports' },
 ];
 
 export default function WorkspacePage() {
   const navigate = useNavigate();
 
   return (
-    <div className="workspace-page">
-      <Row gutter={[16, 16]}>
-        {workspaceCards.map((card) => (
-          <Col xs={24} sm={12} lg={6} key={card.label}>
-            <Card className="metric-card workspace-action-card" variant="borderless" onClick={() => navigate(card.path)}>
-              <span className="metric-icon">{card.icon}</span>
-              <div>
-                <span className="metric-label">{card.label}</span>
-                <strong>{card.value}</strong>
-                <small>{card.detail}</small>
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
+    <div className="workspace-page personal-workspace-page">
+      <section className="workspace-hero-row">
+        <div>
+          <Typography.Title level={3}>我的工作台</Typography.Title>
+          <Typography.Text type="secondary">聚合当前用户相关的审批、收藏表单、关注指标和最近状态。</Typography.Text>
+        </div>
+        <Space>
+          <Button icon={<ReloadOutlined />}>刷新</Button>
+          <Button type="primary" icon={<AppstoreOutlined />} onClick={() => navigate('/account-center?section=app-menu')}>管理应用入口</Button>
+        </Space>
+      </section>
+
+      <Card className="workspace-section" title="待办与审批" extra={<Button type="link" onClick={() => navigate('/workflow')}>查看流程中心</Button>}>
+        <div className="approval-bucket-grid">
+          {approvalBuckets.map((bucket) => (
+            <button className={'approval-bucket-card approval-' + bucket.key} key={bucket.key} onClick={() => navigate(bucket.path)}>
+              <span className="approval-bucket-head">
+                <strong>{bucket.title}</strong>
+                <Tag color={bucket.tone}>{bucket.count}</Tag>
+              </span>
+              <span className="approval-bucket-list">
+                {bucket.items.slice(0, 3).map((item) => <em key={item}>{item}</em>)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="workspace-section" title="收藏的表单" extra={<Tag icon={<StarOutlined />}>来自收藏</Tag>}>
+        {favoriteForms.length ? (
+          <div className="favorite-entry-grid">
+            {favoriteForms.map((entry) => (
+              <button className="favorite-entry-card" key={entry.title} onClick={() => navigate(entry.path)}>
+                <span className="favorite-entry-icon">{entry.icon}</span>
+                <span>
+                  <strong>{entry.title}</strong>
+                  <small>{entry.app}</small>
+                </span>
+                <Tag color={entry.type === '分析展示类' ? 'blue' : entry.type === '业务交互类' ? 'green' : 'purple'}>{entry.type}</Tag>
+                <em>最近访问：{entry.recent}</em>
+              </button>
+            ))}
+          </div>
+        ) : <Empty description="暂无收藏表单，可在业务页面或应用装配中收藏常用表单" />}
+      </Card>
 
       <Row gutter={[16, 16]} align="stretch">
         <Col xs={24} xl={16}>
-          <Card
-            className="workspace-section"
-            title="表单级低代码配置"
-            extra={<Button type="link" icon={<SettingOutlined />} onClick={() => navigate('/model-driven?target=/')}>配置工作台</Button>}
-          >
-            <div className="form-config-grid">
-              {formConfigs.map((form) => (
-                <button className="form-config-card" key={form.name} onClick={() => navigate(form.path)}>
-                  <div className="form-config-head">
-                    <span>
-                      <strong>{form.name}</strong>
-                      <small>{form.domain}</small>
-                    </span>
-                    <Tag color={form.status === '已发布' ? 'success' : form.status === '配置中' ? 'processing' : 'warning'}>
-                      {form.status}
-                    </Tag>
-                  </div>
-                  <div className="form-config-meta">
-                    <em><EditOutlined /> {form.fields} 个组件</em>
-                    <em><LayoutOutlined /> {form.layout}</em>
-                    <em><FileDoneOutlined /> {form.workflow}</em>
-                  </div>
-                  <div className="form-config-actions">
-                    <span>配置组件</span>
-                    <span>配置流程</span>
-                    <span>配置权限</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <Card
-            className="workspace-section"
-            title="配置能力地图"
-            extra={<Button type="link" onClick={() => navigate('/model-driven?target=/maintenance')}>打开配置中心</Button>}
-          >
-            <Row gutter={[12, 12]}>
-              {builderEntries.map((entry) => (
-                <Col xs={24} md={12} key={entry.title}>
-                  <button className="builder-tile" onClick={() => navigate(entry.path)}>
-                    <span className="builder-tile-icon">{entry.icon}</span>
-                    <span>
-                      <strong>{entry.title}</strong>
-                      <small>{entry.subtitle}</small>
-                    </span>
-                    <div className="builder-flow">
-                      {entry.nodes.map((node) => (
-                        <em key={node}>{node}</em>
-                      ))}
-                    </div>
-                  </button>
-                </Col>
-              ))}
-            </Row>
-          </Card>
-
-          <Card className="workspace-section canvas-preview-card" title="页面组件配置预览">
-            <div className="builder-preview">
-              <aside>
-                <span>组件库</span>
-                <em><DatabaseOutlined /> 指标卡</em>
-                <em><BarChartOutlined /> 分析图表</em>
-                <em><ExperimentOutlined /> 规则校验</em>
-              </aside>
-              <main>
-                <div className="preview-toolbar">
-                  <span>设备维护页面</span>
-                  <Tag color="processing">Draft</Tag>
+          <Card className="workspace-section" title="测试关注的指标">
+            <div className="watched-metric-grid">
+              {watchedMetrics.map((metric) => (
+                <div className="watched-metric-row" key={metric.label}>
+                  <span>{metric.label}</span>
+                  <strong>{metric.value}{metric.suffix}</strong>
+                  <Progress percent={Math.min(metric.value, 100)} showInfo={false} strokeColor={metric.tone} />
                 </div>
-                <div className="preview-grid">
-                  <div className="preview-kpi">健康设备<strong>128</strong></div>
-                  <div className="preview-kpi">预警设备<strong>14</strong></div>
-                  <div className="preview-chart" />
-                  <div className="preview-table" />
-                </div>
-              </main>
-              <aside>
-                <span>配置项</span>
-                <em>数据源: equipment_health</em>
-                <em>联动: 工厂 / 产线 / 设备</em>
-                <em>权限: 生产经理 / 维修员</em>
-              </aside>
+              ))}
             </div>
           </Card>
         </Col>
 
         <Col xs={24} xl={8}>
-          <Card className="workspace-section" title="平台状态">
-            <div className="signal-list">
-              {platformSignals.map((signal) => (
-                <div className={`signal-item signal-${signal.tone}`} key={signal.label}>
-                  <span>{signal.label}</span>
-                  <strong>{signal.value}</strong>
-                </div>
+          <Card className="workspace-section recent-status-card" title="最近状态">
+            <div className="recent-activity-list vertical">
+              {recentActivities.map((activity) => (
+                <button className="recent-activity-item" key={activity.title} onClick={() => navigate(activity.path)}>
+                  <span>{activity.icon}</span>
+                  <strong>{activity.title}</strong>
+                  <em>{activity.time}</em>
+                </button>
               ))}
             </div>
-            <DividerLine />
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <div className="health-row">
-                <span><SafetyCertificateOutlined /> 配置健康度</span>
-                <strong>92</strong>
-              </div>
-              <Progress percent={92} showInfo={false} strokeColor="#2f5f73" />
-              <div className="health-row">
-                <span><ClockCircleOutlined /> 最近发布</span>
-                <Tag color="success">设备点检表单</Tag>
-              </div>
-            </Space>
-          </Card>
-
-          <Card className="workspace-section launch-card" variant="borderless">
-            <RocketOutlined />
-            <Typography.Title level={4}>从一个业务页面开始</Typography.Title>
-            <Typography.Paragraph>
-              先配置页面组件，再绑定数据模型、流程和权限，最后发布成可用的业务页面。
-            </Typography.Paragraph>
-            <Button block type="primary" onClick={() => navigate('/model-driven?target=/maintenance')}>
-              新建页面配置
-            </Button>
           </Card>
         </Col>
       </Row>
     </div>
   );
-}
-
-function DividerLine() {
-  return <div className="divider-line" />;
 }

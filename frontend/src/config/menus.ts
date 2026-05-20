@@ -31,7 +31,6 @@ export const BREADCRUMB_MAP: Record<string, string> = {
   '/maintenance': '设备维护',
   '/quality': '质量分析',
   '/supply-chain': '供应链风险',
-  '/model-driven': '表单配置中心',
   '/reports': '报表中心',
   '/templates': '模板市场',
   '/rules': '规则引擎',
@@ -42,7 +41,6 @@ export const BREADCRUMB_MAP: Record<string, string> = {
   '/pipeline': '数据管道',
   '/system-admin': '系统管理',
   '/workflow': '流程中心',
-  '/my-applications': '我的应用',
 };
 
 export const APPROVAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
