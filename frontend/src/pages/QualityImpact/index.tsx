@@ -17,7 +17,6 @@ import {
 } from 'antd';
 import {
   ApiOutlined,
-  BranchesOutlined,
   CheckCircleOutlined,
   ControlOutlined,
   FileProtectOutlined,
@@ -472,10 +471,6 @@ export default function QualityImpactWorkbench() {
               <span>任务处置轴</span>
               <strong>当前停在：影响分析</strong>
               <span>后续动作：确认 AI 建议 → 生成 CAPA → 进入审批</span>
-            </div>
-            <div className="quality-config-link">
-              <BranchesOutlined />
-              <span>对象、关系、动作和角色配置由后台低代码配置中心维护，此处只展示业务处置结果。</span>
             </div>
           </div>
         </Card>

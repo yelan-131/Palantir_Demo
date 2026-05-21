@@ -36,10 +36,10 @@ interface QualityEvent {
 
 const roleCards = {
   admin: [
-    { title: '业务对象配置', desc: '维护 QualityEvent、Defect、CAPA 等对象', icon: <NodeIndexOutlined />, path: '/account-center?section=data-ontology', tone: 'blue' },
-    { title: '对象关系配置', desc: '配置缺陷、批次、供应商、工单、订单关系', icon: <BranchesOutlined />, path: '/account-center?section=data-ontology', tone: 'green' },
-    { title: '业务动作配置', desc: '发布 CAPA、冻结批次、复检、通知动作', icon: <ControlOutlined />, path: '/account-center?section=app-menu', tone: 'orange' },
-    { title: 'AI 能力配置', desc: '控制 AI 可读数据、可生成草稿和审计策略', icon: <RobotOutlined />, path: '/account-center?section=ai', tone: 'purple' },
+    { title: '数据变更审批', desc: '物料、供应商、批次主数据变更待确认', icon: <DatabaseOutlined />, path: '/workflow?tab=pending', tone: 'blue' },
+    { title: '质量异常待审', desc: '缺陷分级、影响范围和处置建议待复核', icon: <SafetyCertificateOutlined />, path: '/program/quality-event', tone: 'red' },
+    { title: '批次放行审批', desc: '复检结果、冻结批次和让步放行待决策', icon: <CheckCircleOutlined />, path: '/workflow?tab=pending', tone: 'green' },
+    { title: 'AI 建议复核', desc: 'AI 草稿、风险解释和动作建议进入人工确认', icon: <RobotOutlined />, path: '/program/quality-event', tone: 'purple' },
   ],
   quality: [
     { title: '质量异常闭环', desc: '查看事件、影响图谱、AI 建议和 CAPA', icon: <SafetyCertificateOutlined />, path: '/program/quality-event', tone: 'red' },
@@ -91,7 +91,7 @@ function getRoleKey(user: any): keyof typeof roleCards {
 
 function roleTitle(roleKey: keyof typeof roleCards) {
   const map = {
-    admin: '平台配置工作台',
+    admin: '数据审批工作台',
     quality: '质量经理工作台',
     production: '生产主管工作台',
     user: '我的业务工作台',
@@ -117,7 +117,7 @@ export default function WorkspacePage() {
   }, []);
 
   const headline = useMemo(() => {
-    if (roleKey === 'admin') return '把低代码配置变成企业运营底座';
+    if (roleKey === 'admin') return '聚合主数据变更、质量异常和 AI 建议的审批处置';
     if (roleKey === 'quality') return '从异常发现到 CAPA 闭环';
     if (roleKey === 'production') return '看清质量异常对工单和交付的影响';
     return '处理与你相关的申请、待办和风险提醒';
@@ -155,8 +155,8 @@ export default function WorkspacePage() {
         <Col xs={24} xl={roleKey === 'admin' ? 12 : 15}>
           <Card
             className="workspace-section"
-            title={roleKey === 'admin' ? '平台能力蓝图' : '质量异常事件'}
-            extra={<Tag color="processing">{roleKey === 'admin' ? '低代码配置中心' : '事件驱动'}</Tag>}
+            title={roleKey === 'admin' ? '数据审批态势' : '质量异常事件'}
+            extra={<Tag color="processing">{roleKey === 'admin' ? '数据治理闭环' : '事件驱动'}</Tag>}
           >
             {roleKey === 'admin' ? (
               <div className="palantir-blueprint-grid">

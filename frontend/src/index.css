@@ -5421,7 +5421,7 @@ button {
 }
 
 .quality-progress-row {
-  height: clamp(184px, 22vh, 250px);
+  height: clamp(154px, 18vh, 210px);
 }
 
 .quality-progress-card .ant-card-body {
@@ -5430,7 +5430,7 @@ button {
 }
 
 .quality-timeline-board {
-  grid-template-rows: 20px minmax(82px, 1fr) auto auto;
+  grid-template-rows: 20px minmax(82px, 1fr) auto;
   gap: 7px;
 }
 
