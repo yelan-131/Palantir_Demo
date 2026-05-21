@@ -4776,7 +4776,7 @@ button {
 
 .quality-map-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -5014,6 +5014,7 @@ button {
 
 .quality-detail-panel .ant-card-body {
   min-height: 0;
+  padding-top: 12px !important;
 }
 
 .quality-progress-row {
@@ -5229,8 +5230,8 @@ button {
 }
 
 .quality-command-hero {
-  min-height: 82px;
-  padding: 16px 18px;
+  min-height: 64px;
+  padding: 12px 18px;
   border: 1px solid rgba(41, 91, 111, 0.2);
   border-radius: 10px;
   background:
@@ -5240,7 +5241,7 @@ button {
 }
 
 .quality-command-hero h3 {
-  margin-bottom: 4px !important;
+  margin: 0 !important;
   font-size: 21px !important;
   font-weight: 750 !important;
 }

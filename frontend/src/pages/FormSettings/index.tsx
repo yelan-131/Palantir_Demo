@@ -286,6 +286,22 @@ function isEditableTarget(target: EventTarget | null) {
   return ['input', 'textarea', 'select'].includes(tagName) || target.isContentEditable || Boolean(target.closest('.ant-select'));
 }
 
+function ruleToggle(defaultEnabled: boolean, title: string) {
+  return (
+    <div className="designer-rule-toggle">
+      <Segmented
+        size="small"
+        defaultValue={defaultEnabled ? 'yes' : 'no'}
+        options={[
+          { label: '是', value: 'yes' },
+          { label: '否', value: 'no' },
+        ]}
+      />
+      <Button size="small" icon={<SettingOutlined />} title={`${title}条件配置`} />
+    </div>
+  );
+}
+
 function makeFlowNodes(steps: string[]): FlowNode[] {
   return steps.map((step, index) => ({
     id: `flow-${index}`,
@@ -538,8 +554,8 @@ export default function FormSettingsPage() {
         <strong className="designer-prop-section-title">{editable ? '子表属性' : '关联表属性'}</strong>
         <label><span>数据来源</span><Input value={editable ? `${baseConfig.dataSource}_items` : 'related_records'} readOnly /></label>
         <label><span>{editable ? '列配置' : '展示列'}</span><Input value={editable ? '物料、数量、单位、备注' : '编号、名称、状态、时间'} readOnly /></label>
-        <label><span>{editable ? '允许新增行' : '分页显示'}</span><Select value="yes" options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
-        <label><span>{editable ? '允许删除行' : '点击查看详情'}</span><Select value="yes" options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
+        <label><span>{editable ? '允许新增行' : '分页显示'}</span>{ruleToggle(true, editable ? '新增行' : '分页')}</label>
+        <label><span>{editable ? '允许删除行' : '点击查看详情'}</span>{ruleToggle(true, editable ? '删除行' : '详情')}</label>
         <label><span>{editable ? '行校验规则' : '排序规则'}</span><Input value={editable ? '明细行不能为空，数量必须大于 0' : '按时间倒序'} readOnly /></label>
       </section>
     );
@@ -560,16 +576,16 @@ export default function FormSettingsPage() {
         </section>
         <section className="designer-prop-section">
           <strong className="designer-prop-section-title">数据与校验</strong>
-          <label><span>是否必填</span><Select value={field.required ? 'yes' : 'no'} options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
+          <label><span>是否必填</span>{ruleToggle(Boolean(field.required), '必填')}</label>
           <label><span>默认值</span><Input value={field.defaultValue || '无'} readOnly /></label>
           <label><span>校验规则</span><Input value={field.validation || '未配置'} readOnly /></label>
           <label><span>枚举/关联来源</span><Input value={field.optionSource || '无'} readOnly /></label>
         </section>
         <section className="designer-prop-section">
           <strong className="designer-prop-section-title">列表与检索</strong>
-          <label><span>列表展示</span><Select value={field.listVisible ? 'yes' : 'no'} options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
-          <label><span>允许搜索</span><Select value={field.searchable ? 'yes' : 'no'} options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
-          <label><span>允许排序</span><Select value={field.sortable ? 'yes' : 'no'} options={[{ value: 'yes', label: '是' }, { value: 'no', label: '否' }]} /></label>
+          <label><span>列表展示</span>{ruleToggle(Boolean(field.listVisible), '列表展示')}</label>
+          <label><span>允许搜索</span>{ruleToggle(Boolean(field.searchable), '搜索')}</label>
+          <label><span>允许排序</span>{ruleToggle(Boolean(field.sortable), '排序')}</label>
         </section>
       </div>
     );

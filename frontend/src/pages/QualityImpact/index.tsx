@@ -291,11 +291,7 @@ export default function QualityImpactWorkbench() {
     <div className="quality-impact-page">
       <section className="quality-command-hero">
         <div>
-          <Typography.Text className="quality-command-kicker">Task Workbench / Quality Closure</Typography.Text>
           <Typography.Title level={3}>质量异常任务处置台</Typography.Title>
-          <Typography.Paragraph>
-            左侧选择任务，中间查看影响范围，右侧处理对象动作，下方跟踪任务推进状态。
-          </Typography.Paragraph>
         </div>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => loadEvent(event.id)} loading={loading}>刷新</Button>
@@ -379,14 +375,6 @@ export default function QualityImpactWorkbench() {
 
             <div className="quality-map-metrics">
               <div>
-                <span><WarningOutlined /> 风险分</span>
-                <strong>{event.risk_score}<small>/100</small></strong>
-              </div>
-              <div>
-                <span><ControlOutlined /> 影响工单</span>
-                <strong>{event.affected.work_orders || 0}<small>个</small></strong>
-              </div>
-              <div>
                 <span><SendOutlined /> 影响订单</span>
                 <strong>{event.affected.orders || 0}<small>个</small></strong>
               </div>
@@ -395,7 +383,7 @@ export default function QualityImpactWorkbench() {
         </main>
 
         <aside className="quality-right-rail">
-          <Card className="quality-detail-panel" title="任务详情">
+          <Card className="quality-detail-panel">
             {selectedNode ? (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <div className="quality-node-head">
