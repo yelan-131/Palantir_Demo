@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftOutlined,
   CalendarOutlined,
@@ -84,6 +84,14 @@ interface LayoutControl {
   desc?: string;
   fieldKey?: string;
   width: ControlWidth;
+}
+
+interface FlowNode {
+  id: string;
+  label: string;
+  role: string;
+  x: number;
+  y: number;
 }
 
 const configs: Record<string, DesignerConfig> = {
@@ -288,6 +296,16 @@ function isEditableTarget(target: EventTarget | null) {
   return ['input', 'textarea', 'select'].includes(tagName) || target.isContentEditable || Boolean(target.closest('.ant-select'));
 }
 
+function makeFlowNodes(steps: string[]): FlowNode[] {
+  return steps.map((step, index) => ({
+    id: `flow-${index}`,
+    label: step,
+    role: index === 0 ? 'start' : index === steps.length - 1 ? 'end' : 'task',
+    x: 56 + index * 172,
+    y: index % 2 === 0 ? 118 : 240,
+  }));
+}
+
 export default function FormSettingsPage() {
   const { formId } = useParams();
   const navigate = useNavigate();
@@ -300,6 +318,17 @@ export default function FormSettingsPage() {
   const [selectedAssetKey, setSelectedAssetKey] = useState<string>(baseConfig.fields[0]?.key || '');
   const [copiedControl, setCopiedControl] = useState<LayoutControl | null>(null);
   const [history, setHistory] = useState<LayoutControl[][]>([]);
+  const [flowNodes, setFlowNodes] = useState<FlowNode[]>(() => makeFlowNodes(baseConfig.flowSteps));
+  const flowCanvasRef = useRef<HTMLDivElement | null>(null);
+  const draggingFlowNodeRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
 
   useEffect(() => {
     const nextControls = baseConfig.fields.map(makeFieldControl);
@@ -309,7 +338,8 @@ export default function FormSettingsPage() {
     setVersion(baseConfig.version);
     setCopiedControl(null);
     setHistory([]);
-  }, [baseConfig.id, baseConfig.version, baseConfig.fields]);
+    setFlowNodes(makeFlowNodes(baseConfig.flowSteps));
+  }, [baseConfig.id, baseConfig.version, baseConfig.fields, baseConfig.flowSteps]);
 
   const selectedControl = useMemo(
     () => layoutControls.find((control) => control.id === selectedControlId),
@@ -319,6 +349,43 @@ export default function FormSettingsPage() {
     () => baseConfig.fields.find((field) => field.key === (selectedControl?.fieldKey || selectedAssetKey)),
     [baseConfig.fields, selectedAssetKey, selectedControl],
   );
+
+  const startFlowNodeDrag = (event: React.PointerEvent<HTMLDivElement>, node: FlowNode) => {
+    const canvas = flowCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / canvas.offsetWidth || 1;
+    const scaleY = rect.height / canvas.offsetHeight || 1;
+    draggingFlowNodeRef.current = {
+      id: node.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: node.x,
+      originY: node.y,
+      scaleX,
+      scaleY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveFlowNode = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = draggingFlowNodeRef.current;
+    const canvas = flowCanvasRef.current;
+    if (!dragState || !canvas) return;
+    const nextX = dragState.originX + (event.clientX - dragState.startX) / dragState.scaleX;
+    const nextY = dragState.originY + (event.clientY - dragState.startY) / dragState.scaleY;
+    const maxX = Math.max(40, canvas.offsetWidth - 196);
+    const maxY = Math.max(60, canvas.offsetHeight - 112);
+    setFlowNodes((current) => current.map((node) => (
+      node.id === dragState.id
+        ? { ...node, x: Math.min(Math.max(28, nextX), maxX), y: Math.min(Math.max(72, nextY), maxY) }
+        : node
+    )));
+  };
+
+  const stopFlowNodeDrag = () => {
+    draggingFlowNodeRef.current = null;
+  };
 
   const commitLayoutChange = (updater: (current: LayoutControl[]) => LayoutControl[]) => {
     setLayoutControls((current) => {
@@ -677,11 +744,52 @@ export default function FormSettingsPage() {
           )}
 
           {activeTab === 'flow' && (
-            <div className="canvas-board flow-canvas">
-              {baseConfig.flowSteps.map((step, index) => (
-                <div className="flow-node" key={step}>
-                  <span>{index + 1}</span>
-                  <strong>{step}</strong>
+            <div
+              className="canvas-board flow-canvas"
+              onPointerMove={moveFlowNode}
+              onPointerUp={stopFlowNodeDrag}
+              onPointerLeave={stopFlowNodeDrag}
+              ref={flowCanvasRef}
+            >
+              <div className="flow-canvas-guide">
+                <strong>流程节点画布</strong>
+                <span>拖拽节点调整位置，节点之间的连线会自动跟随。</span>
+              </div>
+              <svg className="flow-connector-layer" aria-hidden="true">
+                <defs>
+                  <marker id="flow-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="7" refY="4">
+                    <path d="M 0 0 L 8 4 L 0 8 z" />
+                  </marker>
+                </defs>
+                {flowNodes.slice(0, -1).map((node, index) => {
+                  const next = flowNodes[index + 1];
+                  const startX = node.x + 172;
+                  const startY = node.y + 40;
+                  const endX = next.x;
+                  const endY = next.y + 40;
+                  const bend = Math.max(56, Math.abs(endX - startX) / 2);
+                  return (
+                    <path
+                      d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
+                      key={`${node.id}-${next.id}`}
+                    />
+                  );
+                })}
+              </svg>
+              {flowNodes.map((node, index) => (
+                <div
+                  className={`flow-designer-node flow-designer-node-${node.role}`}
+                  key={node.id}
+                  onPointerDown={(event) => startFlowNodeDrag(event, node)}
+                  style={{ left: node.x, top: node.y }}
+                >
+                  <span className="flow-node-index">{index + 1}</span>
+                  <div>
+                    <strong>{node.label}</strong>
+                    <small>{node.role === 'start' ? '开始节点' : node.role === 'end' ? '结束归档' : '处理节点'}</small>
+                  </div>
+                  <i className="flow-port flow-port-in" />
+                  <i className="flow-port flow-port-out" />
                 </div>
               ))}
             </div>

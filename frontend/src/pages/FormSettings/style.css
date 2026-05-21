@@ -605,34 +605,138 @@
 }
 
 .flow-canvas {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  position: relative;
+  overflow: hidden;
   min-height: 320px;
-  align-content: start;
+  background:
+    linear-gradient(90deg, rgba(36, 92, 111, 0.05) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(36, 92, 111, 0.05) 1px, transparent 1px),
+    #fbfdff;
+  background-size: 28px 28px;
 }
 
-.flow-node {
+.flow-canvas-guide {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #dce3ea;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 22px rgba(23, 32, 38, 0.05);
+}
+
+.flow-canvas-guide span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.flow-connector-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flow-connector-layer path {
+  fill: none;
+  stroke: #8fb8c6;
+  stroke-width: 2;
+  marker-end: url("#flow-arrow");
+}
+
+.flow-connector-layer marker path {
+  fill: #8fb8c6;
+}
+
+.flow-designer-node {
+  position: absolute;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 72px;
-  padding: 12px;
-  border: 1px solid #dce3ea;
-  border-radius: 8px;
-  background: #f8fafc;
+  width: 176px;
+  min-height: 80px;
+  padding: 12px 14px;
+  border: 1px solid #cfdae4;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 26px rgba(23, 32, 38, 0.08);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: box-shadow 0.16s ease, transform 0.16s ease, border-color 0.16s ease;
 }
 
-.flow-node span {
+.flow-designer-node:hover {
+  border-color: #2f6c80;
+  box-shadow: 0 16px 34px rgba(23, 32, 38, 0.12);
+  transform: translateY(-1px);
+}
+
+.flow-designer-node:active {
+  cursor: grabbing;
+}
+
+.flow-designer-node-task {
+  border-left: 4px solid #2f6c80;
+}
+
+.flow-designer-node-start {
+  border-left: 4px solid #39a16f;
+}
+
+.flow-designer-node-end {
+  border-left: 4px solid #d0874a;
+}
+
+.flow-node-index {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: #dff1f6;
   color: #245c6f;
   font-weight: 700;
+}
+
+.flow-designer-node strong {
+  display: block;
+  color: #172026;
+  font-size: 13px;
+}
+
+.flow-designer-node small {
+  display: block;
+  margin-top: 4px;
+  color: #8a98a5;
+  font-size: 11px;
+}
+
+.flow-port {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #8fb8c6;
+  border-radius: 999px;
+  background: #ffffff;
+  transform: translateY(-50%);
+}
+
+.flow-port-in {
+  left: -5px;
+}
+
+.flow-port-out {
+  right: -5px;
 }
 
 .permission-canvas {

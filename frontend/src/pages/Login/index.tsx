@@ -1,9 +1,13 @@
 import { Button, Card, Divider, Form, Input, Select, Space, Typography, message } from 'antd';
 import {
+  ApiOutlined,
+  BulbOutlined,
   CheckCircleOutlined,
   DashboardOutlined,
   LockOutlined,
+  PartitionOutlined,
   SafetyCertificateOutlined,
+  SearchOutlined,
   RobotOutlined,
   ShareAltOutlined,
   UserOutlined,
@@ -98,14 +102,25 @@ export default function LoginPage() {
     }
 
     if (activeSlide === 1) {
+      const agentTiles = [
+        { label: 'RAG', icon: <SearchOutlined /> },
+        { label: 'Tool', icon: <ApiOutlined /> },
+        { label: 'Task', icon: <PartitionOutlined /> },
+        { label: 'Insight', icon: <BulbOutlined /> },
+      ];
+
       return (
         <div className="identity-scene-content scene-agent">
-          <div className="identity-agent-hub" aria-hidden="true">
-            <div className="identity-agent-core">{currentSlide.core}</div>
-            {currentSlide.orbit.map((node, index) => (
-              <span className={`identity-agent-node node-${index + 1}`} key={node}>
-                {node}
-              </span>
+          <div className="identity-agent-icon-grid" aria-label="AI Agent 能力">
+            <div className="identity-agent-icon-core">
+              <RobotOutlined />
+              <strong>{currentSlide.core}</strong>
+            </div>
+            {agentTiles.map((tile) => (
+              <div className="identity-agent-icon-tile" key={tile.label}>
+                <span>{tile.icon}</span>
+                <strong>{tile.label}</strong>
+              </div>
             ))}
           </div>
           <div className="identity-agent-queue">

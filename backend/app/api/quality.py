@@ -767,13 +767,17 @@ async def execute_quality_event_action(event_id: str, body: QualityEventAction):
 @router.post("/capa")
 async def create_capa(body: CAPACreate):
     """创建 CAPA (纠正与预防措施)."""
+    due_date = body.due_date
+    if due_date.tzinfo is not None:
+        due_date = due_date.replace(tzinfo=None)
+
     async def _query(db):
         from app.models.relational import CAPA
         capa = CAPA(
             defect_id=body.defect_id,
             action_type=body.action_type,
             description=body.description,
-            due_date=body.due_date,
+            due_date=due_date,
             assignee_id=body.assignee_id,
             status="open",
         )

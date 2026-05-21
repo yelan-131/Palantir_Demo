@@ -4,18 +4,15 @@ import {
   Badge,
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Empty,
   Modal,
   Progress,
-  Row,
   Space,
-  Statistic,
-  Steps,
   Table,
   Tag,
+  Timeline,
   Typography,
   message,
 } from 'antd';
@@ -150,6 +147,43 @@ function normalizeRisk(level: RiskLevel) {
   return riskColor[level] || 'blue';
 }
 
+const taskFilters = ['全部', 'P0 高风险', '待分析', '待处置', '审批中'];
+
+const closureTimeline = [
+  {
+    time: '09:40',
+    title: '异常发现',
+    actor: 'AOI / SPC 规则',
+    status: '已完成',
+    desc: '电控模块 V2 批次连续出现焊点虚焊，缺陷率超过管控线。',
+    color: 'red',
+  },
+  {
+    time: '09:43',
+    title: '影响分析',
+    actor: '质量经理',
+    status: '进行中',
+    desc: '图谱已关联检验批次、物料批次、供应商、工单和客户订单。',
+    color: 'blue',
+  },
+  {
+    time: '09:47',
+    title: 'AI 建议生成',
+    actor: 'AIP 辅助层',
+    status: '待确认',
+    desc: '建议先冻结风险批次，再生成 CAPA，并通知采购确认供应商波动。',
+    color: 'gray',
+  },
+  {
+    time: '待办',
+    title: 'CAPA / 复检执行',
+    actor: '质量工程师',
+    status: '未开始',
+    desc: '等待质量经理确认动作后进入工作流审批和执行闭环。',
+    color: 'gray',
+  },
+];
+
 export default function QualityImpactWorkbench() {
   const [events, setEvents] = useState<QualityEvent[]>([fallbackEvent]);
   const [event, setEvent] = useState<QualityEvent>(fallbackEvent);
@@ -251,10 +285,10 @@ export default function QualityImpactWorkbench() {
     <div className="quality-impact-page">
       <section className="quality-command-hero">
         <div>
-          <Typography.Text className="quality-command-kicker">Role Workbench / Quality Closure</Typography.Text>
-          <Typography.Title level={3}>智能运营指挥台</Typography.Title>
+          <Typography.Text className="quality-command-kicker">Task Workbench / Quality Closure</Typography.Text>
+          <Typography.Title level={3}>质量异常任务处置台</Typography.Title>
           <Typography.Paragraph>
-            以质量异常为中心，把低代码对象、图谱关系、AI 建议和工作流动作串成一个可处置的业务闭环。
+            左侧选择任务，中间查看影响范围，右侧处理对象动作，下方跟踪任务推进状态。
           </Typography.Paragraph>
         </div>
         <Space wrap>
@@ -264,9 +298,14 @@ export default function QualityImpactWorkbench() {
         </Space>
       </section>
 
-      <Row gutter={[14, 14]}>
-        <Col xs={24} xl={6}>
-          <Card className="quality-side-panel" title="质量事件">
+      <div className="quality-command-grid">
+        <aside className="quality-left-rail">
+          <Card className="quality-side-panel quality-task-panel" title="任务区" extra={<Tag color="red">P0</Tag>}>
+            <div className="quality-task-filter">
+              {taskFilters.map((filter, index) => (
+                <button key={filter} className={index === 0 ? 'active' : ''}>{filter}</button>
+              ))}
+            </div>
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
               {events.map((item) => (
                 <button
@@ -278,34 +317,37 @@ export default function QualityImpactWorkbench() {
                     <Badge color={normalizeRisk(item.severity)} />
                     <strong>{item.title}</strong>
                   </span>
-                  <small>{item.id} / {item.source}</small>
+                  <small>{item.id}</small>
+                  <em>{item.source}</em>
                   <Progress percent={item.risk_score} size="small" strokeColor={item.risk_score > 85 ? '#c83f49' : '#d48806'} />
                 </button>
               ))}
+              <button className="quality-event-card">
+                <span>
+                  <Badge color="orange" />
+                  <strong>待生成 CAPA 草稿</strong>
+                </span>
+                <small>CAPA-TASK-072</small>
+                <em>质量经理 / 待确认</em>
+                <Progress percent={64} size="small" strokeColor="#d48806" />
+              </button>
+              <button className="quality-event-card">
+                <span>
+                  <Badge color="gold" />
+                  <strong>供应商风险复核</strong>
+                </span>
+                <small>SUP-RISK-023</small>
+                <em>采购 / 待跟进</em>
+                <Progress percent={48} size="small" strokeColor="#faad14" />
+              </button>
             </Space>
           </Card>
+        </aside>
 
-          <Card className="quality-side-panel" title="角色入口">
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              {[
-                ['超级管理员', '配置对象/关系/动作/权限'],
-                ['质量经理', '处置异常、生成 CAPA、复检'],
-                ['采购', '查看供应商影响、发起复核'],
-                ['生产主管', '查看工单影响、调整排产'],
-              ].map(([role, desc]) => (
-                <div className="quality-role-row" key={role}>
-                  <strong>{role}</strong>
-                  <span>{desc}</span>
-                </div>
-              ))}
-            </Space>
-          </Card>
-        </Col>
-
-        <Col xs={24} xl={12}>
+        <main className="quality-center-stage">
           <Card
             className="quality-impact-graph-card"
-            title="质量异常影响图谱"
+            title="任务展示：影响图谱"
             extra={<Tag color="processing">{nodes.length} 对象 / {edges.length} 关系</Tag>}
           >
             <div className="quality-event-summary">
@@ -332,19 +374,28 @@ export default function QualityImpactWorkbench() {
                 </span>
               ))}
             </div>
+
+            <div className="quality-map-metrics">
+              <div>
+                <span><WarningOutlined /> 风险分</span>
+                <strong>{event.risk_score}<small>/100</small></strong>
+              </div>
+              <div>
+                <span><ControlOutlined /> 影响工单</span>
+                <strong>{event.affected.work_orders || 0}<small>个</small></strong>
+              </div>
+              <div>
+                <span><SendOutlined /> 影响订单</span>
+                <strong>{event.affected.orders || 0}<small>个</small></strong>
+              </div>
+            </div>
           </Card>
+        </main>
 
-          <Row gutter={[12, 12]} style={{ marginTop: 14 }}>
-            <Col span={8}><Card><Statistic title="风险分" value={event.risk_score} suffix="/100" prefix={<WarningOutlined />} /></Card></Col>
-            <Col span={8}><Card><Statistic title="影响工单" value={event.affected.work_orders || 0} prefix={<ControlOutlined />} /></Card></Col>
-            <Col span={8}><Card><Statistic title="影响订单" value={event.affected.orders || 0} prefix={<SendOutlined />} /></Card></Col>
-          </Row>
-        </Col>
-
-        <Col xs={24} xl={6}>
-          <Card className="quality-detail-panel" title="对象详情">
+        <aside className="quality-right-rail">
+          <Card className="quality-detail-panel" title="任务详情">
             {selectedNode ? (
-              <Space direction="vertical" size={14} style={{ width: '100%' }}>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <div className="quality-node-head">
                   <span>{typeIcon[selectedNode.type] || <NodeIndexOutlined />}</span>
                   <div>
@@ -363,7 +414,7 @@ export default function QualityImpactWorkbench() {
                 <Space wrap>
                   {selectedNode.actions.map((action) => <Tag color="blue" key={action}>{action}</Tag>)}
                 </Space>
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <div className="quality-action-stack">
                   {actionConfig.map((action) => (
                     <Button
                       key={action.key}
@@ -375,49 +426,40 @@ export default function QualityImpactWorkbench() {
                       {action.label}
                     </Button>
                   ))}
-                </Space>
+                </div>
               </Space>
             ) : (
               <Empty description="请选择图谱对象" />
             )}
           </Card>
-        </Col>
-      </Row>
+        </aside>
+      </div>
 
-      <Row gutter={[14, 14]} style={{ marginTop: 14 }}>
-        <Col xs={24} lg={14}>
-          <Card title="处置闭环">
-            <Steps
-              current={1}
-              items={[
-                { title: '异常发现', description: 'AOI/SPC 触发规则' },
-                { title: '影响分析', description: '图谱追踪对象关系' },
-                { title: '动作生成', description: 'CAPA/冻结/复检' },
-                { title: '审批执行', description: '进入工作流闭环' },
-              ]}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card title="低代码配置映射">
-            <Table
-              size="small"
-              pagination={false}
-              rowKey="config"
-              dataSource={[
-                { config: '业务对象', value: 'QualityEvent / Defect / CAPA' },
-                { config: '对象关系', value: '缺陷-批次-供应商-工单-订单' },
-                { config: '业务动作', value: '冻结、复检、生成 CAPA、通知' },
-                { config: '角色工作台', value: '质量经理 / 采购 / 生产主管' },
-              ]}
-              columns={[
-                { title: '配置项', dataIndex: 'config', width: 110 },
-                { title: '当前演示绑定', dataIndex: 'value' },
-              ]}
-            />
-          </Card>
-        </Col>
-      </Row>
+      <div className="quality-progress-row">
+        <Card title="任务进度：处置时间线" className="quality-progress-card">
+          <Timeline
+            mode="left"
+            items={closureTimeline.map((item) => ({
+              color: item.color,
+              label: <span className="quality-timeline-time">{item.time}</span>,
+              children: (
+                <div className="quality-timeline-item">
+                  <div>
+                    <strong>{item.title}</strong>
+                    <Tag color={item.status === '进行中' ? 'processing' : item.status === '已完成' ? 'success' : 'default'}>{item.status}</Tag>
+                  </div>
+                  <p>{item.desc}</p>
+                  <span>{item.actor}</span>
+                </div>
+              ),
+            }))}
+          />
+          <div className="quality-config-link">
+            <BranchesOutlined />
+            <span>对象、关系、动作和角色配置由后台低代码配置中心维护，此处只展示业务处置结果。</span>
+          </div>
+        </Card>
+      </div>
 
       <Drawer title="AI 影响分析草稿" open={aiOpen} width={520} onClose={() => setAiOpen(false)}>
         {aiSuggestion ? (
