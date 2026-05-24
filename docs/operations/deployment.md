@@ -61,6 +61,32 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up
 
 Do not use `docker/docker-compose.prod-full.yml`; that file is not present in the current repository.
 
+## Runtime Modes
+
+Demo/local mode:
+
+```env
+APP_MODE=demo
+DEMO_AUTH_OPTIONAL=true
+```
+
+Demo mode may use mock fallbacks, seeded demo data, and SQLite fallback for local bootstrap.
+
+Production mode:
+
+```env
+APP_MODE=production
+DEMO_AUTH_OPTIONAL=false
+SECRET_KEY=<strong-random-secret-at-least-32-chars>
+```
+
+Production mode is fail-fast:
+
+- unsafe/default `SECRET_KEY` stops startup
+- `DEMO_AUTH_OPTIONAL=true` stops startup
+- missing PostgreSQL/`asyncpg` or SQLite fallback stops startup
+- core low-code APIs must return explicit errors instead of silently switching to demo data
+
 ## Service Layout
 
 | Service | Image/build | Host port | Container port | Notes |

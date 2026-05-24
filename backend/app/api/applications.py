@@ -54,7 +54,7 @@ DEFAULT_MENUS = [
     {"id": 1002, "parent_id": None, "title": "预测性维护", "icon": "ToolOutlined", "route_path": "/maintenance", "sort_order": 20, "is_visible": True},
     {"id": 1003, "parent_id": None, "title": "质量分析", "icon": "SafetyCertificateOutlined", "route_path": "/quality", "sort_order": 30, "is_visible": True},
     {"id": 1004, "parent_id": None, "title": "供应链风险", "icon": "ShopOutlined", "route_path": "/supply-chain", "sort_order": 40, "is_visible": True},
-    {"id": 1005, "parent_id": None, "title": "质量异常闭环", "icon": "SafetyCertificateOutlined", "route_path": "/program/quality-event", "sort_order": 35, "is_visible": True},
+    {"id": 1005, "parent_id": None, "title": "料号关系追踪", "icon": "SafetyCertificateOutlined", "route_path": "/program/quality-event", "sort_order": 35, "is_visible": True},
 ]
 
 DEFAULT_APPLICATIONS = [
@@ -69,7 +69,7 @@ DEFAULT_APPLICATIONS = [
         "menu_routes": ["/maintenance"], "role_names": ["admin", "production_manager"],
     },
     {
-        "id": 3, "name": "质量分析", "code": "quality-control", "description": "质量缺陷、检验批次、异常追溯和过程能力分析。",
+        "id": 3, "name": "质量分析", "code": "quality-control", "description": "质量缺陷、检验批次、料号追踪和过程能力分析。",
         "icon": "SafetyCertificateOutlined", "default_route": "/quality", "sort_order": 30, "status": "published", "is_pinned": False,
         "menu_routes": ["/quality", "/program/quality-event"], "role_names": ["admin", "quality_inspector"],
     },

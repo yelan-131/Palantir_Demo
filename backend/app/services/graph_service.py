@@ -29,6 +29,7 @@ BUSINESS_GRAPH_LABELS = [
     "QualityEvent", "Defect", "InspectionBatch", "MaterialBatch",
     "Supplier", "WorkOrder", "Equipment", "CustomerOrder", "CAPA",
     "KnowledgeCard", "Operation", "ProductBatch", "InventoryLot",
+    "Sensor", "TimeSeriesWindow",
 ]
 
 BUSINESS_LABEL_ALIASES = {
@@ -42,7 +43,8 @@ BUSINESS_GRAPH_RELS = [
     "HAS_DEFECT", "FOUND_IN", "INSPECTS", "SUPPLIED_BY",
     "USES_BATCH", "USES_EQUIPMENT", "AFFECTS_ORDER", "TRIGGERS",
     "EVIDENCE_FOR", "RUNS_OPERATION", "PRODUCES_BATCH",
-    "STORED_AS", "REINSPECTS", "MAY_CAUSE",
+    "STORED_AS", "REINSPECTS", "MAY_CAUSE", "MEASURED_BY",
+    "HAS_TS_ANOMALY", "CORRELATES_WITH",
 ]
 
 

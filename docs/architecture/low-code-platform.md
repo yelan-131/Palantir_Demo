@@ -23,7 +23,9 @@ The basic low-code persistence layer is implemented.
 Implemented:
 
 - migration `0006_platform_forms.py`
+- migration `0008_saas_tenants.py`
 - `/api/v1/forms`
+- shared-database tenant isolation with `tenant_id`
 - form metadata
 - application-form bindings
 - application menu nodes
@@ -33,13 +35,14 @@ Implemented:
 - permissions
 - workflow bindings
 - dynamic records
+- audit logging for core form and record mutations
 
 Still evolving:
 
 - advanced field types and validation UX
 - richer permission inheritance
 - bulk import/export for forms
-- high-volume indexing for dynamic records
+- form physicalization for hot/high-volume forms
 - full parity between older model-driven pages and the forms platform
 
 ## 3. Data Model
@@ -158,3 +161,14 @@ Recommended next implementation slices:
 3. Improve dynamic record indexing and filtering.
 4. Add import/export for form packages.
 5. Define when a form should remain JSON-backed and when it should be physicalized.
+
+## 10. Large Dynamic Record Reads
+
+Dynamic records now support two read styles:
+
+- shallow compatibility pages: `page` + `page_size`
+- scale-oriented pages: `cursor_after_id` or `cursor_before_id` + `page_size`
+
+Production mode must avoid unbounded Python-side filtering. Search and structured filters should target fields marked as `searchable` or `sortable` in the form metadata. If a query cannot be pushed to the database safely, production should return a clear error rather than scanning a large tenant dataset in application memory.
+
+For million-plus records per form, prefer cursor pagination and narrow filters. For tens of millions or more, create explicit PostgreSQL expression/generated-column indexes for hot fields. For very hot forms, introduce a physicalized read table while keeping the form metadata as the configuration source.

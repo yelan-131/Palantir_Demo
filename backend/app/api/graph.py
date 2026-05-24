@@ -30,6 +30,8 @@ QUALITY_BUSINESS_ID_MAP = {
     "product-batch-pb-260521-a": "product-batch-pb-260521-a",
     "inventory-lot-inv-7781-a": "inventory-lot-inv-7781-a",
     "inspection-recheck-091": "inspection-batch-recheck-260521-091",
+    "sensor-reflow-temp-05": "sensor-reflow-temp-05",
+    "ts-window-reflow-temp-260521-0930": "ts-window-reflow-temp-260521-0930",
 }
 
 QUALITY_EDGE_REL_MAP = {
@@ -49,6 +51,10 @@ QUALITY_EDGE_REL_MAP = {
     "r14": ("STORED_AS", "material-batch-mb-7781", "inventory-lot-inv-7781-a"),
     "r15": ("REINSPECTS", "capa-072", "inspection-recheck-091"),
     "r16": ("REINSPECTS", "inspection-recheck-091", "product-batch-pb-260521-a"),
+    "r17": ("MEASURED_BY", "equipment-smt-03", "sensor-reflow-temp-05"),
+    "r18": ("HAS_TS_ANOMALY", "sensor-reflow-temp-05", "ts-window-reflow-temp-260521-0930"),
+    "r19": ("CORRELATES_WITH", "ts-window-reflow-temp-260521-0930", "operation-reflow-01"),
+    "r20": ("CORRELATES_WITH", "ts-window-reflow-temp-260521-0930", "defect-001"),
 }
 
 

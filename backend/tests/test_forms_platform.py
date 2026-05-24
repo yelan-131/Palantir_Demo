@@ -10,8 +10,11 @@ def test_form_code_uses_safe_identifier_rules():
     from app.api.forms import _validate_form_code
 
     _validate_form_code("service_ticket")
+    _validate_form_code("service-ticket")
     with pytest.raises(HTTPException):
-        _validate_form_code("service-ticket")
+        _validate_form_code("service ticket")
+    with pytest.raises(HTTPException):
+        _validate_form_code("../service-ticket")
     with pytest.raises(HTTPException):
         _validate_form_code("service_ticket;drop table forms")
 
@@ -100,6 +103,28 @@ def test_record_search_uses_searchable_fields_first():
     assert _record_matches_search(Record(), fields, "needle") is False
 
 
+def test_record_filters_require_queryable_fields():
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+    from app.api.forms import _record_matches_filters
+
+    class Field:
+        def __init__(self, field_name, searchable=False, sortable=False):
+            self.field_name = field_name
+            self.searchable = searchable
+            self.sortable = sortable
+            self.archived = False
+
+    class Record:
+        data = {"status": "open", "secret": "hidden"}
+
+    fields = [Field("status", searchable=True), Field("secret")]
+    assert _record_matches_filters(Record(), fields, [{"field": "status", "op": "equals", "value": "open"}]) is True
+    assert _record_matches_filters(Record(), fields, [{"field": "status", "op": "equals", "value": "closed"}]) is False
+    with pytest.raises(HTTPException):
+        _record_matches_filters(Record(), fields, [{"field": "missing", "op": "equals", "value": "x"}])
+
+
 def test_application_form_binding_schema_is_configuration_only():
     pytest.importorskip("fastapi")
     from app.api.forms import ApplicationFormUpsert
@@ -146,3 +171,30 @@ def test_action_and_workflow_identifiers_share_safe_rules():
     assert_safe_identifier("approve_and_archive")
     with pytest.raises(HTTPException):
         assert_safe_identifier("submit;drop")
+
+
+def test_professional_flow_graph_resolves_executable_steps():
+    pytest.importorskip("fastapi")
+    from app.api.workflow import _get_steps_from_workflow
+
+    workflow = {
+        "config": {
+            "nodes": [
+                {"id": "start", "type": "startEvent", "label": "提交"},
+                {"id": "review", "type": "userTask", "label": "主管审批", "assigneeValue": "质量经理", "approvalMode": "orSign"},
+                {"id": "gate", "type": "exclusiveGateway", "label": "风险判断"},
+                {"id": "end", "type": "endEvent", "label": "归档"},
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "review", "priority": 1},
+                {"id": "e2", "source": "review", "target": "gate", "priority": 1},
+                {"id": "e3", "source": "gate", "target": "end", "priority": 1, "isDefault": True},
+            ],
+        }
+    }
+
+    steps = _get_steps_from_workflow(workflow)
+
+    assert [step["type"] for step in steps] == ["start", "approval", "condition", "end"]
+    assert steps[1]["assignee_role"] == "质量经理"
+    assert steps[1]["approval_mode"] == "orSign"

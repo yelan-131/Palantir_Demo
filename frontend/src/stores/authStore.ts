@@ -26,6 +26,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   login: (token, user) => {
+    localStorage.setItem('mf_token', token);
     localStorage.setItem('mf_user', JSON.stringify(user));
     set({ token, user, isAuthenticated: true });
   },
@@ -37,16 +38,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   restore: async () => {
-    try {
-      const res = await authMe();
-      const user = res.data as UserInfo;
-      localStorage.setItem('mf_user', JSON.stringify(user));
-      set({ token: null, user, isAuthenticated: true });
-      return;
-    } catch {
-      // Fall back to legacy local state only when the API cannot restore.
+    const token = localStorage.getItem('mf_token');
+    if (token) {
+      try {
+        const res = await authMe();
+        const user = res.data as UserInfo;
+        localStorage.setItem('mf_user', JSON.stringify(user));
+        set({ token, user, isAuthenticated: true });
+        return;
+      } catch {
+        // Fall back to legacy local state only when the API cannot restore.
+      }
     }
-    const userStr = localStorage.getItem('mf_user');
+    const userStr = token ? localStorage.getItem('mf_user') : null;
     if (userStr) {
       try {
         const user = JSON.parse(userStr);

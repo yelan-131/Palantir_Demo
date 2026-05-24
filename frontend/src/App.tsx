@@ -147,7 +147,7 @@ const richFallbackMenusByApplication: Record<number, DynamicMenu[]> = {
       { id: 1301, parent_id: 1300, title: '质量总览', icon: 'SafetyCertificateOutlined', route_path: '/program/quality-overview', is_visible: true },
       { id: 1302, parent_id: 1300, title: '检验批次', icon: 'SafetyCertificateOutlined', route_path: '/program/inspection-batch', is_visible: true },
       { id: 1303, parent_id: 1300, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/program/defect-analysis', is_visible: true },
-      { id: 1304, parent_id: 1300, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
+      { id: 1304, parent_id: 1300, title: '料号追踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
     ] },
   ],
   4: [
@@ -193,7 +193,7 @@ const groupedFallbackMenusByApplication: Record<number, DynamicMenu[]> = {
       ] },
       { id: 1320, parent_id: 1300, title: '问题改进', icon: 'AppstoreOutlined', route_path: '', is_visible: true, children: [
         { id: 1321, parent_id: 1320, title: '缺陷分析', icon: 'SafetyCertificateOutlined', route_path: '/program/defect-analysis', is_visible: true },
-        { id: 1322, parent_id: 1320, title: 'CAPA 跟踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
+        { id: 1322, parent_id: 1320, title: '料号追踪', icon: 'AppstoreOutlined', route_path: '/program/quality-event', is_visible: true },
       ] },
     ] },
   ],
@@ -248,7 +248,7 @@ const programTitleMap: Record<string, string> = {
   'defect-analysis-report': '缺陷分析报表',
   'process-capability-dashboard': '过程能力看板',
   'defect-analysis': '缺陷分析',
-  'quality-event': '质量事件',
+  'quality-event': '料号追踪',
   'supplier-risk': '供应商风险',
   'supply-overview': '供应总览',
   'material-impact-report': '物料影响报表',

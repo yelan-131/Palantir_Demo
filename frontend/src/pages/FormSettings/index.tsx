@@ -35,10 +35,26 @@ import {
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Button, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Button, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  createPlatformForm,
+  createPlatformFormField,
+  listPlatformFormLayouts,
+  listPlatformForms,
+  listWorkflowBindings,
+  updatePlatformForm,
+  updateWorkflowBinding,
+  upsertPlatformFormLayout,
+  upsertWorkflowBinding,
+  wfCreateDefinition,
+  wfGetDefinition,
+  wfUpdateDefinition,
+  type PlatformForm,
+} from '@/services/api';
+import {
   makeDefaultViewConfig,
+  normalizeViewConfig,
   sortByOrder,
   type ViewColumnRenderType,
   type ViewConfig,
@@ -48,6 +64,11 @@ import {
   type ViewTableColumnConfig,
   type ViewTableDensity,
 } from '@/utils/viewConfig';
+import ProfessionalFlowDesigner, {
+  createDefaultFlowConfig,
+  validateFlowDesignerConfig,
+  type FlowDesignerConfig,
+} from './ProfessionalFlowDesigner';
 import './style.css';
 
 type DesignerTab = 'form' | 'filter' | 'flow' | 'permission';
@@ -166,6 +187,40 @@ interface PublishCheckItem {
   level: PublishCheckLevel;
   title: string;
   detail: string;
+}
+
+interface WorkflowDesignerMeta {
+  draftWorkflowId?: number;
+  publishedWorkflowId?: number;
+  publishedAt?: string;
+  publishedVersion?: number;
+}
+
+interface ViewConfigMeta {
+  draftVersion?: number;
+  publishedVersion?: number;
+  draftSavedAt?: string;
+  publishedAt?: string;
+  status?: 'draft' | 'published';
+}
+
+interface WorkflowDefinitionPayload {
+  id: number;
+  name: string;
+  description?: string;
+  config?: Partial<FlowDesignerConfig> & Record<string, unknown>;
+  form_config?: Record<string, unknown>;
+  status?: string;
+  version?: number;
+}
+
+interface WorkflowBindingPayload {
+  id: number;
+  form_id: number;
+  workflow_id: number;
+  trigger_action: string;
+  enabled: boolean;
+  config?: Record<string, unknown>;
 }
 
 const controlWidthOptions = [
@@ -365,12 +420,6 @@ const tabs = [
   { key: 'permission', label: '权限设计', icon: <LockOutlined /> },
 ];
 
-const versionOptions = [
-  { value: 'v0.1', label: 'v0.1 当前草稿' },
-  { value: 'v0.0', label: 'v0.0 已发布' },
-  { value: 'history', label: '历史版本' },
-];
-
 const componentGroups: Array<{ category: string; items: ComponentDefinition[] }> = [
   {
     category: '文本类',
@@ -497,6 +546,80 @@ function makeDesignerViewConfig(config: DesignerConfig): ViewConfig {
     designerFieldsToViewFields(config.fields),
     config.filters.map((filter) => filter.key),
   );
+}
+
+function makeProfessionalFlowConfig(config: DesignerConfig): FlowDesignerConfig {
+  return createDefaultFlowConfig({
+    formId: config.id,
+    formName: config.name,
+    version: config.version,
+    steps: config.flowSteps,
+    fields: config.fields.map((field) => ({
+      key: field.key,
+      name: field.name,
+      type: field.type,
+      required: field.required,
+    })),
+  });
+}
+
+function getWorkflowDesignerMeta(form?: PlatformForm | null): WorkflowDesignerMeta {
+  const config = form?.config || {};
+  const meta = config.workflowDesigner;
+  return meta && typeof meta === 'object' ? meta as WorkflowDesignerMeta : {};
+}
+
+function getViewConfigMeta(form?: PlatformForm | null): ViewConfigMeta {
+  const config = form?.config || {};
+  const meta = config.viewConfigMeta;
+  return meta && typeof meta === 'object' ? meta as ViewConfigMeta : {};
+}
+
+function getStoredViewConfig(form: PlatformForm | null | undefined, designerConfig: DesignerConfig): ViewConfig | null {
+  const config = form?.config || {};
+  const stored = config.viewConfigDraft || config.viewConfig;
+  if (!stored || typeof stored !== 'object') return null;
+  return normalizeViewConfig(
+    stored as Partial<ViewConfig>,
+    designerFieldsToViewFields(designerConfig.fields),
+    designerConfig.filters.map((filter) => filter.key),
+  );
+}
+
+function mapDesignerFieldType(type: string) {
+  if (type.includes('日期')) return 'datetime';
+  if (type.includes('数字') || type.includes('数值')) return 'number';
+  if (type.includes('下拉') || type.includes('选择')) return 'enum';
+  if (type.includes('多行')) return 'text';
+  if (type.includes('附件')) return 'json';
+  return 'string';
+}
+
+function makeWorkflowFormConfig(config: DesignerConfig) {
+  return {
+    formCode: config.id,
+    formName: config.name,
+    fields: config.fields.map((field, index) => ({
+      name: field.key,
+      label: field.name,
+      type: mapDesignerFieldType(field.type),
+      required: Boolean(field.required),
+      sortOrder: index,
+    })),
+  };
+}
+
+function makeWorkflowConfigPayload(flowConfig: FlowDesignerConfig, form: PlatformForm, config: DesignerConfig) {
+  return {
+    ...flowConfig,
+    formId: form.id,
+    formCode: form.code,
+    formName: config.name,
+    savedAt: new Date().toISOString(),
+    fieldPermissions: Object.fromEntries(
+      flowConfig.nodes.map((node) => [node.id, node.fieldPermissions || {}]),
+    ),
+  };
 }
 
 function makeFieldControl(field: DesignerField): LayoutControl {
@@ -722,6 +845,10 @@ export default function FormSettingsPage() {
   const [isCanvasDragActive, setCanvasDragActive] = useState(false);
   const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
   const [ruleModal, setRuleModal] = useState<{ controlId: string; ruleKey: ControlRuleKey } | null>(null);
+  const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
+  const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
+  const [workflowMeta, setWorkflowMeta] = useState<WorkflowDesignerMeta>({});
+  const [isPersistingFlow, setPersistingFlow] = useState(false);
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>(() => makeFlowNodes(baseConfig.flowSteps));
   const [flowConnections, setFlowConnections] = useState<FlowConnection[]>(() => makeFlowConnections(makeFlowNodes(baseConfig.flowSteps)));
   const [pendingFlowPort, setPendingFlowPort] = useState<{ nodeId: string; side: FlowPortSide } | null>(null);
@@ -758,6 +885,9 @@ export default function FormSettingsPage() {
     setCanvasDragActive(false);
     setRuleOverrides({});
     setRuleModal(null);
+    setProfessionalFlowConfig(makeProfessionalFlowConfig(baseConfig));
+    setPlatformForm(null);
+    setWorkflowMeta({});
     const nextFlowNodes = makeFlowNodes(baseConfig.flowSteps);
     setFlowNodes(nextFlowNodes);
     setFlowConnections(makeFlowConnections(nextFlowNodes));
@@ -772,13 +902,80 @@ export default function FormSettingsPage() {
     if (selectedAssetKey) setPropertyTab('field');
   }, [selectedAssetKey, selectedControlId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadPersistedFlow = async () => {
+      try {
+        const formsResponse = await listPlatformForms();
+        const forms = (formsResponse.data?.data || []) as PlatformForm[];
+        const matchedForm = forms.find((form) => form.code === baseConfig.id);
+        if (!matchedForm || cancelled) return;
+        setPlatformForm(matchedForm);
+        let persistedViewConfig = getStoredViewConfig(matchedForm, baseConfig);
+        if (!persistedViewConfig) {
+          try {
+            const layoutsResponse = await listPlatformFormLayouts(matchedForm.id);
+            const layouts = (layoutsResponse.data?.data || []) as Array<{ layout_type?: string; config?: Record<string, unknown> }>;
+            const viewLayout = layouts.find((layout) => layout.layout_type === 'view');
+            const layoutConfig = viewLayout?.config || {};
+            const layoutView = layoutConfig.draft || layoutConfig.published;
+            if (layoutView) {
+              persistedViewConfig = normalizeViewConfig(
+                layoutView,
+                designerFieldsToViewFields(baseConfig.fields),
+                baseConfig.filters.map((filter) => filter.key),
+              );
+            }
+          } catch (error) {
+            console.warn('view layout load failed', error);
+          }
+        }
+        if (persistedViewConfig && !cancelled) {
+          setViewConfig(persistedViewConfig);
+        }
+        const meta = getWorkflowDesignerMeta(matchedForm);
+        setWorkflowMeta(meta);
+        const workflowId = meta.draftWorkflowId || meta.publishedWorkflowId;
+        if (!workflowId) return;
+        const definitionResponse = await wfGetDefinition(workflowId);
+        if (cancelled) return;
+        const definition = definitionResponse.data as WorkflowDefinitionPayload;
+        if (definition.config?.nodes && definition.config?.edges) {
+          const defaultFlow = makeProfessionalFlowConfig(baseConfig);
+          const nextConfig = {
+            ...defaultFlow,
+            ...definition.config,
+            version: definition.version ? `v${definition.version}` : String(definition.config.version || defaultFlow.version),
+          } as FlowDesignerConfig;
+          setProfessionalFlowConfig(nextConfig);
+          setVersion(nextConfig.version);
+          setHasUnsavedChanges(false);
+        }
+      } catch {
+        if (!cancelled) {
+          message.warning('未能加载后端流程草稿，当前使用本地默认配置');
+        }
+      }
+    };
+    loadPersistedFlow();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseConfig.id, baseConfig.name, baseConfig.version, baseConfig.fields, baseConfig.flowSteps]);
+
   const selectedControl = useMemo(
     () => layoutControls.find((control) => control.id === selectedControlId),
     [layoutControls, selectedControlId],
   );
   const selectedField = useMemo(
-    () => baseConfig.fields.find((field) => field.key === (selectedControl?.fieldKey || selectedAssetKey)),
-    [baseConfig.fields, selectedAssetKey, selectedControl],
+    () => {
+      const targetKey = selectedControl?.fieldKey || selectedAssetKey;
+      if (activeTab === 'filter') {
+        return baseConfig.filters.find((field) => field.key === targetKey) || baseConfig.fields.find((field) => field.key === targetKey);
+      }
+      return baseConfig.fields.find((field) => field.key === targetKey);
+    },
+    [activeTab, baseConfig.fields, baseConfig.filters, selectedAssetKey, selectedControl],
   );
   const normalizedLibrarySearch = librarySearch.trim().toLowerCase();
   const matchesLibrarySearch = (text: string) => !normalizedLibrarySearch || text.toLowerCase().includes(normalizedLibrarySearch);
@@ -790,6 +987,8 @@ export default function FormSettingsPage() {
     }))
     .filter((group) => !normalizedLibrarySearch || group.items.length > 0 || matchesLibrarySearch(group.category));
   const filteredFields = baseConfig.fields.filter((field) => matchesLibrarySearch(`${field.name} ${field.key} ${field.type} ${field.optionSource || ''}`));
+  const libraryFields = activeTab === 'filter' ? baseConfig.filters : baseConfig.fields;
+  const filteredLibraryFields = libraryFields.filter((field) => matchesLibrarySearch(`${field.name} ${field.key} ${field.type} ${field.optionSource || ''}`));
   const alertSections = baseConfig.id === 'alert-center' ? alertBusinessSections : [
     { key: 'default', title: '基础信息', desc: '当前表单的主要录入字段', fieldKeys: baseConfig.fields.map((field) => field.key) },
   ];
@@ -803,6 +1002,9 @@ export default function FormSettingsPage() {
     const relationWithoutSource = baseConfig.fields.filter((field) => field.type.includes('关联') && !field.optionSource);
     const enabledFilters = viewConfig.filters.filter((filter) => filter.enabled);
     const enabledColumns = viewConfig.table.columns.filter((column) => column.enabled);
+    const flowValidation = validateFlowDesignerConfig(professionalFlowConfig);
+    const flowErrors = flowValidation.filter((item) => item.level === 'error');
+    const flowWarnings = flowValidation.filter((item) => item.level === 'warning');
     const invalidViewFields = [
       ...enabledFilters.filter((filter) => !baseConfig.fields.some((field) => field.key === filter.fieldName)).map((filter) => filter.label),
       ...enabledColumns.filter((column) => !baseConfig.fields.some((field) => field.key === column.fieldName)).map((column) => column.label),
@@ -854,8 +1056,17 @@ export default function FormSettingsPage() {
         detail: baseConfig.id === 'alert-center' ? '已启用推荐规则：严重告警要求附件证据和处理时限。' : '建议按业务场景配置高风险记录的强制处理规则。',
       },
     ];
+    checks.push({
+      level: flowErrors.length ? 'error' : flowWarnings.length ? 'warning' : 'suggestion',
+      title: '流程设计完整性',
+      detail: flowErrors.length
+        ? `流程存在 ${flowErrors.length} 个阻断项：${flowErrors.map((item) => item.title).join('、')}`
+        : flowWarnings.length
+          ? `流程存在 ${flowWarnings.length} 个警告项：${flowWarnings.map((item) => item.title).join('、')}`
+          : '流程结构、节点规则和触发绑定已通过核心发布校验。',
+    });
     return checks;
-  }, [baseConfig.fields, baseConfig.id, hiddenRequiredControls, layoutControls, searchableFieldCount, viewConfig]);
+  }, [baseConfig.fields, baseConfig.id, hiddenRequiredControls, layoutControls, professionalFlowConfig, searchableFieldCount, viewConfig]);
   const publishErrorCount = publishChecks.filter((item) => item.level === 'error').length;
   const publishWarningCount = publishChecks.filter((item) => item.level === 'warning').length;
 
@@ -967,23 +1178,220 @@ export default function FormSettingsPage() {
     }));
   };
 
-  const saveDraft = () => {
-    setHasUnsavedChanges(false);
-    message.success('草稿已保存，发布前不会影响已发布表单');
+  const ensurePlatformForm = async () => {
+    if (platformForm) return platformForm;
+    const formsResponse = await listPlatformForms();
+    const forms = (formsResponse.data?.data || []) as PlatformForm[];
+    const matchedForm = forms.find((form) => form.code === baseConfig.id);
+    if (matchedForm) {
+      setPlatformForm(matchedForm);
+      setWorkflowMeta(getWorkflowDesignerMeta(matchedForm));
+      return matchedForm;
+    }
+
+    const createResponse = await createPlatformForm({
+      name: baseConfig.name,
+      code: baseConfig.id,
+      description: baseConfig.description,
+      table_name: baseConfig.dataSource,
+      storage_mode: 'dynamic',
+      status: 'active',
+      config: {
+        workflowDesigner: {},
+        source: 'form-settings',
+        viewConfig,
+        viewConfigDraft: viewConfig,
+        viewConfigMeta: {
+          draftVersion: 1,
+          publishedVersion: 1,
+          draftSavedAt: new Date().toISOString(),
+          publishedAt: new Date().toISOString(),
+          status: 'published',
+        },
+      },
+    });
+    const createdForm = createResponse.data?.data as PlatformForm;
+    await Promise.all(baseConfig.fields.map((field, index) => createPlatformFormField(createdForm.id, {
+      field_name: field.key,
+      label: field.name,
+      field_type: mapDesignerFieldType(field.type),
+      required: Boolean(field.required),
+      visible_in_list: field.listVisible !== false,
+      visible_in_form: true,
+      searchable: Boolean(field.searchable),
+      sortable: Boolean(field.sortable),
+      default_value: field.defaultValue,
+      enum_values: field.optionSource ? { source: field.optionSource } : undefined,
+      validation: field.validation ? { message: field.validation } : undefined,
+      ui_config: {
+        placeholder: field.placeholder,
+        locked: Boolean(field.locked),
+        designerType: field.type,
+      },
+      sort_order: index,
+    })));
+    setPlatformForm(createdForm);
+    setWorkflowMeta({});
+    return createdForm;
+  };
+
+  const updateFormWorkflowMeta = async (form: PlatformForm, nextMeta: WorkflowDesignerMeta) => {
+    const nextConfig = { ...(form.config || {}), workflowDesigner: nextMeta };
+    const response = await updatePlatformForm(form.id, { config: nextConfig });
+    const updatedForm = (response.data?.data || { ...form, config: nextConfig }) as PlatformForm;
+    setPlatformForm(updatedForm);
+    setWorkflowMeta(nextMeta);
+    return updatedForm;
+  };
+
+  const updateFormViewConfig = async (
+    form: PlatformForm,
+    nextViewConfig: ViewConfig,
+    mode: 'draft' | 'published',
+  ) => {
+    const currentConfig = { ...(form.config || {}) } as Record<string, unknown>;
+    const currentMeta = getViewConfigMeta(form);
+    const now = new Date().toISOString();
+    const draftVersion = Number(currentMeta.draftVersion || currentMeta.publishedVersion || 0);
+    const publishedVersion = Number(currentMeta.publishedVersion || 0);
+    const nextMeta: ViewConfigMeta = mode === 'draft'
+      ? {
+          ...currentMeta,
+          draftVersion: draftVersion + 1,
+          draftSavedAt: now,
+          status: 'draft',
+        }
+      : {
+          ...currentMeta,
+          draftVersion: Math.max(draftVersion, publishedVersion + 1),
+          publishedVersion: publishedVersion + 1,
+          draftSavedAt: now,
+          publishedAt: now,
+          status: 'published',
+        };
+    const nextConfig: Record<string, unknown> = mode === 'draft'
+      ? {
+          ...currentConfig,
+          viewConfigDraft: nextViewConfig,
+          viewConfigMeta: nextMeta,
+        }
+      : {
+          ...currentConfig,
+          viewConfig: nextViewConfig,
+          viewConfigDraft: nextViewConfig,
+          viewConfigMeta: nextMeta,
+        };
+    const response = await updatePlatformForm(form.id, { config: nextConfig });
+    const updatedForm = (response.data?.data || { ...form, config: nextConfig }) as PlatformForm;
+    await upsertPlatformFormLayout(form.id, 'view', {
+      layout_type: 'view',
+      config: {
+        draft: nextConfig.viewConfigDraft,
+        published: nextConfig.viewConfig,
+        meta: nextConfig.viewConfigMeta,
+      },
+    });
+    setPlatformForm(updatedForm);
+    return updatedForm;
+  };
+
+  const saveWorkflowDefinition = async (status: 'draft' | 'published', form: PlatformForm, workflowId?: number) => {
+    const payload = {
+      name: professionalFlowConfig.name || `${baseConfig.name}流程`,
+      description: `${baseConfig.name} 表单内嵌流程设计`,
+      status,
+      config: makeWorkflowConfigPayload(professionalFlowConfig, form, baseConfig),
+      form_config: makeWorkflowFormConfig(baseConfig),
+    };
+    if (workflowId) {
+      const response = await wfUpdateDefinition(workflowId, payload);
+      return {
+        id: workflowId,
+        version: Number(response.data?.version || 1),
+        status: String(response.data?.status || status),
+      };
+    }
+    const response = await wfCreateDefinition(payload);
+    return {
+      id: Number(response.data?.id),
+      version: Number(response.data?.version || 1),
+      status: String(response.data?.status || status),
+    };
+  };
+
+  const saveDraft = async () => {
+    if (isPersistingFlow) return;
+    setPersistingFlow(true);
+    try {
+      const form = await ensurePlatformForm();
+      const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
+      const meta = getWorkflowDesignerMeta(formWithView);
+      const saved = await saveWorkflowDefinition('draft', formWithView, meta.draftWorkflowId);
+      await updateFormWorkflowMeta(formWithView, { ...meta, draftWorkflowId: saved.id });
+      setVersion(`v${saved.version}`);
+      setHasUnsavedChanges(false);
+      message.success('草稿已保存，数据筛选配置和流程草稿都不会影响已发布运行页');
+    } catch (error) {
+      console.error('workflow draft save failed', error);
+      message.error('草稿保存失败，请检查后端服务或登录状态');
+    } finally {
+      setPersistingFlow(false);
+    }
   };
 
   const publishConfig = () => {
     setPublishCheckOpen(true);
   };
 
-  const confirmPublish = () => {
+  const confirmPublish = async () => {
     if (publishErrorCount > 0) {
-      message.error('请先处理发布检查中的阻断项');
+      message.error('请先处理发布确认中的阻断项');
       return;
     }
-    setPublishCheckOpen(false);
-    setHasUnsavedChanges(false);
-    message.success('配置已发布，已记录变更摘要和发布时间');
+    if (isPersistingFlow) return;
+    setPersistingFlow(true);
+    try {
+      const form = await ensurePlatformForm();
+      const formWithView = await updateFormViewConfig(form, viewConfig, 'published');
+      const meta = getWorkflowDesignerMeta(formWithView);
+      const saved = await saveWorkflowDefinition('published', formWithView, meta.draftWorkflowId || meta.publishedWorkflowId);
+      const publishedAt = new Date().toISOString();
+      const updatedForm = await updateFormWorkflowMeta(formWithView, {
+        ...meta,
+        draftWorkflowId: saved.id,
+        publishedWorkflowId: saved.id,
+        publishedAt,
+        publishedVersion: saved.version,
+      });
+      const bindingsResponse = await listWorkflowBindings(updatedForm.id);
+      const existingBindings = (bindingsResponse.data?.data || []) as WorkflowBindingPayload[];
+      await Promise.all(professionalFlowConfig.triggerBindings.map((binding) => {
+        const payload = {
+          workflow_id: saved.id,
+          trigger_action: binding.action,
+          enabled: binding.enabled,
+          config: {
+            label: binding.label,
+            workflowVersion: saved.version,
+            publishedAt,
+            stateMapping: professionalFlowConfig.stateMapping,
+          },
+        };
+        const existing = existingBindings.find((item) => item.trigger_action === binding.action);
+        return existing
+          ? updateWorkflowBinding(updatedForm.id, existing.id, payload)
+          : upsertWorkflowBinding(updatedForm.id, payload);
+      }));
+      setVersion(`v${saved.version}`);
+      setPublishCheckOpen(false);
+      setHasUnsavedChanges(false);
+      message.success('配置已发布，运行页会读取新的数据筛选和表格配置');
+    } catch (error) {
+      console.error('workflow publish failed', error);
+      message.error('发布失败，请检查流程定义或绑定接口');
+    } finally {
+      setPersistingFlow(false);
+    }
   };
 
   const warnBeforeLeave = () => {
@@ -1566,6 +1974,7 @@ export default function FormSettingsPage() {
   const sortedViewColumns = sortByOrder(viewConfig.table.columns);
   const enabledViewFilters = sortedViewFilters.filter((filter) => filter.enabled);
   const enabledViewColumns = sortedViewColumns.filter((column) => column.enabled);
+  const viewConfigMeta = getViewConfigMeta(platformForm);
   const viewSampleRows = [
     { alertId: 'AL-2605-001', title: '压缩空气压力偏低', device: '空压站 2#', level: '严重', status: '已派发', source: '能源站', owner: '李工', occurredAt: '2026-05-24' },
     { alertId: 'AL-2605-002', title: 'A 线节拍延迟', device: '总装 A 线', level: '中等', status: '确认中', source: '生产执行', owner: '王工', occurredAt: '2026-05-24' },
@@ -1668,6 +2077,9 @@ export default function FormSettingsPage() {
           <Segmented value={viewPreviewDevice} onChange={(value) => setViewPreviewDevice(value as 'desktop' | 'narrow')} options={[{ value: 'desktop', label: '桌面预览' }, { value: 'narrow', label: '窄屏预览' }]} />
           <Tag color="blue">{enabledViewFilters.length} 个筛选</Tag>
           <Tag color="green">{enabledViewColumns.length} 个展示列</Tag>
+          <Tag color={viewConfigMeta.status === 'draft' ? 'orange' : 'success'}>
+            {viewConfigMeta.status === 'draft' ? `草稿 v${viewConfigMeta.draftVersion || 1}` : `已发布 v${viewConfigMeta.publishedVersion || 1}`}
+          </Tag>
         </Space>
       </section>
 
@@ -1745,13 +2157,50 @@ export default function FormSettingsPage() {
     </div>
   );
 
+  const toolbarToolPanel = (
+    <div className="designer-top-tool-panel">
+      <section>
+        <strong>配置引导</strong>
+        <span>拖入字段/控件，选中后在右侧配置属性，发布时会同步做业务校验。</span>
+        <div className="designer-top-tool-tags">
+          <Tag color="blue">字段 {baseConfig.fields.length}</Tag>
+          <Tag color="green">控件 {layoutControls.length}</Tag>
+          <Tag color={publishErrorCount ? 'red' : 'success'}>阻断 {publishErrorCount}</Tag>
+        </div>
+      </section>
+      <section>
+        <strong>快捷排版</strong>
+        <div className="designer-top-tool-grid">
+          <Button size="small" icon={<LayoutOutlined />} onClick={applyTwoColumnLayout}>两列</Button>
+          <Button size="small" icon={<TableOutlined />} onClick={applyCompactLayout}>紧凑</Button>
+          <Button size="small" icon={<ApartmentOutlined />} onClick={applyBusinessSectionLayout}>业务分组</Button>
+          <Button size="small" icon={<CheckSquareOutlined />} onClick={batchSetRequired}>批量必填</Button>
+          <Button size="small" onClick={() => batchUpdateVisibleControls({ width: 'full' })}>全宽</Button>
+          <Button size="small" icon={<UndoOutlined />} disabled={!history.length} onClick={undoLayoutChange}>撤销</Button>
+        </div>
+      </section>
+      <section>
+        <strong>业务区块</strong>
+        <div className="designer-top-tool-sections">
+          {alertSections.map((section) => (
+            <button key={section.key} type="button" onClick={applyBusinessSectionLayout}>
+              <span>{section.title}</span>
+              <small>{section.desc}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+
+  const activeTabKey: string = activeTab;
+
   return (
     <div className="form-designer-page">
       <header className="form-designer-toolbar">
         <div className="form-designer-title">
           <Typography.Title level={4}>{baseConfig.name}配置</Typography.Title>
           <span className="designer-title-meta">{baseConfig.status}</span>
-          <Select className="form-version-select form-version-title-select" value={version} onChange={setVersion} options={versionOptions} />
         </div>
         <Tabs
           className="form-designer-tabs"
@@ -1766,23 +2215,34 @@ export default function FormSettingsPage() {
           {hasUnsavedChanges && <Tag className="designer-unsaved-tag" color="orange">未保存</Tag>}
           <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave} />
           <Button size="small" type="text" title="预览" aria-label="预览" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)} />
-          <Button size="small" type="text" title="发布检查" aria-label="发布检查" icon={<WarningOutlined />} onClick={() => setPublishCheckOpen(true)} />
-          <Button size="small" type="text" title="版本差异" aria-label="版本差异" icon={<HistoryOutlined />} onClick={() => setVersionPanelOpen(true)} />
-          <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} onClick={saveDraft} />
-          <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={publishConfig}>保存配置</Button>
+          <Button
+            className="designer-version-action"
+            size="small"
+            title="版本管理"
+            aria-label="版本管理"
+            icon={<HistoryOutlined />}
+            onClick={() => setVersionPanelOpen(true)}
+          >
+            {version} 当前草稿
+          </Button>
+          <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />
+          <Popover content={toolbarToolPanel} placement="bottomRight" trigger="click">
+            <Button size="small" type="text" title="工具" aria-label="工具" icon={<SettingOutlined />} />
+          </Popover>
+          <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>
         </Space>
       </header>
 
-      <section className={`form-designer-shell ${activeTab === 'permission' || activeTab === 'filter' ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' ? 'form-designer-shell-data-view' : ''}`}>
-        {activeTab !== 'permission' && activeTab !== 'filter' && (
+      <section className={`form-designer-shell ${activeTab === 'permission' || activeTab === 'filter' || activeTab === 'flow' ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' ? 'form-designer-shell-data-view' : ''}`}>
+        {!(['permission', 'filter', 'flow'] as DesignerTab[]).includes(activeTab) && (
           <aside className="form-designer-left">
             <div className="designer-panel-head">
-              <strong>{activeTab === 'flow' ? '节点' : '控件'}</strong>
+              <strong>控件</strong>
               {activeTab !== 'form' && (
-                <span>{activeTab === 'flow' ? '流程节点库' : tabs.find((item) => item.key === activeTab)?.label}</span>
+                <span>{tabs.find((item) => item.key === activeTab)?.label}</span>
               )}
             </div>
-            {activeTab === 'form' && (
+            {(activeTab === 'form' || activeTab === 'filter') && (
               <div className="designer-library-search">
                 <Input
                   allowClear
@@ -1795,7 +2255,7 @@ export default function FormSettingsPage() {
               </div>
             )}
 
-          {activeTab === 'form' ? (
+          {(activeTab === 'form' || activeTab === 'filter') ? (
             <>
               <Segmented
                 block
@@ -1811,10 +2271,10 @@ export default function FormSettingsPage() {
                 <div className="designer-group-title">快捷排版</div>
                 <div className="designer-side-guide">
                   <strong>配置引导</strong>
-                  <span>拖入字段/控件，选中后在右侧配置属性，发布前运行检查。</span>
+                  <span>{activeTab === 'filter' ? '配置运行页查询条件，选中后在右侧查看字段属性，发布时会同步做业务校验。' : '拖入字段/控件，选中后在右侧配置属性，发布时会同步做业务校验。'}</span>
                   <div>
-                    <Tag color="blue">字段 {baseConfig.fields.length}</Tag>
-                    <Tag color="green">控件 {layoutControls.length}</Tag>
+                    <Tag color="blue">{activeTab === 'filter' ? '筛选字段' : '字段'} {libraryFields.length}</Tag>
+                    <Tag color="green">{activeTab === 'filter' ? '筛选项' : '控件'} {activeTab === 'filter' ? baseConfig.filters.length : layoutControls.length}</Tag>
                     <Tag color={publishErrorCount ? 'red' : 'success'}>阻断 {publishErrorCount}</Tag>
                   </div>
                 </div>
@@ -1848,7 +2308,7 @@ export default function FormSettingsPage() {
                           draggable
                           key={item.key}
                           data-desc={item.desc}
-                          onClick={() => addComponentToCanvas(item)}
+                          onClick={() => activeTab === 'filter' ? message.info('筛选页先选择字段，再在右侧查看或调整字段属性') : addComponentToCanvas(item)}
                           onDragStart={(event) => event.dataTransfer.setData('componentKey', item.key)}
                         >
                           <span className="designer-component-icon">{item.icon}</span>
@@ -1873,7 +2333,7 @@ export default function FormSettingsPage() {
                             draggable
                             key={item.key}
                             data-desc={item.desc}
-                            onClick={() => addComponentToCanvas(item)}
+                            onClick={() => activeTab === 'filter' ? message.info('筛选页先选择字段，再在右侧查看或调整字段属性') : addComponentToCanvas(item)}
                             onDragStart={(event) => event.dataTransfer.setData('componentKey', item.key)}
                           >
                             <span className="designer-component-icon">{item.icon}</span>
@@ -1890,28 +2350,28 @@ export default function FormSettingsPage() {
               ) : (
                 <>
                   <div className="designer-panel-head designer-panel-head-gap">
-                    <strong>字段库</strong>
-                    <span>{filteredFields.length} / {baseConfig.fields.length} 个</span>
+                    <strong>{activeTab === 'filter' ? '筛选字段' : '字段库'}</strong>
+                    <span>{filteredLibraryFields.length} / {libraryFields.length} 个</span>
                   </div>
-                  <div className="designer-template-grid">
+                  {activeTab === 'form' && <div className="designer-template-grid">
                     {fieldTemplates.filter((field) => matchesLibrarySearch(`${field.name} ${field.type}`)).map((field) => (
                       <button key={field.key} type="button" onClick={() => addTemplateField(field)}>
                         <span>{field.name}</span>
                         <small>{field.type}</small>
                       </button>
                     ))}
-                  </div>
+                  </div>}
                   <div className="designer-field-list">
-                    {filteredFields.map((field) => (
+                    {filteredLibraryFields.map((field) => (
                       <div
                         className={`designer-field ${selectedAssetKey === field.key ? 'designer-field-active' : ''}`}
-                        draggable
+                        draggable={activeTab === 'form'}
                         key={field.key}
                         onClick={() => {
                           setSelectedAssetKey(field.key);
                           setSelectedControlId('');
                         }}
-                        onDragStart={(event) => event.dataTransfer.setData('fieldKey', field.key)}
+                        onDragStart={(event) => activeTab === 'form' && event.dataTransfer.setData('fieldKey', field.key)}
                       >
                         <DragOutlined />
                         <span>{field.name}</span>
@@ -1922,24 +2382,6 @@ export default function FormSettingsPage() {
                 </>
               )}
             </>
-          ) : activeTab === 'flow' ? (
-            <div className="flow-node-library">
-              <div className="designer-panel-head designer-panel-head-gap">
-                <strong>流程节点</strong>
-                <span>{flowNodePalette.length} 类</span>
-              </div>
-              <div className="flow-node-palette">
-                {flowNodePalette.map((item) => (
-                  <button className="flow-node-card" key={item.key} onClick={() => addFlowNode(item)} type="button">
-                    <span className="flow-node-card-icon">{item.icon}</span>
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>{item.desc}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
           ) : (
             <div className="designer-component-list">
               <div className="designer-component">
@@ -1951,36 +2393,11 @@ export default function FormSettingsPage() {
               </div>
             </div>
           )}
-
-          {activeTab !== 'form' && activeTab !== 'flow' && (
-            <>
-              <div className="designer-panel-head designer-panel-head-gap">
-                <strong>{activeTab === 'filter' ? '筛选字段' : '字段库'}</strong>
-                <span>{(activeTab === 'filter' ? baseConfig.filters : baseConfig.fields).length} 个</span>
-              </div>
-              <div className="designer-field-list">
-                {(activeTab === 'filter' ? baseConfig.filters : baseConfig.fields).map((field) => (
-                  <div
-                    className={`designer-field ${selectedAssetKey === field.key ? 'designer-field-active' : ''}`}
-                    key={field.key}
-                    onClick={() => {
-                      setSelectedAssetKey(field.key);
-                      setSelectedControlId('');
-                    }}
-                  >
-                    <DragOutlined />
-                    <span>{field.name}</span>
-                    {field.locked && <Tag color="orange">锁定</Tag>}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
         </aside>
         )}
 
         <main className="form-designer-canvas">
-          {activeTab === 'form' && (
+          {activeTabKey === 'form' && (
             <div
               className="canvas-board create-form-canvas"
               onClick={() => setSelectedControlId('')}
@@ -2027,70 +2444,30 @@ export default function FormSettingsPage() {
             </div>
           )}
 
-          {activeTab === 'filter' && (
+          {activeTabKey === 'filter' && (
             <div className="canvas-board data-view-canvas">
               {renderDataViewDesigner()}
             </div>
           )}
 
-          {activeTab === 'flow' && (
-            <div
-              className="canvas-board flow-canvas"
-              onPointerMove={moveFlowNode}
-              onPointerUp={stopFlowNodeDrag}
-              onPointerLeave={stopFlowNodeDrag}
-              ref={flowCanvasRef}
-            >
-              <div className="flow-canvas-guide">
-                <strong>流程节点画布</strong>
-                <span>从开始节点向下流转，拖拽节点可调整位置。</span>
-              </div>
-              <svg className="flow-connector-layer" aria-hidden="true">
-                <defs>
-                  <marker id="flow-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="7" refY="4">
-                    <path d="M 0 0 L 8 4 L 0 8 z" />
-                  </marker>
-                </defs>
-                {flowConnections.map((connection) => {
-                  const from = flowNodes.find((node) => node.id === connection.fromId);
-                  const to = flowNodes.find((node) => node.id === connection.toId);
-                  if (!from || !to) return null;
-                  return (
-                    <path
-                      d={getFlowConnectorPath(from, connection.fromSide, to, connection.toSide)}
-                      key={connection.id}
-                    />
-                  );
-                })}
-              </svg>
-              {flowNodes.map((node, index) => (
-                <div
-                  className={`flow-designer-node flow-designer-node-${node.role}`}
-                  key={node.id}
-                  onPointerDown={(event) => startFlowNodeDrag(event, node)}
-                  style={{ left: node.x, top: node.y }}
-                >
-                  <span className="flow-node-index">{index + 1}</span>
-                  <div>
-                    <strong>{node.label}</strong>
-                    <small>{node.role === 'start' ? '开始节点' : node.role === 'end' ? '结束归档' : '处理节点'}</small>
-                  </div>
-                  {getFlowNodePorts(node).map((side) => (
-                    <button
-                      aria-label={`${node.label}-${side}-port`}
-                      className={`flow-port flow-port-${side} ${pendingFlowPort?.nodeId === node.id && pendingFlowPort.side === side ? 'flow-port-active' : ''}`}
-                      key={side}
-                      onClick={(event) => handleFlowPortClick(event, node, side)}
-                      title={`${node.label} ${side} 连接点`}
-                      type="button"
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
+          {activeTabKey === 'flow' && (
+            <ProfessionalFlowDesigner
+              config={professionalFlowConfig}
+              fields={baseConfig.fields.map((field) => ({
+                key: field.key,
+                name: field.name,
+                type: field.type,
+                required: field.required,
+              }))}
+              roles={baseConfig.roles}
+              onChange={(nextConfig) => {
+                setProfessionalFlowConfig(nextConfig);
+                markUnsaved();
+              }}
+            />
           )}
 
-          {activeTab === 'permission' && (
+          {activeTabKey === 'permission' && (
             <div className="canvas-board permission-canvas">
               <div className="permission-overview">
                 <div>
@@ -2166,7 +2543,7 @@ export default function FormSettingsPage() {
           )}
         </main>
 
-        {activeTab !== 'permission' && activeTab !== 'filter' && (
+        {!(['permission', 'filter', 'flow'] as DesignerTab[]).includes(activeTab) && (
         <aside className="form-designer-right">
           <div className="designer-panel-head">
             <strong>属性</strong>
@@ -2297,7 +2674,7 @@ export default function FormSettingsPage() {
                 <label><span>字段间距</span><Select value="12" options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></label>
                 <label><span>表单说明</span><Input value={baseConfig.description} readOnly /></label>
                 <label><span>发布状态</span><Input value={hasUnsavedChanges ? '当前草稿有未保存修改' : '草稿与已发布版本一致'} readOnly /></label>
-                <label><span>发布检查</span><Input value={`${publishErrorCount} 个阻断项 / ${publishWarningCount} 个警告`} readOnly /></label>
+                <label><span>发布校验</span><Input value={`${publishErrorCount} 个阻断项 / ${publishWarningCount} 个提醒`} readOnly /></label>
               </section>
               <section className="designer-prop-section">
                 <strong className="designer-prop-section-title">推荐联动</strong>
@@ -2342,11 +2719,15 @@ export default function FormSettingsPage() {
         onCancel={() => setPublishCheckOpen(false)}
         onOk={confirmPublish}
         open={publishCheckOpen}
-        title="发布检查"
+        confirmLoading={isPersistingFlow}
+        title="发布确认"
       >
+        <div className="designer-publish-note">
+          发布时会执行当前业务表单配置的必要校验；不同业务可拥有不同规则，日常编辑不单独打扰。
+        </div>
         <div className="designer-check-summary">
           <Tag color={publishErrorCount ? 'red' : 'success'}>{publishErrorCount} 个阻断项</Tag>
-          <Tag color={publishWarningCount ? 'orange' : 'default'}>{publishWarningCount} 个警告</Tag>
+          <Tag color={publishWarningCount ? 'orange' : 'default'}>{publishWarningCount} 个提醒</Tag>
           <Tag color="blue">{publishChecks.filter((item) => item.level === 'suggestion').length} 个建议</Tag>
         </div>
         <div className="designer-check-list">
@@ -2370,11 +2751,11 @@ export default function FormSettingsPage() {
         title="草稿与已发布版本"
       >
         <div className="designer-version-panel">
-          <div><span>已发布版本</span><strong>v0.1 · 2026-05-24 10:20</strong></div>
-          <div><span>当前草稿</span><strong>{hasUnsavedChanges ? '存在未发布修改' : '无差异'}</strong></div>
-          <div><span>变更摘要</span><strong>字段顺序、业务分组、预览/发布检查规则</strong></div>
+          <div><span>已发布版本</span><strong>数据视图 v{viewConfigMeta.publishedVersion || 0}{viewConfigMeta.publishedAt ? ` · ${viewConfigMeta.publishedAt.slice(0, 10)}` : ''}</strong></div>
+          <div><span>当前草稿</span><strong>{hasUnsavedChanges || viewConfigMeta.status === 'draft' ? `存在未发布修改 · 草稿 v${viewConfigMeta.draftVersion || 1}` : '无差异'}</strong></div>
+          <div><span>变更摘要</span><strong>筛选条件、表格列、流程配置和业务发布规则</strong></div>
           <Space wrap>
-            <Button onClick={saveDraft} icon={<SaveOutlined />}>保存草稿</Button>
+            <Button onClick={saveDraft} loading={isPersistingFlow} icon={<SaveOutlined />}>保存草稿</Button>
             <Button danger onClick={() => { setHasUnsavedChanges(false); setVersionPanelOpen(false); message.success('已回滚到上一发布版本'); }}>回滚上一版</Button>
             <Button type="primary" onClick={() => { setVersionPanelOpen(false); setPublishCheckOpen(true); }}>发布当前草稿</Button>
           </Space>

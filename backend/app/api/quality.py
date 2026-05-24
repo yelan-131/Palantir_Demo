@@ -228,6 +228,26 @@ QUALITY_EVENT_DEMO = {
             "summary": "针对隔离产品与剩余物料发起复检，等待质量工程师确认抽样方案。",
             "actions": ["发起复检", "确认抽样方案"],
         },
+        {
+            "id": "sensor-reflow-temp-05",
+            "label": "TSDB Sensor",
+            "type": "Sensor",
+            "name": "TEMP-REFLOW-05",
+            "status": "online",
+            "risk": "medium",
+            "summary": "Time-series sensor bound to SMT-03 reflow oven zone 5.",
+            "actions": ["View trend", "Open raw readings"],
+        },
+        {
+            "id": "ts-window-reflow-temp-260521-0930",
+            "label": "TSDB Window",
+            "type": "TimeSeriesWindow",
+            "name": "09:30-09:45 / Zone 5 temperature drift",
+            "status": "anomaly",
+            "risk": "major",
+            "summary": "Temperature stayed above the control band for 11 minutes before the AOI defect event.",
+            "actions": ["Compare SPC", "Use as RCA evidence"],
+        },
     ],
     "edges": [
         {"id": "r1", "source": "event-qe-001", "target": "defect-001", "label": "发现"},
@@ -246,6 +266,10 @@ QUALITY_EVENT_DEMO = {
         {"id": "r14", "source": "material-batch-mb-7781", "target": "inventory-lot-inv-7781-a", "label": "库存"},
         {"id": "r15", "source": "capa-072", "target": "inspection-recheck-091", "label": "触发复检"},
         {"id": "r16", "source": "inspection-recheck-091", "target": "product-batch-pb-260521-a", "label": "复检"},
+        {"id": "r17", "source": "equipment-smt-03", "target": "sensor-reflow-temp-05", "label": "measured by", "relation_type": "MEASURED_BY"},
+        {"id": "r18", "source": "sensor-reflow-temp-05", "target": "ts-window-reflow-temp-260521-0930", "label": "TS anomaly", "relation_type": "HAS_TS_ANOMALY"},
+        {"id": "r19", "source": "ts-window-reflow-temp-260521-0930", "target": "operation-reflow-01", "label": "correlates", "relation_type": "CORRELATES_WITH"},
+        {"id": "r20", "source": "ts-window-reflow-temp-260521-0930", "target": "defect-001", "label": "evidence", "relation_type": "CORRELATES_WITH"},
     ],
 }
 

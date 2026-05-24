@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -25,27 +26,38 @@ _sqlite_url = f"sqlite+aiosqlite:///{os.path.abspath(_sqlite_path)}"
 DB_TYPE = "sqlite"
 _engine = None
 
-# Prefer PostgreSQL if asyncpg is installed; we don't probe the connection
-# here to avoid blocking module import — failures surface on first query
-# and are handled by callers.
-try:
-    import asyncpg  # noqa: F401
-    _engine = create_async_engine(
-        settings.DATABASE_URL,
-        echo=settings.DEBUG,
-        pool_size=5,
-        max_overflow=5,
-        pool_pre_ping=True,
-    )
-    DB_TYPE = "postgresql"
-except ImportError:
-    if settings.IS_PRODUCTION:
-        raise RuntimeError("asyncpg is required when APP_MODE=production")
-    logger.info("asyncpg not installed; using SQLite fallback")
-except Exception as exc:
-    if settings.IS_PRODUCTION:
-        raise RuntimeError(f"PostgreSQL engine init failed in production: {exc}") from exc
-    logger.warning("PG engine init failed (%s); using SQLite fallback", exc)
+if settings.DATABASE_BACKEND.lower() == "sqlite":
+    logger.info("DATABASE_BACKEND=sqlite; using SQLite fallback")
+else:
+    # Prefer PostgreSQL if asyncpg is installed and reachable. In demo mode, fall
+    # back to SQLite quickly when the local PostgreSQL service is not running so
+    # login and mock-backed flows remain usable without Docker.
+    try:
+        import asyncpg  # noqa: F401
+        try:
+            with socket.create_connection((settings.POSTGRES_HOST, settings.POSTGRES_PORT), timeout=0.5):
+                pass
+        except OSError as exc:
+            if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
+                raise RuntimeError(f"PostgreSQL is unreachable: {exc}") from exc
+            logger.warning("PostgreSQL unreachable (%s); using SQLite fallback", exc)
+            raise ImportError("postgresql unreachable in demo mode") from exc
+        _engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=settings.DEBUG,
+            pool_size=5,
+            max_overflow=5,
+            pool_pre_ping=True,
+        )
+        DB_TYPE = "postgresql"
+    except ImportError:
+        if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
+            raise RuntimeError("asyncpg and reachable PostgreSQL are required")
+        logger.info("asyncpg unavailable or PostgreSQL unreachable; using SQLite fallback")
+    except Exception as exc:
+        if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
+            raise RuntimeError(f"PostgreSQL engine init failed: {exc}") from exc
+        logger.warning("PG engine init failed (%s); using SQLite fallback", exc)
 
 if _engine is None:
     if settings.IS_PRODUCTION:

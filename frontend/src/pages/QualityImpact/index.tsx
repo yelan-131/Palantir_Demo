@@ -121,6 +121,7 @@ interface PositionedImpactNode extends ImpactNode {
   x: number;
   y: number;
   layoutRole: 'root' | 'neighbor' | 'outer';
+  depth: number;
 }
 
 interface PositionedImpactEdge extends ImpactEdge {
@@ -130,6 +131,7 @@ interface PositionedImpactEdge extends ImpactEdge {
   targetY: number;
   labelX: number;
   labelY: number;
+  depth: number;
 }
 
 interface NodePosition {
@@ -160,6 +162,12 @@ const fallbackNodes: ImpactNode[] = [
   { id: 'equipment-smt-03', label: '设备', type: 'Equipment', name: 'SMT-03 回流焊', status: 'running', risk: 'medium', summary: '温区 5 曲线有轻微偏移，需要设备工程师复核。', actions: ['创建维修工单', '查看传感器趋势'] },
   { id: 'order-so-8821', label: '客户订单', type: 'CustomerOrder', name: 'SO-8821 / 华东客户', status: 'at_risk', risk: 'major', summary: '预计影响 5 月 23 日交付，需确认替代批次。', actions: ['通知销售', '查看交付承诺'] },
   { id: 'capa-072', label: 'CAPA', type: 'CAPA', name: 'CAPA-072', status: 'draft', risk: 'medium', summary: '建议由质量工程师牵头，设备、工艺、采购协同处理。', actions: ['提交审批', '补充原因分析'] },
+  { id: 'operation-reflow-01', label: '工序', type: 'Operation', name: '回流焊 / OP-SMT-REFLOW', status: 'running', risk: 'medium', summary: '电控模块 V2 在 SMT 回流焊工序产生焊点质量风险。', actions: ['查看工艺参数', '锁定工序窗口'] },
+  { id: 'product-batch-pb-260521-a', label: '产品批次', type: 'ProductBatch', name: 'PB-260521-A / 电控模块 V2', status: 'quarantine', risk: 'major', summary: '该产品批次由 WO-260521-017 产出，当前待隔离判定。', actions: ['隔离成品', '查看流向'] },
+  { id: 'inventory-lot-inv-7781-a', label: '库存批次', type: 'InventoryLot', name: 'INV-7781-A / 待判定库存', status: 'hold', risk: 'major', summary: 'MB-7781 剩余库存已进入待判定区，禁止继续发料。', actions: ['查看库存', '冻结库存'] },
+  { id: 'inspection-recheck-091', label: '复检批次', type: 'InspectionBatch', name: 'RECHECK-260521-091', status: 'planned', risk: 'medium', summary: '针对隔离产品与剩余物料发起复检，等待质量工程师确认抽样方案。', actions: ['发起复检', '确认抽样方案'] },
+  { id: 'sensor-reflow-temp-05', label: 'TSDB Sensor', type: 'Sensor', name: 'TEMP-REFLOW-05', status: 'online', risk: 'medium', summary: 'SMT-03 回流焊温区 5 的温度传感器，采样数据进入时序库。', actions: ['查看趋势', '打开原始读数'] },
+  { id: 'ts-window-reflow-temp-260521-0930', label: 'TSDB Window', type: 'TimeSeriesWindow', name: '09:30-09:45 / 温区漂移', status: 'anomaly', risk: 'major', summary: 'AOI 发现缺陷前 11 分钟，温区 5 持续高于控制带，可作为根因分析证据。', actions: ['对比 SPC', '作为 RCA 证据'] },
 ];
 
 const fallbackEdges: ImpactEdge[] = [
@@ -171,6 +179,28 @@ const fallbackEdges: ImpactEdge[] = [
   { id: 'r6', source: 'workorder-260521-017', target: 'equipment-smt-03', label: '经过' },
   { id: 'r7', source: 'workorder-260521-017', target: 'order-so-8821', label: '影响' },
   { id: 'r8', source: 'event-qe-001', target: 'capa-072', label: '建议生成' },
+  { id: 'r9', source: 'workorder-260521-017', target: 'operation-reflow-01', label: '执行工序', relation_type: 'RUNS_OPERATION' },
+  { id: 'r10', source: 'operation-reflow-01', target: 'equipment-smt-03', label: '使用设备', relation_type: 'USES_EQUIPMENT' },
+  { id: 'r11', source: 'operation-reflow-01', target: 'defect-001', label: '可能导致', relation_type: 'MAY_CAUSE' },
+  { id: 'r12', source: 'workorder-260521-017', target: 'product-batch-pb-260521-a', label: '产出', relation_type: 'PRODUCES_BATCH' },
+  { id: 'r13', source: 'product-batch-pb-260521-a', target: 'order-so-8821', label: '交付', relation_type: 'AFFECTS_ORDER' },
+  { id: 'r14', source: 'material-batch-mb-7781', target: 'inventory-lot-inv-7781-a', label: '库存', relation_type: 'STORED_AS' },
+  { id: 'r15', source: 'capa-072', target: 'inspection-recheck-091', label: '触发复检', relation_type: 'REINSPECTS' },
+  { id: 'r16', source: 'inspection-recheck-091', target: 'product-batch-pb-260521-a', label: '复检', relation_type: 'REINSPECTS' },
+  { id: 'r17', source: 'equipment-smt-03', target: 'sensor-reflow-temp-05', label: '采集', relation_type: 'MEASURED_BY' },
+  { id: 'r18', source: 'sensor-reflow-temp-05', target: 'ts-window-reflow-temp-260521-0930', label: '时序异常', relation_type: 'HAS_TS_ANOMALY' },
+  { id: 'r19', source: 'ts-window-reflow-temp-260521-0930', target: 'defect-001', label: '时间相关', relation_type: 'CORRELATES_WITH' },
+];
+
+const timeSeriesEvidenceNodes: ImpactNode[] = [
+  { id: 'sensor-reflow-temp-05', label: 'TSDB Sensor', type: 'Sensor', name: 'TEMP-REFLOW-05', status: 'online', risk: 'medium', summary: 'SMT-03 回流焊温区 5 的温度传感器，采样数据进入时序库。', actions: ['查看趋势', '打开原始读数'] },
+  { id: 'ts-window-reflow-temp-260521-0930', label: 'TSDB Window', type: 'TimeSeriesWindow', name: '09:30-09:45 / 温区漂移', status: 'anomaly', risk: 'major', summary: 'AOI 发现缺陷前 11 分钟，温区 5 持续高于控制带，可作为根因分析证据。', actions: ['对比 SPC', '作为 RCA 证据'] },
+];
+
+const timeSeriesEvidenceEdges: ImpactEdge[] = [
+  { id: 'r17', source: 'equipment-smt-03', target: 'sensor-reflow-temp-05', label: '采集', relation_type: 'MEASURED_BY' },
+  { id: 'r18', source: 'sensor-reflow-temp-05', target: 'ts-window-reflow-temp-260521-0930', label: '时序异常', relation_type: 'HAS_TS_ANOMALY' },
+  { id: 'r19', source: 'ts-window-reflow-temp-260521-0930', target: 'defect-001', label: '时间相关', relation_type: 'CORRELATES_WITH' },
 ];
 
 const fallbackKnowledgeCards: KnowledgeEvidence[] = [
@@ -208,12 +238,29 @@ const fallbackKnowledgeCards: KnowledgeEvidence[] = [
 ];
 
 const actionConfig = [
-  { key: 'generate_capa', label: '生成 CAPA', icon: <FileProtectOutlined />, danger: false },
+  { key: 'expand_center', label: '以此为中心展开', icon: <NodeIndexOutlined />, danger: false },
+  { key: 'view_inventory', label: '查看库存', icon: <ApiOutlined />, danger: false },
   { key: 'freeze_batch', label: '冻结批次', icon: <PauseCircleOutlined />, danger: true },
   { key: 'reinspect', label: '发起复检', icon: <CheckCircleOutlined />, danger: false },
+  { key: 'isolate_product', label: '隔离成品', icon: <SafetyCertificateOutlined />, danger: true },
   { key: 'maintenance_order', label: '创建维修工单', icon: <ToolOutlined />, danger: false },
   { key: 'notify_purchase', label: '通知采购', icon: <SendOutlined />, danger: false },
+  { key: 'generate_capa', label: '生成 CAPA', icon: <FileProtectOutlined />, danger: false },
 ];
+
+const actionKeysByType: Record<string, string[]> = {
+  MaterialBatch: ['expand_center', 'view_inventory', 'freeze_batch', 'reinspect', 'notify_purchase'],
+  InventoryLot: ['expand_center', 'view_inventory', 'freeze_batch', 'reinspect'],
+  ProductBatch: ['expand_center', 'isolate_product', 'reinspect'],
+  WorkOrder: ['expand_center', 'isolate_product'],
+  Operation: ['expand_center', 'maintenance_order'],
+  Equipment: ['expand_center', 'maintenance_order'],
+  Supplier: ['expand_center', 'notify_purchase'],
+  InspectionBatch: ['expand_center', 'reinspect', 'generate_capa'],
+  Defect: ['expand_center', 'reinspect', 'generate_capa'],
+  QualityEvent: ['expand_center', 'generate_capa', 'freeze_batch', 'reinspect', 'notify_purchase'],
+  CAPA: ['expand_center', 'reinspect'],
+};
 
 const riskColor: Record<string, string> = {
   critical: 'red',
@@ -239,6 +286,8 @@ const typeIcon: Record<string, JSX.Element> = {
   Operation: <ControlOutlined />,
   ProductBatch: <ApiOutlined />,
   InventoryLot: <PauseCircleOutlined />,
+  Sensor: <ApiOutlined />,
+  TimeSeriesWindow: <ThunderboltOutlined />,
 };
 
 const objectTypeLabel: Record<string, string> = {
@@ -257,6 +306,8 @@ const objectTypeLabel: Record<string, string> = {
   Material: '物料',
   Inspection: '检验批次',
   SalesOrder: '客户订单',
+  Sensor: '时序传感器',
+  TimeSeriesWindow: '时序窗口',
 };
 
 const relationLabel: Record<string, string> = {
@@ -274,7 +325,13 @@ const relationLabel: Record<string, string> = {
   STORED_AS: '库存',
   REINSPECTS: '复检',
   MAY_CAUSE: '可能导致',
+  MEASURED_BY: '采集',
+  HAS_TS_ANOMALY: '时序异常',
+  CORRELATES_WITH: '时间相关',
 };
+
+const evidenceRelationTypes = new Set(['EVIDENCE_FOR', 'KNOWLEDGE_SUPPORTS', 'REFERENCE_FOR']);
+const timeSeriesRelationTypes = new Set(['MEASURED_BY', 'HAS_TS_ANOMALY', 'CORRELATES_WITH']);
 
 const typeStage: Record<string, number> = {
   Supplier: 14,
@@ -293,6 +350,8 @@ const typeStage: Record<string, number> = {
   ProductBatch: 78,
   InventoryLot: 36,
   Operation: 60,
+  Sensor: 66,
+  TimeSeriesWindow: 54,
 };
 
 function overflowNodeStyle(index: number): CSSProperties {
@@ -324,6 +383,33 @@ function clampPosition(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function getTimelinePercentForNode(node?: ImpactNode) {
+  if (!node) return 100;
+  const stage = getTypeStage(node.type);
+  if (['Supplier', 'Material', 'MaterialBatch', 'InventoryLot'].includes(node.type)) return Math.max(12, stage);
+  if (['Inspection', 'InspectionBatch', 'Defect', 'QualityEvent', 'TimeSeriesWindow'].includes(node.type)) return Math.max(36, stage);
+  if (['Operation', 'Equipment', 'Sensor', 'WorkOrder', 'ProductBatch'].includes(node.type)) return Math.max(58, stage);
+  if (['CustomerOrder', 'SalesOrder', 'CAPA', 'KnowledgeCard', 'KnowledgeItem'].includes(node.type)) return Math.max(82, stage);
+  return stage;
+}
+
+function getTimelinePercentForEdge(edge: ImpactEdge, nodeById: Map<string, ImpactNode>) {
+  const sourcePercent = getTimelinePercentForNode(nodeById.get(edge.source));
+  const targetPercent = getTimelinePercentForNode(nodeById.get(edge.target));
+  if (isTimeSeriesEvidenceEdge(edge)) return Math.min(76, Math.max(sourcePercent, targetPercent));
+  if (isKnowledgeEvidenceEdge(edge)) return Math.min(92, Math.max(sourcePercent, targetPercent));
+  return Math.max(sourcePercent, targetPercent);
+}
+
+function formatTimelinePercent(percent: number) {
+  const startMinutes = 9 * 60 + 40;
+  const endMinutes = 10 * 60;
+  const minute = Math.round(startMinutes + ((endMinutes - startMinutes) * percent) / 100);
+  const hour = Math.floor(minute / 60);
+  const minutes = `${minute % 60}`.padStart(2, '0');
+  return `${hour}:${minutes}`;
+}
+
 function getEdgeDirection(edge: ImpactEdge, selectedId: string, nodeById: Map<string, ImpactNode>, view: GraphViewKey) {
   const source = nodeById.get(edge.source);
   const target = nodeById.get(edge.target);
@@ -338,6 +424,74 @@ function getEdgeDirection(edge: ImpactEdge, selectedId: string, nodeById: Map<st
   if (edge.source === selectedId) return targetStage >= sourceStage ? 'right' : 'left';
   if (edge.target === selectedId) return sourceStage <= targetStage ? 'left' : 'right';
   return targetStage >= sourceStage ? 'right' : 'left';
+}
+
+function getLayoutAnchor(node: ImpactNode, depth: number) {
+  const stage = getTypeStage(node.type);
+  const fallbackX = clampPosition(stage, 12, 88);
+  const stageBands: Record<string, { x: number; y: number }> = {
+    Supplier: { x: 13, y: 48 },
+    Material: { x: 28, y: 72 },
+    MaterialBatch: { x: 30, y: 74 },
+    InventoryLot: { x: 30, y: 28 },
+    Inspection: { x: 42, y: 76 },
+    InspectionBatch: { x: 42, y: 76 },
+    Defect: { x: 50, y: 34 },
+    QualityEvent: { x: 56, y: 52 },
+    KnowledgeCard: { x: 52, y: 18 },
+    KnowledgeItem: { x: 52, y: 18 },
+    TimeSeriesWindow: { x: 54, y: 22 },
+    Operation: { x: 60, y: 30 },
+    Equipment: { x: 70, y: 38 },
+    Sensor: { x: 73, y: 26 },
+    WorkOrder: { x: 68, y: 60 },
+    CAPA: { x: 72, y: 72 },
+    ProductBatch: { x: 80, y: 54 },
+    CustomerOrder: { x: 86, y: 74 },
+    SalesOrder: { x: 86, y: 74 },
+  };
+  const anchor = stageBands[node.type] || { x: fallbackX, y: depth > 2 ? 78 : 50 };
+  return {
+    x: clampPosition(anchor.x, 10, 90),
+    y: clampPosition(anchor.y, 16, 84),
+  };
+}
+
+function avoidCenterCrowding(position: NodePosition, depth: number, index: number) {
+  if (depth <= 1) return position;
+  const inCenterX = position.x > 44 && position.x < 66;
+  const inCenterY = position.y > 36 && position.y < 66;
+  if (!inCenterX || !inCenterY) return position;
+  const direction = index % 2 === 0 ? -1 : 1;
+  return {
+    x: clampPosition(position.x + direction * (depth === 2 ? 14 : 20), 10, 90),
+    y: clampPosition(position.y + (index % 3 - 1) * 10, 16, 84),
+  };
+}
+
+function shouldShowEdgeLabel(edge: PositionedImpactEdge, selectedId?: string) {
+  if (!selectedId) return edge.depth <= 1;
+  const isDirect = edge.source === selectedId || edge.target === selectedId;
+  return isDirect || (edge.depth <= 1 && !isKnowledgeEvidenceEdge(edge));
+}
+
+function isKnowledgeEvidenceEdge(edge: ImpactEdge) {
+  return evidenceRelationTypes.has(edge.relation_type || '') || edge.label.includes('证据');
+}
+
+function isTimeSeriesEvidenceEdge(edge: ImpactEdge) {
+  return timeSeriesRelationTypes.has(edge.relation_type || '') || edge.label.includes('TS') || edge.label.includes('时序');
+}
+
+function isQualityActionNode(node?: ImpactNode) {
+  return Boolean(node && ['QualityEvent', 'Defect', 'InspectionBatch', 'CAPA'].includes(node.type));
+}
+
+function getContextActions(node?: ImpactNode) {
+  if (!node) return [];
+  const keys = actionKeysByType[node.type] || ['expand_center'];
+  const actionByKey = new Map(actionConfig.map((action) => [action.key, action]));
+  return keys.map((key) => actionByKey.get(key)).filter(Boolean) as typeof actionConfig;
 }
 
 function buildGraphLayout(
@@ -355,6 +509,18 @@ function buildGraphLayout(
     ? selectedId
     : graphNodes[0].id;
   const nodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const nodeDepth = new Map<string, number>([[rootId, 0]]);
+  const queue = [rootId];
+  while (queue.length) {
+    const current = queue.shift() as string;
+    const currentDepth = nodeDepth.get(current) ?? 0;
+    graphEdges.forEach((edge) => {
+      const nextId = edge.source === current ? edge.target : edge.target === current ? edge.source : null;
+      if (!nextId || !nodeById.has(nextId) || nodeDepth.has(nextId)) return;
+      nodeDepth.set(nextId, currentDepth + 1);
+      queue.push(nextId);
+    });
+  }
   const neighborIds = new Set<string>();
   graphEdges.forEach((edge) => {
     if (edge.source === rootId && nodeById.has(edge.target)) neighborIds.add(edge.target);
@@ -390,38 +556,44 @@ function buildGraphLayout(
 
   const positioned = new Map<string, PositionedImpactNode>();
   const root = nodeById.get(rootId) || graphNodes[0];
-  positioned.set(root.id, { ...root, x: 50, y: 50, layoutRole: 'root' });
+  positioned.set(root.id, { ...root, x: 50, y: 52, layoutRole: 'root', depth: 0 });
 
   const spread = (items: ImpactNode[], x: number, role: PositionedImpactNode['layoutRole']) => {
-    const start = items.length <= 2 ? 42 : 30;
-    const end = items.length <= 2 ? 58 : 70;
+    const start = items.length <= 2 ? 30 : 22;
+    const end = items.length <= 2 ? 72 : 80;
     items.forEach((node, index) => {
-      const y = items.length === 1 ? 50 : start + ((end - start) * index) / (items.length - 1);
-      positioned.set(node.id, { ...node, x, y, layoutRole: role });
+      const anchor = getLayoutAnchor(node, nodeDepth.get(node.id) ?? 1);
+      const y = items.length === 1 ? anchor.y : start + ((end - start) * index) / (items.length - 1);
+      positioned.set(node.id, { ...node, x, y, layoutRole: role, depth: nodeDepth.get(node.id) ?? 4 });
     });
   };
 
-  spread(leftNodes, 30, 'neighbor');
-  spread(rightNodes, 70, 'neighbor');
+  spread(leftNodes, 26, 'neighbor');
+  spread(rightNodes, 74, 'neighbor');
   sameStageNodes.forEach((node, index) => {
+    const anchor = getLayoutAnchor(node, nodeDepth.get(node.id) ?? 1);
     positioned.set(node.id, {
       ...node,
-      x: index % 2 === 0 ? 50 : 58,
-      y: index < 2 ? 30 : 72,
+      x: index % 2 === 0 ? clampPosition(anchor.x - 10, 18, 82) : clampPosition(anchor.x + 10, 18, 82),
+      y: index < 2 ? clampPosition(anchor.y - 12, 18, 82) : clampPosition(anchor.y + 12, 18, 82),
       layoutRole: 'neighbor',
+      depth: nodeDepth.get(node.id) ?? 4,
     });
   });
 
   outerNodes.forEach((node, index) => {
-    const fallback = overflowNodeStyle(index);
-    const stage = getTypeStage(node.type);
-    const x = Math.max(14, Math.min(86, stage));
-    const y = index % 2 === 0 ? 20 + (index % 4) * 12 : 78 - (index % 4) * 10;
+    const depth = nodeDepth.get(node.id) ?? 4;
+    const anchor = avoidCenterCrowding(getLayoutAnchor(node, depth), depth, index);
+    const columnNudge = ((index % 3) - 1) * 4;
+    const rowNudge = (Math.floor(index / 3) % 3 - 1) * 8;
+    const nearRoot = Math.abs(anchor.x - 50) < 16 && Math.abs(anchor.y - 52) < 16;
+    const rootAvoidY = nearRoot ? (index % 2 === 0 ? -16 : 16) : 0;
     positioned.set(node.id, {
       ...node,
-      x: Number.isFinite(x) ? x : parseFloat(String(fallback.left)) || 50,
-      y,
+      x: clampPosition(anchor.x + columnNudge, 10, 90),
+      y: clampPosition(anchor.y + rowNudge + rootAvoidY, 16, 84),
       layoutRole: 'outer',
+      depth,
     });
   });
 
@@ -432,6 +604,7 @@ function buildGraphLayout(
       ...node,
       x: clampPosition(position.x, 8, 92),
       y: clampPosition(position.y, 14, 86),
+      depth: nodeDepth.get(nodeId) ?? node.depth,
     });
   });
 
@@ -451,6 +624,7 @@ function buildGraphLayout(
         targetY: target.y,
         labelX: (source.x + target.x) / 2,
         labelY: (source.y + target.y) / 2,
+        depth: Math.max(nodeDepth.get(edge.source) ?? 4, nodeDepth.get(edge.target) ?? 4, 1),
       };
     })
     .filter(Boolean) as PositionedImpactEdge[];
@@ -495,17 +669,62 @@ function normalizeGraphEdge(edge: Record<string, unknown>, index: number): Impac
   };
 }
 
+function enrichTimeSeriesEvidence(baseNodes: ImpactNode[], baseEdges: ImpactEdge[]) {
+  const nodeIds = new Set(baseNodes.map((node) => node.id));
+  const edgeIds = new Set(baseEdges.map((edge) => edge.id));
+  const canAttachEvidence = nodeIds.has('equipment-smt-03') && nodeIds.has('defect-001');
+  if (!canAttachEvidence) {
+    return { nodes: baseNodes, edges: baseEdges };
+  }
+
+  const nodes = [
+    ...baseNodes,
+    ...timeSeriesEvidenceNodes.filter((node) => !nodeIds.has(node.id)),
+  ];
+  const enrichedNodeIds = new Set(nodes.map((node) => node.id));
+  const edges = [
+    ...baseEdges,
+    ...timeSeriesEvidenceEdges.filter((edge) => (
+      !edgeIds.has(edge.id) &&
+      enrichedNodeIds.has(edge.source) &&
+      enrichedNodeIds.has(edge.target)
+    )),
+  ];
+  return { nodes, edges };
+}
+
 function normalizeGraphPayload(payload: GraphPayload) {
-  const nextNodes = (payload.nodes || []).map((node, index) => normalizeGraphNode(node, index));
+  const rawNodes = payload.root ? [payload.root, ...(payload.nodes || [])] : (payload.nodes || []);
+  const nodeById = new Map<string, ImpactNode>();
+  rawNodes
+    .map((node, index) => normalizeGraphNode(node, index))
+    .forEach((node) => {
+      if (!nodeById.has(node.id)) {
+        nodeById.set(node.id, node);
+      }
+    });
+  const nextNodes = Array.from(nodeById.values());
   const validNodeIds = new Set(nextNodes.map((node) => node.id));
-  const nextEdges = (payload.edges || [])
+  const edgeByKey = new Map<string, ImpactEdge>();
+  (payload.edges || [])
     .map((edge, index) => normalizeGraphEdge(edge, index))
-    .filter((edge) => validNodeIds.has(edge.source) && validNodeIds.has(edge.target));
+    .filter((edge) => validNodeIds.has(edge.source) && validNodeIds.has(edge.target))
+    .forEach((edge) => {
+      const edgeKey = edge.id || `${edge.source}-${edge.relation_type || edge.label}-${edge.target}`;
+      if (!edgeByKey.has(edgeKey)) {
+        edgeByKey.set(edgeKey, edge);
+      }
+    });
+  const nextEdges = Array.from(edgeByKey.values());
+  const enriched = enrichTimeSeriesEvidence(
+    nextNodes.length ? nextNodes : fallbackNodes,
+    nextEdges.length ? nextEdges : fallbackEdges,
+  );
 
   return {
     event: payload.event,
-    nodes: nextNodes.length ? nextNodes : fallbackNodes,
-    edges: nextEdges.length ? nextEdges : fallbackEdges,
+    nodes: enriched.nodes,
+    edges: enriched.edges,
     source: payload.source || 'graph-api',
   };
 }
@@ -579,26 +798,28 @@ const objectQuickEntries = [
   { objectType: 'ProductBatch', objectId: 'PB-260521-A / 电控模块 V2', title: 'PB-260521-A / 电控模块 V2', hint: '工单 / 工序 / 订单 / 异常' },
 ];
 
+const defaultGraphContext: GraphContext = objectQuickEntries[0];
+
 const graphViewOptions = [
   {
     key: 'impact',
-    label: '影响',
-    desc: '从当前对象看下游影响',
+    label: '下游',
+    desc: '从当前料号查看库存、生产和交付影响',
   },
   {
     key: 'trace',
-    label: '追溯',
-    desc: '向上追溯来源批次',
+    label: '上游',
+    desc: '向上追溯供应商、来料和检验证据',
   },
   {
     key: 'task',
-    label: '任务',
-    desc: '查看处置任务链路',
+    label: '生产',
+    desc: '查看工单、工序、设备和产品批次',
   },
   {
     key: 'part',
-    label: '料号',
-    desc: '按物料/料号展开关系',
+    label: '全链路',
+    desc: '按料号展开供应、检验、库存、生产和异常',
   },
 ] as const;
 
@@ -649,6 +870,7 @@ const closureTimeline = [
 
 export default function QualityImpactWorkbench() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ nodeId: string; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const [events, setEvents] = useState<QualityEvent[]>([fallbackEvent]);
@@ -662,14 +884,12 @@ export default function QualityImpactWorkbench() {
   const [knowledgeEvidence, setKnowledgeEvidence] = useState<KnowledgeEvidence[]>([]);
   const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
   const [graphSource, setGraphSource] = useState('quality-fallback');
-  const [graphView, setGraphView] = useState<GraphViewKey>('impact');
+  const [graphView, setGraphView] = useState<GraphViewKey>('part');
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [nodePositionOverrides, setNodePositionOverrides] = useState<Record<string, NodePosition>>({});
-  const [graphContext, setGraphContext] = useState<GraphContext>({
-    objectType: 'QualityEvent',
-    objectId: fallbackEvent.id,
-    title: fallbackEvent.title,
-  });
+  const [graphContext, setGraphContext] = useState<GraphContext>(defaultGraphContext);
+  const [timelinePercent, setTimelinePercent] = useState(100);
+  const [draggingTimeline, setDraggingTimeline] = useState(false);
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) || nodes[0],
@@ -681,6 +901,20 @@ export default function QualityImpactWorkbench() {
     [edges, selectedNode],
   );
 
+  const timeSeriesEvidence = useMemo(() => {
+    if (!selectedNode) return [];
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return edges
+      .filter((edge) => isTimeSeriesEvidenceEdge(edge) && (edge.source === selectedNode.id || edge.target === selectedNode.id))
+      .map((edge) => {
+        const peerId = edge.source === selectedNode.id ? edge.target : edge.source;
+        return {
+          edge,
+          peer: nodeById.get(peerId),
+        };
+      });
+  }, [edges, nodes, selectedNode]);
+
   const connectedNodeIds = useMemo(() => {
     const connected = new Set<string>();
     visibleEdges.forEach((edge) => {
@@ -690,20 +924,38 @@ export default function QualityImpactWorkbench() {
     return connected;
   }, [visibleEdges]);
 
+  const timelineFilteredEdges = useMemo(() => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return edges.filter((edge) => getTimelinePercentForEdge(edge, nodeById) <= timelinePercent);
+  }, [edges, nodes, timelinePercent]);
+
+  const timelineFilteredNodes = useMemo(() => {
+    if (timelinePercent >= 100) return nodes;
+    const visibleNodeIds = new Set<string>();
+    timelineFilteredEdges.forEach((edge) => {
+      visibleNodeIds.add(edge.source);
+      visibleNodeIds.add(edge.target);
+    });
+    if (selectedNode) visibleNodeIds.add(selectedNode.id);
+    return nodes.filter((node) => visibleNodeIds.has(node.id) || getTimelinePercentForNode(node) <= timelinePercent);
+  }, [nodes, selectedNode, timelineFilteredEdges, timelinePercent]);
+
   const canvasNodes = useMemo(() => {
     if (!selectedNode) {
-      return nodes;
+      return timelineFilteredNodes;
     }
-    const selected = nodes.filter((node) => node.id === selectedNode.id);
-    const connected = nodes.filter((node) => node.id !== selectedNode.id && connectedNodeIds.has(node.id));
-    const remaining = nodes.filter((node) => node.id !== selectedNode.id && !connectedNodeIds.has(node.id));
+    const selected = timelineFilteredNodes.filter((node) => node.id === selectedNode.id);
+    const connected = timelineFilteredNodes.filter((node) => node.id !== selectedNode.id && connectedNodeIds.has(node.id));
+    const remaining = timelineFilteredNodes.filter((node) => node.id !== selectedNode.id && !connectedNodeIds.has(node.id));
     return [...selected, ...connected, ...remaining];
-  }, [connectedNodeIds, nodes, selectedNode]);
+  }, [connectedNodeIds, selectedNode, timelineFilteredNodes]);
 
-  const canvasEdges = useMemo(
-    () => (visibleEdges.length ? visibleEdges : edges.slice(0, 6)),
-    [edges, visibleEdges],
-  );
+  const canvasEdges = useMemo(() => {
+    const canvasNodeIds = new Set(canvasNodes.map((node) => node.id));
+    return timelineFilteredEdges
+      .filter((edge) => canvasNodeIds.has(edge.source) && canvasNodeIds.has(edge.target))
+      .slice(0, 32);
+  }, [canvasNodes, timelineFilteredEdges]);
 
   const { layoutNodes, layoutEdges } = useMemo(
     () => buildGraphLayout(canvasNodes, canvasEdges, selectedNode?.id, graphView, nodePositionOverrides),
@@ -711,56 +963,53 @@ export default function QualityImpactWorkbench() {
   );
 
   const activeGraphView = graphViewOptions.find((item) => item.key === graphView) || graphViewOptions[0];
+  const selectedTimelinePercent = getTimelinePercentForNode(selectedNode);
 
   const contextualTimeline = useMemo(() => {
-    if (graphContext.objectType === 'QualityEvent') {
-      return closureTimeline;
-    }
-
     const sourceLabel = graphSource.includes('fallback') ? '演示子图' : 'Neo4j 子图';
     return [
       {
-        time: '当前',
+        time: '供应',
         offset: 8,
         width: 18,
-        title: '对象选中',
+        title: '供应与批次',
         actor: graphContext.title,
-        status: '已切换',
-        desc: `左侧已切换到 ${graphContext.objectType}，右侧展示该对象详情。`,
+        status: graphContext.objectType === 'MaterialBatch' ? '当前' : '已关联',
+        desc: '从供应商、物料批次和到货批次开始查看料号来源。',
         color: 'blue',
       },
       {
-        time: '查询',
+        time: '检验',
         offset: 30,
         width: 24,
-        title: `${activeGraphView.label}查询`,
+        title: '检验与库存',
         actor: sourceLabel,
         status: loading ? '进行中' : '已返回',
-        desc: `后端按 ${graphContext.objectType}:${graphContext.objectId} 查询关系子图。`,
+        desc: `后端按 ${graphContext.objectType}:${graphContext.objectId} 查询关系子图，回填检验批次、库存批次和证据。`,
         color: loading ? 'gray' : 'blue',
       },
       {
-        time: '渲染',
+        time: '生产',
         offset: 58,
         width: 22,
-        title: '画布更新',
+        title: '生产流转',
         actor: `${nodes.length} 对象 / ${edges.length} 关系`,
         status: '已同步',
-        desc: '中间画布、右侧详情和相关证据已经按当前对象刷新。',
+        desc: '中间画布已按当前料号刷新工单、工序、设备和产品批次关系。',
         color: 'blue',
       },
       {
-        time: '下一步',
+        time: '交付',
         offset: 83,
         width: 12,
-        title: '动作处理',
+        title: '交付与异常',
         actor: selectedNode?.name || graphContext.title,
         status: '待确认',
-        desc: '用户可继续点击节点展开上下文，或执行 CAPA、冻结、复检、通知等动作。',
+        desc: '继续查看客户订单、质量异常、CAPA 或知识证据，并按对象执行动作。',
         color: 'gray',
       },
     ];
-  }, [activeGraphView.label, edges.length, graphContext, graphSource, loading, nodes.length, selectedNode?.name]);
+  }, [edges.length, graphContext, graphSource, loading, nodes.length, selectedNode?.name]);
 
   const loadObjectGraph = async (
     context: GraphContext,
@@ -768,9 +1017,8 @@ export default function QualityImpactWorkbench() {
     eventOverride?: QualityEvent,
   ) => {
     setLoading(true);
-    setNodePositionOverrides({});
     try {
-      const maxHops = view === 'trace' ? 3 : 2;
+      const maxHops = view === 'trace' || view === 'part' || context.objectType !== 'QualityEvent' ? 3 : 2;
       const limit = view === 'task' ? 60 : 80;
       const res = await getBusinessImpactAnalysis({
         object_type: context.objectType,
@@ -802,7 +1050,16 @@ export default function QualityImpactWorkbench() {
         setGraphSource(`${normalized.source} / ${view}`);
         setSelectedNodeId(pickSelectedNodeIdForContext(nextNodes, context));
       } else {
-        message.warning('图谱查询暂时不可用，已保留当前画布');
+        const fallback = normalizeGraphPayload({
+          nodes: fallbackNodes as unknown as Array<Record<string, unknown>>,
+          edges: fallbackEdges as unknown as Array<Record<string, unknown>>,
+          source: 'fallback',
+        });
+        setNodes(fallback.nodes);
+        setEdges(fallback.edges);
+        setGraphSource(`fallback / ${view}`);
+        setSelectedNodeId(pickSelectedNodeIdForContext(fallback.nodes, context));
+        message.warning('图谱服务暂时不可用，已使用本地演示子图');
       }
       setGraphContext(context);
     } finally {
@@ -837,7 +1094,6 @@ export default function QualityImpactWorkbench() {
 
   const changeGraphView = (view: GraphViewKey) => {
     setGraphView(view);
-    setNodePositionOverrides({});
     loadObjectGraph(graphContext, view);
   };
 
@@ -845,7 +1101,23 @@ export default function QualityImpactWorkbench() {
     loadObjectGraph(context, graphView);
   };
 
+  const expandSelectedNode = () => {
+    if (!selectedNode) return;
+    loadObjectGraph({
+      objectType: selectedNode.type,
+      objectId: selectedNode.source_id || selectedNode.name || selectedNode.id,
+      title: selectedNode.name,
+    }, graphView);
+  };
+
   const selectGraphNode = (node: ImpactNode) => {
+    setNodePositionOverrides((prev) => {
+      const next = { ...prev };
+      layoutNodes.forEach((layoutNode) => {
+        next[layoutNode.id] = { x: layoutNode.x, y: layoutNode.y };
+      });
+      return next;
+    });
     setSelectedNodeId(node.id);
     setGraphContext({
       objectType: node.type,
@@ -855,7 +1127,21 @@ export default function QualityImpactWorkbench() {
   };
 
   useEffect(() => {
-    loadEvent();
+    if (!layoutNodes.length) return;
+    setNodePositionOverrides((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      layoutNodes.forEach((node) => {
+        if (next[node.id]) return;
+        next[node.id] = { x: node.x, y: node.y };
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [layoutNodes]);
+
+  useEffect(() => {
+    loadObjectGraph(defaultGraphContext, 'part');
   }, []);
 
   useEffect(() => {
@@ -903,6 +1189,11 @@ export default function QualityImpactWorkbench() {
   };
 
   const runAction = async (action: string) => {
+    if (action === 'expand_center') {
+      expandSelectedNode();
+      return;
+    }
+
     if (action === 'generate_capa') {
       try {
         await createCapa({
@@ -967,16 +1258,46 @@ export default function QualityImpactWorkbench() {
     }, 0);
   };
 
+  const updateTimelineByPointer = (event: PointerEvent<HTMLElement>) => {
+    const rect = timelineRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const nextPercent = clampPosition(((event.clientX - rect.left) / rect.width) * 100, 0, 100);
+    setTimelinePercent(Math.round(nextPercent));
+  };
+
+  const startTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingTimeline(true);
+    updateTimelineByPointer(event);
+  };
+
+  const moveTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (!draggingTimeline) return;
+    updateTimelineByPointer(event);
+  };
+
+  const finishTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDraggingTimeline(false);
+  };
+
   return (
     <div className="quality-impact-page">
       <section className="quality-command-hero">
         <div>
-          <Typography.Title level={3}>质量异常任务处置台</Typography.Title>
+          <Typography.Title level={3}>料号关系追踪台</Typography.Title>
         </div>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => loadObjectGraph(graphContext, graphView)} loading={loading}>刷新</Button>
-          <Button icon={<RobotOutlined />} onClick={runAiAnalysis} loading={loading}>AI 分析影响</Button>
-          <Button type="primary" icon={<FileProtectOutlined />} onClick={() => runAction('generate_capa')}>生成 CAPA</Button>
+          <Button icon={<NodeIndexOutlined />} onClick={expandSelectedNode} loading={loading}>以此为中心展开</Button>
+          {isQualityActionNode(selectedNode) && (
+            <>
+              <Button icon={<RobotOutlined />} onClick={runAiAnalysis} loading={loading}>AI 分析影响</Button>
+              <Button type="primary" icon={<FileProtectOutlined />} onClick={() => runAction('generate_capa')}>生成 CAPA</Button>
+            </>
+          )}
         </Space>
       </section>
 
@@ -1012,16 +1333,16 @@ export default function QualityImpactWorkbench() {
         <main className="quality-center-stage">
           <Card className="quality-impact-graph-card">
             <div className="quality-event-summary">
-              <Tag color={normalizeRisk(event.severity)}>{event.severity}</Tag>
-              <strong>{event.title}</strong>
-              <span>{event.description}</span>
+              <Tag color={normalizeRisk(selectedNode?.risk || 'medium')}>{selectedNode?.type || graphContext.objectType}</Tag>
+              <strong>{graphContext.title}</strong>
+              <span>围绕当前料号查看供应、检验、库存、生产、交付、异常与知识证据。</span>
             </div>
 
             <div className="quality-graph-canvas object-relationship-canvas" ref={canvasRef}>
               <div className="object-canvas-topbar">
                 <div className="object-canvas-heading">
                   <div>
-                    <Typography.Text strong>对象关系画布</Typography.Text>
+                    <Typography.Text strong>关系网络</Typography.Text>
                     <Typography.Text type="secondary">{activeGraphView.desc}</Typography.Text>
                   </div>
                   <Space size={6} wrap>
@@ -1030,7 +1351,7 @@ export default function QualityImpactWorkbench() {
                     </Tag>
                     <Tag color="blue">当前子图 {nodes.length} 对象 / {edges.length} 关系</Tag>
                     <Tag>{graphSource === 'fallback' || graphSource === 'quality-fallback' ? '演示子图' : graphSource}</Tag>
-                    <Tag color="processing">选中 {visibleEdges.length} 条邻接关系</Tag>
+                    <Tag color="processing">邻接 {visibleEdges.length} 条</Tag>
                   </Space>
                 </div>
                 <div className="object-canvas-view-switch" aria-label="关系视图切换">
@@ -1057,9 +1378,11 @@ export default function QualityImpactWorkbench() {
                   const bend = Math.max(8, Math.abs(edge.targetX - edge.sourceX) / 2);
                   const sourceControlX = edge.sourceX + (edge.targetX >= edge.sourceX ? bend : -bend);
                   const targetControlX = edge.targetX - (edge.targetX >= edge.sourceX ? bend : -bend);
+                  const edgeDepth = Math.min(edge.depth, 4);
                   return (
                     <path
                       key={edge.id}
+                      className={`edge-depth-${edgeDepth} ${isTimeSeriesEvidenceEdge(edge) ? 'timeseries-edge' : isKnowledgeEvidenceEdge(edge) ? 'evidence-edge' : 'business-edge'}`}
                       d={`M ${edge.sourceX} ${edge.sourceY} C ${sourceControlX} ${edge.sourceY}, ${targetControlX} ${edge.targetY}, ${edge.targetX} ${edge.targetY}`}
                     />
                   );
@@ -1068,7 +1391,7 @@ export default function QualityImpactWorkbench() {
               {layoutNodes.map((node, index) => (
                 <button
                   key={node.id}
-                  className={`quality-graph-node risk-${node.risk} role-${node.layoutRole} ${node.id === selectedNode?.id ? 'selected' : ''} ${connectedNodeIds.has(node.id) ? 'connected' : ''} ${draggingNodeId === node.id ? 'dragging' : ''}`}
+                  className={`quality-graph-node risk-${node.risk} role-${node.layoutRole} depth-${Math.min(node.depth, 4)} ${node.id === selectedNode?.id ? 'selected' : ''} ${connectedNodeIds.has(node.id) ? 'connected' : ''} ${draggingNodeId === node.id ? 'dragging' : ''}`}
                   style={nodePositionStyle(node, index)}
                   onPointerDown={(pointerEvent) => startNodeDrag(node.id, pointerEvent)}
                   onPointerMove={(pointerEvent) => updateNodeDrag(node.id, pointerEvent)}
@@ -1087,10 +1410,10 @@ export default function QualityImpactWorkbench() {
                   <small>{node.name}</small>
                 </button>
               ))}
-              {layoutEdges.map((edge) => (
+              {layoutEdges.filter((edge) => shouldShowEdgeLabel(edge, selectedNode?.id)).map((edge) => (
                 <span
                   key={edge.id}
-                  className="quality-graph-edge"
+                  className={`quality-graph-edge edge-depth-${Math.min(edge.depth, 4)} ${isTimeSeriesEvidenceEdge(edge) ? 'timeseries-label' : isKnowledgeEvidenceEdge(edge) ? 'evidence-label' : 'business-label'}`}
                   style={{
                     left: `${edge.labelX}%`,
                     top: `${edge.labelY}%`,
@@ -1102,8 +1425,9 @@ export default function QualityImpactWorkbench() {
               ))}
               <div className="object-canvas-legend">
                 <span><i className="legend-selected" /> 当前对象</span>
-                <span><i className="legend-connected" /> 邻接关系</span>
-                <span><i className="legend-expand" /> 可继续展开</span>
+                <span><i className="legend-connected" /> 业务关系</span>
+                <span><i className="legend-evidence" /> 知识证据</span>
+                <span><i className="legend-timeseries" /> 时序证据</span>
               </div>
             </div>
 
@@ -1129,6 +1453,25 @@ export default function QualityImpactWorkbench() {
                   <Descriptions.Item label="对象状态">{selectedNode.status}</Descriptions.Item>
                   <Descriptions.Item label="关联关系">{visibleEdges.length} 条</Descriptions.Item>
                 </Descriptions>
+                {timeSeriesEvidence.length > 0 && (
+                  <div className="quality-timeseries-panel">
+                    <Typography.Text strong>时序证据 / TSDB</Typography.Text>
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      {timeSeriesEvidence.map(({ edge, peer }) => (
+                        <div className="quality-timeseries-card" key={edge.id}>
+                          <Space size={6} wrap>
+                            <Tag color="cyan">{relationLabel[edge.relation_type || ''] || edge.label}</Tag>
+                            <Tag>{peer?.type || 'TimeSeries'}</Tag>
+                          </Space>
+                          <Typography.Text strong>{peer?.name || edge.label}</Typography.Text>
+                          <Typography.Text type="secondary">
+                            {peer?.summary || '时序窗口作为当前关系的证据，不直接替代业务事实。'}
+                          </Typography.Text>
+                        </div>
+                      ))}
+                    </Space>
+                  </div>
+                )}
                 <Space wrap>
                   {selectedNode.actions.map((action) => <Tag color="blue" key={action}>{action}</Tag>)}
                 </Space>
@@ -1158,7 +1501,7 @@ export default function QualityImpactWorkbench() {
                   )}
                 </div>
                 <div className="quality-action-stack">
-                  {actionConfig.map((action) => (
+                  {getContextActions(selectedNode).map((action) => (
                     <Button
                       key={action.key}
                       block
@@ -1186,14 +1529,37 @@ export default function QualityImpactWorkbench() {
                 <span key={tick}>{tick}</span>
               ))}
             </div>
-            <div className="quality-timeline-track">
-              <span className="quality-now-line" />
+            <div
+              ref={timelineRef}
+              className={`quality-timeline-track ${draggingTimeline ? 'dragging' : ''}`}
+              role="slider"
+              aria-label="关系时间截面"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={timelinePercent}
+              tabIndex={0}
+              onPointerDown={startTimelineDrag}
+              onPointerMove={moveTimelineDrag}
+              onPointerUp={finishTimelineDrag}
+              onPointerCancel={finishTimelineDrag}
+              onKeyDown={(keyEvent) => {
+                if (keyEvent.key === 'ArrowLeft') setTimelinePercent((value) => clampPosition(value - 5, 0, 100));
+                if (keyEvent.key === 'ArrowRight') setTimelinePercent((value) => clampPosition(value + 5, 0, 100));
+                if (keyEvent.key === 'Home') setTimelinePercent(0);
+                if (keyEvent.key === 'End') setTimelinePercent(100);
+              }}
+            >
+              <span className="quality-now-line" style={{ left: `${timelinePercent}%` }} />
+              <span className="quality-timeline-fill" style={{ width: `${timelinePercent}%` }} />
               {contextualTimeline.map((item) => (
                 <button
                   key={item.title}
-                  className={`quality-timeline-segment segment-${item.color}`}
+                  type="button"
+                  className={`quality-timeline-segment segment-${item.color} ${timelinePercent >= item.offset ? 'active' : ''}`}
                   style={{ left: `${item.offset}%`, width: `${item.width}%` }}
                   title={item.desc}
+                  onPointerDown={(pointerEvent) => pointerEvent.stopPropagation()}
+                  onClick={() => setTimelinePercent(clampPosition(item.offset + item.width, 0, 100))}
                 >
                   <span>{item.time}</span>
                   <strong>{item.title}</strong>
@@ -1204,10 +1570,17 @@ export default function QualityImpactWorkbench() {
                 </button>
               ))}
             </div>
+            <div className="quality-timeline-controls">
+              <Space size={8} wrap>
+                <Button size="small" onClick={() => setTimelinePercent(selectedTimelinePercent)}>回到当前节点时间</Button>
+                <Button size="small" onClick={() => setTimelinePercent(100)}>回到最新时间</Button>
+              </Space>
+              <span>当前截面 {formatTimelinePercent(timelinePercent)} · 显示 {canvasNodes.length} 节点 / {canvasEdges.length} 关系</span>
+            </div>
             <div className="quality-timeline-foot">
-              <span>任务处置轴</span>
-              <strong>当前停在：影响分析</strong>
-              <span>后续动作：确认 AI 建议 → 生成 CAPA → 进入审批</span>
+              <span>料号流转时间线</span>
+              <strong>当前对象：{selectedNode?.name || graphContext.title}</strong>
+              <span>拖动时间轴查看关系演进；点击节点会固定画布位置并切换一级中心层级。</span>
             </div>
           </div>
         </Card>

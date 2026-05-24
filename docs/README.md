@@ -26,6 +26,7 @@ Read these first when you want the current system truth:
 | --- | --- |
 | [Architecture Overview](architecture/overview.md) | Current full-system architecture, Palantir mapping, module layout, data flow, deployment shape. |
 | [API Reference](development/api-reference.md) | Current FastAPI route map and example requests. |
+| [SaaS Productization Phase 1](architecture/saas-productization-phase-1.md) | First public SaaS boundary, runtime modes, tenant model, ready path, and module maturity. |
 | [Platform Database Landing Plan](architecture/platform-database.md) | Current low-code forms/application/menu persistence design and rollout notes. |
 | [Permission System](architecture/permission-system.md) | Current authentication, RBAC, application visibility, admin guards, and platform form permission enforcement. |
 | [Knowledge Base](architecture/knowledge-base.md) | Current local knowledge/RAG MVP and future persistence boundary. |

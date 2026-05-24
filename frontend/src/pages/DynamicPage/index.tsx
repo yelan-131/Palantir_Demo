@@ -354,8 +354,10 @@ export default function DynamicPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const listFields = pageConfig?.config?.list_fields ||
-    fields.filter(f => f.visible_in_list).map(f => f.field_name);
+  const listFields = tableConfigColumns.length
+    ? tableConfigColumns.map((column) => column.fieldName)
+    : pageConfig?.config?.list_fields ||
+      fields.filter(f => f.visible_in_list).map(f => f.field_name);
 
   const formFieldNames = pageConfig?.config?.form_fields ||
     fields.filter(f => f.visible_in_form).map(f => f.field_name);
@@ -366,15 +368,20 @@ export default function DynamicPage() {
 
   const tableColumns = listFields.map(field_name => {
     const f = fields.find(x => x.field_name === field_name);
+    const viewColumn = tableConfigColumns.find((column) => column.fieldName === field_name);
     return {
-      title: f?.label || field_name,
+      title: viewColumn?.label || f?.label || field_name,
       dataIndex: field_name,
       key: field_name,
+      width: viewColumn?.width,
+      fixed: viewColumn?.fixed,
       ellipsis: true,
-      sorter: f?.sortable ? true : undefined,
+      sorter: viewColumn?.sortable || f?.sortable ? true : undefined,
       render: (val: any) => {
         if (typeof val === 'boolean') return val ? '是' : '否';
-        if (f?.field_type === 'enum' && val) return <Tag>{String(val)}</Tag>;
+        if (val === undefined || val === null || val === '') return viewColumn?.emptyText || '-';
+        if (typeof val === 'boolean') return val ? '是' : '否';
+        if ((viewColumn?.renderType === 'tag' || f?.field_type === 'enum') && val) return <Tag>{String(val)}</Tag>;
         if (field_name === 'status') {
           const colorMap: Record<string, string> = {
             running: 'green', idle: 'orange', maintenance: 'blue',
@@ -461,6 +468,32 @@ export default function DynamicPage() {
     } catch { message.error('删除失败'); }
   };
 
+  const renderDynamicFilterControl = (filter: ViewFilterConfig) => {
+    const field = fields.find((item) => item.field_name === filter.fieldName);
+    const placeholder = filter.placeholder || filter.label;
+    if (filter.controlType === 'dateRange') return <DatePicker.RangePicker style={{ width: '100%' }} />;
+    if (filter.controlType === 'date') return <DatePicker style={{ width: '100%' }} placeholder={placeholder} />;
+    if (filter.controlType === 'number') return <InputNumber style={{ width: '100%' }} placeholder={placeholder} />;
+    if (filter.controlType === 'select' || field?.field_type === 'enum') {
+      let opts: { label: string; value: string }[] = [];
+      if (field?.enum_values) {
+        const parsed = typeof field.enum_values === 'string' ? (() => {
+          try { return JSON.parse(field.enum_values || '[]'); } catch { return []; }
+        })() : field.enum_values;
+        const values = Array.isArray(parsed)
+          ? parsed
+          : Object.entries(parsed ?? {}).map(([value, label]) => ({ value, label }));
+        opts = values.map((item: any) => (
+          typeof item === 'string'
+            ? { label: item, value: item }
+            : { label: String(item.label ?? item.value), value: String(item.value ?? item.label) }
+        ));
+      }
+      return <Select allowClear placeholder={placeholder} options={opts} />;
+    }
+    return <Input allowClear prefix={filter.controlType === 'keyword' ? <SearchOutlined /> : undefined} placeholder={placeholder} />;
+  };
+
   if (!pageConfig) {
     return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
   }
@@ -484,17 +517,45 @@ export default function DynamicPage() {
         </Space>
       </div>
 
+      <Form
+        className="dynamic-view-filter-bar"
+        form={filterForm}
+        layout="vertical"
+        onFinish={(values) => {
+          setPage(1);
+          setSearch(String(values.keyword || ''));
+          setFilterValues(values);
+        }}
+      >
+        {activeFilters.map((filter) => (
+          <Form.Item key={filter.id} name={filter.id} label={filter.label} initialValue={filter.defaultValue}>
+            {renderDynamicFilterControl(filter)}
+          </Form.Item>
+        ))}
+        <Form.Item className="dynamic-view-filter-actions" label=" ">
+          <Space>
+            <Button onClick={() => {
+              filterForm.resetFields();
+              setSearch('');
+              setFilterValues({});
+              setPage(1);
+            }}>重置</Button>
+            <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>查询</Button>
+          </Space>
+        </Form.Item>
+      </Form>
+
       <Table
         dataSource={data}
         columns={tableColumns}
         rowKey="id"
         loading={loading}
-        size="small"
+        size={viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
         scroll={{ x: 'max-content' }}
         pagination={{
           current: page,
           total,
-          pageSize: 20,
+          pageSize: viewConfig.table.pageSize,
           showTotal: (t) => `共 ${t} 条`,
           onChange: (p) => setPage(p),
         }}

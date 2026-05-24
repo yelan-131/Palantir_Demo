@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "manufoundry"
     POSTGRES_PASSWORD: str = "manufoundry123"
     POSTGRES_DB: str = "manufoundry"
+    DATABASE_BACKEND: str = "auto"  # auto | postgresql | sqlite
 
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"

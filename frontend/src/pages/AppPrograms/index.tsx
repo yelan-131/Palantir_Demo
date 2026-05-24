@@ -1,13 +1,19 @@
 import React from 'react';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { useNavigate, useParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
 import MaintenancePage from '../Maintenance';
 import QualityPage from '../Quality';
 import QualityImpactWorkbench from '../QualityImpact';
 import SupplyChainPage from '../SupplyChain';
+import {
+  normalizeViewConfig,
+  sortByOrder,
+  type ViewConfig,
+  type ViewFilterConfig,
+} from '@/utils/viewConfig';
 import './style.css';
 
 const { RangePicker } = DatePicker;
@@ -15,6 +21,10 @@ const { RangePicker } = DatePicker;
 type ProgramKind = 'business' | 'analysis';
 
 type ProgramRow = Record<string, string | number>;
+
+function isDataColumn(column: ColumnsType<ProgramRow>[number]): column is ColumnType<ProgramRow> {
+  return 'dataIndex' in column;
+}
 
 interface ProgramDefinition {
   id: string;
@@ -32,6 +42,7 @@ interface ProgramDefinition {
   focus: string[];
   columns: ColumnsType<ProgramRow>;
   rows: ProgramRow[];
+  viewConfig?: ViewConfig;
 }
 
 const programDefinitions: Record<string, ProgramDefinition> = {
@@ -460,28 +471,28 @@ const programDefinitions: Record<string, ProgramDefinition> = {
     ],
   },  'quality-event': {
     id: 'quality-event',
-    title: '质量事件',
-    subtitle: '跟踪 CAPA、临时遏制、根因分析和长期改善。',
+    title: '料号追踪',
+    subtitle: '围绕料号查看供应、检验、库存、生产、交付、异常和知识证据。',
     kind: 'business',
-    owner: '质量负责人',
+    owner: '质量 / 供应链',
     icon: <CheckCircleOutlined />,
     metrics: [
-      { label: '打开事件', value: 12, tone: 'orange' },
-      { label: '逾期风险', value: 2, tone: 'red' },
-      { label: '已关闭', value: 34, tone: 'green' },
-      { label: '平均周期', value: 5.8, suffix: 'd', tone: 'blue' },
+      { label: '关联对象', value: 16, tone: 'blue' },
+      { label: '关系链路', value: 24, tone: 'green' },
+      { label: '风险节点', value: 4, tone: 'orange' },
+      { label: '证据条目', value: 3, tone: 'blue' },
     ],
-    focus: ['事件分级', '根因与措施', '关闭验证'],
+    focus: ['料号全链路', 'Neo4j 子图', '异常与证据'],
     columns: [
-      { title: '事件编号', dataIndex: 'eventNo' },
-      { title: '主题', dataIndex: 'subject' },
-      { title: '责任人', dataIndex: 'owner' },
-      { title: '阶段', dataIndex: 'stage' },
+      { title: '对象编号', dataIndex: 'eventNo' },
+      { title: '对象名称', dataIndex: 'subject' },
+      { title: '归属', dataIndex: 'owner' },
+      { title: '状态', dataIndex: 'stage' },
     ],
     rows: [
-      { key: 'qe-1', eventNo: 'QE-2605-006', subject: '电控板虚焊复发', owner: '王工', stage: '根因分析' },
-      { key: 'qe-2', eventNo: 'QE-2605-011', subject: '涂层色差客户反馈', owner: '赵工', stage: '措施验证' },
-      { key: 'qe-3', eventNo: 'QE-2605-014', subject: '包装破损抽检异常', owner: '钱工', stage: '临时遏制' },
+      { key: 'mat-1', eventNo: 'MB-7781', subject: '焊锡膏 S12', owner: '供应链 / 质量', stage: '待判定' },
+      { key: 'mat-2', eventNo: 'INV-7781-A', subject: '待判定库存', owner: '仓储 / 质量', stage: '冻结' },
+      { key: 'mat-3', eventNo: 'PB-260521-A', subject: '电控模块 V2', owner: '生产 / 交付', stage: '隔离' },
     ],
   },
   'supplier-risk': {
@@ -748,14 +759,74 @@ function ProgramHeader({ program, onSettings }: { program: ProgramDefinition; on
   );
 }
 
+function programFieldsForView(program: ProgramDefinition) {
+  return program.columns
+    .map((column) => {
+      if (!isDataColumn(column)) return null;
+      const dataColumn = column;
+      const fieldName = typeof dataColumn.dataIndex === 'string' ? dataColumn.dataIndex : '';
+      if (!fieldName) return null;
+      return {
+        fieldName,
+        label: typeof dataColumn.title === 'string' ? dataColumn.title : fieldName,
+        fieldType: fieldName.includes('status') || fieldName.includes('level') ? 'enum' : 'text',
+        searchable: true,
+        sortable: Boolean(dataColumn.sorter),
+        visibleInList: true,
+      };
+    })
+    .filter((field): field is NonNullable<typeof field> => Boolean(field));
+}
+
+function programValueMatchesFilter(row: ProgramRow, filter: ViewFilterConfig, value: unknown) {
+  if (value === undefined || value === null || value === '') return true;
+  const actual = row[filter.fieldName];
+  if (filter.operator === 'equals') return String(actual) === String(value);
+  return String(actual || '').toLowerCase().includes(String(value).toLowerCase());
+}
+
 function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; onSettings: () => void }) {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [selectedRow, setSelectedRow] = React.useState<ProgramRow | null>(null);
+  const [filterValues, setFilterValues] = React.useState<Record<string, unknown>>({});
   const [createForm] = Form.useForm();
+  const [filterForm] = Form.useForm();
+  const viewConfig = React.useMemo(() => normalizeViewConfig(program.viewConfig, programFieldsForView(program)), [program]);
+  const activeFilters = React.useMemo(() => sortByOrder(viewConfig.filters).filter((filter) => filter.enabled), [viewConfig.filters]);
+  const viewColumns = React.useMemo(() => sortByOrder(viewConfig.table.columns).filter((column) => column.enabled), [viewConfig.table.columns]);
+  const filteredRows = React.useMemo(() => program.rows.filter((row) => activeFilters.every((filter) => (
+    programValueMatchesFilter(row, filter, filterValues[filter.id] ?? filter.defaultValue)
+  ))), [activeFilters, filterValues, program.rows]);
+  const configuredColumns = React.useMemo(() => {
+    const baseColumns = viewColumns
+      .map((viewColumn) => {
+        const source = program.columns.find((column) => isDataColumn(column) && column.dataIndex === viewColumn.fieldName) as ColumnType<ProgramRow> | undefined;
+        if (!source) return null;
+        return {
+          ...source,
+          title: viewColumn.label,
+          width: viewColumn.width,
+          fixed: viewColumn.fixed,
+          sorter: viewColumn.sortable ? source.sorter || ((a: ProgramRow, b: ProgramRow) => String(a[viewColumn.fieldName] || '').localeCompare(String(b[viewColumn.fieldName] || ''))) : undefined,
+        };
+      })
+      .filter((column): column is NonNullable<typeof column> => Boolean(column));
+    return [...baseColumns, { title: '操作', key: 'action', fixed: 'right' as const, width: 160, render: (_: unknown, record: ProgramRow) => <Space onClick={(event) => event.stopPropagation()}><Button type="link" size="small" onClick={() => setSelectedRow(record)}>详情</Button><Button type="link" size="small">处理</Button></Space> }];
+  }, [program.columns, viewColumns]);
 
   const closeCreateModal = () => {
     setCreateOpen(false);
     createForm.resetFields();
+  };
+
+  const renderProgramFilterControl = (filter: ViewFilterConfig) => {
+    const placeholder = filter.placeholder || filter.label;
+    if (filter.controlType === 'dateRange') return <RangePicker />;
+    if (filter.controlType === 'select' || filter.controlType === 'relation') {
+      const options = Array.from(new Set(program.rows.map((row) => row[filter.fieldName]).filter(Boolean))).map((value) => ({ value: String(value), label: String(value) }));
+      return <Select allowClear placeholder={placeholder} options={options} />;
+    }
+    return <Input allowClear prefix={filter.controlType === 'keyword' ? <SearchOutlined /> : undefined} placeholder={placeholder} />;
   };
 
   return (
@@ -808,13 +879,32 @@ function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; 
           </div>
         </div>
 
+        <Form
+          className="app-business-search-grid app-business-configured-search"
+          form={filterForm}
+          layout="vertical"
+          onFinish={(values) => setFilterValues(values)}
+        >
+          {activeFilters.map((filter) => (
+            <Form.Item key={filter.id} name={filter.id} label={filter.label} initialValue={filter.defaultValue}>
+              {renderProgramFilterControl(filter)}
+            </Form.Item>
+          ))}
+          <Form.Item className="app-business-search-actions" label=" ">
+            <Space>
+              <Button onClick={() => { filterForm.resetFields(); setFilterValues({}); }}>重置</Button>
+              <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>查询</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+
         <Table<ProgramRow>
           className="app-business-data-table"
           rowKey="key"
-          size="middle"
-          columns={[...program.columns, { title: '操作', key: 'action', fixed: 'right', width: 160, render: (_, record) => <Space onClick={(event) => event.stopPropagation()}><Button type="link" size="small" onClick={() => setSelectedRow(record)}>详情</Button><Button type="link" size="small">处理</Button></Space> }]}
-          dataSource={program.rows}
-          pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条记录` }}
+          size={viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
+          columns={configuredColumns}
+          dataSource={filteredRows}
+          pagination={{ pageSize: viewConfig.table.pageSize, showSizeChanger: false, showTotal: (total) => `共 ${total} 条记录` }}
           scroll={{ x: 1100, y: '100%' }}
           onRow={(record) => ({
             onClick: () => setSelectedRow(record),
