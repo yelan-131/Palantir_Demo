@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
     APP_VERSION: str = "0.2.0"
+    APP_MODE: str = "demo"
     DEBUG: bool = True
 
     POSTGRES_HOST: str = "localhost"
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "manufoundry"
     POSTGRES_PASSWORD: str = "manufoundry123"
     POSTGRES_DB: str = "manufoundry"
+    DATABASE_BACKEND: str = "auto"  # auto | postgresql | sqlite
 
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
@@ -44,6 +46,36 @@ class Settings(BaseSettings):
     # Optional integrations
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
+    AI_PROVIDER: str = "mock"
+    AI_BASE_URL: str = ""
+    AI_API_KEY: str = ""
+    AI_CHAT_MODEL: str = "mock-chat"
+    AI_REASONING_MODEL: str = "mock-reasoning"
+    AI_EMBEDDING_MODEL: str = "mock-embedding"
+    AI_VISION_MODEL: str = "disabled"
+    AI_TIMEOUT_SECONDS: int = 30
+
+    @property
+    def IS_PRODUCTION(self) -> bool:
+        return self.APP_MODE.lower() == "production"
+
+    def validate_runtime(self) -> None:
+        """Fail fast on unsafe production configuration."""
+        mode = self.APP_MODE.lower()
+        if mode not in {"demo", "production"}:
+            raise ValueError("APP_MODE must be either 'demo' or 'production'")
+        if not self.IS_PRODUCTION:
+            return
+        if self.DEMO_AUTH_OPTIONAL:
+            raise ValueError("DEMO_AUTH_OPTIONAL must be false when APP_MODE=production")
+        unsafe_secrets = {
+            "manufoundry-secret-key-change-in-production",
+            "change-me-to-a-long-random-string",
+            "secret",
+            "",
+        }
+        if self.SECRET_KEY in unsafe_secrets or len(self.SECRET_KEY) < 32:
+            raise ValueError("SECRET_KEY must be a strong non-default value when APP_MODE=production")
 
     @property
     def DATABASE_URL(self) -> str:

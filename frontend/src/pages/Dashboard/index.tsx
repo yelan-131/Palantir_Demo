@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag, Skeleton, message } from 'antd';
+import { Button, Card, Row, Col, Statistic, Table, Tag, Skeleton, Space, Typography, message } from 'antd';
 import {
   ToolOutlined,
   CheckCircleOutlined,
   HeartOutlined,
   FileTextOutlined,
+  ReloadOutlined,
+  SettingOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
+import { useNavigate } from 'react-router-dom';
 import { getOverview, getOEE, getProductionStats, getAlerts } from '@/services/api';
 
 // ---------- Type definitions ----------
@@ -84,6 +87,7 @@ const severityLabelMap: Record<string, string> = {
 // ---------- Component ----------
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [oeeData, setOeeData] = useState<OEERecord[]>([]);
   const [productionData, setProductionData] = useState<ProductionDay[]>([]);
@@ -126,6 +130,10 @@ export default function DashboardPage() {
       setLoading(false);
     }
   }, []);
+
+  const openSettings = () => {
+    navigate('/form-settings/production-overview');
+  };
 
   useEffect(() => {
     fetchAllData();
@@ -333,6 +341,22 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="app-program-header">
+          <div className="app-program-title-block">
+            <span className="app-program-icon"><ToolOutlined /></span>
+            <div>
+              <Space size={8} align="center" wrap>
+                <Typography.Title level={3}>生产总览</Typography.Title>
+                <Tag color="blue">分析看板</Tag>
+              </Space>
+              <Typography.Text type="secondary">设备、工单、OEE、产线趋势和告警数据的生产态势总览。</Typography.Text>
+            </div>
+          </div>
+          <Space wrap>
+            <Button icon={<ReloadOutlined />} loading>刷新</Button>
+            <Button icon={<SettingOutlined />} onClick={openSettings}>设置</Button>
+          </Space>
+        </div>
         <Row gutter={[16, 16]}>
           {[1,2,3,4,5,6].map(i => (
             <Col xs={24} sm={12} md={8} lg={4} key={i}>
@@ -351,6 +375,23 @@ export default function DashboardPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="app-program-header">
+        <div className="app-program-title-block">
+          <span className="app-program-icon"><ToolOutlined /></span>
+          <div>
+            <Space size={8} align="center" wrap>
+              <Typography.Title level={3}>生产总览</Typography.Title>
+              <Tag color="blue">分析看板</Tag>
+            </Space>
+            <Typography.Text type="secondary">设备、工单、OEE、产线趋势和告警数据的生产态势总览。</Typography.Text>
+          </div>
+        </div>
+        <Space wrap>
+          <Button icon={<ReloadOutlined />} onClick={fetchAllData}>刷新</Button>
+          <Button icon={<SettingOutlined />} onClick={openSettings}>设置</Button>
+        </Space>
+      </div>
+
       {/* ---- KPI Cards ---- */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={8} lg={4}>

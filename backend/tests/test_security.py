@@ -60,3 +60,16 @@ def test_sha256_fallback_marker_is_namespaced():
     h = hash_password("anything")
     # Either bcrypt ($2b$...) or our explicit sha256$ marker — never bare hex.
     assert h.startswith("$2") or h.startswith("sha256$")
+
+
+def test_permission_match_helpers_support_aliases_and_wildcards():
+    from app.core.permissions import _action_matches, _key_matches
+
+    assert _action_matches("*", "delete")
+    assert _action_matches("view", "read")
+    assert _action_matches("edit", "update")
+    assert not _action_matches("view", "delete")
+
+    assert _key_matches("*", "quality-event")
+    assert _key_matches("quality-event", "quality-event")
+    assert not _key_matches("maintenance-order", "quality-event")

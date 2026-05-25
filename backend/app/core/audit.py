@@ -18,6 +18,7 @@ async def write_audit_log(
     old_values: Optional[dict] = None,
     new_values: Optional[dict] = None,
     user_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> None:
     try:
         from app.core.db import db_session
@@ -25,6 +26,7 @@ async def write_audit_log(
 
         async with db_session() as session:
             entry = AuditLog(
+                tenant_id=tenant_id,
                 user_id=user_id,
                 action=action,
                 resource_type=resource_type,

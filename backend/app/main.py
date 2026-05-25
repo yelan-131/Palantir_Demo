@@ -10,6 +10,7 @@ from app.core.logging import get_logger, setup_logging
 # Initialize logging before anything else
 setup_logging(level=settings.LOG_LEVEL)
 logger = get_logger(__name__)
+settings.validate_runtime()
 
 
 @asynccontextmanager
@@ -83,11 +84,14 @@ from app.api import (  # noqa: E402
     ai_assistant,
     ai_builder,
     analytics,
+    applications,
     auth,
     config_io,
     dashboard,
     data_sources,
+    forms,
     graph,
+    knowledge,
     maintenance,
     model_driven,
     notifications,
@@ -98,6 +102,7 @@ from app.api import (  # noqa: E402
     rules,
     scheduler,
     search,
+    semantic_assets,
     supply_chain,
     templates,
     workflow,
@@ -108,11 +113,18 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["认证"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["系统管理"])
 app.include_router(workflow.router, prefix="/api/v1/workflow", tags=["工作流"])
 
+app.include_router(applications.router, prefix="/api/v1/applications", tags=["applications"])
+app.include_router(applications.admin_router, prefix="/api/v1/admin", tags=["applications-admin"])
+app.include_router(forms.router, prefix="/api/v1/forms", tags=["forms"])
+
 # Data foundation
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["数据源管理"])
 app.include_router(ontology.router, prefix="/api/v1/ontology", tags=["本体管理"])
 app.include_router(graph.router, prefix="/api/v1/graph", tags=["图谱查询"])
 app.include_router(pipeline.router, prefix="/api/v1/pipelines", tags=["数据管线"])
+
+app.include_router(semantic_assets.router, prefix="/api/v1/semantic-assets", tags=["semantic-assets"])
+app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge-base"])
 
 # Business modules
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["数据分析"])

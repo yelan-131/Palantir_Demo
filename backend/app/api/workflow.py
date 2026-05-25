@@ -4,11 +4,15 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 router = APIRouter()
+
+from app.api.deps import current_tenant_id, current_user_id, get_current_user
+from app.config import settings
+from app.core.audit import write_audit_log
 
 
 # ── Schemas ───────────────────────────────────────────────
@@ -18,6 +22,7 @@ class WorkflowDefCreate(BaseModel):
     description: Optional[str] = None
     config: Optional[dict] = None
     form_config: Optional[dict] = None
+    status: Optional[str] = None
     steps: Optional[list] = None  # [{name, type, assignee_role, condition_config}]
 
 
@@ -220,42 +225,95 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
     nodes = config.get("nodes", [])
     edges = config.get("edges", [])
 
-    # Build adjacency from edges to determine order
-    edge_map = {}
+    node_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+
+    def _node_type(node: dict) -> str:
+        raw_type = node.get("type") or node.get("data", {}).get("type") or ""
+        mapping = {
+            "startEvent": "start",
+            "endEvent": "end",
+            "userTask": "approval",
+            "manualTask": "approval",
+            "serviceTask": "notification",
+            "ccTask": "notification",
+            "exclusiveGateway": "condition",
+            "parallelGateway": "condition",
+            "joinGateway": "condition",
+        }
+        return mapping.get(raw_type, raw_type)
+
+    def _node_label(node: dict) -> str:
+        return node.get("label") or node.get("data", {}).get("label") or node.get("id", "节点")
+
+    def _node_assignee(node: dict) -> Optional[str]:
+        return (
+            node.get("assigneeValue")
+            or node.get("assignee_role")
+            or node.get("data", {}).get("approver_role")
+            or node.get("data", {}).get("assignee_role")
+        )
+
+    def _edge_source(edge: dict) -> Optional[str]:
+        return edge.get("source") or edge.get("fromId")
+
+    def _edge_target(edge: dict) -> Optional[str]:
+        return edge.get("target") or edge.get("toId")
+
+    # Build adjacency from edges. Multiple outgoing edges are sorted so graph
+    # execution has deterministic behavior before expression evaluation exists.
+    edge_map: dict[str, list[dict]] = {}
     for edge in edges:
-        edge_map[edge["source"]] = edge["target"]
+        source = _edge_source(edge)
+        target = _edge_target(edge)
+        if not source or not target:
+            continue
+        edge_map.setdefault(source, []).append(edge)
+    for outgoing in edge_map.values():
+        outgoing.sort(key=lambda edge: (not bool(edge.get("isDefault")), edge.get("priority", 999), edge.get("id", "")))
 
     # Find the start node and walk the chain
     start_id = None
     for node in nodes:
-        if node.get("type") == "start":
+        if _node_type(node) == "start":
             start_id = node["id"]
             break
 
     if not start_id:
         # No start node; return nodes in order
         return [
-            {"name": n.get("data", {}).get("label", n["id"]), "type": n["type"],
-             "assignee_role": n.get("data", {}).get("approver_role")}
+            {"name": _node_label(n), "type": _node_type(n),
+             "assignee_role": _node_assignee(n)}
             for n in nodes
         ]
 
     ordered = []
     visited = set()
-    current = start_id
-    while current and current not in visited:
+    queue = [start_id]
+    while queue:
+        current = queue.pop(0)
+        if not current or current in visited:
+            continue
         visited.add(current)
-        node = next((n for n in nodes if n["id"] == current), None)
-        if node:
-            step = {
-                "name": node.get("data", {}).get("label", node["id"]),
-                "type": node["type"],
-                "node_id": node["id"],
-            }
-            if node.get("data", {}).get("approver_role"):
-                step["assignee_role"] = node["data"]["approver_role"]
-            ordered.append(step)
-        current = edge_map.get(current)
+        node = node_by_id.get(current)
+        if not node:
+            continue
+        step = {
+            "name": _node_label(node),
+            "type": _node_type(node),
+            "node_id": node["id"],
+        }
+        assignee = _node_assignee(node)
+        if assignee:
+            step["assignee_role"] = assignee
+        if node.get("fieldPermissions"):
+            step["field_permissions"] = node["fieldPermissions"]
+        if node.get("approvalMode"):
+            step["approval_mode"] = node["approvalMode"]
+        ordered.append(step)
+        for edge in edge_map.get(current, []):
+            target = _edge_target(edge)
+            if target and target not in visited:
+                queue.append(target)
 
     return ordered
 
@@ -308,11 +366,12 @@ def _get_mock_instance_by_id(inst_id: int) -> Optional[dict]:
 # ── Workflow Definition CRUD ─────────────────────────────
 
 @router.get("/definitions")
-async def list_definitions():
+async def list_definitions(user: dict = Depends(get_current_user)):
     """工作流定义列表."""
     async def _query(db):
         from app.models.relational import WorkflowDef
-        result = await db.execute(select(WorkflowDef).order_by(WorkflowDef.id))
+        tenant_id = current_tenant_id(user)
+        result = await db.execute(select(WorkflowDef).where(WorkflowDef.tenant_id == tenant_id).order_by(WorkflowDef.id))
         defs = result.scalars().all()
         return {"data": [
             {"id": d.id, "name": d.name, "description": d.description,
@@ -325,16 +384,19 @@ async def list_definitions():
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Workflow database unavailable")
     return {"data": _MOCK_WORKFLOWS}
 
 
 @router.get("/definitions/{def_id}")
-async def get_definition(def_id: int):
+async def get_definition(def_id: int, user: dict = Depends(get_current_user)):
     """获取工作流定义详情."""
     async def _query(db):
         from app.models.relational import WorkflowDef
+        tenant_id = current_tenant_id(user)
         d = await db.get(WorkflowDef, def_id)
-        if not d:
+        if not d or d.tenant_id != tenant_id:
             return None
         return {
             "id": d.id, "name": d.name, "description": d.description,
@@ -346,6 +408,8 @@ async def get_definition(def_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Workflow not found")
     for d in _MOCK_WORKFLOWS:
         if d["id"] == def_id:
             return d
@@ -353,28 +417,41 @@ async def get_definition(def_id: int):
 
 
 @router.post("/definitions")
-async def create_definition(body: WorkflowDefCreate):
+async def create_definition(body: WorkflowDefCreate, user: dict = Depends(get_current_user)):
     """创建工作流定义."""
     async def _query(db):
         from app.models.relational import WorkflowDef
+        tenant_id = current_tenant_id(user)
         config_data = body.config or {"nodes": [], "edges": []}
         # If body.steps is provided, embed steps into config for execution
         if body.steps:
             config_data["steps"] = body.steps
 
         d = WorkflowDef(
+            tenant_id=tenant_id,
             name=body.name, description=body.description,
             config=json.dumps(config_data, ensure_ascii=False),
             form_config=json.dumps(body.form_config or {"fields": []}, ensure_ascii=False),
+            status=body.status or "draft",
         )
         db.add(d)
         await db.commit()
         await db.refresh(d)
-        return {"id": d.id, "name": d.name}
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="create",
+            resource_type="workflow_def",
+            resource_id=d.id,
+            new_values=body.dict(),
+        )
+        return {"id": d.id, "name": d.name, "status": d.status, "version": d.version}
 
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Workflow database unavailable")
     global _wf_id_counter
     _wf_id_counter += 1
     config_data = body.config or {"nodes": [], "edges": []}
@@ -385,18 +462,19 @@ async def create_definition(body: WorkflowDefCreate):
         "config": config_data,
         "steps": body.steps,
         "form_config": body.form_config or {"fields": []},
-        "status": "draft", "version": 1,
+        "status": body.status or "draft", "version": 1,
     })
-    return {"id": _wf_id_counter, "name": body.name}
+    return {"id": _wf_id_counter, "name": body.name, "status": body.status or "draft", "version": 1}
 
 
 @router.put("/definitions/{def_id}")
-async def update_definition(def_id: int, body: WorkflowDefCreate):
+async def update_definition(def_id: int, body: WorkflowDefCreate, user: dict = Depends(get_current_user)):
     """更新工作流定义."""
     async def _query(db):
         from app.models.relational import WorkflowDef
+        tenant_id = current_tenant_id(user)
         d = await db.get(WorkflowDef, def_id)
-        if not d:
+        if not d or d.tenant_id != tenant_id:
             return None
         d.name = body.name
         if body.description is not None:
@@ -408,13 +486,17 @@ async def update_definition(def_id: int, body: WorkflowDefCreate):
             d.config = json.dumps(config_data, ensure_ascii=False)
         if body.form_config is not None:
             d.form_config = json.dumps(body.form_config, ensure_ascii=False)
+        if body.status is not None:
+            d.status = body.status
         d.version += 1
         await db.commit()
-        return {"id": d.id, "version": d.version}
+        return {"id": d.id, "version": d.version, "status": d.status}
 
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Workflow not found")
     for d in _MOCK_WORKFLOWS:
         if d["id"] == def_id:
             d["name"] = body.name
@@ -422,17 +504,21 @@ async def update_definition(def_id: int, body: WorkflowDefCreate):
                 d["config"] = body.config
             if body.steps:
                 d["steps"] = body.steps
-            return {"id": def_id, "version": d.get("version", 1)}
+            if body.status is not None:
+                d["status"] = body.status
+            d["version"] = int(d.get("version", 1)) + 1
+            return {"id": def_id, "version": d["version"], "status": d.get("status", "draft")}
     raise HTTPException(404, "Workflow not found")
 
 
 @router.delete("/definitions/{def_id}")
-async def delete_definition(def_id: int):
+async def delete_definition(def_id: int, user: dict = Depends(get_current_user)):
     """删除工作流定义."""
     async def _query(db):
         from app.models.relational import WorkflowDef
+        tenant_id = current_tenant_id(user)
         d = await db.get(WorkflowDef, def_id)
-        if not d:
+        if not d or d.tenant_id != tenant_id:
             return None
         await db.delete(d)
         await db.commit()
@@ -441,6 +527,8 @@ async def delete_definition(def_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Workflow not found")
     return {"ok": True}
 
 
@@ -452,11 +540,13 @@ async def list_instances(
     initiator_id: Optional[int] = None,
     workflow_id: Optional[int] = None,
     resource_type: Optional[str] = None,
+    user: dict = Depends(get_current_user),
 ):
     """工作流实例列表 (supports filtering by status, initiator, workflow, resource_type)."""
     async def _query(db):
         from app.models.relational import WorkflowInstance, WorkflowApproval
-        query = select(WorkflowInstance).order_by(WorkflowInstance.created_at.desc())
+        tenant_id = current_tenant_id(user)
+        query = select(WorkflowInstance).where(WorkflowInstance.tenant_id == tenant_id).order_by(WorkflowInstance.created_at.desc())
         if status:
             query = query.where(WorkflowInstance.status == status)
         if initiator_id:
@@ -509,6 +599,8 @@ async def list_instances(
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Workflow instances database unavailable")
 
     # Mock fallback with filtering
     filtered = _MOCK_INSTANCES
@@ -540,12 +632,13 @@ async def list_instances(
 
 
 @router.get("/instances/{inst_id}")
-async def get_instance(inst_id: int):
+async def get_instance(inst_id: int, user: dict = Depends(get_current_user)):
     """获取工作流实例详情 (with full step history)."""
     async def _query(db):
         from app.models.relational import WorkflowInstance, WorkflowApproval, WorkflowDef
+        tenant_id = current_tenant_id(user)
         inst = await db.get(WorkflowInstance, inst_id)
-        if not inst:
+        if not inst or inst.tenant_id != tenant_id:
             return None
 
         approvals_res = await db.execute(
@@ -585,6 +678,8 @@ async def get_instance(inst_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Instance not found")
 
     # Mock fallback
     inst = _get_mock_instance_by_id(inst_id)
@@ -605,12 +700,13 @@ async def get_instance(inst_id: int):
 
 
 @router.post("/definitions/{def_id}/start")
-async def start_instance(def_id: int, body: WorkflowStartRequest):
+async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = Depends(get_current_user)):
     """发起工作流实例 (creates WorkflowInstance + first WorkflowApproval)."""
     async def _query(db):
         from app.models.relational import WorkflowDef, WorkflowInstance, WorkflowApproval
+        tenant_id = current_tenant_id(user)
         d = await db.get(WorkflowDef, def_id)
-        if not d:
+        if not d or d.tenant_id != tenant_id:
             return None
         config = json.loads(d.config) if isinstance(d.config, str) else d.config
         steps = config.get("steps", [])
@@ -629,7 +725,9 @@ async def start_instance(def_id: int, body: WorkflowStartRequest):
         }
 
         inst = WorkflowInstance(
+            tenant_id=tenant_id,
             workflow_id=def_id, title=body.title,
+            initiator_id=current_user_id(user),
             form_data=json.dumps(body.form_data or {}, ensure_ascii=False),
             workflow_state=json.dumps(state, ensure_ascii=False),
             status="pending",
@@ -645,6 +743,14 @@ async def start_instance(def_id: int, body: WorkflowStartRequest):
             db.add(approval)
         await db.commit()
         await db.refresh(inst)
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="start",
+            resource_type="workflow_instance",
+            resource_id=inst.id,
+            new_values={"workflow_id": def_id, "title": body.title, "resource_type": body.resource_type, "resource_id": body.resource_id},
+        )
         return {
             "instance_id": inst.id,
             "status": inst.status,
@@ -655,6 +761,8 @@ async def start_instance(def_id: int, body: WorkflowStartRequest):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Workflow definition not found")
 
     # Mock fallback
     wf = _get_mock_workflow_by_id(def_id)
@@ -720,30 +828,31 @@ async def start_instance(def_id: int, body: WorkflowStartRequest):
 
 
 @router.post("/instances/{inst_id}/approve")
-async def approve_step(inst_id: int, body: StepApprovalRequest):
+async def approve_step(inst_id: int, body: StepApprovalRequest, user: dict = Depends(get_current_user)):
     """审批通过当前步骤 (moves to next step or completes workflow)."""
-    return await _act_on_step(inst_id, body, action="approve")
+    return await _act_on_step(inst_id, body, action="approve", user=user)
 
 
 @router.post("/instances/{inst_id}/reject")
-async def reject_step(inst_id: int, body: StepApprovalRequest):
+async def reject_step(inst_id: int, body: StepApprovalRequest, user: dict = Depends(get_current_user)):
     """驳回当前步骤 (marks instance as rejected)."""
-    return await _act_on_step(inst_id, body, action="reject")
+    return await _act_on_step(inst_id, body, action="reject", user=user)
 
 
-async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str):
+async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, user: dict | None = None):
     """Core step action logic — approve moves forward, reject terminates."""
     if action not in ("approve", "reject"):
         raise HTTPException(400, "action must be 'approve' or 'reject'")
 
     async def _query(db):
         from app.models.relational import WorkflowInstance, WorkflowApproval, WorkflowDef
+        tenant_id = current_tenant_id(user or {})
         inst = await db.get(WorkflowInstance, inst_id)
-        if not inst:
+        if not inst or inst.tenant_id != tenant_id:
             return None
 
         wf_def = await db.get(WorkflowDef, inst.workflow_id)
-        if not wf_def:
+        if not wf_def or wf_def.tenant_id != tenant_id:
             return None
 
         config = json.loads(wf_def.config) if isinstance(wf_def.config, str) else wf_def.config
@@ -760,7 +869,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str):
             pending_approval.action = action
             pending_approval.comment = body.comment
             pending_approval.acted_at = datetime.now()
-            pending_approval.approver_id = body.user_id
+            pending_approval.approver_id = current_user_id(user or {}) or body.user_id
 
         if action == "reject":
             inst.status = "rejected"
@@ -793,6 +902,13 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str):
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
 
         await db.commit()
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user or {}),
+            action=action,
+            resource_type="workflow_instance",
+            resource_id=inst.id,
+        )
         return {
             "id": inst.id, "status": inst.status,
             "current_step": state.get("current_step", current_step_idx),
@@ -802,6 +918,8 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Instance not found")
 
     # Mock fallback
     inst = _get_mock_instance_by_id(inst_id)
@@ -873,30 +991,40 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str):
 
 # Legacy act endpoint kept for backward compatibility
 @router.post("/instances/{inst_id}/act")
-async def approve_or_reject(inst_id: int, body: ApprovalAction):
+async def approve_or_reject(inst_id: int, body: ApprovalAction, user: dict = Depends(get_current_user)):
     """审批/驳回工作流实例 (legacy endpoint)."""
     if body.action not in ("approve", "reject"):
         raise HTTPException(400, "action must be 'approve' or 'reject'")
 
     step_body = StepApprovalRequest(comment=body.comment, user_id=1)
-    return await _act_on_step(inst_id, step_body, action=body.action)
+    return await _act_on_step(inst_id, step_body, action=body.action, user=user)
 
 
 @router.post("/instances/{inst_id}/cancel")
-async def cancel_instance(inst_id: int):
+async def cancel_instance(inst_id: int, user: dict = Depends(get_current_user)):
     """撤销工作流实例."""
     async def _query(db):
         from app.models.relational import WorkflowInstance
+        tenant_id = current_tenant_id(user)
         inst = await db.get(WorkflowInstance, inst_id)
-        if not inst:
+        if not inst or inst.tenant_id != tenant_id:
             return None
         inst.status = "cancelled"
         await db.commit()
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="cancel",
+            resource_type="workflow_instance",
+            resource_id=inst.id,
+        )
         return {"id": inst.id, "status": "cancelled"}
 
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Instance not found")
     for inst in _MOCK_INSTANCES:
         if inst["id"] == inst_id:
             inst["status"] = "cancelled"
@@ -965,9 +1093,47 @@ async def mark_all_read(user_id: int = Query(1)):
 # ── Stats / Summary ──────────────────────────────────────
 
 @router.get("/stats")
-async def workflow_stats():
+async def workflow_stats(user: dict = Depends(get_current_user)):
     """工作流统计概览."""
     # Count from mock data (DB mode would aggregate from tables)
+    async def _query(db):
+        from app.models.relational import Notification, User, WorkflowDef, WorkflowInstance
+        tenant_id = current_tenant_id(user)
+        total_definitions = await db.scalar(
+            select(func.count(WorkflowDef.id)).where(WorkflowDef.tenant_id == tenant_id)
+        )
+        total_instances = await db.scalar(
+            select(func.count(WorkflowInstance.id)).where(WorkflowInstance.tenant_id == tenant_id)
+        )
+        status_rows = await db.execute(
+            select(WorkflowInstance.status, func.count(WorkflowInstance.id))
+            .where(WorkflowInstance.tenant_id == tenant_id)
+            .group_by(WorkflowInstance.status)
+        )
+        by_status = {status: count for status, count in status_rows.all()}
+        unread_notifications = await db.scalar(
+            select(func.count(Notification.id))
+            .join(User, User.id == Notification.user_id)
+            .where(User.tenant_id == tenant_id, Notification.is_read.is_(False))
+        )
+        return {
+            "total_definitions": int(total_definitions or 0),
+            "total_instances": int(total_instances or 0),
+            "instances_by_status": {
+                "pending": int(by_status.get("pending", 0)),
+                "approved": int(by_status.get("approved", 0)),
+                "rejected": int(by_status.get("rejected", 0)),
+                "cancelled": int(by_status.get("cancelled", 0)),
+            },
+            "unread_notifications": int(unread_notifications or 0),
+        }
+
+    result = await _try_db(_query)
+    if result is not None:
+        return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Workflow database unavailable")
+
     total_instances = len(_MOCK_INSTANCES)
     pending = sum(1 for i in _MOCK_INSTANCES if i["status"] == "pending")
     approved = sum(1 for i in _MOCK_INSTANCES if i["status"] == "approved")

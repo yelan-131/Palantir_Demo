@@ -1,8 +1,11 @@
 import axios from 'axios';
 
+const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: apiBaseURL,
   timeout: 30000,
+  withCredentials: true,
 });
 
 // ── Request interceptor: attach Authorization: Bearer <token> ─────
@@ -65,6 +68,12 @@ export const getShortestPath = (srcId: number, tgtId: number) =>
 export const getSubgraph = (entityId: number, depth?: number) =>
   api.get(`/graph/subgraph/${entityId}`, { params: { depth } });
 export const getGraphStats = () => api.get('/graph/stats');
+export const listGraphAssetNodes = (params?: { search?: string; entity_type?: string }) =>
+  api.get('/graph/assets/nodes', { params });
+export const listGraphAssetRelationships = (params?: { search?: string; relation_type?: string }) =>
+  api.get('/graph/assets/relationships', { params });
+export const getGraphAssetQuality = () => api.get('/graph/assets/quality');
+export const listGraphAssetEvidence = () => api.get('/graph/assets/evidence');
 
 // Graph — new endpoints (Phase 2)
 export const getGraphEntity = (label: string, entityId: number) =>
@@ -77,8 +86,86 @@ export const getTraceChain = (entityId: number, maxHops?: number) =>
   api.get(`/graph/trace/${entityId}`, { params: { max_hops: maxHops } });
 export const getCentrality = (limit?: number) =>
   api.get('/graph/analytics/centrality', { params: { limit } });
+export const syncQualityDemoGraph = () => api.post('/graph/sync/quality-demo');
+export const getBusinessImpactAnalysis = (params: {
+  object_type: string;
+  object_id: string;
+  max_hops?: number;
+  limit?: number;
+}) => api.get('/graph/impact-analysis-by-object', { params, timeout: 6000 });
 export const getEntityRelationships = (entityType: string, entityId: number, relType?: string) =>
   api.get(`/ontology/entities/${entityType}/instances/${entityId}/relationships`, { params: { rel_type: relType } });
+
+// Semantic low-code assets
+export const listSemanticDataAssets = () => api.get('/semantic-assets/data-assets');
+export const listSemanticOntologyObjects = () => api.get('/semantic-assets/ontology-objects');
+export const listSemanticOntologyRelations = () => api.get('/semantic-assets/ontology-relations');
+export const listSemanticPageContracts = () => api.get('/semantic-assets/page-contracts');
+export const getSemanticPageContract = (route: string) =>
+  api.get('/semantic-assets/page-contracts/by-route', { params: { route } });
+
+// Knowledge base / local RAG MVP
+export const listKnowledgeSpaces = () => api.get('/knowledge/spaces');
+export const listKnowledgeSources = () => api.get('/knowledge/sources');
+export const listKnowledgeDocuments = (sourceId?: string) =>
+  api.get('/knowledge/documents', { params: { source_id: sourceId } });
+export const listKnowledgeChunks = (documentId: string) =>
+  api.get(`/knowledge/documents/${documentId}/chunks`);
+export const listKnowledgeCards = (params?: { space_id?: string; status?: string }) =>
+  api.get('/knowledge/cards', { params });
+export const getRelatedKnowledgeCards = (params?: { object_type?: string; object_id?: string; limit?: number }) =>
+  api.get('/knowledge/related-cards', { params });
+export const getRelatedKnowledge = (params?: { object_type?: string; object_id?: string; limit?: number }) =>
+  api.get('/knowledge/related', { params });
+export const suggestKnowledgeBindings = (data: { text: string; limit?: number }) =>
+  api.post('/knowledge/binding-candidates', data);
+export const getKnowledgeOcrPipeline = () => api.get('/knowledge/ocr-pipeline');
+export const uploadKnowledgeAsset = (
+  file: File,
+  params?: { permission_scope?: string; owner_user_id?: string },
+) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/knowledge/assets/upload', formData, {
+    params,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+export const createKnowledgeExtractionJob = (
+  file: File,
+  params?: {
+    domain?: string;
+    prompt_name?: string;
+    model_name?: string;
+    permission_scope?: string;
+    owner_user_id?: string;
+  },
+) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      formData.append(key, String(value));
+    }
+  });
+  return api.post('/knowledge/extraction-jobs', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+export const getKnowledgeExtractionJob = (jobId: string) =>
+  api.get(`/knowledge/extraction-jobs/${jobId}`);
+export const approveKnowledgeExtractionJob = (jobId: string, approvedResult?: Record<string, unknown>) =>
+  api.post(`/knowledge/extraction-jobs/${jobId}/approve`, { approved_result: approvedResult });
+export const commitKnowledgeExtractionJobToGraph = (jobId: string) =>
+  api.post(`/knowledge/extraction-jobs/${jobId}/commit-to-graph`);
+export const exportKnowledgeExtractionJob = (jobId: string, format: string) =>
+  api.get(`/knowledge/extraction-jobs/${jobId}/export`, { params: { format }, responseType: 'blob' });
+export const searchKnowledge = (data: {
+  query: string;
+  limit?: number;
+  object_type?: string;
+  object_id?: string;
+}) => api.post('/knowledge/search', data);
 
 // Pipeline
 export const listPipelines = () => api.get('/pipelines');
@@ -111,6 +198,12 @@ export const getDefectPareto = (days?: number) => api.get('/quality/defects/pare
 export const getTraceability = (entityId: number, entityType?: string) =>
   api.get(`/quality/traceability/${entityId}`, { params: { entity_type: entityType } });
 export const listInspections = (params?: Record<string, unknown>) => api.get('/quality/inspections', { params });
+export const listQualityEvents = () => api.get('/quality/events');
+export const getQualityEventImpact = (eventId: string | number) => api.get(`/quality/events/${eventId}/impact`);
+export const getQualityEventAiSuggestion = (eventId: string | number) => api.post(`/quality/events/${eventId}/ai-suggestion`);
+export const executeQualityEventAction = (eventId: string | number, data: Record<string, unknown>) =>
+  api.post(`/quality/events/${eventId}/actions`, data);
+export const createCapa = (data: Record<string, unknown>) => api.post('/quality/capa', data);
 
 // Supply Chain
 export const listSuppliers = (params?: Record<string, unknown>) => api.get('/supply-chain/suppliers', { params });
@@ -123,6 +216,12 @@ export const getSupplyChainAnalytics = () => api.get('/supply-chain/analytics');
 export const sendChat = (message: string, sessionId?: string) =>
   api.post('/ai/chat', { message, session_id: sessionId });
 export const smartAnalyze = (query: string) => api.post('/ai/analyze', { query });
+export const sendAgentChat = (data: Record<string, unknown>) => api.post('/ai/agent', data);
+export const testAIProvider = (providerConfig: Record<string, unknown>) =>
+  api.post('/ai/provider/test', { provider_config: providerConfig });
+export const getAISettings = () => api.get('/ai/settings');
+export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
+export const testSavedAISettings = () => api.post('/ai/settings/test');
 
 // Reports
 export const listReports = (params?: Record<string, unknown>) => api.get('/reports', { params });
@@ -174,6 +273,17 @@ export const updateMenu = (id: number, data: Record<string, unknown>) => api.put
 export const deleteMenu = (id: number) => api.delete(`/model-driven/menus/${id}`);
 
 // Auth (Phase 3) — token now travels via Authorization header (interceptor above)
+// Applications
+export const listApplications = () => api.get('/applications');
+export const getApplication = (id: number) => api.get(`/applications/${id}`);
+export const listApplicationMenus = (id: number) => api.get(`/applications/${id}/menus`);
+export const adminListApplications = () => api.get('/admin/applications');
+export const adminCreateApplication = (data: Record<string, unknown>) => api.post('/admin/applications', data);
+export const adminUpdateApplication = (id: number, data: Record<string, unknown>) => api.put(`/admin/applications/${id}`, data);
+export const adminDeleteApplication = (id: number) => api.delete(`/admin/applications/${id}`);
+export const adminUpdateApplicationBindings = (id: number, data: Record<string, unknown>) =>
+  api.put(`/admin/applications/${id}/bindings`, data);
+
 export const authLogin = (username: string, password: string) =>
   api.post('/auth/login', { username, password });
 export const authLogout = () => api.post('/auth/logout');
@@ -184,6 +294,10 @@ export const adminListUsers = () => api.get('/admin/users');
 export const adminCreateUser = (data: Record<string, unknown>) => api.post('/admin/users', data);
 export const adminUpdateUser = (id: number, data: Record<string, unknown>) => api.put(`/admin/users/${id}`, data);
 export const adminDeleteUser = (id: number) => api.delete(`/admin/users/${id}`);
+export const adminListOrgUnits = () => api.get('/admin/org-units');
+export const adminCreateOrgUnit = (data: Record<string, unknown>) => api.post('/admin/org-units', data);
+export const adminUpdateOrgUnit = (id: number, data: Record<string, unknown>) => api.put(`/admin/org-units/${id}`, data);
+export const adminDeleteOrgUnit = (id: number) => api.delete(`/admin/org-units/${id}`);
 export const adminListRoles = () => api.get('/admin/roles');
 export const adminCreateRole = (data: Record<string, unknown>) => api.post('/admin/roles', data);
 export const adminDeleteRole = (id: number) => api.delete(`/admin/roles/${id}`);
@@ -260,5 +374,193 @@ export const crossEntitySearch = (q: string, models?: string) =>
 // AI Builder (Phase 4)
 export const suggestModel = (description: string) => api.post('/ai-builder/suggest-model', { description });
 export const suggestPage = (modelName: string) => api.post('/ai-builder/suggest-page', { model_name: modelName });
+
+// Platform Forms
+export type PlatformFormStatus = 'draft' | 'active' | 'archived';
+export type PlatformFieldType =
+  | 'string'
+  | 'text'
+  | 'number'
+  | 'integer'
+  | 'decimal'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'enum'
+  | 'json'
+  | 'relation';
+
+export interface PlatformFormField {
+  id: number;
+  form_id: number;
+  field_name: string;
+  label: string;
+  field_type: PlatformFieldType | string;
+  required: boolean;
+  visible_in_list: boolean;
+  visible_in_form: boolean;
+  searchable: boolean;
+  sortable: boolean;
+  archived: boolean;
+  default_value?: string | null;
+  enum_values?: Record<string, unknown> | null;
+  validation?: Record<string, unknown> | null;
+  ui_config?: Record<string, unknown> | null;
+  sort_order: number;
+}
+
+export interface PlatformForm {
+  id: number;
+  name: string;
+  code: string;
+  description?: string | null;
+  model_id?: number | null;
+  table_name?: string | null;
+  status: PlatformFormStatus | string;
+  config?: Record<string, unknown> | null;
+  owner_id?: number | null;
+  fields?: PlatformFormField[];
+  applications?: Array<Record<string, unknown>>;
+}
+
+export interface PlatformMenuNode {
+  id: number;
+  application_id: number;
+  parent_id?: number | null;
+  node_type: 'group' | 'form' | string;
+  title: string;
+  icon?: string | null;
+  form_id?: number | null;
+  route_path?: string | null;
+  visible: boolean;
+  default_entry: boolean;
+  sort_order: number;
+  config?: Record<string, unknown> | null;
+}
+
+export interface PlatformDynamicRecord {
+  id: number;
+  form_id: number;
+  data: Record<string, unknown>;
+  status: string;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PlatformApplicationFormBinding {
+  id: number;
+  application_id: number;
+  form_id: number;
+  alias?: string | null;
+  enabled: boolean;
+  default_view: string;
+  data_scope?: string | null;
+  allow_create: boolean;
+  allow_edit: boolean;
+  allow_delete: boolean;
+  allow_export: boolean;
+  sort_order: number;
+  form?: PlatformForm | null;
+}
+
+export const listPlatformForms = (params?: { application_id?: number }) =>
+  api.get('/forms', { params });
+export const createPlatformForm = (data: Record<string, unknown>) =>
+  api.post('/forms', data);
+export const getPlatformForm = (id: number | string) =>
+  api.get(`/forms/${id}`);
+export const updatePlatformForm = (id: number | string, data: Record<string, unknown>) =>
+  api.put(`/forms/${id}`, data);
+export const deletePlatformForm = (id: number | string) =>
+  api.delete(`/forms/${id}`);
+
+export const listApplicationFormBindings = (applicationId: number | string) =>
+  api.get(`/forms/applications/${applicationId}/forms`);
+export const upsertApplicationFormBinding = (applicationId: number | string, data: Record<string, unknown>) =>
+  api.put(`/forms/applications/${applicationId}/forms`, data);
+export const deleteApplicationFormBinding = (applicationId: number | string, formId: number | string) =>
+  api.delete(`/forms/applications/${applicationId}/forms/${formId}`);
+
+export const createPlatformFormField = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/fields`, data);
+export const updatePlatformFormField = (
+  formId: number | string,
+  fieldId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/fields/${fieldId}`, data);
+export const archivePlatformFormField = (formId: number | string, fieldId: number | string) =>
+  api.delete(`/forms/${formId}/fields/${fieldId}`);
+
+export const listPlatformFormLayouts = (formId: number | string) =>
+  api.get(`/forms/${formId}/layouts`);
+export const upsertPlatformFormLayout = (
+  formId: number | string,
+  layoutType: string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/layouts/${layoutType}`, data);
+
+export const listPlatformFormActions = (formId: number | string) =>
+  api.get(`/forms/${formId}/actions`);
+export const upsertPlatformFormAction = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/actions`, data);
+export const updatePlatformFormAction = (
+  formId: number | string,
+  actionId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/actions/${actionId}`, data);
+export const deletePlatformFormAction = (formId: number | string, actionId: number | string) =>
+  api.delete(`/forms/${formId}/actions/${actionId}`);
+
+export const listPlatformFormPermissions = (formId: number | string) =>
+  api.get(`/forms/${formId}/permissions`);
+export const upsertPlatformFormPermission = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/permissions`, data);
+export const updatePlatformFormPermission = (
+  formId: number | string,
+  permissionId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/permissions/${permissionId}`, data);
+export const deletePlatformFormPermission = (formId: number | string, permissionId: number | string) =>
+  api.delete(`/forms/${formId}/permissions/${permissionId}`);
+
+export const listPlatformDynamicRecords = (formId: number | string, params?: Record<string, unknown>) =>
+  api.get(`/forms/${formId}/records`, { params });
+export const createPlatformDynamicRecord = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/records`, { data });
+export const getPlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
+  api.get(`/forms/${formId}/records/${recordId}`);
+export const updatePlatformDynamicRecord = (
+  formId: number | string,
+  recordId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/records/${recordId}`, { data });
+export const deletePlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
+  api.delete(`/forms/${formId}/records/${recordId}`);
+
+export const listPlatformMenuNodes = (applicationId: number | string) =>
+  api.get(`/forms/applications/${applicationId}/menu-nodes`);
+export const createPlatformMenuNode = (applicationId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/applications/${applicationId}/menu-nodes`, data);
+export const updatePlatformMenuNode = (
+  applicationId: number | string,
+  nodeId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`, data);
+export const deletePlatformMenuNode = (applicationId: number | string, nodeId: number | string) =>
+  api.delete(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`);
+
+export const listWorkflowBindings = (formId: number | string) =>
+  api.get(`/forms/${formId}/workflow-bindings`);
+export const upsertWorkflowBinding = (formId: number | string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/workflow-bindings`, data);
+export const updateWorkflowBinding = (
+  formId: number | string,
+  bindingId: number | string,
+  data: Record<string, unknown>,
+) => api.put(`/forms/${formId}/workflow-bindings/${bindingId}`, data);
+export const deleteWorkflowBinding = (formId: number | string, bindingId: number | string) =>
+  api.delete(`/forms/${formId}/workflow-bindings/${bindingId}`);
 
 export default api;

@@ -9,8 +9,10 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -397,10 +399,20 @@ class PipelineRun(TimestampMixin, Base):
 
 # ── 报表族 (Phase 1) ──────────────────────────────────────
 
+class Tenant(TimestampMixin, Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200))
+    slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="active")
+
+
 class Report(TimestampMixin, Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     config: Mapped[str] = mapped_column(Text, default="{}")
@@ -415,6 +427,7 @@ class ReportSnapshot(TimestampMixin, Base):
     __tablename__ = "report_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     report_id: Mapped[int] = mapped_column(ForeignKey("reports.id"))
     config: Mapped[str] = mapped_column(Text, default="{}")
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -492,6 +505,7 @@ class MenuItem(TimestampMixin, Base):
     __tablename__ = "menu_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("menu_items.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     icon: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -502,10 +516,223 @@ class MenuItem(TimestampMixin, Base):
 
 # ── 权限族 (Phase 3) ──────────────────────────────────────
 
+class Application(TimestampMixin, Base):
+    __tablename__ = "applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    icon: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    default_route: Mapped[str] = mapped_column(String(200), default="/")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(50), default="published")
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    menus: Mapped[list["ApplicationMenu"]] = relationship(back_populates="application", cascade="all, delete-orphan")
+    roles: Mapped[list["ApplicationRole"]] = relationship(back_populates="application", cascade="all, delete-orphan")
+
+
+class ApplicationMenu(TimestampMixin, Base):
+    __tablename__ = "application_menus"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    menu_id: Mapped[int] = mapped_column(ForeignKey("menu_items.id"))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    application: Mapped["Application"] = relationship(back_populates="menus")
+
+
+class ApplicationRole(TimestampMixin, Base):
+    __tablename__ = "application_roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
+
+    application: Mapped["Application"] = relationship(back_populates="roles")
+
+
+class Form(TimestampMixin, Base):
+    __tablename__ = "forms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_models.id"), nullable=True)
+    table_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    storage_mode: Mapped[str] = mapped_column(String(50), default="dynamic")
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    applications: Mapped[list["ApplicationForm"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    fields: Mapped[list["FormField"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    layouts: Mapped[list["FormLayout"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    actions: Mapped[list["FormAction"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    permissions: Mapped[list["FormPermission"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    records: Mapped[list["DynamicRecord"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    workflow_bindings: Mapped[list["WorkflowBinding"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+
+
+class ApplicationForm(TimestampMixin, Base):
+    __tablename__ = "application_forms"
+    __table_args__ = (
+        UniqueConstraint("application_id", "form_id", name="uq_application_forms_application_form"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    alias: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_view: Mapped[str] = mapped_column(String(50), default="list")
+    data_scope: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    allow_create: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_edit: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_delete: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_export: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="applications")
+
+
+class ApplicationMenuNode(TimestampMixin, Base):
+    __tablename__ = "application_menu_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("application_menu_nodes.id"), nullable=True)
+    node_type: Mapped[str] = mapped_column(String(50), default="form")
+    title: Mapped[str] = mapped_column(String(200))
+    icon: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    form_id: Mapped[Optional[int]] = mapped_column(ForeignKey("forms.id"), nullable=True)
+    route_path: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_entry: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FormField(TimestampMixin, Base):
+    __tablename__ = "form_fields"
+    __table_args__ = (
+        UniqueConstraint("form_id", "field_name", name="uq_form_fields_form_field_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    meta_field_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_fields.id"), nullable=True)
+    field_name: Mapped[str] = mapped_column(String(200))
+    label: Mapped[str] = mapped_column(String(200))
+    field_type: Mapped[str] = mapped_column(String(50), default="string")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    visible_in_list: Mapped[bool] = mapped_column(Boolean, default=True)
+    visible_in_form: Mapped[bool] = mapped_column(Boolean, default=True)
+    searchable: Mapped[bool] = mapped_column(Boolean, default=False)
+    sortable: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_value: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    enum_values: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    validation: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ui_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="fields")
+
+
+class FormLayout(TimestampMixin, Base):
+    __tablename__ = "form_layouts"
+    __table_args__ = (
+        UniqueConstraint("form_id", "layout_type", name="uq_form_layouts_form_layout_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    layout_type: Mapped[str] = mapped_column(String(50), default="list")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    form: Mapped["Form"] = relationship(back_populates="layouts")
+
+
+class FormAction(TimestampMixin, Base):
+    __tablename__ = "form_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    action_key: Mapped[str] = mapped_column(String(100))
+    label: Mapped[str] = mapped_column(String(200))
+    action_type: Mapped[str] = mapped_column(String(50), default="builtin")
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    form: Mapped["Form"] = relationship(back_populates="actions")
+
+
+class FormPermission(TimestampMixin, Base):
+    __tablename__ = "form_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
+    action: Mapped[str] = mapped_column(String(50))
+    effect: Mapped[str] = mapped_column(String(20), default="allow")
+    field_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="permissions")
+
+
+class DynamicRecord(TimestampMixin, Base):
+    __tablename__ = "dynamic_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("meta_models.id"), nullable=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="records")
+
+
+class WorkflowBinding(TimestampMixin, Base):
+    __tablename__ = "workflow_bindings"
+    __table_args__ = (
+        UniqueConstraint("form_id", "workflow_id", "trigger_action", name="uq_workflow_bindings_form_workflow_trigger"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"))
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow_defs.id"))
+    trigger_action: Mapped[str] = mapped_column(String(50), default="submit")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    form: Mapped["Form"] = relationship(back_populates="workflow_bindings")
+
+
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -514,12 +741,52 @@ class User(TimestampMixin, Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 
     roles: Mapped[list["UserRole"]] = relationship(back_populates="user")
+    org_memberships: Mapped[list["UserOrgMembership"]] = relationship(back_populates="user")
+
+
+class OrgUnit(TimestampMixin, Base):
+    __tablename__ = "org_units"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_org_units_tenant_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("org_units.id"), nullable=True, index=True)
+    code: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(200))
+    org_type: Mapped[str] = mapped_column(String(50), default="department")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    parent: Mapped[Optional["OrgUnit"]] = relationship(remote_side=[id], back_populates="children")
+    children: Mapped[list["OrgUnit"]] = relationship(back_populates="parent")
+    memberships: Mapped[list["UserOrgMembership"]] = relationship(back_populates="org_unit")
+
+
+class UserOrgMembership(TimestampMixin, Base):
+    __tablename__ = "user_org_memberships"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "org_unit_id", name="uq_user_org_memberships_user_org"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    org_unit_id: Mapped[int] = mapped_column(ForeignKey("org_units.id"), index=True)
+    position_title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped["User"] = relationship(back_populates="org_memberships")
+    org_unit: Mapped["OrgUnit"] = relationship(back_populates="memberships")
 
 
 class Role(TimestampMixin, Base):
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
     label: Mapped[str] = mapped_column(String(200))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -532,6 +799,7 @@ class UserRole(TimestampMixin, Base):
     __tablename__ = "user_roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
 
@@ -543,6 +811,7 @@ class RolePermission(TimestampMixin, Base):
     __tablename__ = "role_permissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
     resource_type: Mapped[str] = mapped_column(String(50))
     resource_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -557,6 +826,7 @@ class WorkflowDef(TimestampMixin, Base):
     __tablename__ = "workflow_defs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     config: Mapped[str] = mapped_column(Text, default="{}")
@@ -571,6 +841,7 @@ class WorkflowInstance(TimestampMixin, Base):
     __tablename__ = "workflow_instances"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow_defs.id"))
     title: Mapped[str] = mapped_column(String(200))
     initiator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -650,6 +921,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     action: Mapped[str] = mapped_column(String(50))
     resource_type: Mapped[str] = mapped_column(String(100))
@@ -669,3 +941,73 @@ class ScheduledJob(TimestampMixin, Base):
     config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class KnowledgeDocument(TimestampMixin, Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    source_file_name: Mapped[str] = mapped_column(String(500))
+    source_type: Mapped[str] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(String(300))
+    markdown_content: Mapped[str] = mapped_column(Text)
+    permission_scope: Mapped[str] = mapped_column(String(50), default="enterprise")
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="indexed")
+
+
+class KnowledgeChunk(TimestampMixin, Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    document_id: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    chunk_text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    source_location: Mapped[str] = mapped_column(String(200), default="section:1")
+    permission_scope: Mapped[str] = mapped_column(String(50), default="enterprise")
+    status: Mapped[str] = mapped_column(String(50), default="indexed")
+
+
+class KnowledgeIngestionJob(TimestampMixin, Base):
+    __tablename__ = "knowledge_ingestion_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    asset_id: Mapped[str] = mapped_column(String(100), index=True)
+    document_id: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="running")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class KnowledgeExtractionResult(TimestampMixin, Base):
+    __tablename__ = "knowledge_extraction_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    document_id: Mapped[str] = mapped_column(String(100), index=True)
+    domain: Mapped[str] = mapped_column(String(100), default="manufacturing")
+    prompt_name: Mapped[str] = mapped_column(String(200), default="manufacturing_ontology_v1")
+    model_name: Mapped[str] = mapped_column(String(200), default="mock-chat")
+    status: Mapped[str] = mapped_column(String(50), default="completed")
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    approved_result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    quality_report: Mapped[dict] = mapped_column(JSON, default=dict)
+    committed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class KnowledgeObjectLink(TimestampMixin, Base):
+    __tablename__ = "knowledge_object_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[str] = mapped_column(String(100), index=True)
+    job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    object_type: Mapped[str] = mapped_column(String(100))
+    object_id: Mapped[str] = mapped_column(String(200))
+    object_name: Mapped[str] = mapped_column(String(300))
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source_location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="candidate")

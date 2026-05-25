@@ -1,0 +1,115 @@
+.ai-skill-action-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.ai-skill-action-card {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d5e2e7;
+  border-radius: 8px;
+  background: #f8fbfc;
+  box-shadow: inset 3px 0 0 #2f5f73;
+}
+
+.ai-skill-action-head {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.ai-skill-action-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ai-skill-action-head code {
+  overflow: hidden;
+  color: #4f6670;
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-skill-action-head .ant-tag {
+  margin: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-skill-action-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #e6f0f3;
+  color: #2f5f73;
+  font-size: 16px;
+}
+
+.ai-skill-action-summary.ant-typography {
+  margin: 8px 0 0;
+  color: #40545d;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ai-skill-action-fields {
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.ai-skill-action-fields div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #e1eaee;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ai-skill-action-fields dt {
+  color: #71818a;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ai-skill-action-fields dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #1d2f37;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-skill-action-next {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #cbd9de;
+}
+
+.ai-skill-action-next .ant-typography {
+  font-size: 11px;
+}
+
+.ai-skill-action-next ol {
+  margin: 5px 0 0 17px;
+  color: #32474f;
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.ai-skill-action-next li + li {
+  margin-top: 2px;
+}

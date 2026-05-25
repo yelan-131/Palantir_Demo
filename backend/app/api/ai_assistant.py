@@ -2,10 +2,18 @@
 
 import json
 import random
+import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+
+from app.api.deps import get_current_user
+from app.services.ai.client import get_provider
+from app.services.ai.orchestrator import run_agent
+from app.services.ai.policies import decide_ai_permission, decide_skill_permission
+from app.services.ai.providers import ProviderConfigurationError
+from app.services.ai.schemas import AIProviderConfig, AgentRequest, ChatMessage, ChatOptions, DraftSaveRequest
 
 router = APIRouter()
 
@@ -19,6 +27,146 @@ class AnalyzeRequest(BaseModel):
     query: str
     entity_type: str | None = None
     entity_id: int | None = None
+
+
+class ProviderTestRequest(BaseModel):
+    provider_config: AIProviderConfig
+
+
+class AISettingsRequest(BaseModel):
+    settings: dict
+
+
+DEFAULT_ROLE_POLICIES = [
+    {
+        "role": "admin",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "business_query", "report", "draft", "save_draft", "workflow", "config"],
+        "domains": ["production", "quality", "maintenance", "supply-chain", "workflow", "low-code"],
+        "agentMode": "save_after_confirm",
+    },
+    {
+        "role": "production_manager",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "business_query", "report", "draft", "save_draft", "workflow"],
+        "domains": ["production", "maintenance", "workflow"],
+        "agentMode": "save_after_confirm",
+    },
+    {
+        "role": "quality_engineer",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "business_query", "report", "draft", "save_draft"],
+        "domains": ["quality"],
+        "agentMode": "save_after_confirm",
+    },
+    {
+        "role": "maintenance_manager",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "business_query", "report", "draft", "save_draft"],
+        "domains": ["maintenance"],
+        "agentMode": "save_after_confirm",
+    },
+    {
+        "role": "supply_chain_manager",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "business_query", "report", "draft", "save_draft"],
+        "domains": ["supply-chain"],
+        "agentMode": "save_after_confirm",
+    },
+    {
+        "role": "viewer",
+        "enabled": True,
+        "capabilities": ["qa", "rag", "report"],
+        "domains": ["production", "quality", "maintenance", "supply-chain"],
+        "agentMode": "readonly",
+    },
+]
+
+
+AI_SYSTEM_SETTINGS = {
+    "aiEnabled": True,
+    "provider": "mock",
+    "baseUrl": "",
+    "apiKey": "",
+    "chatModel": "mock-chat",
+    "reasoningModel": "mock-reasoning",
+    "embeddingModel": "mock-embedding",
+    "visionModel": "disabled",
+    "agentMode": "draft",
+    "ragEnabled": True,
+    "guestAccess": "disabled",
+    "rolePolicies": DEFAULT_ROLE_POLICIES,
+    "riskPolicy": {
+        "low": "allow",
+        "medium": "confirm",
+        "high": "confirm_and_audit",
+        "critical": "blocked",
+    },
+    "forbiddenActions": ["auto_order", "delete_data", "change_permission"],
+}
+
+AI_DRAFT_STORE: dict[str, dict] = {}
+AI_AUDIT_LOGS: list[dict] = []
+
+
+def _settings_to_provider_config(settings_data: dict) -> AIProviderConfig:
+    return AIProviderConfig(
+        provider=settings_data.get("provider") or "mock",
+        base_url=settings_data.get("baseUrl") or settings_data.get("base_url") or "",
+        api_key=settings_data.get("apiKey") or settings_data.get("api_key") or "",
+        organization=settings_data.get("organization") or "",
+        project=settings_data.get("project") or "",
+        chat_model=settings_data.get("chatModel") or settings_data.get("chat_model") or "mock-chat",
+        reasoning_model=settings_data.get("reasoningModel") or settings_data.get("reasoning_model") or "mock-reasoning",
+        embedding_model=settings_data.get("embeddingModel") or settings_data.get("embedding_model") or "mock-embedding",
+        vision_model=settings_data.get("visionModel") or settings_data.get("vision_model") or "disabled",
+        timeout_seconds=int(settings_data.get("timeoutSeconds") or settings_data.get("timeout_seconds") or 30),
+    )
+
+
+def _mask_settings(settings_data: dict) -> dict:
+    masked = {**settings_data}
+    if masked.get("apiKey"):
+        masked["apiKey"] = "********"
+    return masked
+
+
+def _roles_for_demo_user(user: dict) -> list[dict]:
+    if user.get("roles"):
+        return user["roles"]
+    if user.get("is_admin"):
+        return [{"name": "admin", "label": "Admin"}]
+    role_map = {
+        "zhangsan": [{"name": "production_manager", "label": "Production manager"}],
+        "pm_li": [{"name": "production_manager", "label": "Production manager"}, {"name": "approval_lead", "label": "Approval lead"}],
+        "lisi": [{"name": "quality_inspector", "label": "Quality inspector"}],
+        "qe_wang": [{"name": "quality_engineer", "label": "Quality engineer"}],
+        "mm_zhou": [{"name": "maintenance_manager", "label": "Maintenance manager"}],
+        "scm_liu": [{"name": "supply_chain_manager", "label": "Supply chain manager"}],
+        "auditor_gu": [{"name": "viewer", "label": "Viewer"}],
+    }
+    return role_map.get(str(user.get("sub") or ""), [])
+
+
+def _normalize_user(user: dict) -> dict:
+    normalized = {**user}
+    normalized["roles"] = _roles_for_demo_user(normalized)
+    return normalized
+
+
+def _raise_for_ai_decision(decision):
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason or "AI action is not allowed")
+
+
+def _audit_ai_event(user: dict, event_type: str, payload: dict):
+    AI_AUDIT_LOGS.append({
+        "id": f"audit-{uuid.uuid4().hex[:12]}",
+        "event_type": event_type,
+        "user": user.get("sub") or user.get("username") or "unknown",
+        "payload": payload,
+        "created_at": datetime.now().isoformat(),
+    })
 
 
 # Simulated AI responses based on intent detection
@@ -196,6 +344,107 @@ async def chat(body: ChatRequest):
         "data": result.get("data"),
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@router.post("/agent")
+async def agent_chat(body: AgentRequest, user: dict = Depends(get_current_user)):
+    """Enterprise AI Agent shell: RAG evidence + structured skill actions."""
+    current_user = _normalize_user(user)
+    base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
+    _raise_for_ai_decision(base_decision)
+    if body.provider_config is None:
+        body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
+    result = await run_agent(body)
+    for action in result.actions:
+        decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
+        _raise_for_ai_decision(decision)
+        action.requires_confirmation = action.requires_confirmation or decision.requires_confirmation
+    if result.actions:
+        _audit_ai_event(current_user, "agent_actions_prepared", {"actions": [action.model_dump() for action in result.actions]})
+    return result.model_dump()
+
+
+@router.post("/drafts/save")
+async def save_ai_draft(body: DraftSaveRequest, user: dict = Depends(get_current_user)):
+    """Save a confirmed AI-generated draft without submitting workflow."""
+    current_user = _normalize_user(user)
+    action_stub = {
+        "type": "skill_result",
+        "skill": body.skill,
+        "title": body.skill,
+        "mode": "draft",
+        "risk_level": "medium",
+        "requires_confirmation": True,
+        "payload": body.payload,
+        "evidence": body.evidence,
+    }
+    from app.services.ai.schemas import SkillAction
+
+    decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, SkillAction(**action_stub), capability="save_draft")
+    _raise_for_ai_decision(decision)
+    if not body.confirmation.get("confirmed"):
+        raise HTTPException(status_code=400, detail="User confirmation is required before saving AI draft")
+    draft_id = f"draft-{uuid.uuid4().hex[:12]}"
+    record = {
+        "draft_id": draft_id,
+        "status": "draft",
+        "skill": body.skill,
+        "payload": body.payload,
+        "evidence": body.evidence,
+        "created_by": current_user.get("sub") or current_user.get("username"),
+        "created_at": datetime.now().isoformat(),
+    }
+    AI_DRAFT_STORE[draft_id] = record
+    _audit_ai_event(current_user, "draft_saved", {"draft_id": draft_id, "skill": body.skill})
+    return {"ok": True, "data": record}
+
+
+@router.post("/provider/test")
+async def test_provider(body: ProviderTestRequest):
+    """Validate provider configuration without persisting secrets."""
+    provider = get_provider(body.provider_config)
+    try:
+        result = await provider.chat(
+            [ChatMessage(role="user", content="ping")],
+            ChatOptions(model=body.provider_config.chat_model, max_tokens=32),
+        )
+        return {"ok": True, "provider": result.provider, "model": result.model, "message": "Provider configuration accepted"}
+    except ProviderConfigurationError as exc:
+        return {"ok": False, "provider": body.provider_config.provider, "message": str(exc)}
+
+
+@router.get("/settings")
+async def get_ai_settings():
+    """Return backend-owned AI system settings with secret values masked."""
+    return {"data": _mask_settings(AI_SYSTEM_SETTINGS)}
+
+
+@router.put("/settings")
+async def update_ai_settings(body: AISettingsRequest):
+    """Update backend-owned AI system settings for the demo runtime."""
+    merged = {**AI_SYSTEM_SETTINGS, **body.settings}
+    merged.setdefault("guestAccess", "disabled")
+    merged.setdefault("rolePolicies", DEFAULT_ROLE_POLICIES)
+    merged.setdefault("riskPolicy", {"low": "allow", "medium": "confirm", "high": "confirm_and_audit", "critical": "blocked"})
+    merged.setdefault("forbiddenActions", ["auto_order", "delete_data", "change_permission"])
+    AI_SYSTEM_SETTINGS.clear()
+    AI_SYSTEM_SETTINGS.update(merged)
+    return {"data": _mask_settings(AI_SYSTEM_SETTINGS), "ok": True}
+
+
+@router.post("/settings/test")
+async def test_saved_ai_settings():
+    """Validate the saved backend AI settings."""
+    provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
+    return await test_provider(ProviderTestRequest(provider_config=provider_config))
+
+
+@router.get("/audit")
+async def list_ai_audit_logs(user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin privilege required")
+    return {"data": AI_AUDIT_LOGS[-100:]}
 
 
 @router.get("/sessions")

@@ -23,6 +23,29 @@ SAFE_RELS = [
     "CONTAINS", "PRODUCES", "REQUIRES", "SUPPLIES",
     "INSPECTS", "MAINTAINS", "FEEDS", "ASSIGNED_TO",
     "STORED_IN", "SHIPS_TO", "FULFILLS", "FOUND_IN",
+    "RELATED_TO",
+]
+
+BUSINESS_GRAPH_LABELS = [
+    "QualityEvent", "Defect", "InspectionBatch", "MaterialBatch",
+    "Supplier", "WorkOrder", "Equipment", "CustomerOrder", "CAPA",
+    "KnowledgeCard", "Operation", "ProductBatch", "InventoryLot",
+    "Sensor", "TimeSeriesWindow", "Material", "Product", "Customer",
+]
+
+BUSINESS_LABEL_ALIASES = {
+    "MaterialBatch": ["Material"],
+    "InspectionBatch": ["Inspection"],
+    "CustomerOrder": ["SalesOrder"],
+    "QualityEvent": ["Defect", "Inspection"],
+}
+
+BUSINESS_GRAPH_RELS = [
+    "HAS_DEFECT", "FOUND_IN", "INSPECTS", "SUPPLIED_BY",
+    "USES_BATCH", "USES_EQUIPMENT", "AFFECTS_ORDER", "TRIGGERS",
+    "EVIDENCE_FOR", "RUNS_OPERATION", "PRODUCES_BATCH",
+    "STORED_AS", "REINSPECTS", "MAY_CAUSE", "MEASURED_BY",
+    "HAS_TS_ANOMALY", "CORRELATES_WITH", "RELATED_TO",
 ]
 
 
@@ -42,6 +65,131 @@ class GraphService:
                     await session.run(constraint_cypher)
                 except Exception as exc:
                     logger.debug("Constraint creation skipped: %s", exc)
+
+    async def ensure_business_constraints(self):
+        """Create unique constraints for business-object graph ids."""
+        self._check_driver()
+        async with neo4j_driver.session() as session:
+            for label in BUSINESS_GRAPH_LABELS:
+                try:
+                    await session.run(
+                        f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
+                    )
+                except Exception as exc:
+                    logger.debug("Business constraint creation skipped for %s: %s", label, exc)
+
+    # ── Business graph operations ────────────────────────
+
+    async def upsert_business_node(self, label: str, object_id: str, props: dict) -> dict:
+        if label not in BUSINESS_GRAPH_LABELS:
+            raise ValueError(f"Invalid business label: {label}")
+        self._check_driver()
+        payload = {
+            **props,
+            "id": object_id,
+            "object_id": object_id,
+            "type": label,
+        }
+        async with neo4j_driver.session() as session:
+            result = await session.run(
+                f"MERGE (n:{label} {{id: $id}}) "
+                "SET n += $props "
+                "RETURN n {.*, labels: labels(n)} AS node",
+                id=object_id,
+                props=payload,
+            )
+            records = await result.data()
+            return records[0]["node"] if records else {}
+
+    async def upsert_business_edge(
+        self,
+        src_id: str,
+        tgt_id: str,
+        rel_type: str,
+        props: dict | None = None,
+    ) -> dict:
+        if rel_type not in BUSINESS_GRAPH_RELS:
+            raise ValueError(f"Invalid business relation: {rel_type}")
+        self._check_driver()
+        payload = {
+            **(props or {}),
+            "relation_type": rel_type,
+        }
+        async with neo4j_driver.session() as session:
+            result = await session.run(
+                "MATCH (a {id: $src_id}) "
+                "MATCH (b {id: $tgt_id}) "
+                f"MERGE (a)-[r:{rel_type}]->(b) "
+                "SET r += $props "
+                "RETURN r {.*, type: type(r), source: a.id, target: b.id} AS edge",
+                src_id=src_id,
+                tgt_id=tgt_id,
+                props=payload,
+            )
+            records = await result.data()
+            return records[0]["edge"] if records else {}
+
+    async def impact_analysis_by_object(
+        self,
+        object_type: str,
+        object_id: str,
+        max_hops: int = 2,
+        limit: int = 80,
+    ) -> dict[str, Any] | None:
+        allowed_labels = set(BUSINESS_GRAPH_LABELS) | set(SAFE_LABELS)
+        if object_type not in allowed_labels:
+            raise ValueError(f"Invalid business label: {object_type}")
+        self._check_driver()
+        max_hops = max(1, min(max_hops, 3))
+        limit = max(1, min(limit, 120))
+        async with neo4j_driver.session() as session:
+            query_labels = [
+                label for label in [object_type, *BUSINESS_LABEL_ALIASES.get(object_type, [])]
+                if label in allowed_labels
+            ]
+            for label in query_labels:
+                result = await session.run(
+                    f"""
+                    MATCH (root:{label})
+                    WHERE root.id = $object_id
+                       OR root.object_id = $object_id
+                       OR root.source_id = $object_id
+                       OR root.name = $object_id
+                       OR toString(root.pg_id) = $object_id
+                       OR root.sku = $object_id
+                    OPTIONAL MATCH p = (root)-[*1..{max_hops}]-(related)
+                    WITH root, collect(DISTINCT related)[0..$limit] AS relatedNodes, collect(relationships(p)) AS relGroups
+                    WITH root, [root] + relatedNodes AS nodes, reduce(allRels = [], rels IN relGroups | allRels + rels) AS flattenedRels
+                    UNWIND CASE WHEN size(flattenedRels) = 0 THEN [null] ELSE flattenedRels END AS r
+                    WITH root, nodes, collect(DISTINCT r) AS rels
+                    RETURN
+                      root {{.*, id: coalesce(root.id, toString(root.pg_id), root.name), labels: labels(root)}} AS root,
+                      [n IN nodes | n {{.*, id: coalesce(n.id, toString(n.pg_id), n.name), labels: labels(n)}}][0..$limit] AS nodes,
+                      [r IN rels WHERE r IS NOT NULL | r {{.*, type: type(r), source: coalesce(startNode(r).id, toString(startNode(r).pg_id), startNode(r).name), target: coalesce(endNode(r).id, toString(endNode(r).pg_id), endNode(r).name)}}][0..$limit] AS edges
+                    """,
+                    object_id=object_id,
+                    limit=limit,
+                )
+                records = await result.data()
+                if not records:
+                    continue
+                record = records[0]
+                nodes = record.get("nodes") or []
+                edges = record.get("edges") or []
+                if not nodes:
+                    continue
+                return {
+                    "root": record.get("root"),
+                    "nodes": nodes,
+                    "edges": edges,
+                    "summary": {
+                        "node_count": len(nodes),
+                        "edge_count": len(edges),
+                        "max_hops": max_hops,
+                        "label": label,
+                    },
+                }
+            return None
 
     # ── Entity CRUD ──────────────────────────────────────
 

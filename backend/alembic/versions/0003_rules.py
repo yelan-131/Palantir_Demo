@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("condition", sa.Text(), nullable=True),
         sa.Column("action", sa.Text(), nullable=True),
         sa.Column("message", sa.String(500), nullable=True),
-        sa.Column("is_active", sa.Boolean(), server_default=sa.text("1"), nullable=False),
+        sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
         sa.Column("priority", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("id"),

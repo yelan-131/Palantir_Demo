@@ -3,11 +3,15 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
 router = APIRouter()
+
+from app.api.deps import current_tenant_id, current_user_id, get_current_user
+from app.config import settings
+from app.core.audit import write_audit_log
 
 
 # ── Schemas ───────────────────────────────────────────────
@@ -179,13 +183,15 @@ async def list_reports(
     category: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user),
 ):
     """报表列表（分页+分类过滤）."""
     async def _query(db):
         from app.models.relational import Report
         from sqlalchemy import select, func
-        query = select(Report).order_by(Report.updated_at.desc())
-        count_query = select(func.count(Report.id))
+        tenant_id = current_tenant_id(user)
+        query = select(Report).where(Report.tenant_id == tenant_id).order_by(Report.updated_at.desc())
+        count_query = select(func.count(Report.id)).where(Report.tenant_id == tenant_id)
         if category:
             query = query.where(Report.category == category)
             count_query = count_query.where(Report.category == category)
@@ -216,6 +222,8 @@ async def list_reports(
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Reports database unavailable")
 
     filtered = _MOCK_REPORTS
     if category:
@@ -230,11 +238,13 @@ async def list_reports(
 
 
 @router.post("/")
-async def create_report(body: ReportCreate):
+async def create_report(body: ReportCreate, user: dict = Depends(get_current_user)):
     """创建报表."""
     async def _query(db):
         from app.models.relational import Report
+        tenant_id = current_tenant_id(user)
         report = Report(
+            tenant_id=tenant_id,
             name=body.name,
             description=body.description,
             config=json.dumps(body.config or {"canvas": {"gridSize": 8}, "widgets": [], "filters": []}, ensure_ascii=False),
@@ -245,6 +255,14 @@ async def create_report(body: ReportCreate):
         db.add(report)
         await db.commit()
         await db.refresh(report)
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="create",
+            resource_type="report",
+            resource_id=report.id,
+            new_values=body.dict(),
+        )
         return {
             "id": report.id,
             "name": report.name,
@@ -258,6 +276,8 @@ async def create_report(body: ReportCreate):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Reports database unavailable")
 
     global _mock_id_counter
     _mock_id_counter += 1
@@ -277,12 +297,13 @@ async def create_report(body: ReportCreate):
 
 
 @router.get("/{report_id}")
-async def get_report(report_id: int):
+async def get_report(report_id: int, user: dict = Depends(get_current_user)):
     """获取报表详情."""
     async def _query(db):
         from app.models.relational import Report
+        tenant_id = current_tenant_id(user)
         report = await db.get(Report, report_id)
-        if not report:
+        if not report or report.tenant_id != tenant_id:
             return None
         return {
             "id": report.id,
@@ -299,6 +320,8 @@ async def get_report(report_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Report not found")
 
     for r in _MOCK_REPORTS:
         if r["id"] == report_id:
@@ -307,13 +330,21 @@ async def get_report(report_id: int):
 
 
 @router.put("/{report_id}")
-async def update_report(report_id: int, body: ReportUpdate):
+async def update_report(report_id: int, body: ReportUpdate, user: dict = Depends(get_current_user)):
     """更新报表."""
     async def _query(db):
         from app.models.relational import Report
+        tenant_id = current_tenant_id(user)
         report = await db.get(Report, report_id)
-        if not report:
+        if not report or report.tenant_id != tenant_id:
             return None
+        old_values = {
+            "name": report.name,
+            "description": report.description,
+            "config": report.config,
+            "category": report.category,
+            "is_published": report.is_published,
+        }
         if body.name is not None:
             report.name = body.name
         if body.description is not None:
@@ -326,6 +357,15 @@ async def update_report(report_id: int, body: ReportUpdate):
             report.is_published = body.is_published
         await db.commit()
         await db.refresh(report)
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="update",
+            resource_type="report",
+            resource_id=report.id,
+            old_values=old_values,
+            new_values=body.dict(exclude_unset=True),
+        )
         return {
             "id": report.id,
             "name": report.name,
@@ -339,6 +379,8 @@ async def update_report(report_id: int, body: ReportUpdate):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Report not found")
 
     for r in _MOCK_REPORTS:
         if r["id"] == report_id:
@@ -358,22 +400,32 @@ async def update_report(report_id: int, body: ReportUpdate):
 
 
 @router.delete("/{report_id}")
-async def delete_report(report_id: int):
+async def delete_report(report_id: int, user: dict = Depends(get_current_user)):
     """删除报表."""
     async def _query(db):
         from app.models.relational import Report, ReportSnapshot
+        tenant_id = current_tenant_id(user)
         report = await db.get(Report, report_id)
-        if not report:
+        if not report or report.tenant_id != tenant_id:
             return None
         from sqlalchemy import delete
         await db.execute(delete(ReportSnapshot).where(ReportSnapshot.report_id == report_id))
         await db.delete(report)
         await db.commit()
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="delete",
+            resource_type="report",
+            resource_id=report_id,
+        )
         return {"ok": True, "deleted_id": report_id}
 
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Report not found")
 
     global _MOCK_REPORTS
     _MOCK_REPORTS = [r for r in _MOCK_REPORTS if r["id"] != report_id]
@@ -382,19 +434,21 @@ async def delete_report(report_id: int):
 
 
 @router.post("/{report_id}/snapshot")
-async def create_snapshot(report_id: int):
+async def create_snapshot(report_id: int, user: dict = Depends(get_current_user)):
     """创建版本快照."""
     async def _query(db):
         from app.models.relational import Report, ReportSnapshot
         from sqlalchemy import select, func
+        tenant_id = current_tenant_id(user)
         report = await db.get(Report, report_id)
-        if not report:
+        if not report or report.tenant_id != tenant_id:
             return None
         max_ver = await db.scalar(
             select(func.max(ReportSnapshot.version)).where(ReportSnapshot.report_id == report_id)
         )
         version = (max_ver or 0) + 1
         snapshot = ReportSnapshot(
+            tenant_id=tenant_id,
             report_id=report_id,
             config=report.config,
             version=version,
@@ -413,6 +467,8 @@ async def create_snapshot(report_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(404, "Report not found")
 
     for r in _MOCK_REPORTS:
         if r["id"] == report_id:
@@ -431,14 +487,15 @@ async def create_snapshot(report_id: int):
 
 
 @router.get("/{report_id}/snapshots")
-async def list_snapshots(report_id: int):
+async def list_snapshots(report_id: int, user: dict = Depends(get_current_user)):
     """历史版本列表."""
     async def _query(db):
         from app.models.relational import ReportSnapshot
         from sqlalchemy import select
+        tenant_id = current_tenant_id(user)
         result = await db.execute(
             select(ReportSnapshot)
-            .where(ReportSnapshot.report_id == report_id)
+            .where(ReportSnapshot.report_id == report_id, ReportSnapshot.tenant_id == tenant_id)
             .order_by(ReportSnapshot.version.desc())
         )
         snapshots = result.scalars().all()
@@ -458,5 +515,7 @@ async def list_snapshots(report_id: int):
     result = await _try_db(_query)
     if result is not None:
         return result
+    if settings.IS_PRODUCTION:
+        raise HTTPException(503, "Report snapshots database unavailable")
 
     return {"data": _MOCK_SNAPSHOTS.get(report_id, [])}

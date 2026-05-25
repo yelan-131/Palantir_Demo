@@ -1,218 +1,112 @@
-# ManuFoundry 测试指南
+# Testing
 
-> **文档版本**: v1.0
-> **日期**: 2026-04-28
-> **作用**: 测试体系约定、当前覆盖范围、扩展模板
+Last updated: 2026-05-25
 
----
+This document describes the current verification strategy and known test coverage.
 
-## 目录
+## 1. Commands
 
-1. [运行入口](#1-运行入口)
-2. [当前覆盖](#2-当前覆盖)
-3. [测试分层](#3-测试分层)
-4. [写新测试的模板](#4-写新测试的模板)
-5. [Mock 与隔离策略](#5-mock-与隔离策略)
-6. [前端测试](#6-前端测试)
-7. [CI 接入建议](#7-ci-接入建议)
-
----
-
-## 1. 运行入口
+Backend:
 
 ```bash
 cd backend
-pip install pytest                      # 若未安装
-python -m pytest                        # 默认配置见 pytest.ini
-python -m pytest -v                     # verbose
+python -m pytest
+```
+
+Useful focused runs:
+
+```bash
 python -m pytest tests/test_security.py
-python -m pytest -k "cypher"            # 关键字过滤
+python -m pytest tests/test_forms_platform.py
+python -m pytest tests/test_workflow.py
+python -m pytest -k "rules"
+python -m pytest -k "graph"
 ```
 
-`backend/pytest.ini` 已声明 `testpaths = tests`，无需额外参数。
-
-`tests/conftest.py` 作用：
-
-- 把 `backend/` 加入 `sys.path`，免去 `pip install -e .`；
-- 注入测试用 `SECRET_KEY` / `LOG_LEVEL=WARNING` / `DEMO_AUTH_OPTIONAL=true`，保持确定性。
-
----
-
-## 2. 当前覆盖
-
-| 测试文件 | 覆盖目标 | 用例数 |
-|---|---|---|
-| `test_security.py` | JWT 编/解码、tampered 签名、密码哈希、命名空间 | 5 |
-| `test_graph_cypher_safety.py` | 只读 Cypher 关键字校验、模板白名单自一致 | 9 |
-| `test_model_driven_safety.py` | 标识符正则、白名单决议、注入字串拒绝 | 6 |
-| `test_logging_setup.py` | `setup_logging` 幂等、namespace 隔离 | 2 |
-
-**总计 22 个用例**。这是 P3 阶段建立的最低安全/工程基线，覆盖最高风险点（鉴权、注入、日志）。
-
-`test_graph_cypher_safety` 和 `test_model_driven_safety` 内部使用 `pytest.importorskip("fastapi")`，在缺 FastAPI 的环境下自动跳过；`test_security` 与 `test_logging_setup` 仅依赖标准库 + 项目代码。
-
-冒烟模式：在沙箱无 pytest 时也可单跑：
-
-```bash
-cd backend
-python3 << 'EOF'
-import sys; sys.path.insert(0, '.')
-from app.core.security import create_access_token, decode_access_token
-t = create_access_token("alice", extra={"uid": 1})
-assert decode_access_token(t)["sub"] == "alice"
-print("ok")
-EOF
-```
-
----
-
-## 3. 测试分层
-
-| 层 | 范围 | 工具 | 当前状态 |
-|---|---|---|---|
-| **Unit** | 单纯函数 / class，无 IO | pytest | ✅ 已有 4 个文件 |
-| **Integration (router)** | 一条 router → DB → 返回 JSON | `pytest-asyncio` + `httpx.AsyncClient(app=...)` + SQLite memory | ⏳ 待补 |
-| **Contract (schema)** | OpenAPI / pydantic 契约不破坏 | `schemathesis` | ⏳ 待考虑 |
-| **E2E** | 浏览器真实操作 | `playwright` | ⏳ 待考虑 |
-
----
-
-## 4. 写新测试的模板
-
-### 4.1 单元测试模板
-
-```python
-# tests/test_<feature>_<aspect>.py
-import pytest
-
-
-def test_xxx_happy_path():
-    from app.foo import bar
-    assert bar(1, 2) == 3
-
-
-@pytest.mark.parametrize("bad", ["", "x;", "1abc"])
-def test_xxx_rejects_garbage(bad):
-    pytest.importorskip("fastapi")           # 如果被测函数依赖 fastapi
-    from fastapi import HTTPException
-    from app.foo import validate_id
-    with pytest.raises(HTTPException):
-        validate_id(bad)
-```
-
-### 4.2 集成（异步 router）模板
-
-```python
-# tests/test_auth_endpoint.py
-import pytest
-from httpx import AsyncClient
-
-@pytest.mark.asyncio
-async def test_login_returns_token(monkeypatch):
-    pytest.importorskip("fastapi")
-    pytest.importorskip("httpx")
-    from app.main import app
-
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        r = await ac.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
-    assert r.status_code == 200
-    body = r.json()
-    assert "token" in body
-    assert body["user"]["username"] == "admin"
-```
-
-需要安装：`pip install pytest-asyncio httpx`。
-
-### 4.3 隔离 DB
-
-```python
-@pytest.fixture
-async def db():
-    from app.database import _engine
-    from app.models.relational import Base
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield _engine
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-```
-
-或使用 `pytest-postgresql` / `pytest-docker` 起独立 PG 实例。
-
----
-
-## 5. Mock 与隔离策略
-
-| 资源 | 隔离手段 |
-|---|---|
-| **DB** | SQLite memory (`sqlite+aiosqlite://` 默认 fallback) |
-| **Neo4j** | `monkeypatch.setattr("app.database.neo4j_driver", None)` 让 router 走 mock 分支 |
-| **HTTP outbound** | `httpx.MockTransport` |
-| **当前时钟** | `freezegun` 或注入 `now=lambda: datetime(...)` |
-| **OpenAI / LLM** | 当前 `ai_assistant.py` 还是规则匹配，无外部调用；接入后请用 `respx` |
-
-避免 monkey-patch `os.environ`，改用 pytest 的 `monkeypatch.setenv`，自动 teardown。
-
----
-
-## 6. 前端测试
-
-当前 `frontend/` 暂无单元测试。建议：
-
-| 层 | 工具 | 模板 |
-|---|---|---|
-| 组件 | `vitest` + `@testing-library/react` | `import { render, screen } from '@testing-library/react'; render(<Foo />); expect(screen.getByText('xx')).toBeInTheDocument();` |
-| 状态 | `vitest` + Zustand 直接 import store | `useAuthStore.setState({ ... }); useAuthStore.getState().logout(); expect(...)` |
-| E2E | `playwright` | 关键路径：登录 → 仪表盘 → 报表 |
-
-接入步骤（备忘）：
+Frontend:
 
 ```bash
 cd frontend
-npm i -D vitest @vitest/ui jsdom @testing-library/react @testing-library/jest-dom
-# 在 package.json 增 "test": "vitest run"
+npm run type-check
+npm run build
 ```
 
----
+There is currently no dedicated frontend unit-test runner configured. Frontend verification is type-check plus production build.
 
-## 7. CI 接入建议
+## 2. Backend Test Coverage Map
 
-### 7.1 GitHub Actions 模板
+Current backend tests are under `backend/tests`.
 
-```yaml
-# .github/workflows/ci.yml
-name: ci
-on: [push, pull_request]
-jobs:
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install -r backend/requirements.txt pytest pytest-asyncio httpx
-      - run: cd backend && python -m py_compile $(find app -name '*.py')
-      - run: cd backend && python -m pytest -q
+| Test file | Main coverage |
+| --- | --- |
+| `test_security.py` | JWT encode/decode, invalid/tampered tokens, password hash behavior |
+| `test_graph_cypher_safety.py` | read-only Cypher guardrails and template whitelist consistency |
+| `test_model_driven_safety.py` | safe identifiers, model-driven table resolution, injection rejection |
+| `test_logging_setup.py` | logging setup idempotency and namespace behavior |
+| `test_audit.py` | seed conversion helpers, insert SQL generation, audit logging |
+| `test_config_io.py` | configuration export/import, merge/replace behavior, single model export |
+| `test_forms_platform.py` | forms metadata rules, field validation, dynamic record schema, application-form config |
+| `test_notifications.py` | notification list/create/read/read-all/unread/delete/helper behavior |
+| `test_phase4_small.py` | scheduler jobs, search, AI builder suggestions |
+| `test_rules.py` | rule CRUD and rule validation |
+| `test_rules_trigger.py` | trigger condition evaluation, interpolation, action execution fallback, trigger endpoints |
+| `test_templates.py` | template list/detail/instantiate and template schema checks |
+| `test_version.py` | model versioning, publish behavior, impact analysis |
+| `test_workflow.py` | workflow definition CRUD, instance lifecycle, approvals/rejections, notifications, stats |
 
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: cd frontend && npm ci
-      - run: cd frontend && npm run type-check
-      - run: cd frontend && npm run build
+## 3. What Tests Protect
+
+High-risk areas currently covered:
+
+- Auth token safety.
+- Cypher injection prevention.
+- Model-driven identifier safety.
+- Rule validation and trigger evaluation.
+- Workflow lifecycle behavior.
+- Notifications.
+- Forms platform metadata and dynamic record validation.
+- Config import/export.
+- Scheduler/search/AI builder small module behavior.
+
+## 4. Known Gaps
+
+| Gap | Notes |
+| --- | --- |
+| Frontend unit/component tests | No Vitest/React Testing Library setup yet. |
+| Browser E2E | No Playwright flow for login, app switcher, form settings, workflow, or report builder yet. |
+| Full DB integration tests | Many tests are function/router-level; production PostgreSQL + Neo4j integration coverage is limited. |
+| Docker smoke tests | Compose config is validated manually, but no automated container smoke pipeline is documented. |
+| Performance tests | No benchmark for graph queries, dynamic record filtering, or report rendering. |
+| Knowledge API tests | `/api/v1/knowledge` currently has no focused tests for spaces, upload simulation, ingestion jobs, document detail/Markdown, cards, binding candidates, OCR pipeline metadata, related evidence, or search. |
+
+## 5. Recommended Test Additions
+
+Priority order:
+
+1. Add a smoke test that imports `app.main:app` and verifies `/health`.
+2. Add API tests for `/api/v1/forms` happy paths with an isolated test database.
+3. Add API tests for `/api/v1/knowledge` spaces, upload simulation, ingestion jobs, document detail/Markdown, cards, binding candidates, OCR pipeline, search, and related-evidence contracts.
+4. Add frontend type-level route/menu smoke coverage if a test runner is introduced.
+5. Add Playwright E2E for login -> workspace -> app switch -> dynamic form open.
+6. Add Docker Compose smoke verification for production overlay.
+
+## 6. Test Writing Rules
+
+- Keep tests close to the behavior being protected.
+- Prefer unit tests for pure validation and guardrail logic.
+- Use integration tests for route/database contracts that can break across modules.
+- Do not rely on external network services.
+- Keep AI behavior deterministic unless an external LLM integration is explicitly mocked.
+
+## 7. CI Baseline
+
+Minimum CI should run:
+
+```bash
+cd backend
+python -m pytest
+
+cd ../frontend
+npm run type-check
+npm run build
 ```
-
-### 7.2 PR 合并条件
-
-至少满足：
-
-1. `backend` job 全绿（py_compile + pytest）
-2. `frontend` job 全绿（type-check + build）
-3. 新代码必须附带至少 1 条单元测试（覆盖率工具未配置前，code review 强制保证）
-
----
-
-> 任何安全相关的修复（rule of thumb：commit message 含 `sec:` / `vuln:`）必须**同时新增回归测试**，否则不接受合并。

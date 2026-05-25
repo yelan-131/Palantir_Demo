@@ -1,141 +1,129 @@
-# 用户手册与演示指南
+# User Guide And Demo Walkthrough
 
-> **文档版本**: v2.0 | **日期**: 2026-05-13
-> 本文档由 07-用户手册 + 09-场景演示手册 合并而成。
+Last updated: 2026-05-25
 
----
+This guide reflects the current application shell and implemented product
+surfaces. Palantir-inspired future ideas live in `docs/architecture/*` reference
+documents.
 
-## 目录
+## What The Product Does Today
 
-1. [平台概览](#1-平台概览)
-2. [功能模块](#2-功能模块)
-3. [演示场景](#3-演示场景)
+ManuFoundry is a manufacturing operations platform with:
 
----
+- Workspace and operational dashboard.
+- Data-source, ontology, graph, pipeline, and semantic asset workbenches.
+- Predictive maintenance, quality, supply-chain, and report pages.
+- Application/program assembly and database-backed low-code forms.
+- Workflow, rules, notifications, global search, and a floating AI assistant.
+- A local knowledge base/RAG MVP for SOP, CAPA, supplier report, and equipment
+  log evidence.
 
-## 1. 平台概览
+## Login And Navigation
 
-ManuFoundry 制造数智平台是面向制造业的低代码数据操作系统，提供：
+1. Open the frontend.
+2. Log in through `/login`.
+3. The default authenticated page is the workspace at `/`.
+4. Use the left navigation for business modules.
+5. Use the top application switcher to move between configured applications.
+6. Use global search for cross-module lookup.
+7. Use the notification entry for pending messages and workflow items.
+8. Use the floating AI assistant for operational questions and summaries.
 
-- **数据建模**：可视化定义实体、属性和关系
-- **表单设计**：拖拽生成数据录入和编辑界面
-- **仪表盘**：实时监控工厂运营状态
-- **图谱分析**：实体关系可视化和影响分析
-- **工作流**：审批流程自动化
+## Main Modules
 
----
+| Module | What to demonstrate |
+| --- | --- |
+| Workspace | Role-oriented entry, active applications, quick operational context |
+| Dashboard | OEE, production, alert, and overview metrics |
+| Data Sources | Source list, source detail, test/sync/status/preview flows |
+| Ontology | Business object and relationship definitions |
+| Graph | Graph exploration, path, impact, and traceability views |
+| Pipeline | Pipeline list, manual run, run history |
+| Maintenance | Equipment health, predictions, maintenance work orders |
+| Quality | SPC, defects, Pareto, inspections, CAPA, traceability |
+| Supply Chain | Suppliers, inventory, shipments, risk assessment |
+| Reports | Report definitions and snapshots |
+| Workflow | Workflow definitions, instances, approvals, stats |
+| Rules | Validation rules, triggers, trigger evaluation |
+| Templates | Template market and instantiation |
+| System Admin | Users, roles, semantic assets, knowledge center, platform operations |
 
-## 2. 功能模块
+## Low-Code Application And Form Flow
 
-### 2.1 运营总览 Dashboard
+The current low-code platform is database-backed.
 
-首页仪表盘展示全局运营数据：
+Demo path:
 
-- **OEE 概览**：可用率、性能率、质量率的实时趋势
-- **产量统计**：各产线产量对比
-- **告警信息**：设备异常、质量告警、工单逾期
+1. Enter application/program management with `/program/:programId`.
+2. Create or manage application menu nodes.
+3. Open `/form-settings/:formId` for a platform form.
+4. Configure fields, layouts, actions, permissions, and workflow bindings.
+5. Open the runtime page under `/dynamic/:slug`.
+6. Create, edit, search, and delete dynamic records.
 
-### 2.2 数据源管理
+Important behavior:
 
-管理系统接入的各类数据源：
+- Form configuration is stored as metadata.
+- Records are stored in `dynamic_records.data`.
+- Creating a field does not create or alter a physical database table.
+- Application menus prefer backend `application_menu_nodes`; local fallback only
+  exists for older demo data or unavailable APIs.
 
-- 支持类型：数据库、API、IoT 传感器、文件
-- 操作：新增、测试连接、同步、预览数据
+## Knowledge Base And AI Demo
 
-### 2.3 本体建模
+The knowledge center is available from the semantic/system administration
+surface. It currently demonstrates local RAG behavior:
 
-管理平台的数据模型：
+- Browse knowledge sources.
+- Browse documents and chunks.
+- Inspect linked business objects.
+- Run a retrieval test through `/api/v1/knowledge/search`.
+- Use quality impact workflows to show evidence cards from SOP/CAPA/supplier
+  reports/equipment logs.
 
-- **实体类型**：定义业务实体（如设备、工单、供应商）
-- **属性定义**：每个实体的字段（名称、类型、校验规则）
-- **关系类型**：实体间的关联（如设备→属于→产线）
+Current boundary: the knowledge base uses static demo documents, upload
+simulation, Markdown/card metadata, and local TF-IDF retrieval. It is not yet a
+persistent document management system or external vector-store integration.
 
-### 2.4 知识图谱
+## Recommended Demo Scenarios
 
-可视化浏览实体间的关系网络：
+### 1. Quality Exception With Evidence
 
-- **图谱浏览**：点击节点展开关联实体
-- **路径查询**：查找两个实体之间的关联路径
-- **影响分析**：某设备故障会影响哪些订单和客户
+1. Open Quality.
+2. Review defects, SPC, or traceability.
+3. Use related knowledge evidence to cite SOP, historical CAPA, supplier 8D, or
+   equipment log context.
+4. Create or discuss a CAPA/workflow follow-up.
 
-### 2.5 数据管线
+### 2. Equipment Risk To Maintenance Action
 
-管理数据的抽取、转换和加载流程：
+1. Open Dashboard for alert context.
+2. Switch to Maintenance.
+3. Review equipment health and predictions.
+4. Open graph or traceability views to explain affected lines/orders.
+5. Create or review maintenance work-order data.
 
-- 创建管线：配置数据源和转换规则
-- 运行管线：手动或定时执行
-- 查看历史：每次运行的状态和日志
+### 3. Supplier Risk To Production Impact
 
-### 2.6 预测性维护
+1. Open Supply Chain.
+2. Review supplier, inventory, shipment, and risk data.
+3. Use Graph to trace supplier/material/product/order relationships.
+4. Use AI assistant for a short risk summary.
 
-设备健康管理模块：
+### 4. Low-Code Form Build
 
-- **设备健康评分**：实时监控每台设备的健康状态
-- **故障预测**：基于历史数据预测潜在故障
-- **维修工单**：创建和管理维修任务
+1. Create or select an application.
+2. Create a form and attach it to the application menu.
+3. Add fields and configure list/detail/edit layouts.
+4. Open the runtime dynamic page.
+5. Enter test records and verify search/pagination.
 
-### 2.7 质量管理
+## Current Product Boundaries
 
-质量控制与追溯模块：
-
-- **SPC 控制图**：监控生产参数的趋势
-- **缺陷分析**：帕累托图展示缺陷分布
-- **质量追溯**：从成品追溯到原材料和工序
-
-### 2.8 供应链协同
-
-供应商和库存管理：
-
-- **供应商评估**：评级、风险分析
-- **库存监控**：物料库存水平和预警
-- **物流追踪**：在途货物状态
-
-### 2.9 AI 助手
-
-智能对话式数据分析：
-
-- 自然语言提问："上个月 CNC 车间的 OEE 是多少？"
-- 系统自动查询数据并返回结果
-- 支持多轮对话
-
----
-
-## 3. 演示场景
-
-### 场景 1：设备健康预警
-
-**目标**：展示从设备异常到维修响应的完整链路
-
-1. 打开运营总览，观察设备健康分布
-2. 切换到预测性维护，找到健康分低于 60 的设备
-3. 点击设备查看详情：传感器趋势、历史维修记录
-4. 创建维修工单，分配给对应班组
-5. 在图谱中查看该设备的影响范围
-
-### 场景 2：质量异常追溯
-
-**目标**：展示从质量问题到根因定位的全链路追溯
-
-1. 在质量管理页面查看 SPC 控制图，发现超限点
-2. 点击异常点，追溯关联的设备、产线、工序
-3. 在图谱中展开追溯链路：缺陷→工序→设备→传感器
-4. 定位根因（如某台设备温度异常导致焊接质量问题）
-
-### 场景 3：供应链风险评估
-
-**目标**：展示供应商风险对生产的影响
-
-1. 打开供应链协同页面，查看供应商评级
-2. 选中风险较高的供应商，查看其供应的物料清单
-3. 在图谱中追溯：供应商→物料→产品→客户订单
-4. 评估如果该供应商断供，影响哪些订单
-
-### 场景 4：AI 辅助决策
-
-**目标**：展示 AI 助手的智能分析能力
-
-1. 打开 AI 助手
-2. 提问："最近一周有哪些设备出现了健康分下降？"
-3. AI 返回分析结果和趋势图
-4. 追问："这些设备分别在哪些产线？"
-5. AI 关联图谱数据给出产线级别的汇总
+- ERP, IoT, PLC, WMS, and SCADA sources appear in demo/mock data, but only the
+  MES simulator connector has a concrete connector module today.
+- Knowledge/RAG is local MVP retrieval, not external LLM/vector infrastructure.
+- Celery, Prophet, LangChain, Prometheus, Grafana, and TimescaleDB are not
+  active runtime services in the current codebase.
+- Some routers intentionally fall back to mock data when the database is
+  unavailable so demos remain usable.

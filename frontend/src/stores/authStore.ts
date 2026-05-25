@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { authMe } from '../services/api';
 
 interface UserInfo {
   id: number;
@@ -7,6 +8,7 @@ interface UserInfo {
   email: string;
   is_admin: boolean;
   roles: { name: string; label: string }[];
+  tenant_id?: number;
 }
 
 interface AuthState {
@@ -15,7 +17,7 @@ interface AuthState {
   isAuthenticated: boolean;
   login: (token: string, user: UserInfo) => void;
   logout: () => void;
-  restore: () => void;
+  restore: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -35,16 +37,29 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ token: null, user: null, isAuthenticated: false });
   },
 
-  restore: () => {
+  restore: async () => {
     const token = localStorage.getItem('mf_token');
-    const userStr = localStorage.getItem('mf_user');
-    if (token && userStr) {
+    if (token) {
+      try {
+        const res = await authMe();
+        const user = res.data as UserInfo;
+        localStorage.setItem('mf_user', JSON.stringify(user));
+        set({ token, user, isAuthenticated: true });
+        return;
+      } catch {
+        // Fall back to legacy local state only when the API cannot restore.
+      }
+    }
+    const userStr = token ? localStorage.getItem('mf_user') : null;
+    if (userStr) {
       try {
         const user = JSON.parse(userStr);
-        set({ token, user, isAuthenticated: true });
+        set({ token: null, user, isAuthenticated: true });
       } catch {
         set({ token: null, user: null, isAuthenticated: false });
       }
+    } else {
+      set({ token: null, user: null, isAuthenticated: false });
     }
   },
 }));
@@ -61,7 +76,7 @@ export function isAdmin(user: UserInfo | null): boolean {
 }
 
 export function getVisibleMenus(user: UserInfo | null) {
-  const adminOnly = new Set(['system-admin', 'model-driven']);
+  const adminOnly = new Set(['system-admin']);
   const techMenus = new Set(['data-sources', 'ontology', 'graph', 'pipeline']);
 
   return (menu: { key: string }) => {

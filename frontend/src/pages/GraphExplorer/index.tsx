@@ -19,6 +19,7 @@ import {
 import {
   SearchOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   NodeIndexOutlined,
   AimOutlined,
   BranchesOutlined,
@@ -27,6 +28,7 @@ import {
 } from '@ant-design/icons';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
+import { useNavigate } from 'react-router-dom';
 
 import {
   executeCypher,
@@ -150,6 +152,7 @@ function toCytoscapeElements(nodes: GraphNode[], edges: GraphEdge[]) {
 }
 
 export default function GraphExplorerPage() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<GraphStats | null>(null);
   const [searchId, setSearchId] = useState<string>('');
   const [neighbors, setNeighbors] = useState<GraphNode[]>([]);
@@ -395,7 +398,12 @@ export default function GraphExplorerPage() {
 
   return (
     <div>
-      <Title level={4}>关系图谱</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+        <Title level={4} style={{ margin: 0 }}>关系图谱</Title>
+        <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate('/program/quality-event')}>
+          进入质量异常影响分析
+        </Button>
+      </div>
 
       {/* Stats Row */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
