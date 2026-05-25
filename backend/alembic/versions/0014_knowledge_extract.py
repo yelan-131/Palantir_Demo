@@ -1,6 +1,6 @@
 """add knowledge extraction persistence
 
-Revision ID: 0014_knowledge_extraction_persistence
+Revision ID: 0014_knowledge_extract
 Revises: 0013_seed_demo_org_units
 Create Date: 2026-05-25
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0014_knowledge_extraction_persistence"
+revision = "0014_knowledge_extract"
 down_revision = "0013_seed_demo_org_units"
 branch_labels = None
 depends_on = None
