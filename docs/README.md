@@ -1,6 +1,6 @@
 # ManuFoundry Documentation
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
@@ -133,6 +133,9 @@ Archived documents are historical records and are not source of truth:
 | Forms platform | "next phase persistence" | `/api/v1/forms` and migration `0006_platform_forms.py` exist |
 | Permissions | frontend/menu-only visibility | backend admin guards, application access checks, and platform form runtime permission checks exist |
 | Knowledge base | frontend-only concept | `/api/v1/knowledge` exists as a local TF-IDF RAG MVP |
+| Knowledge Agent | stateless chat only | `/api/v1/knowledge/agent/conversations` persists conversations, messages, runs, tool calls, and memory rows |
+| AI provider default | mock/OpenAI-style demo defaults | GLM-compatible defaults are now used unless explicitly overridden |
+| Productization boundary | prose-only roadmap | `/api/v1/productization/readiness` exposes the ready path and module maturity contract |
 | Time-series storage | TimescaleDB active | `sensor_readings` is currently a normal relational table |
 
 ## Verification Commands

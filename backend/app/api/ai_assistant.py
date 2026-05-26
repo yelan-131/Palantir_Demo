@@ -9,11 +9,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
+from app.services.ai.agent_runs import cancel_agent_run, confirm_agent_run, create_agent_run, get_agent_run
+from app.services.ai.audit import list_ai_audit_logs, record_ai_event
 from app.services.ai.client import get_provider
+from app.services.ai.confirmations import consume_confirmation_token
 from app.services.ai.orchestrator import run_agent
 from app.services.ai.policies import decide_ai_permission, decide_skill_permission
 from app.services.ai.providers import ProviderConfigurationError
 from app.services.ai.schemas import AIProviderConfig, AgentRequest, ChatMessage, ChatOptions, DraftSaveRequest
+from app.services.ai.skills import list_skills
+from app.services.ai.tool_registry import list_tools
 
 router = APIRouter()
 
@@ -35,6 +40,11 @@ class ProviderTestRequest(BaseModel):
 
 class AISettingsRequest(BaseModel):
     settings: dict
+
+
+class AgentRunConfirmRequest(BaseModel):
+    confirmation_token: str | None = None
+    confirmed: bool = True
 
 
 DEFAULT_ROLE_POLICIES = [
@@ -85,13 +95,13 @@ DEFAULT_ROLE_POLICIES = [
 
 AI_SYSTEM_SETTINGS = {
     "aiEnabled": True,
-    "provider": "mock",
-    "baseUrl": "",
+    "provider": "glm",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
     "apiKey": "",
-    "chatModel": "mock-chat",
-    "reasoningModel": "mock-reasoning",
-    "embeddingModel": "mock-embedding",
-    "visionModel": "disabled",
+    "chatModel": "glm-4-flash",
+    "reasoningModel": "glm-4-plus",
+    "embeddingModel": "embedding-3",
+    "visionModel": "glm-4v-plus",
     "agentMode": "draft",
     "ragEnabled": True,
     "guestAccess": "disabled",
@@ -106,20 +116,19 @@ AI_SYSTEM_SETTINGS = {
 }
 
 AI_DRAFT_STORE: dict[str, dict] = {}
-AI_AUDIT_LOGS: list[dict] = []
 
 
 def _settings_to_provider_config(settings_data: dict) -> AIProviderConfig:
     return AIProviderConfig(
-        provider=settings_data.get("provider") or "mock",
+        provider=settings_data.get("provider") or "glm",
         base_url=settings_data.get("baseUrl") or settings_data.get("base_url") or "",
         api_key=settings_data.get("apiKey") or settings_data.get("api_key") or "",
         organization=settings_data.get("organization") or "",
         project=settings_data.get("project") or "",
-        chat_model=settings_data.get("chatModel") or settings_data.get("chat_model") or "mock-chat",
-        reasoning_model=settings_data.get("reasoningModel") or settings_data.get("reasoning_model") or "mock-reasoning",
-        embedding_model=settings_data.get("embeddingModel") or settings_data.get("embedding_model") or "mock-embedding",
-        vision_model=settings_data.get("visionModel") or settings_data.get("vision_model") or "disabled",
+        chat_model=settings_data.get("chatModel") or settings_data.get("chat_model") or "glm-4-flash",
+        reasoning_model=settings_data.get("reasoningModel") or settings_data.get("reasoning_model") or "glm-4-plus",
+        embedding_model=settings_data.get("embeddingModel") or settings_data.get("embedding_model") or "embedding-3",
+        vision_model=settings_data.get("visionModel") or settings_data.get("vision_model") or "glm-4v-plus",
         timeout_seconds=int(settings_data.get("timeoutSeconds") or settings_data.get("timeout_seconds") or 30),
     )
 
@@ -160,13 +169,7 @@ def _raise_for_ai_decision(decision):
 
 
 def _audit_ai_event(user: dict, event_type: str, payload: dict):
-    AI_AUDIT_LOGS.append({
-        "id": f"audit-{uuid.uuid4().hex[:12]}",
-        "event_type": event_type,
-        "user": user.get("sub") or user.get("username") or "unknown",
-        "payload": payload,
-        "created_at": datetime.now().isoformat(),
-    })
+    return record_ai_event(user, event_type, payload)
 
 
 # Simulated AI responses based on intent detection
@@ -314,6 +317,44 @@ async def handle_supply_query(message: str) -> dict:
 from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 
+async def _run_agent_for_user(body: AgentRequest, current_user: dict):
+    base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
+    _raise_for_ai_decision(base_decision)
+    if body.provider_config is None:
+        body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
+    result = await run_agent(body)
+    for action in result.actions:
+        decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
+        _raise_for_ai_decision(decision)
+        action.requires_confirmation = action.requires_confirmation or decision.requires_confirmation
+    run = create_agent_run(body, result, current_user)
+    if result.actions:
+        _audit_ai_event(
+            current_user,
+            "agent_actions_prepared",
+            {"run_id": run["run_id"], "actions": [action.model_dump() for action in result.actions]},
+        )
+    else:
+        _audit_ai_event(current_user, "agent_qa_completed", {"run_id": run["run_id"], "evidence_count": len(result.evidence)})
+    return result
+
+
+@router.get("/skills")
+async def get_ai_skills(user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
+    base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
+    _raise_for_ai_decision(base_decision)
+    return {"data": list_skills()}
+
+
+@router.get("/tools")
+async def get_ai_tools(user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
+    base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
+    _raise_for_ai_decision(base_decision)
+    return {"data": list_tools()}
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest):
     """AI 对话查询 — 自然语言查询制造数据."""
@@ -350,18 +391,55 @@ async def chat(body: ChatRequest):
 async def agent_chat(body: AgentRequest, user: dict = Depends(get_current_user)):
     """Enterprise AI Agent shell: RAG evidence + structured skill actions."""
     current_user = _normalize_user(user)
+    result = await _run_agent_for_user(body, current_user)
+    return result.model_dump()
+
+
+@router.post("/agent-runs")
+async def create_ai_agent_run(body: AgentRequest, user: dict = Depends(get_current_user)):
+    """Create an observable Agent run with steps, evidence, and pending confirmations."""
+    current_user = _normalize_user(user)
+    result = await _run_agent_for_user(body, current_user)
+    return result.model_dump()
+
+
+@router.get("/agent-runs/{run_id}")
+async def get_ai_agent_run(run_id: str, user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
-    if body.provider_config is None:
-        body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
-    result = await run_agent(body)
-    for action in result.actions:
-        decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
-        _raise_for_ai_decision(decision)
-        action.requires_confirmation = action.requires_confirmation or decision.requires_confirmation
-    if result.actions:
-        _audit_ai_event(current_user, "agent_actions_prepared", {"actions": [action.model_dump() for action in result.actions]})
-    return result.model_dump()
+    run = get_agent_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return {"data": run}
+
+
+@router.post("/agent-runs/{run_id}/confirm")
+async def confirm_ai_agent_run(run_id: str, body: AgentRunConfirmRequest, user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="User confirmation is required")
+    if not body.confirmation_token:
+        raise HTTPException(status_code=400, detail="Confirmation token is required")
+    try:
+        run = confirm_agent_run(run_id, body.confirmation_token, current_user)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    _audit_ai_event(current_user, "agent_run_confirmed", {"run_id": run_id})
+    return {"data": run, "ok": True}
+
+
+@router.post("/agent-runs/{run_id}/cancel")
+async def cancel_ai_agent_run(run_id: str, user: dict = Depends(get_current_user)):
+    current_user = _normalize_user(user)
+    try:
+        run = cancel_agent_run(run_id, current_user)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    _audit_ai_event(current_user, "agent_run_cancelled", {"run_id": run_id})
+    return {"data": run, "ok": True}
 
 
 @router.post("/drafts/save")
@@ -382,7 +460,13 @@ async def save_ai_draft(body: DraftSaveRequest, user: dict = Depends(get_current
 
     decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, SkillAction(**action_stub), capability="save_draft")
     _raise_for_ai_decision(decision)
-    if not body.confirmation.get("confirmed"):
+    confirmation_token = body.confirmation.get("confirmation_token")
+    if confirmation_token:
+        try:
+            consume_confirmation_token(str(confirmation_token), user=current_user)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif not body.confirmation.get("confirmed"):
         raise HTTPException(status_code=400, detail="User confirmation is required before saving AI draft")
     draft_id = f"draft-{uuid.uuid4().hex[:12]}"
     record = {
@@ -444,7 +528,7 @@ async def list_ai_audit_logs(user: dict = Depends(get_current_user)):
     current_user = _normalize_user(user)
     if not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin privilege required")
-    return {"data": AI_AUDIT_LOGS[-100:]}
+    return {"data": list_ai_audit_logs(100)}
 
 
 @router.get("/sessions")

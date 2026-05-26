@@ -26,7 +26,11 @@ Thumbs.db
 
 # Logs
 *.log
+runtime-logs/
 
 # Database
 *.db
 *.sqlite3
+
+# Local image/package artifacts
+*.tar

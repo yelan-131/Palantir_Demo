@@ -16,10 +16,14 @@ FORBIDDEN_SKILLS = {
 
 CAPABILITY_BY_SKILL = {
     "knowledge.search": "rag",
+    "knowledge.answer_question": "rag",
+    "knowledge.ingest_for_rag": "rag",
     "maintenance.create_work_order_draft": "draft",
     "supply.create_purchase_request_draft": "draft",
     "material.create_material_application_draft": "draft",
     "quality.create_capa_draft": "draft",
+    "low_code.suggest_model_or_page": "config",
+    "workflow.submit_after_confirmation": "workflow",
 }
 
 DOMAIN_BY_SKILL = {
@@ -27,6 +31,8 @@ DOMAIN_BY_SKILL = {
     "supply.create_purchase_request_draft": "supply-chain",
     "material.create_material_application_draft": "supply-chain",
     "quality.create_capa_draft": "quality",
+    "low_code.suggest_model_or_page": "low-code",
+    "workflow.submit_after_confirmation": "workflow",
 }
 
 

@@ -1,6 +1,6 @@
 # Testing
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This document describes the current verification strategy and known test coverage.
 
@@ -19,6 +19,7 @@ Useful focused runs:
 python -m pytest tests/test_security.py
 python -m pytest tests/test_forms_platform.py
 python -m pytest tests/test_workflow.py
+python -m pytest tests/test_ai_knowledge_api.py tests/test_ai_agent_services.py
 python -m pytest -k "rules"
 python -m pytest -k "graph"
 ```
@@ -53,6 +54,10 @@ Current backend tests are under `backend/tests`.
 | `test_templates.py` | template list/detail/instantiate and template schema checks |
 | `test_version.py` | model versioning, publish behavior, impact analysis |
 | `test_workflow.py` | workflow definition CRUD, instance lifecycle, approvals/rejections, notifications, stats |
+| `test_ai_agent_services.py` | provider config defaults, policy decisions, Agent response shape, confirmation/audit helpers |
+| `test_ai_knowledge_api.py` | knowledge APIs, extraction flow, and persisted knowledge Agent conversation/runtime records |
+| `test_productization_boundaries.py` | readiness contract and production rule fallback boundary |
+| `test_ready_path_smoke.py` | first SaaS ready path smoke and production-mode guardrails |
 
 ## 3. What Tests Protect
 
@@ -67,28 +72,29 @@ High-risk areas currently covered:
 - Forms platform metadata and dynamic record validation.
 - Config import/export.
 - Scheduler/search/AI builder small module behavior.
+- Knowledge Agent persistence for conversations, messages, runs, tool calls, memory, and audit rows.
+- Productization readiness endpoint and production-mode fallback guards.
 
 ## 4. Known Gaps
 
 | Gap | Notes |
 | --- | --- |
 | Frontend unit/component tests | No Vitest/React Testing Library setup yet. |
-| Browser E2E | No Playwright flow for login, app switcher, form settings, workflow, or report builder yet. |
+| Browser E2E | No Playwright flow yet; the backend ready-path smoke now covers the first SaaS flow contract. |
 | Full DB integration tests | Many tests are function/router-level; production PostgreSQL + Neo4j integration coverage is limited. |
 | Docker smoke tests | Compose config is validated manually, but no automated container smoke pipeline is documented. |
 | Performance tests | No benchmark for graph queries, dynamic record filtering, or report rendering. |
-| Knowledge API tests | `/api/v1/knowledge` currently has no focused tests for spaces, upload simulation, ingestion jobs, document detail/Markdown, cards, binding candidates, OCR pipeline metadata, related evidence, or search. |
+| Frontend ready-path test runner | `readyPathSmoke.ts` fails at import time if metadata is wrong, but there is no dedicated frontend test command that imports it yet. |
 
 ## 5. Recommended Test Additions
 
 Priority order:
 
-1. Add a smoke test that imports `app.main:app` and verifies `/health`.
-2. Add API tests for `/api/v1/forms` happy paths with an isolated test database.
-3. Add API tests for `/api/v1/knowledge` spaces, upload simulation, ingestion jobs, document detail/Markdown, cards, binding candidates, OCR pipeline, search, and related-evidence contracts.
-4. Add frontend type-level route/menu smoke coverage if a test runner is introduced.
-5. Add Playwright E2E for login -> workspace -> app switch -> dynamic form open.
-6. Add Docker Compose smoke verification for production overlay.
+1. Keep the ready-path smoke green: login -> application -> form -> dynamic record -> workflow -> report -> audit.
+2. Expand knowledge API tests for directory CRUD/move behavior and frontend-facing edge cases.
+3. Add Playwright E2E for login -> workspace -> app switch -> dynamic form open.
+4. Add Docker Compose smoke verification for production overlay.
+5. Add performance checks for graph queries, dynamic record filtering, and report rendering.
 
 ## 6. Test Writing Rules
 
@@ -109,4 +115,14 @@ python -m pytest
 cd ../frontend
 npm run type-check
 npm run build
+```
+
+Production-readiness focused runs:
+
+```bash
+cd backend
+python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py
+
+cd ../frontend
+npm run type-check
 ```

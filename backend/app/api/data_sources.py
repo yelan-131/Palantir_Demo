@@ -23,6 +23,17 @@ class DataSourceUpdate(BaseModel):
     schedule: str | None = None
 
 
+class DataSourceConnectionTest(BaseModel):
+    source_type: str = "postgresql"
+    host: str
+    port: int = 5432
+    database: str
+    schema_name: str = "source"
+    username: str
+    password: str
+    ssl_enabled: bool = False
+
+
 # ── Mock data ──────────────────────────────────────────────
 
 MOCK_DATA_SOURCES = [
@@ -129,6 +140,70 @@ async def create_data_source(body: DataSourceCreate):
     return {"id": 9, "name": body.name, "status": "active"}
 
 
+@router.post("/test-config")
+async def test_connection_config(body: DataSourceConnectionTest):
+    """Test an ad-hoc data source connection before it is saved."""
+    if body.source_type not in {"postgresql", "mysql", "sqlserver", "oracle"}:
+        return {
+            "status": "success",
+            "message": "该数据源类型当前使用模拟连通性检查",
+            "latency_ms": 42,
+            "tables": [],
+        }
+
+    try:
+        import time
+
+        import psycopg2
+        from psycopg2 import sql
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="PostgreSQL driver is not installed") from exc
+
+    started = time.perf_counter()
+    try:
+        conn = psycopg2.connect(
+            host=body.host,
+            port=body.port,
+            user=body.username,
+            password=body.password,
+            dbname=body.database,
+            connect_timeout=5,
+            sslmode="require" if body.ssl_enabled else "prefer",
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                    ORDER BY table_name
+                    """,
+                    (body.schema_name,),
+                )
+                table_names = [row[0] for row in cur.fetchall()]
+                tables = []
+                for table_name in table_names[:12]:
+                    cur.execute(
+                        sql.SQL("SELECT count(*) FROM {}.{}").format(
+                            sql.Identifier(body.schema_name),
+                            sql.Identifier(table_name),
+                        )
+                    )
+                    tables.append({"name": table_name, "rows": cur.fetchone()[0]})
+        finally:
+            conn.close()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Connection failed: {exc}") from exc
+
+    return {
+        "status": "success",
+        "message": f"Connected to {body.database}.{body.schema_name}",
+        "latency_ms": round((time.perf_counter() - started) * 1000),
+        "tables": tables,
+    }
+
+
 @router.get("/{source_id}")
 async def get_data_source(source_id: int):
     """获取数据源详情."""
@@ -225,7 +300,6 @@ async def test_connection(source_id: int):
         "latency_ms": 45,
         "record_count": 1250,
     }
-
 
 @router.post("/{source_id}/sync")
 async def trigger_sync(source_id: int):

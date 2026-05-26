@@ -97,6 +97,7 @@ from app.api import (  # noqa: E402
     notifications,
     ontology,
     pipeline,
+    productization,
     quality,
     reports,
     rules,
@@ -144,3 +145,4 @@ app.include_router(config_io.router, prefix="/api/v1/config", tags=["配置管�
 app.include_router(scheduler.router, prefix="/api/v1/scheduler", tags=["定时任务"])
 app.include_router(search.router, prefix="/api/v1/search", tags=["全文搜索"])
 app.include_router(ai_builder.router, prefix="/api/v1/ai-builder", tags=["AI增强"])
+app.include_router(productization.router, prefix="/api/v1/productization", tags=["productization"])

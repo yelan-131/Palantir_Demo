@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     APP_MODE: str = "demo"
     DEBUG: bool = True
 
-    POSTGRES_HOST: str = "localhost"
+    POSTGRES_HOST: str = "127.0.0.1"
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "manufoundry"
     POSTGRES_PASSWORD: str = "manufoundry123"
@@ -46,13 +46,13 @@ class Settings(BaseSettings):
     # Optional integrations
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
-    AI_PROVIDER: str = "mock"
-    AI_BASE_URL: str = ""
+    AI_PROVIDER: str = "glm"
+    AI_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     AI_API_KEY: str = ""
-    AI_CHAT_MODEL: str = "mock-chat"
-    AI_REASONING_MODEL: str = "mock-reasoning"
-    AI_EMBEDDING_MODEL: str = "mock-embedding"
-    AI_VISION_MODEL: str = "disabled"
+    AI_CHAT_MODEL: str = "glm-4-flash"
+    AI_REASONING_MODEL: str = "glm-4-plus"
+    AI_EMBEDDING_MODEL: str = "embedding-3"
+    AI_VISION_MODEL: str = "glm-4v-plus"
     AI_TIMEOUT_SECONDS: int = 30
 
     @property

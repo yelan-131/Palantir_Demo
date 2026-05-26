@@ -5,6 +5,7 @@ import {
   AppstoreOutlined,
   AuditOutlined,
   BellOutlined,
+  BranchesOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
   KeyOutlined,
@@ -57,6 +58,14 @@ interface AccountCenterProps {
 
 const { Title, Text } = Typography;
 const AI_SETTINGS_STORAGE_KEY = 'mf_ai_assistant_settings';
+const GLM_AI_DEFAULTS = {
+  provider: 'glm',
+  baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+  chatModel: 'glm-4-flash',
+  reasoningModel: 'glm-4-plus',
+  embeddingModel: 'embedding-3',
+  visionModel: 'glm-4v-plus',
+};
 
 interface AuditLogRecord {
   id: number;
@@ -70,6 +79,30 @@ interface AuditLogRecord {
   timestamp?: string | null;
 }
 
+function normalizeAISettings(settings: Record<string, any>) {
+  const normalized = { ...settings };
+  const provider = String(normalized.provider || '');
+  if (!provider || provider === 'mock') {
+    Object.assign(normalized, GLM_AI_DEFAULTS);
+  }
+  if (normalized.provider === 'glm') {
+    if (!normalized.baseUrl || String(normalized.baseUrl).includes('api.openai.com')) normalized.baseUrl = GLM_AI_DEFAULTS.baseUrl;
+    if (!normalized.chatModel || String(normalized.chatModel).startsWith('mock') || String(normalized.chatModel).startsWith('gpt-')) {
+      normalized.chatModel = GLM_AI_DEFAULTS.chatModel;
+    }
+    if (!normalized.reasoningModel || String(normalized.reasoningModel).startsWith('mock') || String(normalized.reasoningModel).startsWith('gpt-')) {
+      normalized.reasoningModel = GLM_AI_DEFAULTS.reasoningModel;
+    }
+    if (!normalized.embeddingModel || String(normalized.embeddingModel).startsWith('mock') || String(normalized.embeddingModel).startsWith('text-embedding')) {
+      normalized.embeddingModel = GLM_AI_DEFAULTS.embeddingModel;
+    }
+    if (!normalized.visionModel || normalized.visionModel === 'disabled' || String(normalized.visionModel).startsWith('gpt-')) {
+      normalized.visionModel = GLM_AI_DEFAULTS.visionModel;
+    }
+  }
+  return normalized;
+}
+
 export default function AccountCenter({ currentApplication }: AccountCenterProps) {
   const user = useAuthStore((s) => s.user);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -77,8 +110,8 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
   const identityDefaultTab = activeSection === 'roles' ? 'roles' : activeSection === 'orgs' ? 'orgs' : 'users';
   const normalizedSection = ['users', 'roles', 'orgs'].includes(activeSection)
     ? 'identity-access'
-    : activeSection === 'palantir-config'
-      ? 'data-ontology'
+    : activeSection === 'palantir-config' || activeSection === 'data-ontology'
+      ? 'data-assets'
       : activeSection;
   const roles = user?.roles?.length ? user.roles.map((role: any) => role.label || role.name).join(' / ') : '-';
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
@@ -116,16 +149,28 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         children: <AppMenuManagement />,
       },
       {
-        key: 'data-ontology',
-        label: '数据资产与本体',
+        key: 'data-assets',
+        label: '数据资产中心',
         icon: <DatabaseOutlined />,
-        children: <SemanticAssetCenter />,
+        children: <SemanticAssetCenter view="data" />,
+      },
+      {
+        key: 'ontology-modeling',
+        label: '本体建模中心',
+        icon: <NodeIndexOutlined />,
+        children: <SemanticAssetCenter view="ontology" />,
       },
       {
         key: 'knowledge',
         label: '知识库中心',
         icon: <FileSearchOutlined />,
         children: <KnowledgeCenter />,
+      },
+      {
+        key: 'knowledge-graph',
+        label: '知识图谱中心',
+        icon: <BranchesOutlined />,
+        children: <SemanticAssetCenter view="graph-assets" />,
       },
       {
         key: 'identity-access',
@@ -393,7 +438,7 @@ function AIPlatformPanelV2() {
   const [form] = Form.useForm();
   const savedSettings = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem(AI_SETTINGS_STORAGE_KEY) || '{}');
+      return normalizeAISettings(JSON.parse(localStorage.getItem(AI_SETTINGS_STORAGE_KEY) || '{}'));
     } catch {
       return {};
     }
@@ -401,15 +446,10 @@ function AIPlatformPanelV2() {
 
   const defaultSettings = useMemo(() => ({
     aiEnabled: true,
-    provider: 'openai-compatible',
-    baseUrl: 'https://api.openai.com/v1',
+    ...GLM_AI_DEFAULTS,
     apiKey: '',
     organization: '',
     project: '',
-    chatModel: 'gpt-4o-mini',
-    reasoningModel: 'gpt-4o',
-    embeddingModel: 'text-embedding-3-small',
-    visionModel: 'gpt-4o',
     temperature: 'strict',
     maxTokens: 2048,
     timeoutSeconds: 30,
@@ -453,13 +493,13 @@ function AIPlatformPanelV2() {
         const response = await getAISettings();
         const backendSettings = response.data?.settings || response.data?.data?.settings || response.data?.data;
         if (!cancelled && backendSettings && typeof backendSettings === 'object' && !Array.isArray(backendSettings)) {
-          const mergedSettings = { ...defaultSettings, ...savedSettings, ...backendSettings };
+          const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings });
           form.setFieldsValue(mergedSettings);
           localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(mergedSettings));
         }
       } catch {
         if (!cancelled) {
-          form.setFieldsValue({ ...defaultSettings, ...savedSettings });
+          form.setFieldsValue(normalizeAISettings({ ...defaultSettings, ...savedSettings }));
         }
       }
     };
@@ -472,7 +512,7 @@ function AIPlatformPanelV2() {
   }, [defaultSettings, form, savedSettings]);
 
   const saveLocalSettings = (values: Record<string, unknown>) => {
-    localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(values));
+    localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalizeAISettings(values)));
   };
 
   const aiRoleOptions = [
@@ -510,8 +550,17 @@ function AIPlatformPanelV2() {
     message.success('AI 设置已保存到本地 Demo 配置');
   };
 
+  const applyProviderPreset = (provider: string) => {
+    if (provider === 'glm') {
+      const nextSettings = { ...form.getFieldsValue(), ...GLM_AI_DEFAULTS };
+      form.setFieldsValue(nextSettings);
+      saveLocalSettings(nextSettings);
+    }
+  };
+
   const handleSaveToBackend = async () => {
-    const values = form.getFieldsValue();
+    const values = normalizeAISettings(form.getFieldsValue());
+    form.setFieldsValue(values);
     saveLocalSettings(values);
     try {
       await updateAISettings(values);
@@ -522,7 +571,8 @@ function AIPlatformPanelV2() {
   };
 
   const handleTestConnection = async () => {
-    const values = form.getFieldsValue();
+    const values = normalizeAISettings(form.getFieldsValue());
+    form.setFieldsValue(values);
     saveLocalSettings(values);
     try {
       await updateAISettings(values);
@@ -562,10 +612,10 @@ function AIPlatformPanelV2() {
                 { label: 'Qwen', value: 'qwen' },
                 { label: 'GLM', value: 'glm' },
                 { label: 'Local Model', value: 'local' },
-              ]} />
+              ]} onChange={applyProviderPreset} />
             </Form.Item>
             <Form.Item name="baseUrl" label="Base URL">
-              <Input placeholder="https://api.openai.com/v1" />
+              <Input placeholder="https://open.bigmodel.cn/api/paas/v4" />
             </Form.Item>
             <Form.Item name="apiKey" label="API Key">
               <Input.Password placeholder="Demo 可留空，正式环境由后端密钥库托管" />
@@ -615,6 +665,7 @@ function AIPlatformPanelV2() {
             </Form.Item>
             <Form.Item name="visionModel" label="视觉模型">
               <Select options={[
+                { label: 'glm-4v-plus', value: 'glm-4v-plus' },
                 { label: 'gpt-4o', value: 'gpt-4o' },
                 { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
                 { label: '暂不启用', value: 'disabled' },

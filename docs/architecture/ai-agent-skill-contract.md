@@ -1,12 +1,12 @@
 # AI Agent Skill/Tool Contract
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
-Status: roadmap/design. This document defines the intended AI skill/tool
-contract and staged migration path. Current API entry points are listed in the
-baseline section.
+Status: scaffold implemented + roadmap. This document defines the intended
+AI skill/tool contract and staged migration path. Current API entry points are
+listed in the baseline section.
 
-Version: v0.1
+Version: v0.2
 
 Scope: ManuFoundry system AI Agent architecture, skill/tool contracts, staged
 delivery path, risk policy, confirmation strategy, and migration from demo mock
@@ -48,6 +48,36 @@ generic OpenAI-compatible label. The first implementation can reuse the
 OpenAI-compatible request shape, while keeping a separate provider name for
 future GLM-specific authentication, model naming, embedding, and vision
 behavior.
+
+### 2.1 Implemented Scaffold
+
+The first OpenClaw-style enterprise scaffold is now present in the backend:
+
+| Layer | Module / API | Current scope |
+| --- | --- | --- |
+| Skill Registry | `backend/app/services/ai/skills.py`, `GET /api/v1/ai/skills` | Built-in enterprise skills with allowed tools, risk level, permissions, confirmation policy, and output shape. |
+| Tool Registry | `backend/app/services/ai/tool_registry.py`, `GET /api/v1/ai/tools` | Typed tool contracts for knowledge search/ingestion, form drafts, workflow, notifications, inventory, quality event reads, and impact graph queries. |
+| Agent Runtime | `backend/app/services/ai/orchestrator.py`, `POST /api/v1/ai/agent-runs` | Creates structured runs with steps, evidence, actions, risk level, and confirmation payloads. |
+| Confirmation | `backend/app/services/ai/confirmations.py` | Server-generated confirmation tokens for write-like AI actions. |
+| Agent Run State | `backend/app/services/ai/agent_runs.py` | In-memory lifecycle for the general AI assistant: create, fetch, confirm, cancel. |
+| Audit | `backend/app/services/ai/audit.py`, `GET /api/v1/ai/audit` | Shared in-memory AI audit helper used by agent and draft flows. |
+| Knowledge Agent Persistence | `backend/app/api/knowledge.py`, migration `0015_ai_agent_runtime.py` | Relational persistence for knowledge-center conversations, messages, runs, tool calls, and memory entries. |
+| Knowledge Directories | `GET/POST/PUT /api/v1/knowledge/directories`, `POST /api/v1/knowledge/directories/{id}/move` | Demo directory tree API for the Obsidian-style knowledge page. |
+
+The legacy `/api/v1/ai/agent` endpoint remains compatible, but it now also
+creates an observable `run_id` and returns `steps`, `risk_level`, and
+`confirmation_payload` when a draft action is prepared.
+
+Durability is currently split:
+
+- `/api/v1/ai/agent-runs` uses the in-memory scaffold and is suitable for demo
+  and contract iteration.
+- `/api/v1/knowledge/agent/conversations/*` writes relational AI runtime rows
+  and is the implemented persistent path for knowledge-center chat.
+
+Before general-purpose agentic work is considered production-ready, the
+in-memory scaffold should be moved behind the same database-backed repository
+pattern.
 
 ## 3. Core Concepts
 
@@ -208,10 +238,11 @@ Tool implementation rules:
 - Use idempotency keys for repeated writes and workflow/external calls.
 - Never accept raw SQL, raw Python, or arbitrary endpoint names from an LLM.
 - Keep sensitive values out of prompts, tool logs, and frontend responses.
-- Keep provider credentials and system prompts on the backend. GLM settings such
-  as `GLM_API_KEY`, `GLM_MODEL`, `GLM_BASE_URL`, and approved system settings
-  are configuration inputs to the provider adapter, not user-provided tool
-  arguments.
+- Keep provider credentials and system prompts on the backend. Current GLM-
+  compatible settings use `AI_PROVIDER=glm`, `AI_BASE_URL`, `AI_API_KEY`,
+  `AI_CHAT_MODEL`, `AI_REASONING_MODEL`, `AI_EMBEDDING_MODEL`, and
+  `AI_VISION_MODEL`; these are configuration inputs to the provider adapter,
+  not user-provided tool arguments.
 
 ### 5.1 Knowledge Ingestion Tools
 
@@ -383,12 +414,25 @@ backend/app/services/ai/
   config.py             # backend-owned provider/system settings resolver
   orchestrator.py       # intent, planning, skill routing
   skills.py             # skill registry and skill contracts
-  tools.py              # tool registry and tool contracts
+  tools.py              # current mock business draft helpers
+  tool_registry.py      # typed tool registry and tool contracts
   policies.py           # risk, permission, and confirmation policy
   schemas.py            # shared Pydantic input/output schemas
+  agent_runs.py         # run state, steps, evidence, status
   confirmations.py      # confirmation payloads/tokens
   audit.py              # AI action log helpers
   evidence.py           # source/result normalization
+```
+
+Relational AI runtime tables currently live in `backend/app/models/relational.py`
+and migration `0015_ai_agent_runtime.py`:
+
+```text
+ai_conversations
+ai_messages
+ai_agent_runs
+ai_tool_calls
+ai_memory_entries
 ```
 
 Router responsibilities:
@@ -399,10 +443,10 @@ Router responsibilities:
 - `/api/v1/knowledge/*` can remain a direct local RAG API and also be registered as tools.
 
 Backend provider configuration must be centralized behind the AI service layer.
-GLM credentials and system settings should be loaded from environment variables
-or backend-managed settings, then passed to `client.py` by the orchestrator. The
-frontend should only send user intent, conversation context, selected business
-mode, and uploaded document references.
+GLM-compatible credentials and system settings should be loaded from environment
+variables or backend-managed settings, then passed to `client.py` by the
+orchestrator. The frontend should only send user intent, conversation context,
+selected business mode, and uploaded document references.
 
 Domain services remain the source of truth for business behavior. The AI layer composes them; it does not replace them.
 

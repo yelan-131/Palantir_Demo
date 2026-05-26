@@ -1,6 +1,6 @@
 # Frontend Development Guide
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 Source of truth: `frontend/src/App.tsx`, `frontend/src/services/api.ts`,
 `frontend/src/config/menus.ts`, and `frontend/package.json`.
@@ -83,6 +83,19 @@ There are two menu sources:
 Runtime menus prefer the backend response. Local/static menus remain as a
 fallback for demo resilience and legacy pages.
 
+Account Center now separates the semantic/knowledge workbench into four
+admin-facing sections:
+
+| Section key | Label | Main component |
+| --- | --- | --- |
+| `data-assets` | Data Assets Center | `SemanticAssetCenter view="data"` |
+| `ontology-modeling` | Ontology Modeling Center | `SemanticAssetCenter view="ontology"` |
+| `knowledge` | Knowledge Center | `KnowledgeCenter` |
+| `knowledge-graph` | Knowledge Graph Center | `SemanticAssetCenter view="graph-assets"` |
+
+Legacy query sections `palantir-config` and `data-ontology` are normalized to
+`data-assets` for compatibility.
+
 When adding a fixed product page, update:
 
 1. `src/pages/<PageName>/index.tsx`.
@@ -118,11 +131,32 @@ Implemented client groups include:
 - Workflow, notifications, templates, rules, scheduler, search.
 - Knowledge base: spaces, sources, documents, upload simulation, ingestion jobs,
   Markdown, chunks, cards, related evidence, binding candidates, OCR workflow
-  metadata, and local RAG search.
+  metadata, directories, local RAG search, and persisted knowledge Agent
+  conversations/messages.
+- AI platform settings, including GLM-compatible defaults and provider testing.
+- Productization readiness is consumed by backend tests today; add a frontend
+  service wrapper only when a page needs to render it.
 
 The knowledge base API is currently a local MVP backed by static documents and
 TF-IDF retrieval on the backend. It is not yet connected to an external vector
-database or embedding service.
+database or embedding service. The knowledge Agent chat uses persisted
+conversation/runtime rows, while the source knowledge material remains
+demo/static or in-memory upload simulation.
+
+## Ready Path Smoke Guard
+
+`src/config/readyPathSmoke.ts` is a compile-time/runtime guard for the first
+SaaS path routes and menu keys:
+
+- required routes: `/`, `/account-center`, `/system-admin`, `/workflow`,
+  `/reports`;
+- required business menu routes: `/`, `/dashboard`, `/maintenance`, `/quality`,
+  `/supply-chain`;
+- each route must have a breadcrumb entry in `BREADCRUMB_MAP`.
+
+Keep this file aligned with the productization ready path and route/menu
+metadata. It is intentionally small and should fail loudly if a required route
+is renamed without updating navigation metadata.
 
 ## Auth And Permissions
 

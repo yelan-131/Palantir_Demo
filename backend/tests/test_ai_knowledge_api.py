@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 
 import pandas as pd
 import pytest
@@ -13,22 +14,31 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def clear_ingested_knowledge():
     from app.services.ai import knowledge_ingestion
+    from app.services.ai.agent_runs import AGENT_RUNS
+    from app.services.ai.audit import AI_AUDIT_LOGS
+    from app.services.ai.confirmations import CONFIRMATIONS
 
     for store in (
         knowledge_ingestion.ASSETS,
         knowledge_ingestion.DOCUMENTS,
         knowledge_ingestion.CHUNKS,
         knowledge_ingestion.JOBS,
+        AGENT_RUNS,
+        CONFIRMATIONS,
     ):
         store.clear()
+    AI_AUDIT_LOGS.clear()
     yield
     for store in (
         knowledge_ingestion.ASSETS,
         knowledge_ingestion.DOCUMENTS,
         knowledge_ingestion.CHUNKS,
         knowledge_ingestion.JOBS,
+        AGENT_RUNS,
+        CONFIRMATIONS,
     ):
         store.clear()
+    AI_AUDIT_LOGS.clear()
 
 
 @pytest.fixture()
@@ -124,6 +134,24 @@ def test_ai_provider_test_accepts_glm_when_key_is_present(client):
     assert data["model"] == "glm-4-flash"
 
 
+def test_saved_ai_settings_default_to_glm_and_report_missing_key(client):
+    settings = client.get("/api/v1/ai/settings")
+    assert settings.status_code == 200
+    data = settings.json()["data"]
+    assert data["provider"] == "glm"
+    assert data["baseUrl"] == "https://open.bigmodel.cn/api/paas/v4"
+    assert data["chatModel"] == "glm-4-flash"
+    assert data["embeddingModel"] == "embedding-3"
+    assert data["apiKey"] == ""
+
+    response = client.post("/api/v1/ai/settings/test")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["provider"] == "glm"
+    assert "glm API key is not configured" in payload["message"]
+
+
 def test_agent_endpoint_rejects_guest_by_default(client):
     response = client.post("/api/v1/ai/agent", json={"message": "draft a CAPA"})
 
@@ -157,8 +185,43 @@ def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_clie
     assert data["requires_confirmation"] is True
     assert data["actions"][0]["skill"] == "quality.create_capa_draft"
     assert data["actions"][0]["requires_confirmation"] is True
+    assert data["run_id"].startswith("run-")
+    assert data["confirmation_payload"]["confirmation_token"].startswith("confirm-")
+    assert data["steps"]
     assert data["evidence"]
     assert data["evidence"][0]["source_file_name"] == "quality-process.md"
+
+
+def test_skill_tool_and_agent_run_lifecycle(ai_user_client):
+    skills = ai_user_client.get("/api/v1/ai/skills")
+    assert skills.status_code == 200
+    assert any(item["name"] == "quality.create_capa_draft" for item in skills.json()["data"])
+
+    tools = ai_user_client.get("/api/v1/ai/tools")
+    assert tools.status_code == 200
+    assert any(item["name"] == "knowledge.search" for item in tools.json()["data"])
+
+    created = ai_user_client.post("/api/v1/ai/agent-runs", json={"message": "draft a quality CAPA"})
+    assert created.status_code == 200
+    run_payload = created.json()
+    token = run_payload["confirmation_payload"]["confirmation_token"]
+    run_id = run_payload["run_id"]
+
+    fetched = ai_user_client.get(f"/api/v1/ai/agent-runs/{run_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["status"] == "waiting_confirmation"
+
+    confirmed = ai_user_client.post(
+        f"/api/v1/ai/agent-runs/{run_id}/confirm",
+        json={"confirmation_token": token, "confirmed": True},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["data"]["status"] == "confirmed"
+
+    cancelled_run = ai_user_client.post("/api/v1/ai/agent-runs", json={"message": "draft a quality CAPA"})
+    cancel_response = ai_user_client.post(f"/api/v1/ai/agent-runs/{cancelled_run.json()['run_id']}/cancel")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["data"]["status"] == "cancelled"
 
 
 def test_confirmed_ai_draft_can_be_saved_by_allowed_role(ai_user_client):
@@ -265,3 +328,125 @@ def test_knowledge_search_rejects_blank_query(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Search query cannot be empty"
+
+
+def test_knowledge_directories_can_be_created_updated_and_moved(client):
+    initial = client.get("/api/v1/knowledge/directories")
+    assert initial.status_code == 200
+    assert initial.json()["data"]["tree"]
+
+    created = client.post(
+        "/api/v1/knowledge/directories",
+        json={"name": "APS project", "parent_id": "dir-enterprise", "scope": "project", "sort_order": 42},
+    )
+    assert created.status_code == 200
+    directory_id = created.json()["data"]["id"]
+
+    updated = client.put(f"/api/v1/knowledge/directories/{directory_id}", json={"name": "APS planning project"})
+    assert updated.status_code == 200
+    assert updated.json()["data"]["name"] == "APS planning project"
+
+    moved = client.post(f"/api/v1/knowledge/directories/{directory_id}/move", json={"parent_id": "dir-quality", "sort_order": 5})
+    assert moved.status_code == 200
+    assert moved.json()["data"]["parent_id"] == "dir-quality"
+
+
+async def _reset_ai_runtime_tables():
+    from sqlalchemy import delete
+
+    from app.core.db import db_session
+    from app.models.relational import AIAgentRun, AIConversation, AIMemoryEntry, AIMessage, AIToolCall, AuditLog
+
+    async with db_session() as session:
+        for model in (AIMemoryEntry, AIToolCall, AIAgentRun, AIMessage, AIConversation):
+            await session.execute(delete(model))
+        await session.execute(delete(AuditLog).where(AuditLog.resource_type == "ai_agent_run"))
+        await session.commit()
+
+
+def _ensure_ai_runtime_schema():
+    from app.database import DB_TYPE, _engine, init_db
+    from app.models.relational import AIAgentRun, AIConversation, AIMemoryEntry, AIMessage, AIToolCall
+
+    asyncio.run(init_db())
+    if DB_TYPE != "sqlite":
+        async def _create_agent_tables():
+            async with _engine.begin() as conn:
+                await conn.run_sync(
+                    lambda sync_conn: AIToolCall.metadata.create_all(
+                        sync_conn,
+                        tables=[
+                            AIConversation.__table__,
+                            AIMessage.__table__,
+                            AIAgentRun.__table__,
+                            AIToolCall.__table__,
+                            AIMemoryEntry.__table__,
+                        ],
+                    )
+                )
+
+        asyncio.run(_create_agent_tables())
+    asyncio.run(_reset_ai_runtime_tables())
+
+
+def test_knowledge_agent_conversation_resume_and_message_persistence(ai_user_client):
+    _ensure_ai_runtime_schema()
+
+    created = ai_user_client.post(
+        "/api/v1/knowledge/agent/conversations",
+        json={"document_id": "doc-welding-sop", "document_title": "焊点虚焊异常处置 SOP"},
+    )
+    assert created.status_code == 200
+    conversation_id = created.json()["data"]["conversation_id"]
+
+    resumed = ai_user_client.post(
+        "/api/v1/knowledge/agent/conversations",
+        json={"document_id": "doc-welding-sop", "document_title": "焊点虚焊异常处置 SOP"},
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["data"]["conversation_id"] == conversation_id
+
+    sent = ai_user_client.post(
+        f"/api/v1/knowledge/agent/conversations/{conversation_id}/messages",
+        json={"content": "继续分析上下游风险"},
+    )
+    assert sent.status_code == 200
+    payload = sent.json()["data"]
+    assert payload["user_message"]["role"] == "user"
+    assert payload["assistant_message"]["role"] == "assistant"
+    assert payload["run"]["run_id"].startswith("run-")
+    assert payload["run"]["steps"][2]["tool"] == "knowledge.search"
+    assert payload["evidence"]
+
+    messages = ai_user_client.get(f"/api/v1/knowledge/agent/conversations/{conversation_id}/messages")
+    assert messages.status_code == 200
+    assert [item["role"] for item in messages.json()["data"]] == ["user", "assistant"]
+
+    async def _counts():
+        from sqlalchemy import func, select
+
+        from app.core.db import db_session
+        from app.models.relational import AIAgentRun, AIMessage, AIToolCall, AuditLog
+
+        async with db_session() as session:
+            return {
+                "messages": await session.scalar(select(func.count(AIMessage.id))),
+                "runs": await session.scalar(select(func.count(AIAgentRun.id))),
+                "tool_calls": await session.scalar(select(func.count(AIToolCall.id))),
+                "audit": await session.scalar(select(func.count(AuditLog.id)).where(AuditLog.resource_type == "ai_agent_run")),
+            }
+
+    counts = asyncio.run(_counts())
+    assert counts == {"messages": 2, "runs": 1, "tool_calls": 1, "audit": 1}
+
+
+def test_knowledge_agent_rejects_blank_and_unknown_conversation(ai_user_client):
+    _ensure_ai_runtime_schema()
+
+    blank = ai_user_client.post("/api/v1/knowledge/agent/conversations/missing/messages", json={"content": "   "})
+    assert blank.status_code == 400
+    assert blank.json()["detail"] == "Message content cannot be empty"
+
+    missing = ai_user_client.get("/api/v1/knowledge/agent/conversations/missing/messages")
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Agent conversation not found"

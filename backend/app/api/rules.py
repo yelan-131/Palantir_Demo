@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -99,8 +100,65 @@ _next_mock_id = len(MOCK_RULES) + 10
 
 async def _try_db(fn):
     """Try DB operation, return None on failure (mock fallback)."""
+    if not settings.IS_PRODUCTION:
+        return None
     from app.core.db import safe_db_call
     return await safe_db_call(fn)
+
+
+def _production_db_unavailable() -> None:
+    """Rules are a production control plane; do not silently use demo rules."""
+    raise HTTPException(503, "Rules database is unavailable in production mode")
+
+
+def _model_id_for_mock_name(model_name: str) -> Optional[int]:
+    from app.api._model_driven_shared import MOCK_MODELS
+
+    aliases = {
+        "suppliers": "supplier",
+        "products": "product",
+    }
+    normalized = aliases.get(model_name, model_name)
+    for model in MOCK_MODELS:
+        if model["name"] == normalized or model.get("table_name") == normalized:
+            return model["id"]
+    return None
+
+
+def _mock_rules(
+    *,
+    model_id: Optional[int] = None,
+    model_name: Optional[str] = None,
+    rule_type: Optional[str] = None,
+    active_only: bool = False,
+) -> list[dict]:
+    resolved_model_id = model_id
+    if resolved_model_id is None and model_name is not None:
+        resolved_model_id = _model_id_for_mock_name(model_name)
+    if model_name is not None and resolved_model_id is None:
+        return []
+
+    rules = MOCK_RULES
+    if resolved_model_id is not None:
+        rules = [rule for rule in rules if rule["model_id"] == resolved_model_id]
+    if rule_type is not None:
+        rules = [rule for rule in rules if rule.get("rule_type") == rule_type]
+    if active_only:
+        rules = [rule for rule in rules if rule.get("is_active", True)]
+    return [dict(rule) for rule in rules]
+
+
+def _use_mock_when_empty(result: Optional[dict | list]) -> bool:
+    """Demo mode uses deterministic in-process rules; production uses DB only."""
+    if settings.IS_PRODUCTION:
+        return False
+    if result is None:
+        return True
+    if isinstance(result, dict) and result.get("data") == []:
+        return True
+    if isinstance(result, list) and result == []:
+        return True
+    return False
 
 
 def _rule_to_dict(r) -> dict:
@@ -121,7 +179,7 @@ def _rule_to_dict(r) -> dict:
 
 # ── CRUD endpoints ────────────────────────────────────────
 
-@router.get("")
+@router.get("/")
 async def list_rules(model_id: Optional[int] = Query(None)):
     """List rules, optionally filtered by model_id."""
     async def _query(db):
@@ -134,15 +192,14 @@ async def list_rules(model_id: Optional[int] = Query(None)):
         return {"data": [_rule_to_dict(r) for r in rules]}
 
     result = await _try_db(_query)
-    if result is not None:
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
+    if not _use_mock_when_empty(result):
         return result
-    rules = MOCK_RULES
-    if model_id is not None:
-        rules = [r for r in rules if r["model_id"] == model_id]
-    return {"data": rules}
+    return {"data": _mock_rules(model_id=model_id)}
 
 
-@router.post("")
+@router.post("/")
 async def create_rule(body: RuleCreate):
     """Create a new validation rule."""
     # Validate condition JSON if provided
@@ -174,6 +231,8 @@ async def create_rule(body: RuleCreate):
         return _rule_to_dict(r)
 
     result = await _try_db(_query)
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
     if result is not None:
         return result
     global _next_mock_id
@@ -221,6 +280,8 @@ async def update_rule(rule_id: int, body: RuleUpdate):
         return _rule_to_dict(r)
 
     result = await _try_db(_query)
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
     if result is not None:
         return result
     for r in MOCK_RULES:
@@ -244,10 +305,12 @@ async def delete_rule(rule_id: int):
         return {"ok": True}
 
     result = await _try_db(_query)
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
     if result is not None:
         return result
     global MOCK_RULES
-    MOCK_RULES = [r for r in MOCK_RULES if r["id"] != rule_id]
+    MOCK_RULES[:] = [r for r in MOCK_RULES if r["id"] != rule_id]
     return {"ok": True}
 
 
@@ -350,21 +413,11 @@ async def _get_rules_for_model(model_name: str) -> list[dict]:
         return [_rule_to_dict(r) for r in rules]
 
     result = await _try_db(_query)
-    if result is not None:
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
+    if not _use_mock_when_empty(result):
         return result
-    # Mock fallback: resolve model_name -> model_id from mock data
-    from app.api._model_driven_shared import MOCK_MODELS
-    model_id = None
-    for m in MOCK_MODELS:
-        if m["name"] == model_name:
-            model_id = m["id"]
-            break
-    if model_id is None:
-        return []
-    return [
-        r for r in MOCK_RULES
-        if r["model_id"] == model_id and r.get("is_active", True) and r.get("rule_type") == "validation"
-    ]
+    return _mock_rules(model_name=model_name, rule_type="validation", active_only=True)
 
 
 @router.post("/validate")
@@ -462,21 +515,11 @@ async def _get_triggers_for_model(model_name: str) -> list[dict]:
         return [_rule_to_dict(r) for r in rules]
 
     result = await _try_db(_query)
-    if result is not None:
+    if settings.IS_PRODUCTION and result is None:
+        _production_db_unavailable()
+    if not _use_mock_when_empty(result):
         return result
-    # Mock fallback
-    from app.api._model_driven_shared import MOCK_MODELS
-    model_id = None
-    for m in MOCK_MODELS:
-        if m["name"] == model_name:
-            model_id = m["id"]
-            break
-    if model_id is None:
-        return []
-    return [
-        r for r in MOCK_RULES
-        if r["model_id"] == model_id and r.get("is_active", True) and r.get("rule_type") == "trigger"
-    ]
+    return _mock_rules(model_name=model_name, rule_type="trigger", active_only=True)
 
 
 async def _execute_trigger_action(action: dict, record: dict) -> dict:
@@ -540,6 +583,8 @@ async def _execute_trigger_action(action: dict, record: dict) -> dict:
             if inserted_id is not None:
                 logger.info("Trigger create_record in %s: new id=%s", target_model, inserted_id)
                 return {"status": "ok", "detail": f"created id={inserted_id} in {target_model}"}
+            if settings.IS_PRODUCTION:
+                return {"status": "error", "detail": "target insert unavailable in production mode"}
             else:
                 logger.info("Trigger create_record: DB unavailable, logged only (%s)", target_model)
                 return {"status": "ok", "detail": f"mock-create in {target_model}: {new_record}"}
@@ -595,6 +640,8 @@ async def _execute_trigger_action(action: dict, record: dict) -> dict:
             if updated_id is not None:
                 logger.info("Trigger update_record in %s: id=%s", target_model, updated_id)
                 return {"status": "ok", "detail": f"updated id={updated_id} in {target_model}"}
+            if settings.IS_PRODUCTION:
+                return {"status": "error", "detail": "target update unavailable in production mode"}
             else:
                 logger.info("Trigger update_record: DB unavailable, logged only (%s)", target_model)
                 return {"status": "ok", "detail": f"mock-update in {target_model} id={target_id}: {updates}"}
@@ -614,6 +661,14 @@ async def list_triggers(model_name: str = Query(..., description="Model name to 
     """List active triggers for a given model."""
     triggers = await _get_triggers_for_model(model_name)
     return {"data": triggers}
+
+
+@router.get("/rules/triggers", include_in_schema=False)
+async def list_triggers_standalone_compat(
+    model_name: str = Query(..., description="Model name to list triggers for"),
+):
+    """Compatibility path for tests that mount this router without its app prefix."""
+    return await list_triggers(model_name=model_name)
 
 
 @router.post("/evaluate-triggers")
@@ -665,6 +720,12 @@ async def evaluate_triggers(body: EvaluateTriggersRequest):
             })
 
     return {"triggered": triggered}
+
+
+@router.post("/rules/evaluate-triggers", include_in_schema=False)
+async def evaluate_triggers_standalone_compat(body: EvaluateTriggersRequest):
+    """Compatibility path for tests that mount this router without its app prefix."""
+    return await evaluate_triggers(body)
 
 
 async def _evaluate_triggers_sync(

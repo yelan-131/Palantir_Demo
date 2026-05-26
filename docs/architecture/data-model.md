@@ -1,6 +1,6 @@
 # Data Model And Ontology Notes
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 Source of truth: `backend/app/models/relational.py`,
 `backend/app/models/graph_models.py`, and `backend/alembic/versions/*`.
@@ -43,6 +43,7 @@ Current ORM tables in `relational.py` are grouped below.
 | Identity and permissions | `users`, `roles`, `user_roles`, `role_permissions` |
 | Workflow and notifications | `workflow_defs`, `workflow_instances`, `workflow_approvals`, `notifications` |
 | Rules and operations | `rules`, `audit_logs`, `scheduled_jobs` |
+| AI runtime | `ai_conversations`, `ai_messages`, `ai_agent_runs`, `ai_tool_calls`, `ai_memory_entries` |
 
 ## Manufacturing Core
 
@@ -137,10 +138,38 @@ The older model-driven surface remains available through:
 `/api/v1/model-driven` uses explicit table/column allowlists for dynamic CRUD.
 Do not bypass those allowlists when adding new metadata-driven models.
 
-## Knowledge Base Model
+## Knowledge Base And AI Runtime Model
 
-The current knowledge base does not have persistent knowledge tables. It is an
-API MVP backed by in-code demo arrays in `backend/app/api/knowledge.py`.
+The current knowledge base still does not have persistent document/card/chunk
+tables. Static knowledge material remains an API MVP backed by in-code demo
+arrays in `backend/app/api/knowledge.py`.
+
+The knowledge Agent chat path now has runtime persistence through migration
+`0015_ai_agent_runtime.py`:
+
+```text
+AIConversation
+  -> AIMessage
+  -> AIAgentRun
+    -> AIToolCall
+
+AIConversation
+  -> AIMemoryEntry
+```
+
+Current AI runtime table responsibilities:
+
+| Table | Purpose |
+| --- | --- |
+| `ai_conversations` | User/page/document scoped active conversations. |
+| `ai_messages` | User and assistant messages with evidence, model, usage, status, and error fields. |
+| `ai_agent_runs` | Observable run records with input, answer, steps, evidence, actions, risk, and confirmation payload. |
+| `ai_tool_calls` | Tool-call audit trail for a run, including tool/skill names, input/output, status, and duration. |
+| `ai_memory_entries` | Conversation-scoped memory summaries and structured values. |
+
+This runtime persistence is separate from the older `/api/v1/ai/agent-runs`
+in-memory scaffold. The knowledge Agent APIs write database rows; the general
+AI assistant run scaffold still needs a repository layer before it is durable.
 
 Current API concepts:
 
@@ -155,14 +184,19 @@ Current API concepts:
 - linked business object;
 - related evidence;
 - search result.
+- knowledge Agent conversation;
+- knowledge Agent message;
+- AI run steps/tool calls/memory entries for knowledge chat.
 
 Current retrieval method:
 
 - scikit-learn `TfidfVectorizer`;
 - cosine similarity;
 - no external embedding model;
-- no vector database;
-- upload/indexing is currently a demo/API simulation, not durable storage.
+- no vector database for knowledge documents/chunks;
+- upload/indexing is currently a demo/API simulation, not durable storage;
+- knowledge Agent conversations/messages/runs are durable when the relational
+  database is available and migration `0015_ai_agent_runtime.py` has run.
 
 When persistent knowledge storage is added, introduce explicit tables or a
 document store and update this section.

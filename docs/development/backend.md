@@ -1,6 +1,6 @@
 # Backend Development Guide
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 Source of truth: `backend/app/main.py`, `backend/app/api/*`,
 `backend/app/models/*`, `backend/alembic/versions/*`, and
@@ -56,6 +56,8 @@ Important variables:
 | `NEO4J_*` | graph database connection |
 | `REDIS_*` | Redis connection parameters |
 | `LOG_LEVEL` | application logging level |
+| `APP_MODE` | `demo` or `production`; production rejects unsafe fallbacks |
+| `AI_PROVIDER` / `AI_BASE_URL` / `AI_*_MODEL` | backend AI provider defaults; current defaults target GLM-compatible APIs |
 
 ## Mounted Routers
 
@@ -73,12 +75,12 @@ Routers are mounted in `app/main.py` under `/api/v1`:
 | `/graph` | graph query, neighbors, path, subgraph, stats, impact, trace |
 | `/pipelines` | pipelines and pipeline runs |
 | `/semantic-assets` | semantic asset workbench APIs |
-| `/knowledge` | local knowledge base and TF-IDF RAG MVP |
+| `/knowledge` | local knowledge base, TF-IDF RAG MVP, directory demo APIs, and persisted knowledge Agent conversations |
 | `/analytics` | aggregate/time-series/distribution APIs |
 | `/maintenance` | equipment health, predictions, maintenance work orders |
 | `/quality` | SPC, defects, traceability, inspections, CAPA |
 | `/supply-chain` | suppliers, inventory, shipments, risk, analytics |
-| `/ai` | assistant chat/session/analyze APIs |
+| `/ai` | assistant chat/session/analyze APIs, skill/tool registries, observable agent runs, confirmations, audit |
 | `/dashboard` | overview, OEE, production, alerts |
 | `/reports` | report definitions and snapshots |
 | `/model-driven` | metadata-driven CRUD and pages |
@@ -89,6 +91,7 @@ Routers are mounted in `app/main.py` under `/api/v1`:
 | `/scheduler` | scheduled jobs |
 | `/search` | global search |
 | `/ai-builder` | AI-assisted model/page suggestions |
+| `/productization` | first SaaS ready-path and module maturity contract |
 
 ## Database And Fallbacks
 
@@ -125,6 +128,7 @@ admin-controlled capability, not current behavior.
 
 - `GET /knowledge/sources`
 - `GET /knowledge/spaces`
+- `GET/POST/PUT /knowledge/directories`
 - `GET /knowledge/documents`
 - `POST /knowledge/assets/upload`
 - `GET /knowledge/ingestion-jobs/{job_id}`
@@ -138,13 +142,58 @@ admin-controlled capability, not current behavior.
 - `GET /knowledge/ocr-pipeline`
 - `GET /knowledge/related`
 - `POST /knowledge/search`
+- `POST /knowledge/agent/conversations`
+- `GET /knowledge/agent/conversations`
+- `GET /knowledge/agent/conversations/{conversation_id}/messages`
+- `POST /knowledge/agent/conversations/{conversation_id}/messages`
 
 The current implementation uses in-code demo documents and scikit-learn
-TF-IDF/cosine similarity. It also models spaces, knowledge cards, binding
-candidates, upload simulation, ingestion-job status, document Markdown, and
-OCR/publishing workflow metadata. It preserves a future RAG API shape but does
-not yet use an embedding service, vector database, persisted upload pipeline,
-or knowledge tables.
+TF-IDF/cosine similarity. It also models spaces, directories, knowledge cards,
+binding candidates, upload simulation, ingestion-job status, document Markdown,
+and OCR/publishing workflow metadata.
+
+The knowledge Agent conversation APIs persist conversation, message, run,
+tool-call, and memory rows through the AI runtime tables introduced by
+`0015_ai_agent_runtime.py`. This persistence is for chat/runtime observability;
+the knowledge documents/chunks themselves are still demo/static or in-memory
+ingestion data and do not yet use an embedding service, vector database,
+persisted upload pipeline, or knowledge tables.
+
+## AI Runtime
+
+The AI assistant currently has two related surfaces:
+
+| Surface | Current behavior |
+| --- | --- |
+| `/api/v1/ai` | General assistant, provider settings, skill/tool registry, in-memory agent-run scaffold, confirmation tokens, and AI audit list. |
+| `/api/v1/knowledge/agent/*` | Knowledge-center conversations persisted in relational AI runtime tables. |
+
+The default provider settings now point at GLM-compatible model names
+(`glm-4-flash`, `glm-4-plus`, `embedding-3`, `glm-4v-plus`). Keep secrets in
+environment variables or a backend-managed secret store; do not commit API keys.
+
+State-changing AI actions must keep this order:
+
+```text
+permission decision -> skill/tool allowlist -> dry-run/draft -> confirmation token -> audit -> durable write
+```
+
+The general AI run state in `backend/app/services/ai/agent_runs.py` is still
+in-memory. Move it behind a repository if it needs the same durability as the
+knowledge Agent path.
+
+## Productization Boundary
+
+`/api/v1/productization/readiness` exposes the first SaaS ready path and module
+maturity map. Tests use this endpoint as a contract, so update it together with
+`docs/architecture/saas-productization-phase-1.md` when phase-1 scope changes.
+
+In production mode:
+
+- `DEMO_AUTH_OPTIONAL` must be `false`;
+- SQLite fallback is rejected;
+- rules must not silently fall back to mock rules;
+- unindexed dynamic-record search fails instead of scanning arbitrary JSON.
 
 ## Security Conventions
 

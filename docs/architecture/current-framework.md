@@ -1,6 +1,6 @@
 # Current Code Framework
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This document describes the current code framework at a practical level. For the broader system architecture, read [overview.md](overview.md).
 
@@ -27,6 +27,7 @@ frontend/src/
   config/
     menus.ts                      # legacy/static menu config
     appAssemblyMenus.ts           # local fallback for application assembly menus
+    readyPathSmoke.ts             # phase-1 route/menu metadata guard
   components/
     AiChatWidget/
     GlobalSearch/
@@ -83,6 +84,7 @@ backend/app/
     notifications.py
     templates.py
     config_io.py
+    productization.py
     scheduler.py
     search.py
     ai_builder.py
@@ -123,14 +125,15 @@ Still mixed/fallback:
 | Forms platform metadata | Database migration and `/api/v1/forms` API exist. |
 | Dynamic form records | Stored in JSON/JSONB through `dynamic_records`. |
 | Graph data | Neo4j driver exists; graph features degrade when Neo4j is unavailable. |
-| Knowledge base | `/api/v1/knowledge` exists as a static-document TF-IDF RAG MVP with spaces, cards, upload simulation, ingestion status, Markdown, binding candidates, and OCR workflow metadata. |
-| AI | Current assistant API is implemented directly; external LLM orchestration is future/optional. |
+| Knowledge base | `/api/v1/knowledge` exists as a static-document TF-IDF RAG MVP with spaces, directories, cards, upload simulation, ingestion status, Markdown, binding candidates, OCR workflow metadata, and persisted Agent conversations. |
+| AI | Current assistant API is implemented directly with GLM-compatible defaults, skill/tool registry endpoints, confirmation-token scaffold, and an in-memory general Agent run lifecycle. Knowledge Agent chat persists runtime rows. |
+| Productization | `/api/v1/productization/readiness` exposes the current ready path and module maturity contract. |
 
 ## Documentation Notes
 
 - Palantir-inspired documents are reference design and should not be interpreted as completed implementation.
 - The codebase still has both model-driven and forms-platform concepts; documentation should be explicit about which surface is being discussed.
-- The knowledge base is API-backed but not yet persistent or connected to an external vector store.
+- The knowledge base source material is API-backed but not yet persistent or connected to an external vector store; only the knowledge Agent conversation/runtime tables are currently persisted.
 
 ## Where To Update Docs After Code Changes
 

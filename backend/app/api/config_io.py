@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.api._model_driven_shared import (
     MOCK_MENUS,
     MOCK_MODELS,
@@ -247,6 +248,8 @@ async def import_config(body: ImportRequest):
 
 async def _try_db_import(config: dict, mode: str):
     """Attempt DB-based import. Returns (imported, skipped) or None for fallback."""
+    if not settings.IS_PRODUCTION:
+        return None
 
     async def _do_import(db):
         from app.models.relational import MetaField, MetaModel, MenuItem, PageConfig, Rule

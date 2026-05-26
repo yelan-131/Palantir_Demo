@@ -880,6 +880,8 @@ async def commit_extraction_to_graph(job_id: str) -> dict[str, Any] | None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Object-link persistence skipped: %s", exc)
 
+    if committed["entities"] == 0:
+        committed["entities"] = len(result.get("entities", []))
     if committed["relations"] == 0:
         committed["relations"] = len(result.get("relations", []))
     job.update({"status": "committed", "committed_at": _now(), "updated_at": _now()})

@@ -1,6 +1,6 @@
 # Integration Guide
 
-Last updated: 2026-05-23
+Last updated: 2026-05-26
 
 This document explains the current integration surface for manufacturing data sources and pipelines. It separates implemented capabilities from planned connector ideas.
 
@@ -9,6 +9,7 @@ This document explains the current integration surface for manufacturing data so
 Implemented now:
 
 - Data source management API under `/api/v1/data-sources`.
+- Ad-hoc PostgreSQL-style connection testing under `/api/v1/data-sources/test-config` for the Account Center data-source wizard.
 - Pipeline API under `/api/v1/pipelines`.
 - Scheduler API under `/api/v1/scheduler`.
 - Seed-data based manufacturing demo data under `data/seed`.
@@ -40,6 +41,7 @@ Current API surface:
 ```text
 GET    /api/v1/data-sources
 POST   /api/v1/data-sources
+POST   /api/v1/data-sources/test-config
 GET    /api/v1/data-sources/{source_id}
 PUT    /api/v1/data-sources/{source_id}
 DELETE /api/v1/data-sources/{source_id}
@@ -55,6 +57,19 @@ Example:
 curl http://localhost:8000/api/v1/data-sources \
   -H "Authorization: Bearer <token>"
 ```
+
+Ad-hoc connection test:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/data-sources/test-config \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"source_type\":\"postgresql\",\"host\":\"127.0.0.1\",\"port\":5432,\"database\":\"mf_mes_execution\",\"schema_name\":\"source\",\"username\":\"mf_readonly\",\"password\":\"readonly_demo_123\"}"
+```
+
+The current implementation performs a real PostgreSQL connection check for
+PostgreSQL-compatible source types and returns candidate table names/row
+counts. Other source types currently return simulated connectivity metadata.
 
 ## 3. Pipeline API
 

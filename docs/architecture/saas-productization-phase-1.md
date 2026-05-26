@@ -1,10 +1,11 @@
 # SaaS Productization Phase 1
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
-Status: roadmap/productization. This document defines a target SaaS production
-boundary; it is not a statement that every production guard is already enforced
-in code.
+Status: productization boundary + implemented guards. This document defines the
+first SaaS production boundary and the tests/endpoints that currently enforce
+part of it; modules marked beta/demo/roadmap are still outside the acceptance
+path.
 
 This document defines the first production boundary for ManuFoundry as a public SaaS product. The goal is not to finish every manufacturing module. The first ready path is:
 
@@ -64,6 +65,17 @@ Production rules:
 | Workflow binding and instances | Ready foundation | Tenant-filtered definitions/instances and audit on start/approval/cancel. |
 | Reports | Ready foundation | Tenant-filtered report CRUD and snapshots. |
 | Audit logs | Ready foundation | Core actions include tenant/user/resource metadata. |
+| Route/menu smoke guard | Ready foundation | `frontend/src/config/readyPathSmoke.ts` asserts required ready-path routes, breadcrumbs, and business menus. |
+
+The backend exposes the current machine-readable readiness contract at:
+
+```text
+GET /api/v1/productization/readiness
+```
+
+This endpoint is the public contract for the first production path and the
+module maturity split. Keep it aligned with this document whenever the phase-1
+scope changes.
 
 ## Module Maturity
 
@@ -97,6 +109,18 @@ Production rules:
 10. Create a report against the form data.
 11. Review the audit log for the tenant.
 
+The regression guard for this path is:
+
+```bash
+cd backend
+python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py
+```
+
+That smoke test intentionally proves the API contract before adding browser E2E:
+login/user context, application creation, form and field setup, dynamic records,
+workflow start/approval, report snapshot, audit visibility, and readiness
+metadata.
+
 ## Remaining Product Work
 
 - Enforce unique codes per tenant instead of global uniqueness for applications, forms, and roles.
@@ -105,6 +129,17 @@ Production rules:
 - Expand E2E coverage around the full ready path.
 - Add onboarding, invite flow, password reset, account lockout, and rate limiting.
 - Add billing, plans, quotas, and operational observability after the first SaaS loop is stable.
+
+## Pre-delivery Checklist
+
+- Backend full test suite passes.
+- Frontend `npm run type-check` and `npm run build` pass.
+- `GET /api/v1/productization/readiness` matches the committed scope.
+- `APP_MODE=production`, `DEMO_AUTH_OPTIONAL=false`, and a strong `SECRET_KEY` are set.
+- Default demo credentials are not used for real users.
+- Local runtime artifacts such as `runtime-logs/`, `.db` files, and `.tar` exports are not committed.
+- `frontend/src/config/readyPathSmoke.ts` still includes the required phase-1 routes and menu keys.
+- Deployment smoke verifies public frontend and `/health`.
 
 ## Large Data Read Strategy
 

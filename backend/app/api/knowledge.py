@@ -8,14 +8,21 @@ store.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import desc, select
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from app.api.deps import current_user_id, get_current_user
+from app.core.audit import write_audit_log
+from app.core.db import db_session
+from app.models.relational import AIAgentRun, AIConversation, AIMemoryEntry, AIMessage, AIToolCall
 from app.services.ai.knowledge_ingestion import (
     CHUNKS as INGESTED_CHUNKS,
     DOCUMENTS as INGESTED_DOCUMENTS,
@@ -42,6 +49,18 @@ class KnowledgeSearchBody(BaseModel):
     object_id: str | None = None
 
 
+class KnowledgeAgentConversationBody(BaseModel):
+    document_id: str | None = None
+    document_title: str | None = None
+    page: str = "knowledge-center"
+    metadata: dict[str, Any] | None = None
+
+
+class KnowledgeAgentMessageBody(BaseModel):
+    content: str
+    context: dict[str, Any] | None = None
+
+
 class BindingCandidateBody(BaseModel):
     text: str
     limit: int = 8
@@ -49,6 +68,28 @@ class BindingCandidateBody(BaseModel):
 
 class ExtractionApproveBody(BaseModel):
     approved_result: dict[str, Any] | None = None
+
+
+class KnowledgeDirectoryCreateBody(BaseModel):
+    name: str
+    parent_id: str | None = None
+    scope: str = "enterprise"
+    owner_user_id: str = "demo-user"
+    sort_order: int = 100
+
+
+class KnowledgeDirectoryUpdateBody(BaseModel):
+    name: str | None = None
+    parent_id: str | None = None
+    scope: str | None = None
+    owner_user_id: str | None = None
+    sort_order: int | None = None
+    status: str | None = None
+
+
+class KnowledgeDirectoryMoveBody(BaseModel):
+    parent_id: str | None = None
+    sort_order: int = 100
 
 
 KNOWLEDGE_SPACES = [
@@ -83,6 +124,43 @@ KNOWLEDGE_SPACES = [
         "owner_role": "平台管理员 / 业务专家",
         "review_required": True,
         "description": "跨部门可复用的正式知识，进入工作台和 AI 辅助层引用。",
+    },
+]
+
+
+KNOWLEDGE_DIRECTORIES = [
+    {
+        "id": "dir-enterprise",
+        "name": "Enterprise knowledge",
+        "parent_id": None,
+        "scope": "enterprise",
+        "owner_user_id": "system",
+        "sort_order": 10,
+        "status": "active",
+        "created_at": "2026-05-21T10:00:00",
+        "updated_at": "2026-05-21T10:00:00",
+    },
+    {
+        "id": "dir-quality",
+        "name": "Quality department",
+        "parent_id": "dir-enterprise",
+        "scope": "department",
+        "owner_user_id": "quality",
+        "sort_order": 20,
+        "status": "active",
+        "created_at": "2026-05-21T10:00:00",
+        "updated_at": "2026-05-21T10:00:00",
+    },
+    {
+        "id": "dir-personal",
+        "name": "Personal notes",
+        "parent_id": None,
+        "scope": "private",
+        "owner_user_id": "demo-user",
+        "sort_order": 30,
+        "status": "active",
+        "created_at": "2026-05-21T10:00:00",
+        "updated_at": "2026-05-21T10:00:00",
     },
 ]
 
@@ -475,6 +553,148 @@ def _matches_card(card: dict[str, Any], object_type: str | None, object_id: str 
     return False
 
 
+def _user_key(user: dict[str, Any]) -> str:
+    return str(user.get("sub") or user.get("username") or user.get("uid") or "guest")
+
+
+def _now_iso(value: Any) -> str | None:
+    return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+def _serialize_conversation(row: AIConversation) -> dict[str, Any]:
+    return {
+        "id": row.conversation_id,
+        "conversation_id": row.conversation_id,
+        "user_id": row.user_id,
+        "page": row.page,
+        "document_id": row.document_id,
+        "title": row.title,
+        "status": row.status,
+        "last_message": row.last_message,
+        "metadata": row.metadata_json or {},
+        "created_at": _now_iso(row.created_at),
+        "updated_at": _now_iso(row.updated_at),
+    }
+
+
+def _serialize_message(row: AIMessage) -> dict[str, Any]:
+    return {
+        "id": row.message_id,
+        "message_id": row.message_id,
+        "conversation_id": row.conversation_id,
+        "role": row.role,
+        "content": row.content,
+        "evidence": row.evidence or [],
+        "model_name": row.model_name,
+        "usage": row.usage,
+        "status": row.status,
+        "error": row.error,
+        "created_at": _now_iso(row.created_at),
+        "updated_at": _now_iso(row.updated_at),
+    }
+
+
+def _serialize_run(row: AIAgentRun) -> dict[str, Any]:
+    return {
+        "id": row.run_id,
+        "run_id": row.run_id,
+        "conversation_id": row.conversation_id,
+        "user_message_id": row.user_message_id,
+        "assistant_message_id": row.assistant_message_id,
+        "status": row.status,
+        "mode": row.mode,
+        "input_message": row.input_message,
+        "answer": row.answer,
+        "steps": row.steps or [],
+        "evidence": row.evidence or [],
+        "actions": row.actions or [],
+        "risk_level": row.risk_level,
+        "requires_confirmation": row.requires_confirmation,
+        "confirmation_payload": row.confirmation_payload,
+        "created_at": _now_iso(row.created_at),
+        "updated_at": _now_iso(row.updated_at),
+    }
+
+
+def _search_knowledge_payload(
+    query: str,
+    *,
+    limit: int = 5,
+    object_type: str | None = None,
+    object_id: str | None = None,
+) -> list[dict[str, Any]]:
+    vectorizer, matrix = _retriever()
+    query_vector = vectorizer.transform([query])
+    scores = cosine_similarity(query_vector, matrix).flatten()
+    ranked = sorted(enumerate(scores), key=lambda item: item[1], reverse=True)
+
+    results: list[dict[str, Any]] = []
+    for item in search_ingested_knowledge(query, limit=limit):
+        results.append(item)
+
+    for index, score in ranked:
+        if score <= 0:
+            continue
+        chunk = KNOWLEDGE_CHUNKS[index]
+        document = _document_by_id(chunk["document_id"])
+        if not _matches_object(document, object_type, object_id):
+            continue
+        payload = _chunk_payload(chunk, float(score))
+        payload.setdefault("snippet", payload.get("chunk_text", "")[:300])
+        payload.setdefault("source_location", payload.get("source_ref", "demo-source"))
+        results.append(payload)
+        if len(results) >= max(1, min(limit, 10)):
+            break
+
+    return results[: max(1, min(limit, 10))]
+
+
+def _knowledge_agent_answer(
+    *,
+    query: str,
+    title: str,
+    evidence: list[dict[str, Any]],
+    history: list[AIMessage],
+) -> str:
+    history_hint = "，我会结合前面的追问继续收敛上下文" if history else ""
+    if evidence:
+        source_names = [
+            str(item.get("title") or item.get("document_title") or item.get("source_file_name") or item.get("document_id"))
+            for item in evidence[:3]
+        ]
+        return (
+            f"我已基于《{title}》和 {len(evidence)} 条知识证据{history_hint}形成回答。"
+            f"当前问题是：{query}。建议优先复核这些来源：{'、'.join(source_names)}；"
+            "如需发布到图谱，应先确认候选实体、关系和证据段落。"
+        )
+    return (
+        f"我已记录这次关于《{title}》的追问{history_hint}。当前知识库没有检索到强匹配证据，"
+        "建议先补充文档片段或切换到抽取结果页确认候选实体。"
+    )
+
+
+def _directory_document_count(directory_id: str) -> int:
+    if directory_id == "dir-quality":
+        return sum(1 for item in KNOWLEDGE_DOCUMENTS if item["source_id"] in {"quality-sop", "historical-capa"})
+    if directory_id == "dir-enterprise":
+        return len(KNOWLEDGE_DOCUMENTS) + len(INGESTED_DOCUMENTS)
+    if directory_id == "dir-personal":
+        return sum(1 for item in INGESTED_DOCUMENTS.values() if item.get("owner_user_id") == "demo-user")
+    return 0
+
+
+def _directory_tree() -> list[dict[str, Any]]:
+    by_parent: dict[str | None, list[dict[str, Any]]] = {}
+    for directory in KNOWLEDGE_DIRECTORIES:
+        payload = {**directory, "document_count": _directory_document_count(directory["id"]), "children": []}
+        by_parent.setdefault(directory.get("parent_id"), []).append(payload)
+    for children in by_parent.values():
+        children.sort(key=lambda item: (item["sort_order"], item["name"]))
+    for directory in [item for children in by_parent.values() for item in children]:
+        directory["children"] = by_parent.get(directory["id"], [])
+    return by_parent.get(None, [])
+
+
 @router.get("/sources")
 async def list_sources():
     return {"data": KNOWLEDGE_SOURCES}
@@ -483,6 +703,283 @@ async def list_sources():
 @router.get("/spaces")
 async def list_spaces():
     return {"data": KNOWLEDGE_SPACES}
+
+
+@router.get("/directories")
+async def list_directories():
+    return {"data": {"items": KNOWLEDGE_DIRECTORIES, "tree": _directory_tree()}}
+
+
+@router.post("/directories")
+async def create_directory(body: KnowledgeDirectoryCreateBody):
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Directory name cannot be empty")
+    if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
+        raise HTTPException(status_code=404, detail="Parent directory not found")
+    now = datetime.now().isoformat()
+    record = {
+        "id": f"dir-{uuid.uuid4().hex[:12]}",
+        "name": body.name.strip(),
+        "parent_id": body.parent_id,
+        "scope": body.scope,
+        "owner_user_id": body.owner_user_id,
+        "sort_order": body.sort_order,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    KNOWLEDGE_DIRECTORIES.append(record)
+    return {"data": record, "ok": True}
+
+
+@router.put("/directories/{directory_id}")
+async def update_directory(directory_id: str, body: KnowledgeDirectoryUpdateBody):
+    record = next((item for item in KNOWLEDGE_DIRECTORIES if item["id"] == directory_id), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="Knowledge directory not found")
+    if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
+        raise HTTPException(status_code=404, detail="Parent directory not found")
+    updates = body.model_dump(exclude_unset=True)
+    if "name" in updates and not str(updates["name"]).strip():
+        raise HTTPException(status_code=400, detail="Directory name cannot be empty")
+    record.update({key: value for key, value in updates.items() if value is not None})
+    if body.name is not None:
+        record["name"] = body.name.strip()
+    record["updated_at"] = datetime.now().isoformat()
+    return {"data": record, "ok": True}
+
+
+@router.post("/directories/{directory_id}/move")
+async def move_directory(directory_id: str, body: KnowledgeDirectoryMoveBody):
+    record = next((item for item in KNOWLEDGE_DIRECTORIES if item["id"] == directory_id), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="Knowledge directory not found")
+    if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
+        raise HTTPException(status_code=404, detail="Parent directory not found")
+    if body.parent_id == directory_id:
+        raise HTTPException(status_code=400, detail="Directory cannot be moved under itself")
+    record["parent_id"] = body.parent_id
+    record["sort_order"] = body.sort_order
+    record["updated_at"] = datetime.now().isoformat()
+    return {"data": record, "ok": True}
+
+
+@router.post("/agent/conversations")
+async def create_or_resume_agent_conversation(
+    body: KnowledgeAgentConversationBody,
+    user: dict = Depends(get_current_user),
+):
+    user_key = _user_key(user)
+    document_id = body.document_id or "general"
+    title = body.document_title or "知识助手对话"
+    page = body.page or "knowledge-center"
+    async with db_session() as session:
+        existing = await session.scalar(
+            select(AIConversation)
+            .where(
+                AIConversation.user_id == user_key,
+                AIConversation.page == page,
+                AIConversation.document_id == document_id,
+                AIConversation.status == "active",
+            )
+            .order_by(desc(AIConversation.updated_at))
+        )
+        if existing:
+            existing.title = title
+            if body.metadata:
+                existing.metadata_json = {**(existing.metadata_json or {}), **body.metadata}
+            await session.commit()
+            await session.refresh(existing)
+            return {"data": _serialize_conversation(existing), "ok": True}
+
+        record = AIConversation(
+            conversation_id=f"conv-{uuid.uuid4().hex[:12]}",
+            user_id=user_key,
+            page=page,
+            document_id=document_id,
+            title=title,
+            status="active",
+            metadata_json=body.metadata or {},
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return {"data": _serialize_conversation(record), "ok": True}
+
+
+@router.get("/agent/conversations")
+async def list_agent_conversations(
+    document_id: str | None = None,
+    page: str = "knowledge-center",
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    user_key = _user_key(user)
+    async with db_session() as session:
+        stmt = (
+            select(AIConversation)
+            .where(AIConversation.user_id == user_key, AIConversation.page == page)
+            .order_by(desc(AIConversation.updated_at))
+            .limit(max(1, min(limit, 100)))
+        )
+        if document_id:
+            stmt = stmt.where(AIConversation.document_id == document_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        return {"data": [_serialize_conversation(row) for row in rows]}
+
+
+@router.get("/agent/conversations/{conversation_id}/messages")
+async def list_agent_messages(
+    conversation_id: str,
+    user: dict = Depends(get_current_user),
+):
+    user_key = _user_key(user)
+    async with db_session() as session:
+        conversation = await session.scalar(
+            select(AIConversation).where(
+                AIConversation.conversation_id == conversation_id,
+                AIConversation.user_id == user_key,
+            )
+        )
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Agent conversation not found")
+        messages = (
+            await session.execute(
+                select(AIMessage)
+                .where(AIMessage.conversation_id == conversation_id)
+                .order_by(AIMessage.id)
+            )
+        ).scalars().all()
+        return {"data": [_serialize_message(row) for row in messages]}
+
+
+@router.post("/agent/conversations/{conversation_id}/messages")
+async def send_agent_message(
+    conversation_id: str,
+    body: KnowledgeAgentMessageBody,
+    user: dict = Depends(get_current_user),
+):
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message content cannot be empty")
+
+    user_key = _user_key(user)
+    async with db_session() as session:
+        conversation = await session.scalar(
+            select(AIConversation).where(
+                AIConversation.conversation_id == conversation_id,
+                AIConversation.user_id == user_key,
+            )
+        )
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Agent conversation not found")
+
+        history = (
+            await session.execute(
+                select(AIMessage)
+                .where(AIMessage.conversation_id == conversation_id)
+                .order_by(desc(AIMessage.id))
+                .limit(12)
+            )
+        ).scalars().all()
+        evidence = _search_knowledge_payload(content, limit=5)
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        user_message = AIMessage(
+            message_id=f"msg-{uuid.uuid4().hex[:12]}",
+            conversation_id=conversation_id,
+            role="user",
+            content=content,
+            evidence=[],
+            status="completed",
+        )
+        answer = _knowledge_agent_answer(
+            query=content,
+            title=conversation.title,
+            evidence=evidence,
+            history=list(reversed(history)),
+        )
+        assistant_message = AIMessage(
+            message_id=f"msg-{uuid.uuid4().hex[:12]}",
+            conversation_id=conversation_id,
+            role="assistant",
+            content=answer,
+            evidence=evidence,
+            model_name="knowledge-agent-v1",
+            usage={"mode": "local_agent_runtime", "history_messages": len(history), "evidence_count": len(evidence)},
+            status="completed",
+        )
+        steps = [
+            {"id": "step-context", "type": "observe", "status": "completed", "summary": conversation.title},
+            {"id": "step-history", "type": "memory", "status": "completed", "message_count": len(history)},
+            {"id": "step-knowledge-search", "type": "tool", "tool": "knowledge.search", "status": "completed", "result_count": len(evidence)},
+            {"id": "step-answer", "type": "respond", "status": "completed", "model": "knowledge-agent-v1"},
+        ]
+        run = AIAgentRun(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            user_message_id=user_message.message_id,
+            assistant_message_id=assistant_message.message_id,
+            status="completed",
+            mode="qa",
+            input_message=content,
+            answer=answer,
+            steps=steps,
+            evidence=evidence,
+            actions=[],
+            risk_level="low",
+            requires_confirmation=False,
+        )
+        tool_call = AIToolCall(
+            call_id=f"call-{uuid.uuid4().hex[:12]}",
+            run_id=run_id,
+            tool_name="knowledge.search",
+            skill_name="knowledge.answer_question",
+            input={"query": content, "limit": 5, "document_id": conversation.document_id},
+            output={"result_count": len(evidence), "results": evidence},
+            status="completed",
+            duration_ms=0,
+        )
+        memory = AIMemoryEntry(
+            memory_id=f"mem-{uuid.uuid4().hex[:12]}",
+            conversation_id=conversation_id,
+            scope="conversation",
+            key="last_agent_turn",
+            value={"last_user_message": content, "last_answer": answer, "evidence_count": len(evidence)},
+            summary=answer[:300],
+            status="active",
+        )
+        conversation.last_message = content
+        conversation.metadata_json = {**(conversation.metadata_json or {}), "last_run_id": run_id}
+
+        session.add_all([user_message, assistant_message, run, tool_call, memory])
+        await session.commit()
+        await session.refresh(conversation)
+        await session.refresh(user_message)
+        await session.refresh(assistant_message)
+        await session.refresh(run)
+        conversation_payload = _serialize_conversation(conversation)
+        user_message_payload = _serialize_message(user_message)
+        assistant_message_payload = _serialize_message(assistant_message)
+        run_payload = _serialize_run(run)
+
+    await write_audit_log(
+        action="ai_agent_message",
+        resource_type="ai_agent_run",
+        resource_id=run_id,
+        new_values={"run_id": run_id, "conversation_id": conversation_id, "message": content[:300]},
+        user_id=current_user_id(user),
+    )
+
+    return {
+        "data": {
+            "conversation": conversation_payload,
+            "user_message": user_message_payload,
+            "assistant_message": assistant_message_payload,
+            "run": run_payload,
+            "evidence": evidence,
+        },
+        "ok": True,
+    }
 
 
 @router.get("/documents")
@@ -720,33 +1217,15 @@ async def search_knowledge(body: KnowledgeSearchBody):
     if not query:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
 
-    vectorizer, matrix = _retriever()
-    query_vector = vectorizer.transform([query])
-    scores = cosine_similarity(query_vector, matrix).flatten()
-    ranked = sorted(enumerate(scores), key=lambda item: item[1], reverse=True)
-
-    results = []
-    for item in search_ingested_knowledge(query, limit=body.limit):
-        results.append(item)
-
-    for index, score in ranked:
-        if score <= 0:
-            continue
-        chunk = KNOWLEDGE_CHUNKS[index]
-        document = _document_by_id(chunk["document_id"])
-        if not _matches_object(document, body.object_type, body.object_id):
-            continue
-        payload = _chunk_payload(chunk, float(score))
-        payload.setdefault("snippet", payload.get("chunk_text", "")[:300])
-        payload.setdefault("source_location", payload.get("source_ref", "demo-source"))
-        results.append(payload)
-        if len(results) >= max(1, min(body.limit, 10)):
-            break
-
     return {
         "data": {
             "query": query,
             "answer": "已根据本地知识库检索到相关 SOP、历史 CAPA 或供应商证据，MVP 阶段返回候选引用，由业务用户确认后再进入流程。",
-            "results": results,
+            "results": _search_knowledge_payload(
+                query,
+                limit=body.limit,
+                object_type=body.object_type,
+                object_id=body.object_id,
+            ),
         }
     }

@@ -18,3 +18,4 @@ if str(ROOT) not in sys.path:
 os.environ.setdefault("SECRET_KEY", "test-secret-key-do-not-use-in-prod")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("DEMO_AUTH_OPTIONAL", "true")
+os.environ.setdefault("DATABASE_BACKEND", "sqlite")

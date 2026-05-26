@@ -11,15 +11,15 @@ ProviderName = Literal["openai-compatible", "openai", "azure-openai", "deepseek"
 
 
 class AIProviderConfig(BaseModel):
-    provider: ProviderName = "mock"
-    base_url: str = ""
+    provider: ProviderName = "glm"
+    base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     api_key: str = ""
     organization: str | None = None
     project: str | None = None
-    chat_model: str = "mock-chat"
-    reasoning_model: str = "mock-reasoning"
-    embedding_model: str = "mock-embedding"
-    vision_model: str = "disabled"
+    chat_model: str = "glm-4-flash"
+    reasoning_model: str = "glm-4-plus"
+    embedding_model: str = "embedding-3"
+    vision_model: str = "glm-4v-plus"
     timeout_seconds: int = 30
 
 
@@ -83,9 +83,13 @@ class AgentRequest(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    run_id: str | None = None
     answer: str
     actions: list[SkillAction] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    confirmation_payload: dict[str, Any] = Field(default_factory=dict)
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     requires_confirmation: bool = False
     mode: Literal["qa", "assisted", "agentic"] = "qa"
 

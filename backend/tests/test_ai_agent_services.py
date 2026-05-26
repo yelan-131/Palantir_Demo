@@ -21,7 +21,7 @@ async def test_mock_provider_returns_embeddings():
     from app.services.ai.providers import make_provider
     from app.services.ai.schemas import AIProviderConfig
 
-    provider = make_provider(AIProviderConfig(provider="mock"))
+    provider = make_provider(AIProviderConfig(provider="mock", embedding_model="mock-embedding"))
     result = await provider.embed(["material application process"])
 
     assert result.provider == "mock"
@@ -54,3 +54,20 @@ def test_policy_blocks_forbidden_action():
     assert action.risk_level == "critical"
     assert action.requires_confirmation is True
 
+
+def test_skill_tool_registry_contracts():
+    from app.services.ai.skills import get_skill, list_skills
+    from app.services.ai.tool_registry import get_tool, list_tools, validate_tool_call
+
+    assert any(item["name"] == "knowledge.answer_question" for item in list_skills())
+    assert any(item["name"] == "forms.create_dynamic_record_draft" for item in list_tools())
+    assert get_skill("quality.create_capa_draft").confirmation_policy == "confirm_token"
+    assert get_tool("workflow.start").side_effect == "workflow_action"
+
+    allowed, reason = validate_tool_call("quality.create_capa_draft", "forms.create_dynamic_record_draft")
+    assert allowed is True
+    assert reason == "Allowed"
+
+    allowed, reason = validate_tool_call("knowledge.answer_question", "workflow.start")
+    assert allowed is False
+    assert reason == "Tool is outside the skill allowlist"

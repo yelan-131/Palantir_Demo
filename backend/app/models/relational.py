@@ -1011,3 +1011,80 @@ class KnowledgeObjectLink(TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     source_location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="candidate")
+
+
+class AIConversation(TimestampMixin, Base):
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(100), index=True)
+    page: Mapped[str] = mapped_column(String(100), default="knowledge-center")
+    document_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    last_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AIMessage(TimestampMixin, Base):
+    __tablename__ = "ai_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(100), ForeignKey("ai_conversations.conversation_id"), index=True)
+    role: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    model_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="completed")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AIAgentRun(TimestampMixin, Base):
+    __tablename__ = "ai_agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(100), ForeignKey("ai_conversations.conversation_id"), index=True)
+    user_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    assistant_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="completed")
+    mode: Mapped[str] = mapped_column(String(50), default="qa")
+    input_message: Mapped[str] = mapped_column(Text)
+    answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    actions: Mapped[list] = mapped_column(JSON, default=list)
+    risk_level: Mapped[str] = mapped_column(String(50), default="low")
+    requires_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+    confirmation_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class AIToolCall(TimestampMixin, Base):
+    __tablename__ = "ai_tool_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    call_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    run_id: Mapped[str] = mapped_column(String(100), ForeignKey("ai_agent_runs.run_id"), index=True)
+    tool_name: Mapped[str] = mapped_column(String(200))
+    skill_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="completed")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AIMemoryEntry(TimestampMixin, Base):
+    __tablename__ = "ai_memory_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    memory_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(100), ForeignKey("ai_conversations.conversation_id"), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(50), default="conversation")
+    key: Mapped[str] = mapped_column(String(200))
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="active")

@@ -1,6 +1,6 @@
 # Deployment
 
-Last updated: 2026-05-23
+Last updated: 2026-05-26
 
 This document reflects the current repository files and the project deployment convention.
 
@@ -34,6 +34,7 @@ Local verification:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/productization/readiness
 Invoke-WebRequest http://127.0.0.1:3000
 ```
 
@@ -78,6 +79,8 @@ Production mode:
 APP_MODE=production
 DEMO_AUTH_OPTIONAL=false
 SECRET_KEY=<strong-random-secret-at-least-32-chars>
+AI_PROVIDER=glm
+AI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 ```
 
 Production mode is fail-fast:
@@ -137,6 +140,11 @@ Run migrations:
 docker exec manufoundry-backend alembic upgrade head
 ```
 
+Current migration head includes `0015_ai_agent_runtime.py`, which creates
+relational AI runtime tables for knowledge Agent conversations, messages, runs,
+tool calls, and memory entries. Run migrations before verifying the Knowledge
+Center chat path after deployment.
+
 Seed data when needed:
 
 ```bash
@@ -156,6 +164,24 @@ docker logs -f manufoundry-backend --tail 100
 docker logs -f manufoundry-frontend --tail 100
 ```
 
+Pre-deploy verification from a clean working tree should include:
+
+```bash
+cd backend
+python -m pytest
+
+cd ../frontend
+npm run type-check
+npm run build
+```
+
+At minimum, run the ready-path guard before promoting a productization change:
+
+```bash
+cd backend
+python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py
+```
+
 ## Verification
 
 Frontend:
@@ -168,6 +194,7 @@ Backend:
 
 ```bash
 curl -fsS http://111.229.172.100:8000/health
+curl -fsS http://111.229.172.100:8000/api/v1/productization/readiness
 ```
 
 Expected backend response:

@@ -2,8 +2,11 @@ import { useMemo } from 'react';
 import {
   AppstoreOutlined,
   AuditOutlined,
+  BranchesOutlined,
   DatabaseOutlined,
+  FileSearchOutlined,
   LogoutOutlined,
+  NodeIndexOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
   SkinOutlined,
@@ -79,10 +82,28 @@ export default function AccountMenu({ user, onNavigate, onLogout }: AccountMenuP
               onClick: () => onNavigate('/account-center?section=app-menu'),
             },
             {
-              key: 'data-ontology',
-              label: '数据资产与本体',
+              key: 'data-assets',
+              label: '数据资产中心',
               icon: <DatabaseOutlined />,
-              onClick: () => onNavigate('/account-center?section=data-ontology'),
+              onClick: () => onNavigate('/account-center?section=data-assets'),
+            },
+            {
+              key: 'ontology-modeling',
+              label: '本体建模中心',
+              icon: <NodeIndexOutlined />,
+              onClick: () => onNavigate('/account-center?section=ontology-modeling'),
+            },
+            {
+              key: 'knowledge',
+              label: '知识库中心',
+              icon: <FileSearchOutlined />,
+              onClick: () => onNavigate('/account-center?section=knowledge'),
+            },
+            {
+              key: 'knowledge-graph',
+              label: '知识图谱中心',
+              icon: <BranchesOutlined />,
+              onClick: () => onNavigate('/account-center?section=knowledge-graph'),
             },
             {
               key: 'identity-access',

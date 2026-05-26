@@ -1,6 +1,6 @@
 # ManuFoundry Architecture Overview
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This is the current high-level architecture document. It describes what the codebase implements now, and it separates that from Palantir-inspired reference direction.
 
@@ -119,6 +119,7 @@ Main API modules:
 | Scheduler | `/api/v1/scheduler` |
 | Search | `/api/v1/search` |
 | AI builder | `/api/v1/ai-builder` |
+| Productization | `/api/v1/productization` |
 
 ## 6. Data And Persistence
 
@@ -132,6 +133,13 @@ The persistence layer has two major parts:
    - Applications, application menus, roles.
    - Forms platform tables introduced by migration `0006_platform_forms.py`.
    - Dynamic form records stored as JSON/JSONB rather than creating a physical table for every user-defined form.
+
+3. **AI runtime observability**
+   - Knowledge Agent conversations, messages, runs, tool calls, and memory rows
+     are stored in the relational database through migration
+     `0015_ai_agent_runtime.py`.
+   - General `/api/v1/ai/agent-runs` still uses an in-memory scaffold for run
+     lifecycle while the contract stabilizes.
 
 Forms platform tables:
 
@@ -182,7 +190,7 @@ sequenceDiagram
 | Foundry Pipeline Builder | Data source management, pipeline APIs, scheduler APIs |
 | Object actions | Form actions, rules engine, workflow bindings, notifications |
 | Operational decision apps | Dashboard, maintenance, quality, supply-chain, workflow, reports |
-| AIP-style assistance | Floating AI widget, `/api/v1/ai`, AI builder suggestions, local `/api/v1/knowledge` evidence retrieval |
+| AIP-style assistance | Floating AI widget, `/api/v1/ai`, skill/tool registry, confirmation-token scaffold, AI builder suggestions, local `/api/v1/knowledge` evidence retrieval, persisted knowledge Agent chat runtime |
 | Gotham-style command UI | Event/risk workbench reference docs, notification center, graph impact/trace endpoints |
 
 The important architectural lesson is not a visual copy of Palantir. The lesson is the **object-centric operating model**: users act on meaningful business objects, not disconnected screens.
@@ -217,7 +225,8 @@ Implemented now:
 
 - Workbench shell, app switcher, dynamic menus, workspace, system admin surfaces.
 - Backend APIs for applications, forms platform, workflow, rules, reports, notifications, scheduler, search, templates, AI builder.
-- Local knowledge base APIs with static demo documents, upload simulation, Markdown, cards, binding candidates, OCR workflow metadata, and TF-IDF retrieval.
+- Local knowledge base APIs with static demo documents, upload simulation, Markdown, cards, directories, binding candidates, OCR workflow metadata, TF-IDF retrieval, and persisted knowledge Agent conversations.
+- Productization readiness contract under `/api/v1/productization/readiness`.
 - Forms metadata persistence and JSON dynamic records.
 - Docker development and production-style compose files.
 - Backend test coverage across security, workflow, rules, notifications, forms, config import/export, templates, scheduler/search/AI builder, graph safety, and model-driven safety.

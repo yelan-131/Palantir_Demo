@@ -47,6 +47,7 @@ export const createDataSource = (data: Record<string, unknown>) => api.post('/da
 export const getDataSource = (id: number) => api.get(`/data-sources/${id}`);
 export const deleteDataSource = (id: number) => api.delete(`/data-sources/${id}`);
 export const testConnection = (id: number) => api.post(`/data-sources/${id}/test`);
+export const testDataSourceConfig = (data: Record<string, unknown>) => api.post('/data-sources/test-config', data);
 export const triggerSync = (id: number) => api.post(`/data-sources/${id}/sync`);
 export const getSyncStatus = (id: number) => api.get(`/data-sources/${id}/status`);
 export const previewData = (id: number, limit?: number) => api.get(`/data-sources/${id}/preview`, { params: { limit } });
@@ -166,6 +167,18 @@ export const searchKnowledge = (data: {
   object_type?: string;
   object_id?: string;
 }) => api.post('/knowledge/search', data);
+export const createKnowledgeAgentConversation = (data: {
+  document_id?: string;
+  document_title?: string;
+  page?: string;
+  metadata?: Record<string, unknown>;
+}) => api.post('/knowledge/agent/conversations', data);
+export const listKnowledgeAgentMessages = (conversationId: string) =>
+  api.get(`/knowledge/agent/conversations/${conversationId}/messages`);
+export const sendKnowledgeAgentMessage = (conversationId: string, data: {
+  content: string;
+  context?: Record<string, unknown>;
+}) => api.post(`/knowledge/agent/conversations/${conversationId}/messages`, data);
 
 // Pipeline
 export const listPipelines = () => api.get('/pipelines');
