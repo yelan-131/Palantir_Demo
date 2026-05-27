@@ -1,6 +1,6 @@
 # API Reference
 
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 Source of truth: `backend/app/main.py` and `backend/app/api/*`.
 
@@ -72,7 +72,7 @@ Permission implementation notes are in
 | Quality | `/quality` | `/spc/{parameter}`, `/defects`, `/defects/pareto`, `/traceability/{entity_id}`, `/inspections`, `/events`, `/events/{event_id}/impact`, `/events/{event_id}/ai-suggestion`, `/events/{event_id}/actions`, `/capa` |
 | Supply chain | `/supply-chain` | `/suppliers`, `/inventory`, `/shipments`, `/risk-assessment`, `/analytics` |
 | AI assistant | `/ai` | `/chat`, `/agent`, `/agent-runs`, `/agent-runs/{run_id}`, `/agent-runs/{run_id}/confirm`, `/agent-runs/{run_id}/cancel`, `/skills`, `/tools`, `/drafts/save`, `/provider/test`, `/settings`, `/settings/test`, `/audit`, `/sessions`, `/analyze` |
-| Dashboard | `/dashboard` | `/overview`, `/oee`, `/production`, `/alerts` |
+| Dashboard | `/dashboard` | `/overview`, `/oee`, `/production`, `/alerts`, `/programs/{program_id}` |
 | Reports | `/reports` | `/`, `/{report_id}`, `/{report_id}/snapshot`, `/{report_id}/snapshots` |
 | Model-driven | `/model-driven` | `/models`, `/models/{model_id}/fields`, `/models/import-from-ontology`, `/models/{model_id}/versions`, `/models/{model_id}/publish`, `/models/{model_id}/impact`, `/pages`, `/pages/generate`, `/data/{model_name}`, `/data/{model_name}/options`, `/data/{model_name}/{record_id}/children/{child_table}`, `/menus` |
 | Rules | `/rules` | `/`, `/{rule_id}`, `/validate`, `/triggers`, `/evaluate-triggers` |
@@ -88,6 +88,7 @@ Permission implementation notes are in
 
 - Use `/api/v1/data-sources`, not `/api/v1/datasources`.
 - Use `/api/v1/dashboard/*` for dashboard data, not `/api/v1/operations/*`.
+- `/api/v1/dashboard/programs/{program_id}` is the current data bridge for generated `/program/*` application pages that still use frontend-owned layouts.
 - Workflow notifications exist under `/api/v1/workflow/notifications`; there is also a newer general notification module under `/api/v1/notifications`.
 - Reports routes are mounted under `/api/v1/reports`; the router uses both `/` and `/{report_id}` paths.
 - The AI assistant route is `/api/v1/ai`; the visible UI entry is the floating AI widget, while `/ai-assistant` redirects to `/`.

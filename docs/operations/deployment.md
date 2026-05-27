@@ -1,6 +1,6 @@
 # Deployment
 
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 This document reflects the current repository files and the project deployment convention.
 
@@ -57,7 +57,7 @@ The frontend reads `frontend/.env.local`; the current local proxy target is
 Use these files together for production-style deployment:
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
 ```
 
 Do not use `docker/docker-compose.prod-full.yml`; that file is not present in the current repository.
@@ -131,7 +131,7 @@ git pull
 Rebuild and restart:
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
 ```
 
 Run migrations:
@@ -151,10 +151,16 @@ Seed data when needed:
 docker exec -w /app manufoundry-backend bash -c 'PYTHONPATH=/app python scripts/seed_data.py'
 ```
 
+Reload the large manufacturing demo dataset after replacing server data:
+
+```bash
+docker exec -w /app manufoundry-backend bash -c 'PYTHONPATH=/app python scripts/reseed_business_data.py'
+```
+
 Check service status:
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
 ```
 
 Check logs:
@@ -195,6 +201,7 @@ Backend:
 ```bash
 curl -fsS http://111.229.172.100:8000/health
 curl -fsS http://111.229.172.100:8000/api/v1/productization/readiness
+curl -fsS "http://111.229.172.100:8000/api/v1/dashboard/programs/line-status?limit=5"
 ```
 
 Expected backend response:

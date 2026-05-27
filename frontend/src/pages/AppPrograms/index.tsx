@@ -8,6 +8,7 @@ import MaintenancePage from '../Maintenance';
 import QualityPage from '../Quality';
 import QualityImpactWorkbench from '../QualityImpact';
 import SupplyChainPage from '../SupplyChain';
+import { getAppProgramData } from '@/services/api';
 import {
   normalizeViewConfig,
   sortByOrder,
@@ -43,6 +44,12 @@ interface ProgramDefinition {
   columns: ColumnsType<ProgramRow>;
   rows: ProgramRow[];
   viewConfig?: ViewConfig;
+}
+
+interface ProgramDataPayload {
+  metrics?: ProgramDefinition['metrics'];
+  rows?: ProgramRow[];
+  source?: string;
 }
 
 const lineNames = ['总装 A 线', '总装 B 线', 'SMT-01', 'SMT-02', 'SMT-03', '涂装 C 线', '压铸 D 线', '电控装配线', '终检 E 线', '包装 F 线'];
@@ -832,10 +839,42 @@ const toneClassMap: Record<ProgramDefinition['metrics'][number]['tone'], string>
   orange: 'program-stat-orange',
   red: 'program-stat-red',
 };
+const routedProgramIds = new Set(['production-overview', 'device-health', 'quality-overview', 'quality-event', 'supply-overview']);
 
 function AppProgramPage() {
   const { programId } = useParams();
   const navigate = useNavigate();
+  const [programData, setProgramData] = React.useState<ProgramDataPayload | null>(null);
+  const [programLoading, setProgramLoading] = React.useState(false);
+
+  const baseProgram = programId ? programDefinitions[programId] : undefined;
+  const loadProgramData = React.useCallback(async () => {
+    if (!programId || routedProgramIds.has(programId) || !programDefinitions[programId]) return;
+    setProgramLoading(true);
+    try {
+      const response = await getAppProgramData(programId, 500);
+      const payload = response.data as ProgramDataPayload;
+      setProgramData(payload?.rows || payload?.metrics ? payload : null);
+    } catch {
+      setProgramData(null);
+    } finally {
+      setProgramLoading(false);
+    }
+  }, [programId]);
+
+  React.useEffect(() => {
+    setProgramData(null);
+    void loadProgramData();
+  }, [loadProgramData]);
+
+  const program = React.useMemo(() => {
+    if (!baseProgram) return undefined;
+    return {
+      ...baseProgram,
+      metrics: programData?.metrics?.length ? programData.metrics : baseProgram.metrics,
+      rows: programData?.rows?.length ? programData.rows : baseProgram.rows,
+    };
+  }, [baseProgram, programData]);
 
   if (programId === 'production-overview') {
     return <DashboardPage />;
@@ -857,8 +896,6 @@ function AppProgramPage() {
     return <SupplyChainPage />;
   }
 
-  const program = programId ? programDefinitions[programId] : undefined;
-
   if (!program) {
     return (
       <Card>
@@ -876,18 +913,28 @@ function AppProgramPage() {
   return (
     <div className={`app-program-page app-program-${program.kind}`}>
       {program.kind === 'business' ? (
-        <BusinessProgram program={program} onSettings={openSettings} />
+        <BusinessProgram program={program} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
       ) : (
         <>
-          <ProgramHeader program={program} onSettings={openSettings} />
-          <AnalysisProgram program={program} onSettings={openSettings} />
+          <ProgramHeader program={program} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
+          <AnalysisProgram program={program} onSettings={openSettings} loading={programLoading} />
         </>
       )}
     </div>
   );
 }
 
-function ProgramHeader({ program, onSettings }: { program: ProgramDefinition; onSettings: () => void }) {
+function ProgramHeader({
+  program,
+  onSettings,
+  onReload,
+  loading,
+}: {
+  program: ProgramDefinition;
+  onSettings: () => void;
+  onReload: () => void;
+  loading?: boolean;
+}) {
   return (
     <div className="app-program-header">
       <div className="app-program-title-block">
@@ -903,7 +950,7 @@ function ProgramHeader({ program, onSettings }: { program: ProgramDefinition; on
         </div>
       </div>
       <Space wrap>
-        <Button icon={<ReloadOutlined />}>刷新</Button>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
         <Button icon={<DownloadOutlined />}>导出</Button>
         <Button icon={<ExpandOutlined />}>全屏</Button>
         <Button icon={<BarChartOutlined />}>切换维度</Button>
@@ -939,7 +986,17 @@ function programValueMatchesFilter(row: ProgramRow, filter: ViewFilterConfig, va
   return String(actual || '').toLowerCase().includes(String(value).toLowerCase());
 }
 
-function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; onSettings: () => void }) {
+function BusinessProgram({
+  program,
+  onSettings,
+  onReload,
+  loading,
+}: {
+  program: ProgramDefinition;
+  onSettings: () => void;
+  onReload: () => void;
+  loading?: boolean;
+}) {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [selectedRow, setSelectedRow] = React.useState<ProgramRow | null>(null);
   const [filterValues, setFilterValues] = React.useState<Record<string, unknown>>({});
@@ -993,7 +1050,7 @@ function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; 
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新增</Button>
             <Button icon={<UploadOutlined />}>申请</Button>
             <Button>批量处理</Button>
-            <Button icon={<ReloadOutlined />}>刷新</Button>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
             <Button icon={<DownloadOutlined />}>导出</Button>
             <Button icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
           </Space>
@@ -1058,6 +1115,7 @@ function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; 
           size={viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
           columns={configuredColumns}
           dataSource={filteredRows}
+          loading={loading}
           pagination={{ pageSize: viewConfig.table.pageSize, showSizeChanger: false, showTotal: (total) => `共 ${total} 条记录` }}
           scroll={{ x: 1100, y: '100%' }}
           onRow={(record) => ({
@@ -1146,7 +1204,7 @@ function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; 
       </Modal>
     </>
   );
-}function AnalysisProgram({ program, onSettings }: { program: ProgramDefinition; onSettings: () => void }) {
+}function AnalysisProgram({ program, onSettings, loading }: { program: ProgramDefinition; onSettings: () => void; loading?: boolean }) {
   return (
     <>
       <Card title="分析筛选" className="app-program-card app-program-filter-card">
@@ -1213,6 +1271,7 @@ function BusinessProgram({ program, onSettings }: { program: ProgramDefinition; 
               size="middle"
               columns={program.columns}
               dataSource={program.rows}
+              loading={loading}
               pagination={false}
               scroll={{ x: 760 }}
             />

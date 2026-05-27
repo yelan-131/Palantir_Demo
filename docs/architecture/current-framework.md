@@ -1,6 +1,6 @@
 # Current Code Framework
 
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 This document describes the current code framework at a practical level. For the broader system architecture, read [overview.md](overview.md).
 
@@ -12,6 +12,7 @@ ManuFoundry is currently a manufacturing low-code analytics workbench:
 - The top bar switches between business applications.
 - The left side menu shows "Workspace + current application menu".
 - Business pages are rendered through fixed modules, `/program/:programId`, or `/dynamic/:slug`.
+- Generated `/program/*` pages keep their frontend layout definitions, but key production pages now load metrics and rows from `/api/v1/dashboard/programs/{program_id}` before falling back to local demo rows.
 - System administration manages applications, menu assembly, forms, semantic assets, users, roles, and permissions.
 - AI assistance is exposed through a floating widget rather than a normal side-menu page.
 

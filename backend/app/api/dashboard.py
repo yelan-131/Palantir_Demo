@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import safe_db_call as _try_db
-from app.models.relational import Defect, Equipment, Factory, ProductionLine, WorkOrder
+from app.models.relational import Defect, Equipment, Factory, Product, ProductionLine, SalesOrder, WorkOrder, Workshop
 
 router = APIRouter()
 
@@ -196,3 +196,205 @@ async def _query_alerts(db: AsyncSession, limit: int):
             "timestamp": eq.updated_at.isoformat() if eq.updated_at else None,
         })
     return {"data": alerts, "total": len(alerts)}
+
+
+@router.get("/programs/{program_id}")
+async def get_program_data(program_id: str, limit: int = Query(500, ge=1, le=1000)):
+    """Return database-backed rows for generated application pages.
+
+    The AppPrograms frontend still owns layout and column renderers. This API
+    replaces the old static row arrays with data from the manufacturing seed
+    tables when the production database is available.
+    """
+    loaders = {
+        "line-status": _query_line_status_program,
+        "production-plan-entry": _query_plan_program,
+        "alert-center": _query_alert_program,
+    }
+    loader = loaders.get(program_id)
+    if loader is None:
+        return {"data": None, "source": "unsupported", "program_id": program_id}
+
+    result = await _try_db(lambda db: loader(db, limit))
+    if result is None:
+        return {"data": None, "source": "fallback", "program_id": program_id}
+    result["program_id"] = program_id
+    result["source"] = "database"
+    return result
+
+
+def _metric(label: str, value: int | float | str, tone: str, suffix: str | None = None) -> dict:
+    payload = {"label": label, "value": value, "tone": tone}
+    if suffix:
+        payload["suffix"] = suffix
+    return payload
+
+
+async def _query_line_status_program(db: AsyncSession, limit: int):
+    status_counts = dict(
+        (
+            (status or "unknown"),
+            count,
+        )
+        for status, count in (
+            await db.execute(select(ProductionLine.status, func.count(ProductionLine.id)).group_by(ProductionLine.status))
+        ).all()
+    )
+    total_lines = sum(status_counts.values())
+
+    equipment_stats = (
+        select(
+            Equipment.line_id.label("line_id"),
+            func.count(Equipment.id).label("equipment_count"),
+            func.avg(Equipment.health_score).label("avg_health"),
+        )
+        .group_by(Equipment.line_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(
+            ProductionLine.id,
+            ProductionLine.name,
+            ProductionLine.status,
+            ProductionLine.capacity,
+            Workshop.name.label("workshop_name"),
+            equipment_stats.c.equipment_count,
+            equipment_stats.c.avg_health,
+        )
+        .join(Workshop, Workshop.id == ProductionLine.workshop_id)
+        .outerjoin(equipment_stats, equipment_stats.c.line_id == ProductionLine.id)
+        .order_by(ProductionLine.id.asc())
+        .limit(limit)
+    )
+    rows = []
+    for row in result.mappings().all():
+        health = float(row["avg_health"] or 0)
+        load = max(1, min(100, round((float(row["capacity"] or 0) % 100) * 0.45 + health * 0.55)))
+        rows.append({
+            "key": f"line-{row['id']}",
+            "line": row["name"],
+            "product": row["workshop_name"],
+            "station": f"{int(row['equipment_count'] or 0)} devices / {row['status']}",
+            "load": load,
+        })
+
+    running = int(status_counts.get("running", 0))
+    idle = int(status_counts.get("idle", 0))
+    maintenance = int(status_counts.get("maintenance", 0))
+    offline = int(status_counts.get("offline", 0) + status_counts.get("fault", 0))
+    return {
+        "metrics": [
+            _metric("运行产线", running, "green"),
+            _metric("待料/空闲", idle, "orange"),
+            _metric("维护/换型", maintenance, "blue"),
+            _metric("停线/故障", offline, "red"),
+        ],
+        "rows": rows,
+        "total": total_lines,
+    }
+
+
+async def _query_plan_program(db: AsyncSession, limit: int):
+    status_counts = dict(
+        (
+            (status or "unknown"),
+            count,
+        )
+        for status, count in (
+            await db.execute(select(WorkOrder.status, func.count(WorkOrder.id)).group_by(WorkOrder.status))
+        ).all()
+    )
+    distinct_lines = await db.scalar(select(func.count(func.distinct(WorkOrder.line_id)))) or 0
+    result = await db.execute(
+        select(
+            WorkOrder.id,
+            WorkOrder.order_no,
+            WorkOrder.quantity,
+            WorkOrder.completed_quantity,
+            WorkOrder.status,
+            ProductionLine.name.label("line_name"),
+            Product.name.label("product_name"),
+        )
+        .join(ProductionLine, ProductionLine.id == WorkOrder.line_id)
+        .join(SalesOrder, SalesOrder.id == WorkOrder.sales_order_id)
+        .join(Product, Product.id == SalesOrder.product_id)
+        .order_by(WorkOrder.planned_start.desc(), WorkOrder.id.asc())
+        .limit(limit)
+    )
+    rows = [
+        {
+            "key": f"plan-{row['id']}",
+            "planNo": row["order_no"],
+            "product": row["product_name"],
+            "line": row["line_name"],
+            "quantity": int(row["quantity"] or 0),
+            "status": row["status"],
+        }
+        for row in result.mappings().all()
+    ]
+    pending = int(status_counts.get("pending", 0))
+    confirmed = int(status_counts.get("confirmed", 0) + status_counts.get("in_progress", 0))
+    adjust = int(status_counts.get("cancelled", 0))
+    return {
+        "metrics": [
+            _metric("待提交计划", pending, "orange"),
+            _metric("已确认/执行", confirmed, "green"),
+            _metric("待调整批次", adjust, "red"),
+            _metric("覆盖产线", int(distinct_lines), "blue"),
+        ],
+        "rows": rows,
+        "total": sum(status_counts.values()),
+    }
+
+
+async def _query_alert_program(db: AsyncSession, limit: int):
+    equipment_result = await db.execute(
+        select(Equipment.id, Equipment.name, Equipment.status, Equipment.health_score, ProductionLine.name.label("line_name"))
+        .join(ProductionLine, ProductionLine.id == Equipment.line_id)
+        .where((Equipment.health_score < 78) | (Equipment.status.in_(["fault", "maintenance", "offline"])))
+        .order_by(Equipment.health_score.asc(), Equipment.id.asc())
+        .limit(limit)
+    )
+    rows = []
+    for row in equipment_result.mappings().all():
+        critical = float(row["health_score"] or 0) < 55 or row["status"] in {"fault", "offline"}
+        rows.append({
+            "key": f"alert-equipment-{row['id']}",
+            "name": f"{row['name']} health warning",
+            "source": row["line_name"],
+            "level": "critical" if critical else "warning",
+            "status": "open" if critical else "reviewing",
+            "owner": "maintenance",
+            "occurredAt": datetime.now().strftime("%Y-%m-%d"),
+        })
+
+    remaining = max(0, limit - len(rows))
+    if remaining:
+        defect_result = await db.execute(
+            select(Defect.id, Defect.defect_type, Defect.severity, Defect.created_at)
+            .order_by(Defect.created_at.desc(), Defect.id.asc())
+            .limit(remaining)
+        )
+        for row in defect_result.mappings().all():
+            rows.append({
+                "key": f"alert-defect-{row['id']}",
+                "name": f"{row['defect_type']} quality event",
+                "source": "quality",
+                "level": "critical" if row["severity"] == "critical" else "warning",
+                "status": "open",
+                "owner": "quality",
+                "occurredAt": row["created_at"].strftime("%Y-%m-%d") if row["created_at"] else None,
+            })
+
+    critical_count = sum(1 for row in rows if row["level"] == "critical")
+    warning_count = sum(1 for row in rows if row["level"] == "warning")
+    return {
+        "metrics": [
+            _metric("未关闭告警", len(rows), "orange"),
+            _metric("严重告警", critical_count, "red"),
+            _metric("待复核", warning_count, "blue"),
+            _metric("数据来源", "PostgreSQL", "green"),
+        ],
+        "rows": rows,
+        "total": len(rows),
+    }

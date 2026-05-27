@@ -124,6 +124,8 @@ export const getOverview = () => api.get('/dashboard/overview');
 export const getOEE = (lineId?: number) => api.get('/dashboard/oee', { params: { line_id: lineId } });
 export const getProductionStats = (days?: number) => api.get('/dashboard/production', { params: { days } });
 export const getAlerts = (limit?: number) => api.get('/dashboard/alerts', { params: { limit } });
+export const getAppProgramData = (programId: string, limit?: number) =>
+  api.get(`/dashboard/programs/${programId}`, { params: { limit } });
 
 // Data Sources
 export const listDataSources = (params?: Record<string, string>) => api.get('/data-sources', { params });
