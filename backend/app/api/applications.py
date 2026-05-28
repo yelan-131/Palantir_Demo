@@ -208,10 +208,6 @@ async def _ensure_default_seed(db: AsyncSession, tenant_id: int = 1) -> None:
         db.add(Tenant(id=tenant_id, name="Default Tenant", slug="default"))
         await db.flush()
 
-    existing = await db.scalar(select(Application.id).where(Application.tenant_id == tenant_id).limit(1))
-    if existing:
-        return
-
     db_menus: dict[str, MenuItem] = {}
     for menu in DEFAULT_MENUS:
         item = await db.scalar(select(MenuItem).where(MenuItem.route_path == menu["route_path"], MenuItem.tenant_id == tenant_id))
@@ -227,33 +223,75 @@ async def _ensure_default_seed(db: AsyncSession, tenant_id: int = 1) -> None:
             )
             db.add(item)
             await db.flush()
+        else:
+            item.title = menu["title"]
+            item.icon = menu["icon"]
+            item.sort_order = menu["sort_order"]
+            item.is_visible = True
         db_menus[menu["route_path"]] = item
 
     roles = (await db.execute(select(Role).where(Role.tenant_id == tenant_id))).scalars().all()
     role_by_name = {role.name: role for role in roles}
 
     for app_cfg in DEFAULT_APPLICATIONS:
-        app = Application(
-            tenant_id=tenant_id,
-            name=app_cfg["name"],
-            code=app_cfg["code"],
-            description=app_cfg["description"],
-            icon=app_cfg["icon"],
-            default_route=app_cfg["default_route"],
-            sort_order=app_cfg["sort_order"],
-            status=app_cfg["status"],
-            is_pinned=app_cfg["is_pinned"],
-        )
-        db.add(app)
-        await db.flush()
+        app = await db.scalar(select(Application).where(Application.code == app_cfg["code"], Application.tenant_id == tenant_id))
+        if app is None:
+            app = Application(
+                tenant_id=tenant_id,
+                name=app_cfg["name"],
+                code=app_cfg["code"],
+                description=app_cfg["description"],
+                icon=app_cfg["icon"],
+                default_route=app_cfg["default_route"],
+                sort_order=app_cfg["sort_order"],
+                status=app_cfg["status"],
+                is_pinned=app_cfg["is_pinned"],
+            )
+            db.add(app)
+            await db.flush()
+        else:
+            app.name = app_cfg["name"]
+            app.description = app_cfg["description"]
+            app.icon = app_cfg["icon"]
+            app.default_route = app_cfg["default_route"]
+            app.sort_order = app_cfg["sort_order"]
+            app.status = app_cfg["status"]
+            app.is_pinned = app_cfg["is_pinned"]
+
         for idx, route in enumerate(app_cfg["menu_routes"]):
             menu = db_menus.get(route)
             if menu:
-                db.add(ApplicationMenu(tenant_id=tenant_id, application_id=app.id, menu_id=menu.id, sort_order=idx, is_default=route == app.default_route))
+                app_menu = await db.scalar(
+                    select(ApplicationMenu).where(
+                        ApplicationMenu.application_id == app.id,
+                        ApplicationMenu.menu_id == menu.id,
+                        ApplicationMenu.tenant_id == tenant_id,
+                    )
+                )
+                if app_menu is None:
+                    app_menu = ApplicationMenu(
+                        tenant_id=tenant_id,
+                        application_id=app.id,
+                        menu_id=menu.id,
+                        sort_order=idx,
+                        is_default=route == app.default_route,
+                    )
+                    db.add(app_menu)
+                else:
+                    app_menu.sort_order = idx
+                    app_menu.is_default = route == app.default_route
         for role_name in app_cfg["role_names"]:
             role = role_by_name.get(role_name)
             if role:
-                db.add(ApplicationRole(tenant_id=tenant_id, application_id=app.id, role_id=role.id))
+                app_role = await db.scalar(
+                    select(ApplicationRole).where(
+                        ApplicationRole.application_id == app.id,
+                        ApplicationRole.role_id == role.id,
+                        ApplicationRole.tenant_id == tenant_id,
+                    )
+                )
+                if app_role is None:
+                    db.add(ApplicationRole(tenant_id=tenant_id, application_id=app.id, role_id=role.id))
     await db.commit()
 
 
@@ -340,7 +378,7 @@ async def list_applications(
 @router.get("/{app_id}/menus")
 async def list_application_menus(app_id: int, user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     async def _query(session):
-        from app.models.relational import Application, ApplicationMenu, ApplicationMenuNode, MenuItem
+        from app.models.relational import Application, ApplicationForm, ApplicationMenu, ApplicationMenuNode, Form, MenuItem
 
         tenant_id = current_tenant_id(user)
         await _ensure_default_seed(session, tenant_id)
@@ -356,6 +394,33 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
         )).scalars().all()
         if platform_nodes:
             return {"data": _menu_tree([_platform_menu_payload(node) for node in platform_nodes])}
+        form_rows = await session.execute(
+            select(ApplicationForm, Form)
+            .join(Form, Form.id == ApplicationForm.form_id)
+            .where(
+                ApplicationForm.application_id == app_id,
+                ApplicationForm.tenant_id == tenant_id,
+                ApplicationForm.enabled.is_(True),
+                Form.tenant_id == tenant_id,
+                Form.status == "published",
+            )
+            .order_by(ApplicationForm.sort_order, Form.id)
+        )
+        form_items = [
+            {
+                "id": 100000 + binding.id,
+                "parent_id": None,
+                "title": binding.alias or form.name,
+                "icon": "FormOutlined",
+                "route_path": f"/dynamic/{form.id}",
+                "sort_order": binding.sort_order,
+                "is_visible": True,
+                "is_default": False,
+            }
+            for binding, form in form_rows.fetchall()
+        ]
+        if form_items:
+            return {"data": form_items}
         rows = await session.execute(
             select(MenuItem, ApplicationMenu)
             .join(ApplicationMenu, ApplicationMenu.menu_id == MenuItem.id)

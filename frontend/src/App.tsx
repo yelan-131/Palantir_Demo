@@ -186,7 +186,7 @@ function getRuntimePageTitle(pathname: string): string {
 function PageLoader() {
   return (
     <div style={{ padding: 40 }}>
-      <Spin size="large" tip="鍔犺浇宸ヤ綔鍙?..">
+      <Spin size="large" tip={'\u52a0\u8f7d\u5de5\u4f5c\u53f0...'}>
         <div style={{ minHeight: 200 }} />
       </Spin>
     </div>
@@ -204,18 +204,17 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     if (this.state.error) {
       return (
         <div style={{ padding: 40 }}>
-          <Typography.Title level={4} type="danger">椤甸潰娓叉煋澶辫触</Typography.Title>
+          <Typography.Title level={4} type="danger">{'\u9875\u9762\u6e32\u67d3\u5931\u8d25'}</Typography.Title>
           <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fff', padding: 16, borderRadius: 6 }}>
             {this.state.error}
           </pre>
-          <Button type="primary" onClick={() => window.location.reload()}>閲嶆柊鍔犺浇椤甸潰</Button>
+          <Button type="primary" onClick={() => window.location.reload()}>{'\u91cd\u65b0\u52a0\u8f7d\u9875\u9762'}</Button>
         </div>
       );
     }
     return this.props.children;
   }
 }
-
 function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
   if (items.some((item) => item.children?.length)) {
     return items.map((item) => ({
@@ -310,7 +309,7 @@ function AppContent() {
         localStorage.setItem('mf_current_app_id', String(matched.id));
       })
       .catch(() => {
-        message.error('搴旂敤鍒楄〃鍔犺浇澶辫触');
+        message.error('\u5e94\u7528\u5217\u8868\u52a0\u8f7d\u5931\u8d25');
         setApplications([]);
         setCurrentApplication(null);
         setDynamicMenus([]);
@@ -327,7 +326,7 @@ function AppContent() {
         setDynamicMenus(buildDynamicMenuTree(items));
       })
       .catch(() => {
-        message.error('搴旂敤鑿滃崟鍔犺浇澶辫触');
+        message.error('\u5e94\u7528\u83dc\u5355\u52a0\u8f7d\u5931\u8d25');
         setDynamicMenus([]);
       });
   }, [currentApplication]);
@@ -458,7 +457,7 @@ function AppContent() {
               handleApproval(n.related_id || n.id, 'approve');
             }}
           >
-            閫氳繃
+            {'\u901a\u8fc7'}
           </Button>
           <Button
             size="small"
@@ -470,7 +469,7 @@ function AppContent() {
               handleApproval(n.related_id || n.id, 'reject');
             }}
           >
-            椹冲洖
+            {'\u9a73\u56de'}
           </Button>
         </div>
       )}
@@ -478,7 +477,7 @@ function AppContent() {
   );
 
   const notificationMenuItems: NonNullable<MenuProps['items']> = [
-    { key: 'header', label: <strong>閫氱煡涓績</strong>, disabled: true },
+    { key: 'header', label: <strong>{'\u901a\u77e5\u4e2d\u5fc3'}</strong>, disabled: true },
     { type: 'divider' },
   ];
 
@@ -563,7 +562,7 @@ function AppContent() {
             />
             <Dropdown menu={applicationMenu} trigger={['click']} disabled={!applications.length}>
               <Button className="application-switch-button" icon={iconFor(currentApplication?.icon)}>
-                <span>{currentApplication?.name || '閫夋嫨搴旂敤'}</span>
+                <span>{currentApplication?.name || '\u9009\u62e9\u5e94\u7528'}</span>
                 <DownOutlined />
               </Button>
             </Dropdown>
@@ -576,7 +575,7 @@ function AppContent() {
               icon={<SearchOutlined />}
               onClick={() => setSearchOpen(true)}
             >
-              鎼滅储搴旂敤銆佹暟鎹祫浜ф垨閰嶇疆 Ctrl+K
+              {'\u641c\u7d22\u5e94\u7528\u3001\u6570\u636e\u8d44\u4ea7\u6216\u914d\u7f6e Ctrl+K'}
             </Button>
             <Dropdown menu={notificationMenu} trigger={['click']}>
               <Badge count={unread} size="small">
@@ -602,9 +601,9 @@ function AppContent() {
                   <Typography.Title level={3}>{runtimeTitle}</Typography.Title>
                 </div>
                 <Space wrap>
-                  <Button icon={<PlusOutlined />}>鏂板</Button>
-                  <Button icon={<ReloadOutlined />}>鍒锋柊</Button>
-                  <Button icon={<DownloadOutlined />}>瀵煎嚭</Button>
+                  <Button icon={<PlusOutlined />}>{'\u65b0\u589e'}</Button>
+                  <Button icon={<ReloadOutlined />}>{'\u5237\u65b0'}</Button>
+                  <Button icon={<DownloadOutlined />}>{'\u5bfc\u51fa'}</Button>
                 </Space>
               </div>
             )}
