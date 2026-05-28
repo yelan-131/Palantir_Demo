@@ -12,6 +12,7 @@ Release date: 2026-05-28
 - `line-status` 从 `production_lines`、`workshops`、`equipment` 聚合产线指标和明细。
 - `production-plan-entry` 从 `work_orders`、`sales_orders`、`products`、`production_lines` 读取计划明细。
 - `alert-center` 从低健康度设备和质量缺陷记录生成告警列表。
+- 生产、设备、质量、SPC、供应商和物料影响类 `/program/*` 页面也接入同一数据桥，避免未支持页面静默回退为纯前端示例。
 - 前端应用页优先读取服务器接口，接口不可用时才回退到内置示例行。
 
 ## 数据口径

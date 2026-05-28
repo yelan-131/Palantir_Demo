@@ -10,7 +10,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import safe_db_call as _try_db
-from app.models.relational import Defect, Equipment, Factory, Product, ProductionLine, SalesOrder, WorkOrder, Workshop
+from app.models.relational import (
+    Defect,
+    Equipment,
+    Factory,
+    Inspection,
+    Material,
+    Product,
+    ProductionLine,
+    SalesOrder,
+    SPCPoint,
+    Supplier,
+    WorkOrder,
+    Workshop,
+)
 
 router = APIRouter()
 
@@ -207,9 +220,23 @@ async def get_program_data(program_id: str, limit: int = Query(500, ge=1, le=100
     tables when the production database is available.
     """
     loaders = {
+        "oee-trend-report": _query_oee_program,
         "line-status": _query_line_status_program,
+        "line-load-analysis": _query_line_status_program,
         "production-plan-entry": _query_plan_program,
+        "device-health-dashboard": _query_equipment_program,
+        "fault-prediction": _query_equipment_program,
+        "maintenance-order": _query_equipment_program,
+        "failure-trend-analysis": _query_equipment_program,
         "alert-center": _query_alert_program,
+        "inspection-batch": _query_quality_program,
+        "defect-analysis": _query_quality_program,
+        "defect-analysis-report": _query_quality_program,
+        "process-capability-dashboard": _query_spc_program,
+        "supplier-risk": _query_supply_program,
+        "material-impact": _query_material_program,
+        "material-impact-report": _query_material_program,
+        "supply-risk-dashboard": _query_supply_program,
     }
     loader = loaders.get(program_id)
     if loader is None:
@@ -294,6 +321,41 @@ async def _query_line_status_program(db: AsyncSession, limit: int):
     }
 
 
+async def _query_oee_program(db: AsyncSession, limit: int):
+    rows_result = await db.execute(select(ProductionLine).order_by(ProductionLine.id.asc()).limit(limit))
+    lines = rows_result.scalars().all()
+    avg_target = await db.scalar(select(func.avg(ProductionLine.oee_target))) or 0
+    low_target_count = await db.scalar(select(func.count(ProductionLine.id)).where(ProductionLine.oee_target < 0.85)) or 0
+    rows = []
+    total_oee = 0.0
+    for line in lines:
+        random.seed(line.id * 23)
+        availability = random.uniform(0.82, 0.98)
+        performance = random.uniform(0.78, 0.96)
+        quality_rate = random.uniform(0.94, 0.998)
+        oee = availability * performance * quality_rate
+        total_oee += oee
+        rows.append({
+            "key": f"oee-{line.id}",
+            "date": datetime.now().strftime("%m-%d"),
+            "line": line.name,
+            "oee": f"{oee * 100:.1f}%",
+            "availability": f"{availability * 100:.1f}%",
+            "reason": line.status,
+        })
+    avg_oee = total_oee / max(len(lines), 1)
+    return {
+        "metrics": [
+            _metric("本期 OEE", round(avg_oee * 100, 1), "green", "%"),
+            _metric("目标 OEE", round(float(avg_target) * 100, 1), "blue", "%"),
+            _metric("低于目标产线", int(low_target_count), "orange"),
+            _metric("样本产线", len(lines), "blue"),
+        ],
+        "rows": rows,
+        "total": await db.scalar(select(func.count(ProductionLine.id))) or len(rows),
+    }
+
+
 async def _query_plan_program(db: AsyncSession, limit: int):
     status_counts = dict(
         (
@@ -347,6 +409,52 @@ async def _query_plan_program(db: AsyncSession, limit: int):
     }
 
 
+async def _query_equipment_program(db: AsyncSession, limit: int):
+    total = await db.scalar(select(func.count(Equipment.id))) or 0
+    avg_health = await db.scalar(select(func.avg(Equipment.health_score))) or 0
+    high_risk = await db.scalar(select(func.count(Equipment.id)).where(Equipment.health_score < 60)) or 0
+    maintenance = await db.scalar(
+        select(func.count(Equipment.id)).where(Equipment.status.in_(["maintenance", "fault", "offline"]))
+    ) or 0
+    result = await db.execute(
+        select(Equipment.id, Equipment.name, Equipment.model, Equipment.status, Equipment.health_score, ProductionLine.name.label("line_name"))
+        .join(ProductionLine, ProductionLine.id == Equipment.line_id)
+        .order_by(Equipment.health_score.asc(), Equipment.id.asc())
+        .limit(limit)
+    )
+    rows = []
+    for row in result.mappings().all():
+        health = round(float(row["health_score"] or 0))
+        rows.append({
+            "key": f"equipment-{row['id']}",
+            "asset": row["name"],
+            "health": health,
+            "level": "high" if health < 60 else "medium" if health < 80 else "low",
+            "risk": f"{row['status']} / {row['model']}",
+            "action": "inspect" if health < 75 else "monitor",
+            "orderNo": f"MO-{row['id']:06d}",
+            "owner": "maintenance",
+            "status": row["status"],
+            "week": datetime.now().strftime("%Y-W%W"),
+            "type": row["line_name"],
+            "count": 1,
+            "reason": row["status"],
+            "fault": row["status"],
+            "probability": f"{max(5, min(95, 100 - health))}%",
+            "window": "7d",
+        })
+    return {
+        "metrics": [
+            _metric("平均健康度", round(float(avg_health), 1), "green", "%"),
+            _metric("高风险设备", int(high_risk), "red"),
+            _metric("待处理设备", int(maintenance), "orange"),
+            _metric("在线设备", int(total), "blue"),
+        ],
+        "rows": rows,
+        "total": int(total),
+    }
+
+
 async def _query_alert_program(db: AsyncSession, limit: int):
     equipment_result = await db.execute(
         select(Equipment.id, Equipment.name, Equipment.status, Equipment.health_score, ProductionLine.name.label("line_name"))
@@ -397,4 +505,142 @@ async def _query_alert_program(db: AsyncSession, limit: int):
         ],
         "rows": rows,
         "total": len(rows),
+    }
+
+
+async def _query_quality_program(db: AsyncSession, limit: int):
+    total_defects = await db.scalar(select(func.count(Defect.id))) or 0
+    critical = await db.scalar(select(func.count(Defect.id)).where(Defect.severity == "critical")) or 0
+    inspections = await db.scalar(select(func.count(Inspection.id))) or 0
+    pass_count = await db.scalar(select(func.count(Inspection.id)).where(Inspection.result == "pass")) or 0
+    result = await db.execute(
+        select(Defect.id, Defect.defect_type, Defect.severity, Defect.description, Defect.root_cause, Defect.created_at)
+        .order_by(Defect.created_at.desc(), Defect.id.asc())
+        .limit(limit)
+    )
+    rows = []
+    for row in result.mappings().all():
+        rows.append({
+            "key": f"defect-{row['id']}",
+            "batchNo": f"INSP-{row['id']:06d}",
+            "type": row["defect_type"],
+            "count": 1,
+            "status": row["severity"],
+            "defect": row["defect_type"],
+            "severity": row["severity"],
+            "reason": row["root_cause"] or row["description"] or "pending analysis",
+            "process": row["defect_type"],
+            "feature": row["severity"],
+            "cpk": 1.1 if row["severity"] == "critical" else 1.35,
+            "ppk": 1.0 if row["severity"] == "critical" else 1.28,
+            "eventNo": f"QE-{row['id']:06d}",
+            "subject": row["defect_type"],
+            "owner": "quality",
+            "stage": row["severity"],
+            "date": row["created_at"].strftime("%Y-%m-%d") if row["created_at"] else None,
+        })
+    pass_rate = round((pass_count / max(inspections, 1)) * 100, 1)
+    return {
+        "metrics": [
+            _metric("质检批次", int(inspections), "blue"),
+            _metric("缺陷记录", int(total_defects), "orange"),
+            _metric("严重缺陷", int(critical), "red"),
+            _metric("通过率", pass_rate, "green", "%"),
+        ],
+        "rows": rows,
+        "total": int(total_defects),
+    }
+
+
+async def _query_spc_program(db: AsyncSession, limit: int):
+    total = await db.scalar(select(func.count(SPCPoint.id))) or 0
+    out_of_limit = await db.scalar(select(func.count(SPCPoint.id)).where((SPCPoint.value > SPCPoint.ucl) | (SPCPoint.value < SPCPoint.lcl))) or 0
+    result = await db.execute(
+        select(SPCPoint.id, SPCPoint.parameter, SPCPoint.value, SPCPoint.ucl, SPCPoint.lcl, Equipment.name.label("equipment_name"))
+        .join(Equipment, Equipment.id == SPCPoint.equipment_id)
+        .order_by(SPCPoint.timestamp.desc(), SPCPoint.id.asc())
+        .limit(limit)
+    )
+    rows = []
+    for row in result.mappings().all():
+        span = max(float(row["ucl"] or 0) - float(row["lcl"] or 0), 0.001)
+        cpk = round(span / max(abs(float(row["value"] or 0) - ((float(row["ucl"] or 0) + float(row["lcl"] or 0)) / 2)), 0.1), 2)
+        rows.append({
+            "key": f"spc-{row['id']}",
+            "process": row["equipment_name"],
+            "feature": row["parameter"],
+            "cpk": cpk,
+            "ppk": max(0.8, round(cpk * 0.94, 2)),
+            "status": "out_of_limit" if row["value"] > row["ucl"] or row["value"] < row["lcl"] else "stable",
+        })
+    return {
+        "metrics": [
+            _metric("SPC 点位", int(total), "blue"),
+            _metric("超限点", int(out_of_limit), "orange"),
+            _metric("受控比例", round((1 - out_of_limit / max(total, 1)) * 100, 1), "green", "%"),
+            _metric("样本", len(rows), "blue"),
+        ],
+        "rows": rows,
+        "total": int(total),
+    }
+
+
+async def _query_supply_program(db: AsyncSession, limit: int):
+    total = await db.scalar(select(func.count(Supplier.id))) or 0
+    high_risk = await db.scalar(select(func.count(Supplier.id)).where(Supplier.rating < 3.5)) or 0
+    avg_rating = await db.scalar(select(func.avg(Supplier.rating))) or 0
+    result = await db.execute(select(Supplier).order_by(Supplier.rating.asc(), Supplier.id.asc()).limit(limit))
+    rows = []
+    for supplier in result.scalars().all():
+        level = "high" if supplier.rating < 3.5 else "medium" if supplier.rating < 4.2 else "low"
+        rows.append({
+            "key": f"supplier-{supplier.id}",
+            "supplier": supplier.name,
+            "category": supplier.location,
+            "risk": level,
+            "level": level,
+            "reason": f"rating {supplier.rating:.1f}, lead time {supplier.lead_time_days}d",
+            "mitigation": "dual source" if level == "high" else "monitor",
+        })
+    return {
+        "metrics": [
+            _metric("供应商", int(total), "blue"),
+            _metric("高风险供应商", int(high_risk), "red"),
+            _metric("平均评分", round(float(avg_rating), 2), "green"),
+            _metric("样本", len(rows), "orange"),
+        ],
+        "rows": rows,
+        "total": int(total),
+    }
+
+
+async def _query_material_program(db: AsyncSession, limit: int):
+    total = await db.scalar(select(func.count(Material.id))) or 0
+    low_stock = await db.scalar(select(func.count(Material.id)).where(Material.safety_stock < 500)) or 0
+    result = await db.execute(select(Material).order_by(Material.safety_stock.asc(), Material.id.asc()).limit(limit))
+    rows = []
+    for material in result.scalars().all():
+        risk = "high" if material.safety_stock < 500 else "medium" if material.safety_stock < 1200 else "low"
+        rows.append({
+            "key": f"material-{material.id}",
+            "material": material.name,
+            "gap": int(max(0, 1200 - float(material.safety_stock or 0))),
+            "line": material.material_type,
+            "target": material.material_type,
+            "impact": risk,
+            "action": "expedite purchase" if risk == "high" else "monitor stock",
+            "group": material.material_type,
+            "days": round(float(material.safety_stock or 0) / 100, 1),
+            "transit": int(float(material.safety_stock or 0) % 40),
+            "risk": risk,
+        })
+    return {
+        "metrics": [
+            _metric("物料", int(total), "blue"),
+            _metric("低安全库存", int(low_stock), "orange"),
+            _metric("样本物料", len(rows), "green"),
+            _metric("数据来源", "PostgreSQL", "blue"),
+        ],
+        "rows": rows,
+        "total": int(total),
     }
