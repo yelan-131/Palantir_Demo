@@ -3009,6 +3009,49 @@
   flex-direction: column;
 }
 
+.view-config-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.view-config-filter-grid .view-config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 124px;
+  padding: 12px;
+  border: 1px solid #dce5ec;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.view-config-filter-grid .view-config-row:last-child {
+  border-bottom: 1px solid #dce5ec;
+}
+
+.view-config-filter-grid .view-config-row-main {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: flex-start;
+}
+
+.view-config-filter-grid .view-config-row-main .ant-tag {
+  width: fit-content;
+}
+
+.view-config-filter-grid .view-config-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-self: end;
+}
+
+.view-config-filter-grid .view-config-inline-editor {
+  grid-column: auto;
+  grid-template-columns: 1fr;
+  padding: 10px;
+}
+
 .view-config-row {
   position: relative;
   display: grid;
@@ -3109,6 +3152,51 @@
   width: 100%;
 }
 
+.view-filter-field-modal-note {
+  margin-bottom: 12px;
+  color: #667783;
+  font-size: 12px;
+}
+
+.view-filter-field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.view-filter-field-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce5ec;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.view-filter-field-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.view-filter-field-option strong,
+.view-filter-field-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-filter-field-option small {
+  color: #7a8995;
+  font-size: 11px;
+}
+
 .view-runtime-preview {
   padding: 14px;
 }
@@ -3201,6 +3289,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .view-config-filter-grid {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+
+  .view-filter-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .form-designer-right {
     grid-column: 1 / -1;
   }
@@ -3242,6 +3338,8 @@
   .flow-canvas,
   .view-config-row,
   .view-config-row-main,
+  .view-config-filter-grid,
+  .view-filter-field-grid,
   .view-config-inline-editor,
   .view-config-inline-editor-wide,
   .view-runtime-filter-preview {

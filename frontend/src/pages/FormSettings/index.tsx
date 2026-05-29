@@ -3384,6 +3384,34 @@ export default function FormSettingsPage() {
 
       <Modal
         centered
+        className="view-filter-field-modal"
+        okText="完成"
+        onCancel={() => setFilterFieldPickerOpen(false)}
+        onOk={() => setFilterFieldPickerOpen(false)}
+        open={filterFieldPickerOpen}
+        title="选择筛选字段"
+        width={720}
+      >
+        <div className="view-filter-field-modal-note">勾选表单字段后，会自动出现在筛选区；取消勾选会从筛选区移除。</div>
+        <Checkbox.Group
+          className="view-filter-field-grid"
+          value={sortedViewFilters.map((filter) => filter.fieldName)}
+          onChange={(values) => syncViewFiltersByFields(values.map(String))}
+        >
+          {baseConfig.fields.map((field) => (
+            <label className="view-filter-field-option" key={field.key}>
+              <Checkbox value={field.key} />
+              <span>
+                <strong>{field.name}</strong>
+                <small>{field.key} · {field.type}</small>
+              </span>
+            </label>
+          ))}
+        </Checkbox.Group>
+      </Modal>
+
+      <Modal
+        centered
         className="designer-preview-modal"
         footer={null}
         onCancel={() => setPreviewOpen(false)}
