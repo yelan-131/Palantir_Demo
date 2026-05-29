@@ -412,6 +412,7 @@ The low-code form creation flow has split into two distinct tools:
 | Draft state merge | `backend/app/services/ai/action_state.py` | Merges structured semantic slots into the pending action state without letting regex extraction overwrite explicit LLM slots. |
 | Confirmation card | `low_code.create_form_definition` skill output | Shows the current form draft and waits for human confirmation. |
 | Configuration write | `forms.create_form_definition`, `backend/app/services/ai/low_code_tools.py` | Creates form metadata, fields, layouts, optional menu binding, audit event, and route only after confirmation and permission checks. |
+| Existing form field change | `low_code.add_form_field` -> `forms.add_form_field` | Adds fields to an existing form after the same semantic planning, permission, confirmation, and audit gates. |
 
 This means conversational edits should be represented as form deltas before they
 become a write payload:
@@ -429,6 +430,22 @@ The `low_code.create_form_definition` skill allows both
 `ai.semantic_plan_low_code_form` and `forms.create_form_definition`; the former
 has no side effect, while the latter is a high-risk configuration write that
 requires `config` permission and confirmation.
+
+For an existing form, field additions are modeled as a separate skill instead of
+being hidden inside form creation:
+
+```json
+{
+  "skill": "low_code.add_form_field",
+  "tool": "forms.add_form_field",
+  "payload": {
+    "form_code": "material_master",
+    "fields": [
+      {"field_name": "supplier_rating", "label": "供应商等级", "field_type": "string"}
+    ]
+  }
+}
+```
 
 ### 9.4 Example: Supply Chain Recommendation To Purchase Request Draft
 

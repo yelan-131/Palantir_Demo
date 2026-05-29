@@ -154,13 +154,19 @@ def test_skill_tool_registry_contracts():
     assert get_skill("quality.create_capa_draft").confirmation_policy == "confirm_token"
     assert get_tool("workflow.start").side_effect == "workflow_action"
     assert get_tool("ai.semantic_plan_low_code_form").side_effect == "read"
+    assert get_tool("forms.add_form_field").side_effect == "configuration_write"
     assert "ai.semantic_plan_low_code_form" in get_skill("low_code.create_form_definition").allowed_tools
+    assert "forms.add_form_field" in get_skill("low_code.add_form_field").allowed_tools
 
     allowed, reason = validate_tool_call("quality.create_capa_draft", "forms.create_dynamic_record_draft")
     assert allowed is True
     assert reason == "Allowed"
 
     allowed, reason = validate_tool_call("low_code.create_form_definition", "ai.semantic_plan_low_code_form")
+    assert allowed is True
+    assert reason == "Allowed"
+
+    allowed, reason = validate_tool_call("low_code.add_form_field", "forms.add_form_field")
     assert allowed is True
     assert reason == "Allowed"
 

@@ -42,11 +42,25 @@ CREATE_FORM_DEFINITION_CONTRACT = {
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
 }
 
+ADD_FORM_FIELD_CONTRACT = {
+    "tool": "forms.add_form_field",
+    "required": ["form.id|form.code", "fields"],
+    "optional": ["field.required", "field.searchable", "field.sortable", "field.enum_values", "field.ui_config"],
+    "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
+    "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
+}
+
 
 def describe_create_form_definition_contract() -> dict[str, Any]:
     """Return the platform contract the Agent must consult before proposing a form write."""
 
     return CREATE_FORM_DEFINITION_CONTRACT
+
+
+def describe_add_form_field_contract() -> dict[str, Any]:
+    """Return the platform contract for adding fields to an existing form."""
+
+    return ADD_FORM_FIELD_CONTRACT
 
 
 def has_minimum_form_requirements(context: dict[str, Any]) -> bool:
@@ -319,4 +333,131 @@ async def execute_create_form_definition(
         "application_binding": {"id": binding.id, "application_id": binding.application_id} if binding else None,
         "menu_node": {"id": menu_node.id, "route_path": menu_node.route_path} if menu_node else None,
         "route_path": f"/dynamic/{form.id}",
+    }
+
+
+def _field_payload(field: FormField) -> dict[str, Any]:
+    return {"id": field.id, "field_name": field.field_name, "label": field.label, "field_type": field.field_type}
+
+
+def _append_field_to_layouts(layouts: list[FormLayout], field: FormField) -> list[str]:
+    changed: list[str] = []
+    for layout in layouts:
+        config = dict(layout.config or {})
+        if layout.layout_type == "list":
+            columns = list(config.get("columns") or [])
+            if field.visible_in_list and not any(item.get("field_name") == field.field_name for item in columns if isinstance(item, dict)):
+                columns.append({"field_name": field.field_name, "label": field.label, "width": 160})
+                config["columns"] = columns
+                layout.config = config
+                changed.append("list")
+        elif layout.layout_type == "form":
+            sections = list(config.get("sections") or [])
+            if not sections:
+                sections = [{"title": "Basic", "fields": []}]
+            first = dict(sections[0])
+            fields = list(first.get("fields") or [])
+            already_present = any(
+                (item.get("field_name") if isinstance(item, dict) else item) == field.field_name
+                for item in fields
+            )
+            if field.visible_in_form and not already_present:
+                fields.append({"field_name": field.field_name, "label": field.label, "col_span": 1})
+                first["fields"] = fields
+                sections[0] = first
+                config["sections"] = sections
+                layout.config = config
+                changed.append("form")
+    return changed
+
+
+async def execute_add_form_field(
+    session: AsyncSession,
+    *,
+    user: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Add fields to an existing form after AI confirmation and admin policy check."""
+
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin privilege required for AI low-code configuration writes")
+
+    tenant_id = current_tenant_id(user)
+    form_id = payload.get("form_id") or payload.get("formId")
+    form_code = payload.get("form_code") or payload.get("formCode")
+    form = None
+    if form_id:
+        form = await session.get(Form, int(form_id))
+        if form and form.tenant_id != tenant_id:
+            form = None
+    elif form_code:
+        form = await session.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == str(form_code)))
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    fields = payload.get("fields") or []
+    if not isinstance(fields, list) or not fields:
+        raise HTTPException(status_code=422, detail="At least one field is required")
+
+    existing_names = {
+        name
+        for name in (
+            await session.execute(select(FormField.field_name).where(FormField.form_id == form.id, FormField.tenant_id == tenant_id))
+        ).scalars().all()
+    }
+    max_sort_order = await session.scalar(
+        select(FormField.sort_order).where(FormField.form_id == form.id, FormField.tenant_id == tenant_id).order_by(FormField.sort_order.desc()).limit(1)
+    )
+    next_sort_order = int(max_sort_order or 0) + 1
+    created_fields: list[FormField] = []
+    for index, field_data in enumerate(fields):
+        if not isinstance(field_data, dict):
+            continue
+        field_name = _slugify(str(field_data.get("field_name") or field_data.get("name") or f"field_{next_sort_order + index}"), f"field_{next_sort_order + index}")
+        assert_safe_identifier(field_name)
+        if field_name in existing_names:
+            raise HTTPException(status_code=409, detail=f"Field already exists on this form: {field_name}")
+        existing_names.add(field_name)
+        field = FormField(
+            tenant_id=tenant_id,
+            form_id=form.id,
+            field_name=field_name,
+            label=str(field_data.get("label") or field_name),
+            field_type=_normalize_field_type(field_data.get("field_type")),
+            required=bool(field_data.get("required", False)),
+            visible_in_list=bool(field_data.get("visible_in_list", True)),
+            visible_in_form=bool(field_data.get("visible_in_form", True)),
+            searchable=bool(field_data.get("searchable", False)),
+            sortable=bool(field_data.get("sortable", False)),
+            enum_values=field_data.get("enum_values"),
+            ui_config=field_data.get("ui_config"),
+            sort_order=int(field_data.get("sort_order", next_sort_order + index)),
+        )
+        session.add(field)
+        created_fields.append(field)
+
+    await session.flush()
+    layouts = (
+        await session.execute(select(FormLayout).where(FormLayout.form_id == form.id, FormLayout.tenant_id == tenant_id))
+    ).scalars().all()
+    changed_layouts: set[str] = set()
+    for field in created_fields:
+        changed_layouts.update(_append_field_to_layouts(list(layouts), field))
+
+    await session.commit()
+    for field in created_fields:
+        await session.refresh(field)
+    await write_audit_log(
+        tenant_id=tenant_id,
+        user_id=current_user_id(user),
+        action="ai_add_form_field",
+        resource_type="form",
+        resource_id=form.id,
+        new_values=payload,
+    )
+
+    return {
+        "form": {"id": form.id, "name": form.name, "code": form.code, "status": form.status},
+        "fields": [_field_payload(field) for field in created_fields],
+        "changed_layouts": sorted(changed_layouts),
     }

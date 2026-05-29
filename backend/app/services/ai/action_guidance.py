@@ -6,12 +6,13 @@ import re
 from typing import Any
 
 from .agent_definition import load_action_contracts
-from .low_code_tools import describe_create_form_definition_contract, has_minimum_form_requirements
+from .low_code_tools import describe_add_form_field_contract, describe_create_form_definition_contract, has_minimum_form_requirements
 
 
 def describe_action_contract(skill: str) -> dict[str, Any]:
     contracts = {
         "low_code.create_form_definition": describe_create_form_definition_contract(),
+        "low_code.add_form_field": describe_add_form_field_contract(),
         **load_action_contracts(),
     }
     return contracts.get(skill, {"tool": skill, "required": [], "questions": [], "example": ""})

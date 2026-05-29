@@ -26,7 +26,7 @@ from app.services.ai.memory import memory_service
 from app.services.ai.orchestrator import run_agent
 from app.services.ai.policies import decide_ai_permission, decide_skill_permission
 from app.services.ai.providers import ProviderConfigurationError
-from app.services.ai.low_code_tools import execute_create_form_definition
+from app.services.ai.low_code_tools import execute_add_form_field, execute_create_form_definition
 from app.services.ai.runtime import agent_runtime
 from app.services.ai.schemas import AIProviderConfig, AgentRequest, AgentResponse, ChatMessage, ChatOptions, DraftSaveRequest
 from app.services.ai.settings import (
@@ -213,6 +213,24 @@ async def _execute_confirmed_agent_run(run: dict[str, Any], current_user: dict[s
         skill = action.get("skill")
         action_payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
         source_draft_id = str(action_payload.get("_source_draft_id") or action_payload.get("_resume_draft_id") or "")
+        if skill == "low_code.add_form_field":
+            async with db_session() as session:
+                result = await execute_add_form_field(session, user=current_user, payload=action_payload)
+            results.append({
+                "skill": skill,
+                "tool": "forms.add_form_field",
+                "status": "completed",
+                "result": result,
+            })
+            _audit_ai_event(current_user, "agent_tool_executed", {"skill": skill, "tool": "forms.add_form_field", "result": result})
+            await _update_ai_draft_status(
+                draft_id=source_draft_id,
+                current_user=current_user,
+                status="executed",
+                metadata={"executed_result": result, "run_id": run.get("run_id")},
+            )
+            continue
+
         if skill != "low_code.create_form_definition":
             payload = action_payload
             dynamic_result = None
