@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Drawer, Empty, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Timeline, Typography } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { useNavigate, useParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
@@ -1267,7 +1267,7 @@ function BusinessProgram({
       </Modal>
 
       <Drawer
-        className="app-business-detail-drawer"
+        className="workflow-detail-drawer app-business-detail-drawer"
         destroyOnClose
         extra={(
           <Space>
@@ -1282,24 +1282,77 @@ function BusinessProgram({
         width={460}
       >
         {selectedRow ? (
-          <Space className="app-business-detail-body" direction="vertical" size={14}>
-            <div className="app-business-detail-summary">
-              <Typography.Text type="secondary">业务记录</Typography.Text>
-              <Typography.Title level={5}>{selectedRowTitle}</Typography.Title>
-              <Space wrap>
-                {selectedRow.level ? <Tag color={String(selectedRow.level).includes('严重') ? 'red' : 'blue'}>{String(selectedRow.level)}</Tag> : null}
-                {selectedRow.status ? <Tag color={String(selectedRow.status).includes('关闭') ? 'default' : 'processing'}>{String(selectedRow.status)}</Tag> : null}
-                {selectedRow.source ? <Tag color="cyan">{String(selectedRow.source)}</Tag> : null}
-              </Space>
+          <div className="workflow-detail-content app-business-detail-body">
+            <div className="workflow-detail-head">
+              <FileSearchOutlined />
+              <div>
+                <Typography.Text strong>{selectedRowTitle}</Typography.Text>
+                <Typography.Text type="secondary">{program.title} · 表单记录</Typography.Text>
+              </div>
+              {selectedRow.status ? <Tag color={String(selectedRow.status).includes('关闭') ? 'default' : 'processing'}>{String(selectedRow.status)}</Tag> : null}
             </div>
-            <Descriptions bordered column={1} size="small">
-              {detailItems.map((item) => (
-                <Descriptions.Item key={item.key} label={item.label}>
-                  {formatDetailValue(item.value)}
-                </Descriptions.Item>
-              ))}
-            </Descriptions>
-          </Space>
+            <Tabs
+              className="workflow-detail-tabs"
+              items={[
+                {
+                  key: 'form',
+                  label: '表单信息',
+                  children: (
+                    <div className="workflow-tab-page">
+                      <Form layout="vertical" className="workflow-business-form">
+                        <div className="workflow-form-section-title">业务表单</div>
+                        <Row gutter={12}>
+                          {detailItems.map((item) => (
+                            <Col xs={24} md={12} key={item.key}>
+                              <Form.Item label={item.label}>
+                                <Input value={formatDetailValue(item.value)} readOnly />
+                              </Form.Item>
+                            </Col>
+                          ))}
+                        </Row>
+                      </Form>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'progress',
+                  label: '流程进度',
+                  children: (
+                    <div className="workflow-tab-page">
+                      <div className="workflow-progress-summary">
+                        <div>
+                          <span>当前节点</span>
+                          <strong>{currentNode}</strong>
+                        </div>
+                        <div>
+                          <span>当前处理人</span>
+                          <strong>{currentHandler}</strong>
+                        </div>
+                        <Tag color={progressStatus.includes('完成') || progressStatus.includes('关闭') ? 'green' : 'blue'}>{progressStatus}</Tag>
+                      </div>
+                      <div className="workflow-progress-card">
+                        <div className="workflow-form-section-title">处理记录</div>
+                        <Timeline
+                          items={(interactionEntries.length ? interactionEntries : [
+                            { title: '创建业务记录', description: formatDetailValue(selectedRow._createdAt || selectedRow.occurredAt) },
+                            { title: currentNode, description: currentHandler },
+                          ]).map((entry, index) => ({
+                            color: index === 0 ? 'blue' : 'gray',
+                            children: (
+                              <div className="workflow-step-item">
+                                <strong>{entry.title}</strong>
+                                <span>{entry.description}</span>
+                              </div>
+                            ),
+                          }))}
+                        />
+                      </div>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </div>
         ) : null}
       </Drawer>
     </>
