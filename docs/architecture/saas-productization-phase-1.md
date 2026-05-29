@@ -1,6 +1,6 @@
 # SaaS Productization Phase 1
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 Status: productization boundary + implemented guards. This document defines the
 first SaaS production boundary and the tests/endpoints that currently enforce
@@ -31,12 +31,15 @@ Phase 1 uses a shared database with `tenant_id` isolation.
 The following SaaS-facing tables carry `tenant_id`:
 
 - tenants
+- tenant_domains, tenant_invites, tenant_exports
 - users, roles, user_roles, role_permissions
+- user_sessions, password_history, password_reset_tokens, oidc_states
 - applications, application_menus, application_roles, menu_items
-- forms, application_forms, application_menu_nodes, form_fields, form_layouts, form_actions, form_permissions, workflow_bindings, dynamic_records
+- forms, form_versions, application_forms, application_menu_nodes, form_fields, form_layouts, form_actions, form_permissions, workflow_bindings, dynamic_records
 - workflow_defs, workflow_instances
 - reports, report_snapshots
 - audit_logs
+- notifications, rules, scheduler jobs, knowledge runtime rows, and AI runtime rows
 
 Existing data is migrated into the default tenant. New records are created with the tenant from the authenticated user context.
 
@@ -57,14 +60,16 @@ Production rules:
 | --- | --- | --- |
 | Runtime mode guard | Ready | `APP_MODE` controls demo vs production behavior. |
 | Tenant context | Ready foundation | Shared database `tenant_id` filtering is in place for the low-code core. |
+| Tenant operations | Ready foundation | `/api/v1/platform` covers tenant list/detail/create/update, invites, password reset tokens, and redacted exports for platform admins. |
 | Cookie auth | Ready foundation | Login sets an HttpOnly cookie; logout clears it. |
 | Applications and menus | Ready foundation | Database-backed and tenant-filtered. |
-| Forms and fields | Ready foundation | Database-backed and tenant-filtered. |
-| Dynamic records | Ready foundation | CRUD is tenant-filtered; no-search listing uses DB pagination. |
+| Forms and fields | Ready foundation | Database-backed, tenant-filtered, and publish immutable form-version snapshots. |
+| Dynamic records | Ready foundation | CRUD is tenant-filtered; records carry `schema_version`; no-search listing uses DB pagination. |
 | Permissions | Ready foundation | Backend permission checks are the security boundary. |
 | Workflow binding and instances | Ready foundation | Tenant-filtered definitions/instances and audit on start/approval/cancel. |
 | Reports | Ready foundation | Tenant-filtered report CRUD and snapshots. |
 | Audit logs | Ready foundation | Core actions include tenant/user/resource metadata. |
+| System readiness | Ready foundation | `/api/v1/system/readiness` reports database, Redis, and Neo4j readiness; `/api/v1/release/current` exposes release metadata. |
 | Route/menu smoke guard | Ready foundation | `frontend/src/config/readyPathSmoke.ts` asserts required ready-path routes, breadcrumbs, and business menus. |
 
 The backend exposes the current machine-readable readiness contract at:
@@ -90,30 +95,31 @@ scope changes.
 | Quality | Beta/Demo | Keep visible as a demo module unless explicitly hardened. |
 | Equipment and maintenance | Beta/Demo | Keep separate from SaaS ready acceptance. |
 | Supply chain | Beta/Demo | Demo data and workflows remain useful, but not phase-1 ready. |
-| AI assistant and AI builder | Beta/Demo | Keep as assisted workflow surface; do not rely on it for production correctness. |
-| Knowledge base | Demo | Static/local retrieval remains a demonstration path. |
+| AI assistant and AI builder | Ready foundation/Beta | Conversation, memory, audit, and confirmation-token surfaces exist; low-code writes remain admin-only and confirmation-gated. |
+| Knowledge base | Ready foundation/Beta | Persistent document/chunk/runtime rows exist; retrieval is still local TF-IDF and not a production vector stack. |
 | Graph/ontology | Beta/Demo | Useful architecture direction, not a phase-1 SaaS dependency. |
 | Template marketplace | Disabled/Demo | Should not block the ready path. |
 
 ## First SaaS Usage Path
 
 1. Create or migrate a tenant.
-2. Create tenant users and assign roles.
+2. Configure tenant domain/profile data, invite tenant users, and assign roles.
 3. Create an application.
 4. Add application menus.
 5. Create a form.
 6. Add fields, layouts, actions, and permissions.
-7. Create dynamic records.
-8. Bind a workflow to the form submit action.
-9. Start and approve a workflow instance.
-10. Create a report against the form data.
-11. Review the audit log for the tenant.
+7. Publish a form version when the schema is ready for runtime use.
+8. Create dynamic records.
+9. Bind a workflow to the form submit action.
+10. Start and approve a workflow instance.
+11. Create a report against the form data.
+12. Review the audit log and, when needed, create a redacted tenant export.
 
 The regression guard for this path is:
 
 ```bash
 cd backend
-python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py
+python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py tests/test_tenant_onboarding.py tests/test_saas_hardening.py
 ```
 
 That smoke test intentionally proves the API contract before adding browser E2E:
@@ -123,23 +129,26 @@ metadata.
 
 ## Remaining Product Work
 
-- Enforce unique codes per tenant instead of global uniqueness for applications, forms, and roles.
-- Add tenant administration screens for tenant/user/role lifecycle.
 - Add PostgreSQL JSONB indexes for common dynamic record search fields.
 - Expand E2E coverage around the full ready path.
-- Add onboarding, invite flow, password reset, account lockout, and rate limiting.
+- Connect tenant invite and password reset flows to real email delivery.
+- Add account lockout operational dashboards, rate limiting, and suspicious-session review.
 - Add billing, plans, quotas, and operational observability after the first SaaS loop is stable.
+- Add external vector/embedding infrastructure for production knowledge retrieval.
 
 ## Pre-delivery Checklist
 
 - Backend full test suite passes.
 - Frontend `npm run type-check` and `npm run build` pass.
 - `GET /api/v1/productization/readiness` matches the committed scope.
+- `GET /api/v1/system/readiness` reports expected dependency status.
+- `GET /api/v1/release/current` reports the deployed release.
+- Alembic is upgraded through `0024_seed_application_assembly.py`.
 - `APP_MODE=production`, `DEMO_AUTH_OPTIONAL=false`, and a strong `SECRET_KEY` are set.
 - Default demo credentials are not used for real users.
 - Local runtime artifacts such as `runtime-logs/`, `.db` files, and `.tar` exports are not committed.
 - `frontend/src/config/readyPathSmoke.ts` still includes the required phase-1 routes and menu keys.
-- Deployment smoke verifies public frontend and `/health`.
+- Deployment smoke verifies public frontend, `/health`, `/api/v1/system/readiness`, and `/api/v1/release/current`.
 
 ## Large Data Read Strategy
 

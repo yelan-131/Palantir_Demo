@@ -1,6 +1,6 @@
 # Low-Code Platform Architecture
 
-Last updated: 2026-05-25
+Last updated: 2026-05-29
 
 Status: current implementation plus design notes. For the canonical endpoint
 list, use `docs/development/api-reference.md`.
@@ -16,6 +16,7 @@ This document explains the low-code layer: applications, forms, menu assembly, a
 | Application-form binding | Makes a form available inside an application. |
 | Menu node | Organizes how users navigate inside an application. A node may be a group or a form entry. |
 | Dynamic record | A user-created record for a low-code form, stored as JSON/JSONB. |
+| Form version | An immutable published snapshot of a form schema, layout, permissions, and actions. |
 | Form action | A button/action such as create, edit, delete, export, submit, or workflow trigger. |
 | Workflow binding | Connects a form action to a workflow definition. |
 
@@ -27,6 +28,8 @@ Implemented:
 
 - migration `0006_platform_forms.py`
 - migration `0008_saas_tenants.py`
+- migration `0021_form_versions.py`
+- migration `0024_seed_application_assembly.py`
 - `/api/v1/forms`
 - shared-database tenant isolation with `tenant_id`
 - form metadata
@@ -38,6 +41,8 @@ Implemented:
 - permissions
 - workflow bindings
 - dynamic records
+- published form versions and record `schema_version`
+- database-seeded application forms/menu nodes for production-like programs
 - audit logging for core form and record mutations
 
 Still evolving:
@@ -60,6 +65,7 @@ erDiagram
   forms ||--o{ form_layouts : has
   forms ||--o{ form_actions : has
   forms ||--o{ form_permissions : protects
+  forms ||--o{ form_versions : publishes
   forms ||--o{ workflow_bindings : triggers
   forms ||--o{ dynamic_records : stores
 ```
@@ -76,6 +82,7 @@ The platform writes configuration tables:
 - `form_actions`
 - `form_permissions`
 - `workflow_bindings`
+- `form_versions`
 - `application_forms`
 - `application_menu_nodes`
 
@@ -105,6 +112,9 @@ Admin configures page layout/actions
 Admin assembles menu
   -> application_menu_nodes
 
+Admin publishes schema
+  -> form_versions
+
 User opens app
   -> /api/v1/applications
   -> /api/v1/applications/{id}/menus
@@ -128,6 +138,7 @@ All endpoints are mounted under `/api/v1/forms`.
 | Layouts | `GET /{form_id}/layouts`, `PUT /{form_id}/layouts/{layout_type}` |
 | Actions | `GET /{form_id}/actions`, `POST /{form_id}/actions`, `PUT /{form_id}/actions/{action_id}`, `DELETE /{form_id}/actions/{action_id}` |
 | Permissions | `GET /{form_id}/permissions`, `POST /{form_id}/permissions`, `PUT /{form_id}/permissions/{permission_id}`, `DELETE /{form_id}/permissions/{permission_id}` |
+| Publishing | `GET /{form_id}/publish/preview`, `POST /{form_id}/publish`, `GET /{form_id}/versions`, `GET /{form_id}/versions/{version_number}` |
 | Workflow bindings | `GET /{form_id}/workflow-bindings`, `POST /{form_id}/workflow-bindings`, `PUT /{form_id}/workflow-bindings/{binding_id}`, `DELETE /{form_id}/workflow-bindings/{binding_id}` |
 | Records | `GET /{form_id}/records`, `POST /{form_id}/records`, `PUT /{form_id}/records/{record_id}`, `DELETE /{form_id}/records/{record_id}` |
 | Application forms | `GET /applications/{application_id}/forms`, `PUT /applications/{application_id}/forms`, `DELETE /applications/{application_id}/forms/{form_id}` |
@@ -159,11 +170,11 @@ They can coexist, but new application assembly and configurable forms should pre
 
 Recommended next implementation slices:
 
-1. Make all application assembly UI paths prefer database-backed forms/menu nodes.
-2. Add clear UI state labels for draft/published/archived forms.
-3. Improve dynamic record indexing and filtering.
-4. Add import/export for form packages.
-5. Define when a form should remain JSON-backed and when it should be physicalized.
+1. Add clear UI state labels for draft/published/archived forms.
+2. Improve dynamic record indexing and filtering.
+3. Add import/export for form packages.
+4. Define when a form should remain JSON-backed and when it should be physicalized.
+5. Expand browser E2E around application assembly, published versions, and record creation.
 
 ## 10. Large Dynamic Record Reads
 

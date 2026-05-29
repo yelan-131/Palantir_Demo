@@ -321,7 +321,14 @@ async def _query_dynamic_form_program(db: AsyncSession, tenant_id: int, program_
         for record in records:
             data = record.data or {}
             rows.append({
+                **data,
                 "key": f"record-{record.id}",
+                "recordId": record.id,
+                "formId": form.id,
+                "formCode": form.code,
+                "_formData": data,
+                "_createdAt": record.created_at.isoformat() if record.created_at else None,
+                "_updatedAt": record.updated_at.isoformat() if record.updated_at else None,
                 "name": data.get("title") or data.get("alertId") or f"Alert {record.id}",
                 "source": data.get("source") or data.get("device") or "-",
                 "level": data.get("level") or "-",
@@ -346,7 +353,14 @@ async def _query_dynamic_form_program(db: AsyncSession, tenant_id: int, program_
     for record in records:
         data = record.data or {}
         rows.append({
+            **data,
             "key": f"record-{record.id}",
+            "recordId": record.id,
+            "formId": form.id,
+            "formCode": form.code,
+            "_formData": data,
+            "_createdAt": record.created_at.isoformat() if record.created_at else None,
+            "_updatedAt": record.updated_at.isoformat() if record.updated_at else None,
             "riskNo": data.get("riskNo") or f"SR-{record.id:06d}",
             "subject": data.get("subject") or "-",
             "level": data.get("level") or "-",

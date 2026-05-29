@@ -1,6 +1,6 @@
 # Deployment
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 This document reflects the current repository files and the project deployment convention.
 
@@ -34,6 +34,8 @@ Local verification:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/system/readiness
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/release/current
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/productization/readiness
 Invoke-WebRequest http://127.0.0.1:3000
 ```
@@ -140,10 +142,10 @@ Run migrations:
 docker exec manufoundry-backend alembic upgrade head
 ```
 
-Current migration head includes `0015_ai_agent_runtime.py`, which creates
-relational AI runtime tables for knowledge Agent conversations, messages, runs,
-tool calls, and memory entries. Run migrations before verifying the Knowledge
-Center chat path after deployment.
+Current migration head includes SaaS hardening and application assembly work up
+through `0024_seed_application_assembly.py`. Run migrations before verifying
+tenant management, form publishing, Knowledge Center chat, and application
+menus.
 
 Seed data when needed:
 
@@ -200,6 +202,8 @@ Backend:
 
 ```bash
 curl -fsS http://111.229.172.100:8000/health
+curl -fsS http://111.229.172.100:8000/api/v1/system/readiness
+curl -fsS http://111.229.172.100:8000/api/v1/release/current
 curl -fsS http://111.229.172.100:8000/api/v1/productization/readiness
 curl -fsS "http://111.229.172.100:8000/api/v1/dashboard/programs/line-status?limit=5"
 ```

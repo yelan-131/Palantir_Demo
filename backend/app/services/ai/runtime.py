@@ -6,7 +6,7 @@ construction, model calls, and policy-aware answer generation into services.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from .knowledge_ingestion import search_ingested_knowledge
 from .prompt_builder import PromptBuildInput, PromptBuilder
@@ -21,6 +21,7 @@ from .agent_context_router import classify_context_need
 
 EXTERNAL_PROVIDER_NAMES = {"openai-compatible", "openai", "azure-openai", "deepseek", "qwen", "glm"}
 RISK_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+AgentEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
 GENERAL_CHAT_TERMS = [
     "你好",
     "您好",
@@ -87,6 +88,11 @@ def _format_provider_failure(exc: Exception) -> str:
     return "大模型连接失败。请检查 AI provider、base URL、API Key、模型名称、账户额度和网络连通性后重试。"
 
 
+async def _emit_step(event_sink: AgentEventSink | None, step: dict[str, Any]) -> None:
+    if event_sink:
+        await event_sink("step.completed", {"step": step})
+
+
 class AgentRuntime:
     def __init__(self, prompt_builder: PromptBuilder | None = None):
         self.prompt_builder = prompt_builder or PromptBuilder()
@@ -103,7 +109,14 @@ class AgentRuntime:
             return "general"
         return "knowledge"
 
-    async def run(self, request: AgentRequest, *, tenant_profile: TenantProfile | None = None, user: dict[str, Any] | None = None) -> AgentResponse:
+    async def run(
+        self,
+        request: AgentRequest,
+        *,
+        tenant_profile: TenantProfile | None = None,
+        user: dict[str, Any] | None = None,
+        event_sink: AgentEventSink | None = None,
+    ) -> AgentResponse:
         """Run the generic enterprise Agent shell.
 
         The planner is still conservative in this stage: it proposes draft
@@ -122,29 +135,29 @@ class AgentRuntime:
             }
         ]
         planner_result = plan_agent_turn(request.message, request.context)
-        steps.append(
-            {
-                "id": "step-planner",
-                "type": "plan",
-                "status": "completed",
-                "intent": planner_result.intent,
-                "skill": planner_result.skill,
-                "confidence": planner_result.confidence,
-                "reason": planner_result.reason,
-            }
-        )
+        planner_step = {
+            "id": "step-planner",
+            "type": "plan",
+            "status": "completed",
+            "intent": planner_result.intent,
+            "skill": planner_result.skill,
+            "confidence": planner_result.confidence,
+            "reason": planner_result.reason,
+        }
+        steps.append(planner_step)
+        await _emit_step(event_sink, planner_step)
         context_need = "draft_action" if planner_result.intent == "action" else classify_context_need(request.message, request.context)
         evidence = search_ingested_knowledge(request.message, limit=3) if context_need in {"knowledge_rag", "business_query", "semantic_graph", "draft_action"} else []
         if context_need in {"knowledge_rag", "business_query", "semantic_graph", "draft_action"}:
-            steps.append(
-                {
-                    "id": "step-knowledge-search",
-                    "type": "tool",
-                    "tool": "knowledge.search",
-                    "status": "completed",
-                    "result_count": len(evidence),
-                }
-            )
+            knowledge_step = {
+                "id": "step-knowledge-search",
+                "type": "tool",
+                "tool": "knowledge.search",
+                "status": "completed",
+                "result_count": len(evidence),
+            }
+            steps.append(knowledge_step)
+            await _emit_step(event_sink, knowledge_step)
         actions = []
         if planner_result.skill == "low_code.create_form_definition":
             action_context = {
@@ -155,22 +168,22 @@ class AgentRuntime:
         elif planner_result.intent == "qa":
             actions = choose_draft_actions(request.message, evidence=evidence, context=request.context)
         if actions:
-            steps.append(
-                {
-                    "id": "step-skill-selection",
-                    "type": "plan",
-                    "status": "completed",
-                    "skills": [action.skill for action in actions],
-                }
-            )
-            steps.append(
-                {
-                    "id": "step-confirmation",
-                    "type": "policy",
-                    "status": "waiting_confirmation",
-                    "summary": "Draft actions require human confirmation before saving or submission.",
-                }
-            )
+            skill_step = {
+                "id": "step-skill-selection",
+                "type": "plan",
+                "status": "completed",
+                "skills": [action.skill for action in actions],
+            }
+            confirmation_step = {
+                "id": "step-confirmation",
+                "type": "policy",
+                "status": "waiting_confirmation",
+                "summary": "Draft actions require human confirmation before saving or submission.",
+            }
+            steps.append(skill_step)
+            await _emit_step(event_sink, skill_step)
+            steps.append(confirmation_step)
+            await _emit_step(event_sink, confirmation_step)
             return AgentResponse(
                 answer=f"{profile.assistant_name} 已准备好草稿动作，确认前不会写入或提交业务流程。",
                 actions=actions,
@@ -183,16 +196,16 @@ class AgentRuntime:
 
         config = request.provider_config or settings_to_provider_config(settings_snapshot())
         if not _is_real_model_configured(config):
-            steps.append(
-                {
-                    "id": "step-model-config",
-                    "type": "configure",
-                    "status": "blocked",
-                    "provider": config.provider,
-                    "model": config.chat_model,
-                    "summary": "Large model provider is not configured.",
-                }
-            )
+            model_step = {
+                "id": "step-model-config",
+                "type": "configure",
+                "status": "blocked",
+                "provider": config.provider,
+                "model": config.chat_model,
+                "summary": "Large model provider is not configured.",
+            }
+            steps.append(model_step)
+            await _emit_step(event_sink, model_step)
             return AgentResponse(
                 answer="未配置大模型。请先在 AI 设置或后端环境变量中配置可用的大模型 provider、base URL、API Key 和模型名称。",
                 evidence=evidence,
@@ -223,15 +236,15 @@ class AgentRuntime:
                 )
             )
             result = await provider.chat(messages, ChatOptions(model=config.chat_model, max_tokens=1200, temperature=0.3))
-            steps.append(
-                {
-                    "id": "step-answer",
-                    "type": "respond",
-                    "status": "completed",
-                    "model": result.model,
-                    "provider": result.provider,
-                }
-            )
+            answer_step = {
+                "id": "step-answer",
+                "type": "respond",
+                "status": "completed",
+                "model": result.model,
+                "provider": result.provider,
+            }
+            steps.append(answer_step)
+            await _emit_step(event_sink, answer_step)
             return AgentResponse(
                 answer=result.content,
                 evidence=evidence,
@@ -239,16 +252,16 @@ class AgentRuntime:
                 mode="qa",
             )
         except Exception as exc:  # noqa: BLE001 - page assistant should degrade gracefully
-            steps.append(
-                {
-                    "id": "step-answer",
-                    "type": "respond",
-                    "status": "failed",
-                    "model": config.chat_model,
-                    "provider": config.provider,
-                    "fallback_reason": str(exc),
-                }
-            )
+            failed_step = {
+                "id": "step-answer",
+                "type": "respond",
+                "status": "failed",
+                "model": config.chat_model,
+                "provider": config.provider,
+                "fallback_reason": str(exc),
+            }
+            steps.append(failed_step)
+            await _emit_step(event_sink, failed_step)
             return AgentResponse(
                 answer=_format_provider_failure(exc),
                 evidence=evidence,

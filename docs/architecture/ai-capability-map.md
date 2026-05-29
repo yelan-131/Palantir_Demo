@@ -1,6 +1,6 @@
 # AI Capability Map
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 Status: roadmap/design with implemented scaffolding called out. This document
 defines AI capability direction and risk levels; endpoint-level contracts remain
@@ -25,7 +25,9 @@ The project already contains the first AI entry points:
 - Current GLM-compatible backend defaults: `AI_PROVIDER=glm`, `AI_BASE_URL`, `AI_API_KEY`, `AI_CHAT_MODEL`, `AI_REASONING_MODEL`, `AI_EMBEDDING_MODEL`, `AI_VISION_MODEL`
 - Skill/tool registry endpoints: `GET /api/v1/ai/skills`, `GET /api/v1/ai/tools`
 - Observable Agent scaffold: `POST /api/v1/ai/agent-runs`
+- General Agent conversations and memories: `/api/v1/ai/agent/conversations/*`, `/api/v1/ai/memories`
 - Persisted knowledge Agent runtime: `/api/v1/knowledge/agent/conversations/*`
+- Low-code Agent tool helpers: `backend/app/services/ai/planner.py` and `backend/app/services/ai/low_code_tools.py`
 
 Current implementation is still deterministic and scaffold-heavy, but it now has
 GLM-compatible provider defaults, registries, confirmation tokens, audit helpers,
@@ -166,6 +168,8 @@ backend/app/services/ai/
   tools.py           # business tool registry
   tool_registry.py   # typed tool registry contract
   skills.py          # skill registry contract
+  planner.py         # deterministic action planner
+  low_code_tools.py  # confirmed low-code form creation tools
   policies.py        # risk levels and confirmation requirements
   schemas.py         # structured request/response models
   knowledge_ingestion.py # file -> Markdown -> chunks -> embeddings MVP

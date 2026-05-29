@@ -1,6 +1,6 @@
 # Backend Development Guide
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 Source of truth: `backend/app/main.py`, `backend/app/api/*`,
 `backend/app/models/*`, `backend/alembic/versions/*`, and
@@ -38,6 +38,8 @@ Useful endpoints:
 | --- | --- |
 | `/` | Service metadata |
 | `/health` | Health check |
+| `/api/v1/system/readiness` | database/migration/storage/SMTP/production-config readiness |
+| `/api/v1/system/metrics` | in-process request counters and route latency snapshot |
 | `/docs` | OpenAPI UI |
 
 ## Configuration
@@ -67,6 +69,8 @@ Routers are mounted in `app/main.py` under `/api/v1`:
 | --- | --- |
 | `/auth` | login, logout, current user |
 | `/admin` | users, roles, audit/admin surfaces, application admin router |
+| `/platform` | platform-admin tenant management, invites, password reset, tenant export |
+| `/tenant` | current tenant public profile |
 | `/workflow` | workflow definitions, instances, approvals, workflow notifications |
 | `/applications` | application list/detail/menu runtime |
 | `/forms` | platform forms, fields, layouts, actions, permissions, workflow bindings, dynamic records, app menu nodes |
@@ -88,6 +92,7 @@ Routers are mounted in `app/main.py` under `/api/v1`:
 | `/notifications` | general notifications |
 | `/templates` | template market |
 | `/config` | config import/export |
+| `/release` | release metadata |
 | `/scheduler` | scheduled jobs |
 | `/search` | global search |
 | `/ai-builder` | AI-assisted model/page suggestions |
@@ -112,15 +117,34 @@ Rules:
 
 The low-code layer is implemented and persisted:
 
-- Migration: `backend/alembic/versions/0006_platform_forms.py`.
+- Migration lineage: `0006_platform_forms.py`, `0021_form_versions.py`, and
+  `0024_seed_application_assembly.py`.
 - Models: `Form`, `ApplicationForm`, `ApplicationMenuNode`, `FormField`,
   `FormLayout`, `FormAction`, `FormPermission`, `DynamicRecord`,
-  `WorkflowBinding`.
+  `FormVersion`, `WorkflowBinding`.
 - API: `/api/v1/forms`.
 
 Creating a form or field is metadata-only. Business records are stored in
-`dynamic_records.data` as JSON/JSONB. Physical table generation is a future
-admin-controlled capability, not current behavior.
+`dynamic_records.data` as JSON/JSONB. Published forms create immutable
+`form_versions.snapshot` records, and dynamic records carry `schema_version`.
+Physical table generation is a future admin-controlled capability, not current
+behavior.
+
+## Tenant Platform
+
+The SaaS-facing tenant layer is implemented through:
+
+- `backend/app/api/platform.py` for platform-admin operations;
+- `backend/app/api/tenant.py` for current-tenant public profile;
+- `backend/app/services/tenant_onboarding.py` and `backend/app/services/iam.py`;
+- migrations `0019_identity_access_center.py` through `0023_saas_hardening.py`.
+
+Important rules:
+
+- Platform admin operations require a normal admin user in tenant `1`.
+- Tenant domains and tenant-scoped uniqueness prevent cross-tenant collisions.
+- Tenant exports redact password/token/secret/SMTP/API-key-like fields.
+- New durable SaaS-facing tables should define tenant scope explicitly.
 
 ## Knowledge Base MVP
 
@@ -147,17 +171,17 @@ admin-controlled capability, not current behavior.
 - `GET /knowledge/agent/conversations/{conversation_id}/messages`
 - `POST /knowledge/agent/conversations/{conversation_id}/messages`
 
-The current implementation uses in-code demo documents and scikit-learn
-TF-IDF/cosine similarity. It also models spaces, directories, knowledge cards,
-binding candidates, upload simulation, ingestion-job status, document Markdown,
-and OCR/publishing workflow metadata.
+The current implementation uses persistent document/chunk/ingestion/extraction
+rows plus in-code/demo catalog concepts where the MVP still needs them. Search
+uses scikit-learn TF-IDF/cosine similarity rather than an external vector
+database.
 
 The knowledge Agent conversation APIs persist conversation, message, run,
 tool-call, and memory rows through the AI runtime tables introduced by
 `0015_ai_agent_runtime.py`. This persistence is for chat/runtime observability;
-the knowledge documents/chunks themselves are still demo/static or in-memory
-ingestion data and do not yet use an embedding service, vector database,
-persisted upload pipeline, or knowledge tables.
+knowledge document/chunk/ingestion rows are also persisted by the current MVP.
+The remaining production gap is external embedding generation, vector search,
+and a hardened ingestion worker rather than relational knowledge storage itself.
 
 ## AI Runtime
 
@@ -178,9 +202,10 @@ State-changing AI actions must keep this order:
 permission decision -> skill/tool allowlist -> dry-run/draft -> confirmation token -> audit -> durable write
 ```
 
-The general AI run state in `backend/app/services/ai/agent_runs.py` is still
-in-memory. Move it behind a repository if it needs the same durability as the
-knowledge Agent path.
+The AI layer now also includes deterministic low-code planning and execution
+helpers in `backend/app/services/ai/planner.py` and
+`backend/app/services/ai/low_code_tools.py`. Low-code writes must stay
+admin-only, tenant-scoped, audit logged, and confirmation gated.
 
 ## Productization Boundary
 
@@ -194,6 +219,8 @@ In production mode:
 - SQLite fallback is rejected;
 - rules must not silently fall back to mock rules;
 - unindexed dynamic-record search fails instead of scanning arbitrary JSON.
+- `/api/v1/system/readiness` should be used with release and productization
+  checks before treating a deployment as ready.
 
 ## Security Conventions
 
@@ -225,6 +252,8 @@ Backend permission boundaries currently include:
 | `/api/v1/applications/{app_id}/menus` | rejects inaccessible apps |
 | Platform form configuration APIs | `require_admin` |
 | Platform form runtime records | `view/create/edit/delete` form permission checks |
+| `/api/v1/platform/*` | platform admin plus tenant `1` guard |
+| Low-code AI writes | admin-only, tenant-scoped, confirmation/audit path |
 
 When adding a new route, decide explicitly whether it is:
 
@@ -249,6 +278,8 @@ python -m pytest
 ```
 
 Current focused tests cover API behavior, model-driven safety, graph Cypher
-guardrails, rule engine behavior, scheduler behavior, and form persistence.
+guardrails, rule engine behavior, scheduler behavior, form persistence, tenant
+onboarding, SaaS hardening, business tenant isolation, dashboard program data,
+and low-code AI agent tools.
 When changing an endpoint contract, update the relevant tests and
 `docs/development/api-reference.md`.

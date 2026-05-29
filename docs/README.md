@@ -1,6 +1,6 @@
 # ManuFoundry Documentation
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
@@ -46,7 +46,7 @@ Read these first when you want the current system truth:
 | [Data Model](architecture/data-model.md) | Current relational model groups, platform forms storage, Neo4j notes, and ontology direction boundaries. |
 | [Platform Database Landing Plan](architecture/platform-database.md) | Current low-code forms/application/menu persistence design and rollout notes. |
 | [Permission System](architecture/permission-system.md) | Current authentication, RBAC, application visibility, admin guards, and platform form permission enforcement. |
-| [Knowledge Base](architecture/knowledge-base.md) | Current local knowledge/RAG MVP and future persistence boundary. |
+| [Knowledge Base](architecture/knowledge-base.md) | Current local knowledge/RAG MVP, persistent document/chunk/runtime rows, and future vector boundary. |
 | [Graph Database Integration](architecture/graph-database-integration.md) | Current graph sync and quality impact graph integration. |
 
 ## Developer Guides
@@ -64,6 +64,7 @@ Read these first when you want the current system truth:
 | [Deployment](operations/deployment.md) | Local startup, Docker Compose deployment, server update convention, and verification. |
 | [Testing](operations/testing.md) | Backend/frontend verification strategy and known test gaps. |
 | [Release 0.3.3](operations/release-0.3.3.md) | Server application pages switched from static rows to PostgreSQL-backed manufacturing data. |
+| [Release 0.3.4](operations/release-0.3.4.md) | SaaS tenant hardening, form versions, platform tenant operations, AI low-code tools, and app assembly menus. |
 | [Neo4j Beginner Guide](operations/neo4j-beginner-guide.md) | Beginner-friendly Neo4j browser and Cypher walkthrough for this project. |
 | [Demo Knowledge Assets](operations/demo-knowledge-assets.md) | Local scripts for generating and seeding demo knowledge-base files. |
 
@@ -134,7 +135,7 @@ Archived documents are historical records and are not source of truth:
 | AI stack | Prophet/LangChain active | currently optional/future; active AI APIs are implemented directly |
 | Forms platform | "next phase persistence" | `/api/v1/forms` and migration `0006_platform_forms.py` exist |
 | Permissions | frontend/menu-only visibility | backend admin guards, application access checks, and platform form runtime permission checks exist |
-| Knowledge base | frontend-only concept | `/api/v1/knowledge` exists as a local TF-IDF RAG MVP |
+| Knowledge base | frontend-only concept | `/api/v1/knowledge` exists with persistent document/chunk/runtime rows and local TF-IDF retrieval |
 | Knowledge Agent | stateless chat only | `/api/v1/knowledge/agent/conversations` persists conversations, messages, runs, tool calls, and memory rows |
 | AI provider default | mock/OpenAI-style demo defaults | GLM-compatible defaults are now used unless explicitly overridden |
 | Productization boundary | prose-only roadmap | `/api/v1/productization/readiness` exposes the ready path and module maturity contract |

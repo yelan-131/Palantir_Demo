@@ -1,10 +1,11 @@
 # Permission System
 
-Last updated: 2026-05-24
+Last updated: 2026-05-29
 
 Source of truth: `backend/app/core/permissions.py`,
 `backend/app/api/deps.py`, `backend/app/api/admin.py`,
-`backend/app/api/applications.py`, `backend/app/api/forms.py`, and
+`backend/app/api/applications.py`, `backend/app/api/forms.py`,
+`backend/app/api/platform.py`, `backend/app/api/tenant.py`, and
 `backend/app/models/relational.py`.
 
 ## Current Positioning
@@ -38,7 +39,9 @@ uid      = user id
 is_admin = admin bypass flag
 ```
 
-Clients send the token as:
+The browser flow should rely on the HttpOnly session cookie plus `/auth/me`.
+Bearer tokens remain supported for compatibility. API clients may send the
+token as:
 
 ```http
 Authorization: Bearer <token>
@@ -78,7 +81,10 @@ Core tables:
 | `application_forms` | Forms available inside an application and action flags |
 | `application_menu_nodes` | Application menu tree |
 | `form_permissions` | Form and field permissions by role |
+| `form_versions` | Published immutable form snapshots |
 | `dynamic_records` | Platform form runtime records |
+| `tenant_domains`, `tenant_invites`, `tenant_exports` | Tenant onboarding and operations |
+| `user_sessions`, `password_history`, `password_reset_tokens`, `oidc_states` | Identity hardening and onboarding support |
 
 `role_permissions` uses this shape:
 
@@ -223,6 +229,26 @@ Protected surfaces include:
 This makes user management, role management, permission editing, audit log
 viewing, and application administration admin-only backend operations.
 
+## Platform Tenant Operations
+
+The `/api/v1/platform` router is narrower than regular admin APIs. It is for
+platform operations across tenants and currently requires an admin user in the
+default platform tenant (`tenant_id=1`).
+
+Protected surfaces include:
+
+```text
+/platform/tenants
+/platform/tenants/{tenant_id}
+/platform/tenants/{tenant_id}/invites
+/platform/tenants/{tenant_id}/users/{user_id}/password-reset
+/platform/tenants/{tenant_id}/exports
+```
+
+Tenant exports redact sensitive values before returning data. Regular tenant
+administrators should continue to use tenant-scoped admin APIs rather than this
+cross-tenant platform surface.
+
 ## Platform Form Access
 
 The `/api/v1/forms` API is split into two categories.
@@ -249,6 +275,10 @@ GET    /forms/{form_id}/workflow-bindings
 POST   /forms/{form_id}/workflow-bindings
 PUT    /forms/{form_id}/workflow-bindings/{binding_id}
 DELETE /forms/{form_id}/workflow-bindings/{binding_id}
+GET    /forms/{form_id}/publish/preview
+POST   /forms/{form_id}/publish
+GET    /forms/{form_id}/versions
+GET    /forms/{form_id}/versions/{version_number}
 GET    /forms/applications/{application_id}/forms
 PUT    /forms/applications/{application_id}/forms
 DELETE /forms/applications/{application_id}/forms/{form_id}

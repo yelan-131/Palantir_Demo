@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Button, Card, Col, DatePicker, Drawer, Empty, Form, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { useNavigate, useParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
@@ -21,7 +21,7 @@ const { RangePicker } = DatePicker;
 
 type ProgramKind = 'business' | 'analysis';
 
-type ProgramRow = Record<string, string | number>;
+type ProgramRow = Record<string, unknown>;
 
 function isDataColumn(column: ColumnsType<ProgramRow>[number]): column is ColumnType<ProgramRow> {
   return 'dataIndex' in column;
@@ -986,6 +986,38 @@ function programValueMatchesFilter(row: ProgramRow, filter: ViewFilterConfig, va
   return String(actual || '').toLowerCase().includes(String(value).toLowerCase());
 }
 
+function getRowFormData(row: ProgramRow | null): Record<string, unknown> {
+  const formData = row?._formData;
+  if (formData && typeof formData === 'object' && !Array.isArray(formData)) {
+    return formData as Record<string, unknown>;
+  }
+  return row || {};
+}
+
+function formatDetailValue(value: unknown) {
+  if (value === undefined || value === null || value === '') return '-';
+  if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function getInteractionEntries(row: ProgramRow | null) {
+  const formData = getRowFormData(row);
+  const source = formData.interactionLog || row?.interactionLog;
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  return source.map((item, index) => {
+    if (item && typeof item === 'object') {
+      const entry = item as Record<string, unknown>;
+      return {
+        title: String(entry.action || entry.title || `处理记录 ${index + 1}`),
+        description: [entry.time, entry.actor].filter(Boolean).map(String).join(' · ') || '系统记录',
+      };
+    }
+    return { title: String(item), description: '系统记录' };
+  });
+}
+
 function BusinessProgram({
   program,
   onSettings,
@@ -1008,6 +1040,35 @@ function BusinessProgram({
   const filteredRows = React.useMemo(() => program.rows.filter((row) => activeFilters.every((filter) => (
     programValueMatchesFilter(row, filter, filterValues[filter.id] ?? filter.defaultValue)
   ))), [activeFilters, filterValues, program.rows]);
+  const selectedRowTitle = selectedRow
+    ? String(selectedRow.name || selectedRow.title || selectedRow.planNo || selectedRow.requestNo || selectedRow.key || '记录详情')
+    : '记录详情';
+  const detailItems = React.useMemo(() => {
+    if (!selectedRow) return [];
+    const formData = getRowFormData(selectedRow);
+    const visibleFields = viewColumns
+      .map((viewColumn) => ({
+        key: viewColumn.fieldName,
+        label: viewColumn.label,
+        value: selectedRow[viewColumn.fieldName] ?? formData[viewColumn.fieldName],
+      }))
+      .filter((item) => item.value !== undefined && item.value !== null && item.value !== '');
+    const visibleKeys = new Set(visibleFields.map((item) => item.key));
+    const extraFields = Object.entries(formData)
+      .filter(([key, value]) => !key.startsWith('_') && key !== 'key' && !visibleKeys.has(key) && value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => ({ key, label: fieldLabelMap[key] || key, value }));
+    return [...visibleFields, ...extraFields];
+  }, [selectedRow, viewColumns]);
+  const interactionEntries = React.useMemo(() => getInteractionEntries(selectedRow), [selectedRow]);
+  const progressStatus = selectedRow
+    ? String(selectedRow.processStatus || selectedRow.status || '未启动')
+    : '未启动';
+  const currentNode = selectedRow
+    ? String(selectedRow.currentNode || selectedRow.status || '业务记录')
+    : '业务记录';
+  const currentHandler = selectedRow
+    ? String(selectedRow.currentHandler || selectedRow.owner || '未分配')
+    : '未分配';
   const configuredColumns = React.useMemo(() => {
     const baseColumns = viewColumns
       .map((viewColumn) => {
@@ -1093,7 +1154,8 @@ function BusinessProgram({
         <Form
           className="app-business-search-grid app-business-configured-search"
           form={filterForm}
-          layout="vertical"
+          colon={false}
+          layout="horizontal"
           onFinish={(values) => setFilterValues(values)}
         >
           {activeFilters.map((filter) => (
@@ -1118,6 +1180,7 @@ function BusinessProgram({
           loading={loading}
           pagination={{ pageSize: viewConfig.table.pageSize, showSizeChanger: false, showTotal: (total) => `共 ${total} 条记录` }}
           scroll={{ x: 1100, y: '100%' }}
+          rowClassName={(record) => record.key === selectedRow?.key ? 'app-business-row-selected' : ''}
           onRow={(record) => ({
             onClick: () => setSelectedRow(record),
           })}
@@ -1202,6 +1265,43 @@ function BusinessProgram({
           </Row>
         </Form>
       </Modal>
+
+      <Drawer
+        className="app-business-detail-drawer"
+        destroyOnClose
+        extra={(
+          <Space>
+            <Button size="small">处理</Button>
+            <Button size="small" type="primary">编辑</Button>
+          </Space>
+        )}
+        onClose={() => setSelectedRow(null)}
+        open={Boolean(selectedRow)}
+        placement="right"
+        title={selectedRowTitle}
+        width={460}
+      >
+        {selectedRow ? (
+          <Space className="app-business-detail-body" direction="vertical" size={14}>
+            <div className="app-business-detail-summary">
+              <Typography.Text type="secondary">业务记录</Typography.Text>
+              <Typography.Title level={5}>{selectedRowTitle}</Typography.Title>
+              <Space wrap>
+                {selectedRow.level ? <Tag color={String(selectedRow.level).includes('严重') ? 'red' : 'blue'}>{String(selectedRow.level)}</Tag> : null}
+                {selectedRow.status ? <Tag color={String(selectedRow.status).includes('关闭') ? 'default' : 'processing'}>{String(selectedRow.status)}</Tag> : null}
+                {selectedRow.source ? <Tag color="cyan">{String(selectedRow.source)}</Tag> : null}
+              </Space>
+            </div>
+            <Descriptions bordered column={1} size="small">
+              {detailItems.map((item) => (
+                <Descriptions.Item key={item.key} label={item.label}>
+                  {formatDetailValue(item.value)}
+                </Descriptions.Item>
+              ))}
+            </Descriptions>
+          </Space>
+        ) : null}
+      </Drawer>
     </>
   );
 }function AnalysisProgram({ program, onSettings, loading }: { program: ProgramDefinition; onSettings: () => void; loading?: boolean }) {

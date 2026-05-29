@@ -1,6 +1,6 @@
 # API Reference
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 Source of truth: `backend/app/main.py` and `backend/app/api/*`.
 
@@ -18,6 +18,13 @@ System endpoints outside `/api/v1`:
 | --- | --- | --- |
 | `GET` | `/` | service metadata |
 | `GET` | `/health` | health check |
+
+System endpoints under `/api/v1`:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/system/readiness` | Runtime readiness checks for database, migrations, SMTP, storage, and production config |
+| `GET` | `/system/metrics` | In-process request counters, error counters, and last route latency map |
 
 ## Authentication
 
@@ -59,8 +66,10 @@ Permission implementation notes are in
 | Auth | `/auth` | `/login`, `/logout`, `/me` |
 | Admin | `/admin` | `/users`, `/org-units`, `/roles`, `/audit-logs`, `/applications` |
 | Workflow | `/workflow` | `/definitions`, `/instances`, `/instances/{inst_id}/act`, `/instances/{inst_id}/cancel`, `/notifications`, `/stats` |
+| Platform | `/platform` | `/tenants`, `/tenants/{tenant_id}`, `/tenants/{tenant_id}/invites`, `/tenants/{tenant_id}/invites/{invite_id}/revoke`, `/tenants/{tenant_id}/invites/{invite_id}/resend`, `/tenants/{tenant_id}/users/{user_id}/password-reset`, `/tenants/{tenant_id}/exports` |
+| Tenant | `/tenant` | `/profile/public` |
 | Applications | `/applications` | `/`, `/{app_id}`, `/{app_id}/menus` |
-| Forms | `/forms` | `/`, `/{form_id}`, `/{form_id}/fields`, `/{form_id}/layouts`, `/{form_id}/actions`, `/{form_id}/permissions`, `/{form_id}/workflow-bindings`, `/{form_id}/records`, `/applications/{application_id}/forms`, `/applications/{application_id}/menu-nodes` |
+| Forms | `/forms` | `/`, `/{form_id}`, `/{form_id}/publish/preview`, `/{form_id}/publish`, `/{form_id}/versions`, `/{form_id}/versions/{version_number}`, `/{form_id}/fields`, `/{form_id}/layouts`, `/{form_id}/actions`, `/{form_id}/permissions`, `/{form_id}/workflow-bindings`, `/{form_id}/records`, `/applications/{application_id}/forms`, `/applications/{application_id}/menu-nodes` |
 | Data sources | `/data-sources` | `/`, `/test-config`, `/{source_id}`, `/{source_id}/test`, `/{source_id}/sync`, `/{source_id}/status`, `/{source_id}/preview` |
 | Ontology | `/ontology` | `/entities`, `/entities/{entity_type}`, `/entities/{entity_type}/instances`, `/entities/{entity_type}/instances/{entity_id}/relationships`, `/relations`, `/timeline/{entity_id}` |
 | Graph | `/graph` | `/query`, `/neighbors/{entity_id}`, `/path`, `/subgraph/{entity_id}`, `/stats`, `/sync/quality-demo`, `/impact-analysis-by-object`, `/entity/{label}/{entity_id}`, `/entity/{label}/{entity_id}/relationships`, `/impact-analysis/{entity_id}`, `/trace/{entity_id}`, `/analytics/centrality` |
@@ -71,7 +80,7 @@ Permission implementation notes are in
 | Maintenance | `/maintenance` | `/equipment-health`, `/equipment/{equipment_id}/health`, `/predictions`, `/work-orders` |
 | Quality | `/quality` | `/spc/{parameter}`, `/defects`, `/defects/pareto`, `/traceability/{entity_id}`, `/inspections`, `/events`, `/events/{event_id}/impact`, `/events/{event_id}/ai-suggestion`, `/events/{event_id}/actions`, `/capa` |
 | Supply chain | `/supply-chain` | `/suppliers`, `/inventory`, `/shipments`, `/risk-assessment`, `/analytics` |
-| AI assistant | `/ai` | `/chat`, `/agent`, `/agent-runs`, `/agent-runs/{run_id}`, `/agent-runs/{run_id}/confirm`, `/agent-runs/{run_id}/cancel`, `/skills`, `/tools`, `/drafts/save`, `/provider/test`, `/settings`, `/settings/test`, `/audit`, `/sessions`, `/analyze` |
+| AI assistant | `/ai` | `/skills`, `/tools`, `/agent/conversations`, `/agent/conversations/{conversation_id}/messages`, `/agent/conversations/{conversation_id}`, `/memories`, `/memories/{memory_id}`, `/chat`, `/agent`, `/agent-runs`, `/agent-runs/{run_id}`, `/agent-runs/{run_id}/confirm`, `/agent-runs/{run_id}/cancel`, `/drafts/save`, `/provider/test`, `/settings`, `/settings/test`, `/audit`, `/sessions`, `/analyze` |
 | Dashboard | `/dashboard` | `/overview`, `/oee`, `/production`, `/alerts`, `/programs/{program_id}` |
 | Reports | `/reports` | `/`, `/{report_id}`, `/{report_id}/snapshot`, `/{report_id}/snapshots` |
 | Model-driven | `/model-driven` | `/models`, `/models/{model_id}/fields`, `/models/import-from-ontology`, `/models/{model_id}/versions`, `/models/{model_id}/publish`, `/models/{model_id}/impact`, `/pages`, `/pages/generate`, `/data/{model_name}`, `/data/{model_name}/options`, `/data/{model_name}/{record_id}/children/{child_table}`, `/menus` |
@@ -79,6 +88,7 @@ Permission implementation notes are in
 | Notifications | `/notifications` | `/`, `/{notification_id}/read`, `/read-all`, `/unread-count` |
 | Templates | `/templates` | `/`, `/{template_id}`, `/{template_id}/instantiate` |
 | Config | `/config` | `/export`, `/export/{model_name}`, `/import` |
+| Release | `/release` | `/current` |
 | Scheduler | `/scheduler` | `/jobs`, `/jobs/{job_id}`, `/jobs/{job_id}/trigger` |
 | Search | `/search` | `/` |
 | AI builder | `/ai-builder` | `/suggest-model`, `/suggest-page` |
@@ -89,6 +99,8 @@ Permission implementation notes are in
 - Use `/api/v1/data-sources`, not `/api/v1/datasources`.
 - Use `/api/v1/dashboard/*` for dashboard data, not `/api/v1/operations/*`.
 - `/api/v1/dashboard/programs/{program_id}` is the current data bridge for generated `/program/*` application pages that still use frontend-owned layouts.
+- `/api/v1/system/readiness` is the operational readiness endpoint; `/health` only proves the process is alive.
+- `/api/v1/platform/*` is platform-admin only and requires tenant `1` admin context.
 - Workflow notifications exist under `/api/v1/workflow/notifications`; there is also a newer general notification module under `/api/v1/notifications`.
 - Reports routes are mounted under `/api/v1/reports`; the router uses both `/` and `/{report_id}` paths.
 - The AI assistant route is `/api/v1/ai`; the visible UI entry is the floating AI widget, while `/ai-assistant` redirects to `/`.
@@ -219,6 +231,19 @@ Check productization readiness:
 ```bash
 curl http://localhost:8000/api/v1/productization/readiness \
   -H "Authorization: Bearer <token>"
+```
+
+Check runtime readiness:
+
+```bash
+curl http://localhost:8000/api/v1/system/readiness \
+  -H "Authorization: Bearer <token>"
+```
+
+Get current release metadata:
+
+```bash
+curl http://localhost:8000/api/v1/release/current
 ```
 
 Knowledge API note: the current backend still uses static demo sources/documents

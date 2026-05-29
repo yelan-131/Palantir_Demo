@@ -286,10 +286,6 @@
   display: none;
 }
 
-.app-business-configured-search .ant-form-item {
-  margin-bottom: 0;
-}
-
 .app-business-search-grid label {
   display: flex;
   flex-direction: column;
@@ -303,6 +299,55 @@
   line-height: 18px;
 }
 
+.app-business-configured-search {
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px;
+}
+
+.app-business-configured-search .ant-form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.app-business-configured-search .ant-form-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-business-configured-search .ant-form-item-label {
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.app-business-configured-search .ant-form-item-label > label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  min-width: 44px;
+  max-width: 72px;
+  height: 32px;
+  overflow: hidden;
+  color: #415563;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-business-configured-search .ant-form-item-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-business-configured-search .ant-form-item-control-input {
+  min-height: 32px;
+}
+
 .app-business-search-grid .ant-input,
 .app-business-search-grid .ant-input-affix-wrapper,
 .app-business-search-grid .ant-select-selector,
@@ -311,12 +356,12 @@
 }
 
 .app-business-search-actions {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
+  grid-column: 1 / -1;
+  position: static;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  padding-top: 2px;
 }
 
 .app-business-list-toolbar {
@@ -411,12 +456,47 @@
   background: #eef7fa;
 }
 
+.app-business-data-table .ant-table-tbody > tr.app-business-row-selected > td,
+.app-business-data-table .ant-table-tbody > tr.app-business-row-selected:hover > td {
+  background: #d9ecfa;
+}
+
 .app-business-create-form {
   padding-top: 8px;
 }
 
 .app-business-detail-drawer {
   width: 100%;
+}
+
+.app-business-detail-drawer .ant-drawer-body {
+  padding: 18px;
+  background: #f7fafc;
+}
+
+.app-business-detail-body {
+  width: 100%;
+}
+
+.app-business-detail-summary {
+  padding: 14px;
+  border: 1px solid #dce6ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.app-business-detail-summary .ant-typography {
+  margin: 0 0 8px;
+}
+
+.app-business-detail-drawer .ant-descriptions {
+  background: #ffffff;
+}
+
+.app-business-detail-drawer .ant-descriptions-item-label {
+  width: 108px;
+  color: #52606b;
+  font-weight: 700;
 }
 
 .app-program-filter-card .ant-card-body {
@@ -593,6 +673,17 @@
 
   .app-business-search-actions {
     position: static;
+  }
+
+  .app-business-configured-search .ant-form-item-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .app-business-configured-search .ant-form-item-label > label {
+    max-width: none;
+    height: auto;
   }
 
   .app-business-list-toolbar,

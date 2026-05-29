@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 
@@ -127,8 +128,8 @@ def _serialize_conversation(row: AIConversation) -> dict[str, Any]:
     }
 
 
-def _serialize_message(row: AIMessage) -> dict[str, Any]:
-    return {
+def _serialize_message(row: AIMessage, run: AIAgentRun | None = None) -> dict[str, Any]:
+    payload = {
         "id": row.message_id,
         "tenant_id": row.tenant_id,
         "message_id": row.message_id,
@@ -143,6 +144,20 @@ def _serialize_message(row: AIMessage) -> dict[str, Any]:
         "created_at": _now_iso(row.created_at),
         "updated_at": _now_iso(row.updated_at),
     }
+    if run:
+        payload.update(
+            {
+                "run_id": run.run_id,
+                "mode": run.mode,
+                "steps": run.steps or [],
+                "actions": run.actions or [],
+                "risk_level": run.risk_level,
+                "requires_confirmation": run.requires_confirmation,
+                "confirmation_payload": run.confirmation_payload,
+                "run_status": run.status,
+            }
+        )
+    return payload
 
 
 def _serialize_run(row: AIAgentRun) -> dict[str, Any]:
@@ -175,6 +190,15 @@ def _raise_for_ai_decision(decision):
 
 def _audit_ai_event(user: dict, event_type: str, payload: dict):
     return record_ai_event(user, event_type, payload)
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+
+async def _emit_agent_step(event_sink, step: dict[str, Any]) -> None:
+    if event_sink:
+        await event_sink("step.completed", {"step": step})
 
 
 async def _execute_confirmed_agent_run(run: dict[str, Any], current_user: dict[str, Any]) -> dict[str, Any]:
@@ -350,10 +374,29 @@ async def handle_supply_query(message: str) -> dict:
 from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 
-async def _run_agent_for_user(body: AgentRequest, current_user: dict):
+async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink=None):
     await load_persisted_ai_settings()
+    identity_step = {
+        "id": "step-identity",
+        "type": "identity",
+        "status": "completed",
+        "user": current_user.get("sub") or current_user.get("username") or "unknown",
+        "roles": [role.get("name") if isinstance(role, dict) else role for role in current_user.get("roles", [])],
+        "is_admin": bool(current_user.get("is_admin")),
+    }
+    await _emit_agent_step(event_sink, identity_step)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
+    ai_permission_step = {
+        "id": "step-ai-permission",
+        "type": "policy",
+        "status": "completed",
+        "capability": base_decision.capability,
+        "matched_role": base_decision.matched_role,
+        "requires_confirmation": base_decision.requires_confirmation,
+        "audit_required": base_decision.audit_required,
+    }
+    await _emit_agent_step(event_sink, ai_permission_step)
     if body.provider_config is None:
         body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
     context = body.context or {}
@@ -406,18 +449,17 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict):
                 "contextNeed": context_need,
                 "semanticContext": semantic_context,
             }
-        result = await run_agent(body, current_user)
-        result.steps.insert(
-            0,
-            {
-                "id": "step-context-intent",
-                "type": "context",
-                "status": "completed",
-                "intent": context_need,
-                "semantic_objects": len(semantic_context.get("objects") or []),
-                "semantic_records": semantic_context.get("record_count", 0),
-            },
-        )
+        context_intent_step = {
+            "id": "step-context-intent",
+            "type": "context",
+            "status": "completed",
+            "intent": context_need,
+            "semantic_objects": len(semantic_context.get("objects") or []),
+            "semantic_records": semantic_context.get("record_count", 0),
+        }
+        await _emit_agent_step(event_sink, context_intent_step)
+        result = await run_agent(body, current_user, event_sink=event_sink)
+        result.steps.insert(0, context_intent_step)
         conversation_id = (body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId")
         if conversation_id:
             async with db_session() as session:
@@ -433,51 +475,31 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict):
                     user_key=_user_key(current_user),
                     evidence=result.evidence,
                 )
-            result.steps.insert(
-                0,
-                {
-                    "id": "step-context-builder",
-                    "type": "context",
-                    "status": "completed",
-                    "sources": runtime_context.get("context_sources") or {},
-                },
-            )
-    result.steps = [
-        {
-            "id": "step-identity",
-            "type": "identity",
-            "status": "completed",
-            "user": current_user.get("sub") or current_user.get("username") or "unknown",
-            "roles": [role.get("name") if isinstance(role, dict) else role for role in current_user.get("roles", [])],
-            "is_admin": bool(current_user.get("is_admin")),
-        },
-        {
-            "id": "step-ai-permission",
-            "type": "policy",
-            "status": "completed",
-            "capability": base_decision.capability,
-            "matched_role": base_decision.matched_role,
-            "requires_confirmation": base_decision.requires_confirmation,
-            "audit_required": base_decision.audit_required,
-        },
-        *result.steps,
-    ]
+            context_builder_step = {
+                "id": "step-context-builder",
+                "type": "context",
+                "status": "completed",
+                "sources": runtime_context.get("context_sources") or {},
+            }
+            result.steps.insert(0, context_builder_step)
+            await _emit_agent_step(event_sink, context_builder_step)
+    result.steps = [identity_step, ai_permission_step, *result.steps]
     for action in result.actions:
         decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
         _raise_for_ai_decision(decision)
         action.requires_confirmation = action.requires_confirmation or decision.requires_confirmation
-        result.steps.append(
-            {
-                "id": f"step-skill-policy-{action.skill}",
-                "type": "policy",
-                "status": "completed",
-                "skill": action.skill,
-                "capability": decision.capability,
-                "matched_role": decision.matched_role,
-                "requires_confirmation": decision.requires_confirmation,
-                "audit_required": decision.audit_required,
-            }
-        )
+        skill_policy_step = {
+            "id": f"step-skill-policy-{action.skill}",
+            "type": "policy",
+            "status": "completed",
+            "skill": action.skill,
+            "capability": decision.capability,
+            "matched_role": decision.matched_role,
+            "requires_confirmation": decision.requires_confirmation,
+            "audit_required": decision.audit_required,
+        }
+        result.steps.append(skill_policy_step)
+        await _emit_agent_step(event_sink, skill_policy_step)
     for internal_key in ("_current_user", "_tenant_id", "_user_key"):
         body.context.pop(internal_key, None)
     run = create_agent_run(body, result, current_user)
@@ -812,7 +834,20 @@ async def list_agent_conversation_messages(conversation_id: str, user: dict = De
                 .order_by(AIMessage.id)
             )
         ).scalars().all()
-        return {"data": [_serialize_message(row) for row in rows], "ok": True}
+        assistant_message_ids = [row.message_id for row in rows if row.role == "assistant"]
+        runs_by_message: dict[str, AIAgentRun] = {}
+        if assistant_message_ids:
+            runs = (
+                await session.execute(
+                    select(AIAgentRun).where(
+                        AIAgentRun.tenant_id == tenant_id,
+                        AIAgentRun.conversation_id == conversation_id,
+                        AIAgentRun.assistant_message_id.in_(assistant_message_ids),
+                    )
+                )
+            ).scalars().all()
+            runs_by_message = {row.assistant_message_id: row for row in runs if row.assistant_message_id}
+        return {"data": [_serialize_message(row, runs_by_message.get(row.message_id)) for row in rows], "ok": True}
 
 
 @router.delete("/agent/conversations/{conversation_id}")
@@ -924,6 +959,52 @@ async def agent_chat(body: AgentRequest, user: dict = Depends(get_current_user))
     if persisted:
         payload.update(persisted)
     return payload
+
+
+@router.post("/agent/stream")
+async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current_user)):
+    """Observable Agent run stream.
+
+    This endpoint uses Server-Sent Events over a POST response so the browser can
+    include the normal Authorization header while receiving backend-confirmed
+    execution events.
+    """
+
+    current_user = _normalize_user(user)
+
+    async def event_generator():
+        events: list[tuple[str, dict[str, Any]]] = []
+
+        async def emit(event: str, data: dict[str, Any]) -> None:
+            events.append((event, data))
+
+        run_id: str | None = None
+        yield _sse("run.accepted", {"status": "accepted", "message": body.message})
+        try:
+            result = await _run_agent_for_user(body, current_user, event_sink=emit)
+            for event, data in events:
+                yield _sse(event, data)
+            payload = result.model_dump()
+            run_id = payload.get("run_id")
+            persisted = await _persist_agent_turn(body, result, current_user)
+            if persisted:
+                payload.update(persisted)
+                run_id = (persisted.get("run") or {}).get("run_id") or run_id
+            yield _sse("answer.completed", payload)
+            yield _sse("run.completed", {"run_id": run_id, "status": "waiting_confirmation" if result.requires_confirmation else "completed"})
+        except HTTPException as exc:
+            yield _sse("run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code})
+        except Exception as exc:  # noqa: BLE001 - stream should report failures as events
+            yield _sse("run.failed", {"status": "failed", "detail": str(exc)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/agent-runs")

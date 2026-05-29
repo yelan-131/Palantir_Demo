@@ -91,6 +91,18 @@ type ControlRuleKey = 'visible' | 'readonly' | 'required';
 type PreviewMode = 'create' | 'edit' | 'list';
 type PreviewDevice = 'desktop' | 'tablet' | 'mobile';
 type PublishCheckLevel = 'error' | 'warning' | 'suggestion';
+type EncodingResetCycle = 'none' | 'day' | 'month' | 'year' | 'dependency';
+type FieldBusinessType =
+  | 'text'
+  | 'longText'
+  | 'number'
+  | 'date'
+  | 'datetime'
+  | 'enum'
+  | 'person'
+  | 'relation'
+  | 'attachment'
+  | 'code';
 
 interface ControlRuleCondition {
   sourceField?: string;
@@ -106,10 +118,26 @@ interface ControlRule {
 
 type ControlRules = Record<ControlRuleKey, ControlRule>;
 
+interface EncodingRule {
+  enabled: boolean;
+  template: string;
+  dependencies: string[];
+  resetCycle: EncodingResetCycle;
+  sequenceLength: number;
+  fixedLength?: number;
+  prefix?: string;
+  datePattern?: string;
+  dependencySegmentLength?: number;
+  regenerateOnDependencyChange: boolean;
+  allowManualOverride: boolean;
+  unique: boolean;
+}
+
 interface DesignerField {
   key: string;
   name: string;
   type: string;
+  businessType?: FieldBusinessType;
   placeholder: string;
   locked?: boolean;
   required?: boolean;
@@ -158,6 +186,7 @@ interface LayoutControl {
   placeholder?: string;
   helpText?: string;
   optionSource?: string;
+  encodingRule?: EncodingRule;
   width: ControlWidth;
   rules: ControlRules;
 }
@@ -264,6 +293,35 @@ const controlTypeOptions = [
   { value: 'readonly-text', label: '只读展示' },
 ];
 
+const fieldBusinessTypeOptions: Array<{ value: FieldBusinessType; label: string }> = [
+  { value: 'text', label: '文本' },
+  { value: 'longText', label: '多行文本' },
+  { value: 'number', label: '数值' },
+  { value: 'date', label: '日期' },
+  { value: 'datetime', label: '日期时间' },
+  { value: 'enum', label: '枚举/下拉' },
+  { value: 'person', label: '人员' },
+  { value: 'relation', label: '关联对象' },
+  { value: 'attachment', label: '附件' },
+  { value: 'code', label: '编码' },
+];
+
+const encodingResetCycleOptions = [
+  { value: 'none', label: '不重置' },
+  { value: 'day', label: '按天重置' },
+  { value: 'month', label: '按月重置' },
+  { value: 'year', label: '按年重置' },
+  { value: 'dependency', label: '按依赖字段重置' },
+];
+
+const encodingDatePatternOptions = [
+  { value: 'YYMM', label: 'YYMM（4位）' },
+  { value: 'YYYYMMDD', label: 'YYYYMMDD（8位）' },
+  { value: 'YYYY', label: 'YYYY（4位）' },
+  { value: 'MMDD', label: 'MMDD（4位）' },
+  { value: 'none', label: '不使用日期段' },
+];
+
 const ruleLabels: Record<ControlRuleKey, string> = {
   visible: '显示',
   readonly: '只读',
@@ -329,6 +387,89 @@ function makeControlRules(required = false): ControlRules {
   };
 }
 
+function inferBusinessTypeFromLegacyType(type = ''): FieldBusinessType {
+  if (type === 'code' || type.includes('编码')) return 'code';
+  if (type.includes('日期')) return 'datetime';
+  if (type.includes('数字') || type.includes('数值')) return 'number';
+  if (type.includes('下拉') || type.includes('选择')) return 'enum';
+  if (type.includes('人员')) return 'person';
+  if (type.includes('关联')) return 'relation';
+  if (type.includes('附件')) return 'attachment';
+  if (type.includes('多行')) return 'longText';
+  return 'text';
+}
+
+function getFieldBusinessType(field?: DesignerField): FieldBusinessType {
+  if (!field) return 'text';
+  return field.businessType || inferBusinessTypeFromLegacyType(field.type);
+}
+
+function getFieldBusinessTypeLabel(field?: DesignerField) {
+  const businessType = getFieldBusinessType(field);
+  return fieldBusinessTypeOptions.find((item) => item.value === businessType)?.label || '文本';
+}
+
+function isEncodingField(field?: DesignerField) {
+  return getFieldBusinessType(field) === 'code';
+}
+
+function makeEncodingRule(field?: DesignerField): EncodingRule {
+  const prefix = field?.key.toLowerCase().includes('alert') ? 'AL' : field?.key.toLowerCase().includes('risk') ? 'SR' : 'NO';
+  return {
+    enabled: true,
+    template: `{PREFIX}-{YYMM}-{SEQ3}`,
+    prefix,
+    datePattern: 'YYMM',
+    dependencies: [],
+    resetCycle: 'month',
+    sequenceLength: 3,
+    fixedLength: 13,
+    dependencySegmentLength: 2,
+    regenerateOnDependencyChange: true,
+    allowManualOverride: false,
+    unique: true,
+  };
+}
+
+function renderEncodingSample(rule?: EncodingRule, fields: DesignerField[] = []) {
+  if (!rule?.enabled) return '不自动生成';
+  const dependencyCode = rule.dependencies
+    .map((fieldKey) => fields.find((field) => field.key === fieldKey)?.name || fieldKey)
+    .slice(0, 2)
+    .join('-');
+  const seq = String(1).padStart(rule.sequenceLength || 3, '0');
+  return rule.template
+    .replace('{PREFIX}', rule.prefix || '')
+    .replace('{YYMM}', '2605')
+    .replace('{YYYYMMDD}', '20260529')
+    .replace('{YYYY}', '2026')
+    .replace('{MMDD}', '0529')
+    .replace('{MM}', '05')
+    .replace('{DD}', '29')
+    .replace('{DEP}', dependencyCode || '业务字段')
+    .replace(/\{SEQ\d*\}/g, seq);
+}
+
+function getDateSegmentLength(pattern?: string) {
+  if (!pattern || pattern === 'none') return 0;
+  return pattern.length;
+}
+
+function getEncodingComposition(rule?: EncodingRule) {
+  if (!rule?.enabled) return '未启用自动编码';
+  const parts = [
+    `前缀 ${rule.prefix?.length || 0} 位`,
+    `日期 ${getDateSegmentLength(rule.datePattern)} 位`,
+    rule.dependencies.length ? `依赖段 ${rule.dependencySegmentLength || 0} 位` : '依赖段 0 位',
+    `流水 ${rule.sequenceLength || 0} 位`,
+  ];
+  const expected = (rule.prefix?.length || 0)
+    + getDateSegmentLength(rule.datePattern)
+    + (rule.dependencies.length ? rule.dependencySegmentLength || 0 : 0)
+    + (rule.sequenceLength || 0);
+  return `${parts.join(' + ')} = ${expected} 位${rule.fixedLength ? ` / 目标 ${rule.fixedLength} 位` : ''}`;
+}
+
 const flowNodePalette: FlowNodeDefinition[] = [
   { key: 'start', name: '开始节点', desc: '流程入口，仅保留一个', role: 'start', icon: <CheckCircleOutlined /> },
   { key: 'approve', name: '审批节点', desc: '人工审核、同意或驳回', role: 'task', icon: <UserSwitchOutlined /> },
@@ -353,7 +494,7 @@ const configs: Record<string, DesignerConfig> = {
     version: 'v0.1',
     description: '用于新增风险复核业务数据，而不是配置整个运行页面。',
     fields: [
-      { key: 'riskNo', name: '风险单号', type: '文本 / 自动编号', placeholder: '自动生成 SR-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
+      { key: 'riskNo', name: '风险单号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成 SR-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
       { key: 'subject', name: '风险主题', type: '文本输入', placeholder: '请输入风险主题', required: true, listVisible: true, searchable: true, validation: '2-80 个字符' },
       { key: 'level', name: '风险等级', type: '下拉选择', placeholder: '高 / 中 / 低', required: true, listVisible: true, searchable: true, optionSource: '高、中、低' },
       { key: 'owner', name: '处理人', type: '人员选择', placeholder: '选择处理人', required: true, listVisible: true, searchable: true, optionSource: '组织人员' },
@@ -380,7 +521,7 @@ const configs: Record<string, DesignerConfig> = {
     version: 'v0.1',
     description: '用于新增设备告警数据，字段和风险复核不同。',
     fields: [
-      { key: 'alertId', name: '告警编号', type: '文本 / 自动编号', placeholder: '自动生成 AL-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
+      { key: 'alertId', name: '告警编号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成 AL-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
       { key: 'title', name: '告警标题', type: '文本输入', placeholder: '请输入告警标题', required: true, listVisible: true, searchable: true, validation: '2-80 个字符' },
       { key: 'device', name: '关联设备', type: '关联对象', placeholder: '选择设备', required: true, listVisible: true, searchable: true, optionSource: '设备台账' },
       { key: 'level', name: '告警等级', type: '下拉选择', placeholder: '严重 / 一般 / 提醒', required: true, listVisible: true, searchable: true, optionSource: '严重、一般、提醒' },
@@ -415,7 +556,7 @@ const defaultConfig: DesignerConfig = {
   version: 'v0.1',
   description: '用于配置新增业务数据的表单。',
   fields: [
-    { key: 'id', name: '编号', type: '文本 / 自动编号', placeholder: '自动生成编号', locked: true, required: true, listVisible: true, searchable: true, validation: '系统唯一编号' },
+    { key: 'id', name: '编号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成编号', locked: true, required: true, listVisible: true, searchable: true, validation: '系统唯一编号' },
     { key: 'name', name: '名称', type: '文本输入', placeholder: '请输入名称', required: true, listVisible: true, searchable: true },
     { key: 'status', name: '状态', type: '下拉选择', placeholder: '请选择状态', listVisible: true, searchable: true },
   ],
@@ -503,7 +644,7 @@ const alertBusinessSections: BusinessSection[] = [
 ];
 
 const fieldTemplates: DesignerField[] = [
-  { key: 'templateCode', name: '业务编号', type: '文本 / 自动编号', placeholder: '自动生成唯一编号', locked: true, required: true, listVisible: true, searchable: true, sortable: true },
+  { key: 'templateCode', name: '业务编号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成唯一编号', locked: true, required: true, listVisible: true, searchable: true, sortable: true },
   { key: 'templateTitle', name: '标题', type: '文本输入', placeholder: '请输入标题', required: true, listVisible: true, searchable: true },
   { key: 'templateStatus', name: '状态', type: '下拉选择', placeholder: '待处理 / 处理中 / 已关闭', listVisible: true, searchable: true, optionSource: '待处理、处理中、已关闭' },
   { key: 'templateLevel', name: '等级', type: '下拉选择', placeholder: '高 / 中 / 低', listVisible: true, searchable: true, optionSource: '高、中、低' },
@@ -550,12 +691,14 @@ function optionSourceToOptions(source?: string, fallback?: string) {
 
 function inferFieldControlType(field?: DesignerField) {
   if (!field) return 'text';
-  if (field.type.includes('下拉')) return 'select';
-  if (field.type.includes('人员') || field.type.includes('关联')) return 'relation';
-  if (field.type.includes('日期')) return 'datetime';
-  if (field.type.includes('附件')) return 'upload';
-  if (field.type.includes('多行')) return 'textarea';
-  if (field.type.includes('数字') || field.type.includes('数值')) return 'number';
+  const businessType = getFieldBusinessType(field);
+  if (businessType === 'code') return 'readonly-text';
+  if (businessType === 'enum') return 'select';
+  if (businessType === 'person' || businessType === 'relation') return 'relation';
+  if (businessType === 'date' || businessType === 'datetime') return 'datetime';
+  if (businessType === 'attachment') return 'upload';
+  if (businessType === 'longText') return 'textarea';
+  if (businessType === 'number') return 'number';
   return 'text';
 }
 
@@ -738,12 +881,14 @@ function getStoredViewConfig(form: PlatformForm | null | undefined, designerConf
   );
 }
 
-function mapDesignerFieldType(type: string) {
-  if (type.includes('日期')) return 'datetime';
-  if (type.includes('数字') || type.includes('数值')) return 'number';
-  if (type.includes('下拉') || type.includes('选择')) return 'enum';
-  if (type.includes('多行')) return 'text';
-  if (type.includes('附件')) return 'json';
+function mapDesignerFieldType(field: DesignerField) {
+  const businessType = getFieldBusinessType(field);
+  if (businessType === 'code') return 'code';
+  if (businessType === 'date' || businessType === 'datetime') return 'datetime';
+  if (businessType === 'number') return 'number';
+  if (businessType === 'enum') return 'enum';
+  if (businessType === 'attachment') return 'json';
+  if (businessType === 'longText') return 'text';
   return 'string';
 }
 
@@ -754,7 +899,7 @@ function makeWorkflowFormConfig(config: DesignerConfig) {
     fields: config.fields.map((field, index) => ({
       name: field.key,
       label: field.name,
-      type: mapDesignerFieldType(field.type),
+      type: mapDesignerFieldType(field),
       required: Boolean(field.required),
       sortOrder: index,
     })),
@@ -784,7 +929,8 @@ function makeFieldControl(field: DesignerField): LayoutControl {
     placeholder: field.placeholder,
     helpText: '',
     optionSource: field.optionSource,
-    width: field.type.includes('多行') ? 'full' : 'half',
+    encodingRule: isEncodingField(field) ? makeEncodingRule(field) : undefined,
+    width: getFieldBusinessType(field) === 'longText' ? 'full' : 'half',
     rules: makeControlRules(Boolean(field.required)),
   };
 }
@@ -1198,6 +1344,12 @@ export default function FormSettingsPage() {
   const selectedControlUsesDataSource = Boolean(
     selectedControl && isDataSourceControlType(selectedEffectiveControlType),
   );
+  const selectedControlUsesEncoding = Boolean(
+    selectedControl && isEncodingField(selectedField),
+  );
+  const selectedEncodingRule = selectedControlUsesEncoding
+    ? selectedControl?.encodingRule || makeEncodingRule(selectedField)
+    : undefined;
   const normalizedLibrarySearch = librarySearch.trim().toLowerCase();
   const matchesLibrarySearch = (text: string) => !normalizedLibrarySearch || text.toLowerCase().includes(normalizedLibrarySearch);
   const filteredCommonControls = commonControls.filter((item) => matchesLibrarySearch(`${item.name} ${item.desc} ${item.category}`));
@@ -1455,7 +1607,11 @@ export default function FormSettingsPage() {
     await Promise.all(baseConfig.fields.map((field, index) => createPlatformFormField(createdForm.id, {
       field_name: field.key,
       label: field.name,
-      field_type: mapDesignerFieldType(field.type),
+      field_type: mapDesignerFieldType(field),
+      business_type: getFieldBusinessType(field),
+      control_type: inferFieldControlType(field),
+      data_source: field.optionSource,
+      encoding_rule: isEncodingField(field) ? makeEncodingRule(field) : undefined,
       required: Boolean(field.required),
       visible_in_list: field.listVisible !== false,
       visible_in_form: true,
@@ -1468,6 +1624,8 @@ export default function FormSettingsPage() {
         placeholder: field.placeholder,
         locked: Boolean(field.locked),
         designerType: field.type,
+        businessType: getFieldBusinessType(field),
+        controlType: inferFieldControlType(field),
       },
       sort_order: index,
     })));
@@ -1920,6 +2078,12 @@ export default function FormSettingsPage() {
     )));
   };
 
+  const updateSelectedEncodingRule = (patch: Partial<EncodingRule>) => {
+    if (!selectedControlId) return;
+    const currentRule = selectedControl?.encodingRule || makeEncodingRule(selectedField);
+    updateSelectedControl({ encodingRule: { ...currentRule, ...patch } });
+  };
+
   const moveLayoutControl = (sourceId: string, targetId: string, position: DropPosition = 'before') => {
     if (!sourceId || !targetId || sourceId === targetId) return;
     commitLayoutChange((current) => {
@@ -2230,7 +2394,8 @@ export default function FormSettingsPage() {
           <strong className="designer-prop-section-title">字段资产</strong>
           <label className="designer-prop-locked"><span>字段编码</span><Input value={field.key} disabled suffix="锁定" /></label>
           <label><span>字段名称</span><Input value={field.name} readOnly /></label>
-          <label className="designer-prop-locked"><span>字段类型</span><Input value={field.type} disabled suffix="锁定" /></label>
+          <label className="designer-prop-locked"><span>字段类型</span><Input value={getFieldBusinessTypeLabel(field)} disabled suffix="后端字段" /></label>
+          <label className="designer-prop-locked"><span>存储类型</span><Input value={mapDesignerFieldType(field)} disabled suffix="动态记录" /></label>
           <label className={field.locked ? 'designer-prop-locked' : undefined}><span>字段状态</span><Input value={field.locked ? '锁定字段' : '可配置字段'} disabled={field.locked} readOnly suffix={field.locked ? '锁定' : undefined} /></label>
         </section>
         <section className="designer-prop-section">
@@ -3002,6 +3167,10 @@ export default function FormSettingsPage() {
                             <span>字段来源</span>
                             <Input value={selectedField ? selectedField.name : '未绑定字段'} disabled />
                           </label>
+                          <label className="designer-prop-locked">
+                            <span>字段类型</span>
+                            <Input value={selectedField ? getFieldBusinessTypeLabel(selectedField) : '未绑定字段'} disabled suffix="后端字段" />
+                          </label>
                       </section>
                       {selectedControlUsesDataSource && (
                         <section className="designer-prop-section">
@@ -3035,6 +3204,94 @@ export default function FormSettingsPage() {
                               options={optionSourceToOptions(selectedControl.optionSource || selectedField?.optionSource, selectedControl.placeholder || selectedField?.placeholder)}
                             />
                           </label>
+                        </section>
+                      )}
+                      {selectedControlUsesEncoding && selectedEncodingRule && (
+                        <section className="designer-prop-section">
+                          <strong className="designer-prop-section-title">编码规则</strong>
+                          <label><span>启用编码</span><Switch checked={selectedEncodingRule.enabled} onChange={(enabled) => updateSelectedEncodingRule({ enabled })} /></label>
+                          <label>
+                            <span>编码模板</span>
+                            <Input
+                              value={selectedEncodingRule.template}
+                              placeholder="{PREFIX}-{YYMM}-{DEP}-{SEQ5}"
+                              onChange={(event) => updateSelectedEncodingRule({ template: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            <span>总长度</span>
+                            <InputNumber
+                              min={4}
+                              max={64}
+                              value={selectedEncodingRule.fixedLength}
+                              onChange={(fixedLength) => updateSelectedEncodingRule({ fixedLength: Number(fixedLength || 13) })}
+                            />
+                          </label>
+                          <label>
+                            <span>前缀</span>
+                            <Input
+                              allowClear
+                              value={selectedEncodingRule.prefix || ''}
+                              onChange={(event) => updateSelectedEncodingRule({ prefix: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            <span>日期段</span>
+                            <Select
+                              value={selectedEncodingRule.datePattern || 'YYMM'}
+                              options={encodingDatePatternOptions}
+                              onChange={(datePattern) => updateSelectedEncodingRule({ datePattern })}
+                            />
+                          </label>
+                          <label>
+                            <span>依赖字段</span>
+                            <Select
+                              mode="multiple"
+                              allowClear
+                              value={selectedEncodingRule.dependencies}
+                              options={baseConfig.fields.filter((field) => field.key !== selectedField?.key).map((field) => ({ value: field.key, label: field.name }))}
+                              placeholder="选择影响编码变化的字段"
+                              onChange={(dependencies) => updateSelectedEncodingRule({ dependencies })}
+                            />
+                          </label>
+                          <label>
+                            <span>依赖段位数</span>
+                            <InputNumber
+                              min={0}
+                              max={16}
+                              disabled={!selectedEncodingRule.dependencies.length}
+                              value={selectedEncodingRule.dependencySegmentLength}
+                              onChange={(dependencySegmentLength) => updateSelectedEncodingRule({ dependencySegmentLength: Number(dependencySegmentLength || 0) })}
+                            />
+                          </label>
+                          <label>
+                            <span>流水位数</span>
+                            <InputNumber
+                              min={1}
+                              max={16}
+                              value={selectedEncodingRule.sequenceLength}
+                              onChange={(sequenceLength) => {
+                                const nextLength = Number(sequenceLength || 3);
+                                updateSelectedEncodingRule({
+                                  sequenceLength: nextLength,
+                                  template: selectedEncodingRule.template.replace(/\{SEQ\d*\}/, `{SEQ${nextLength}}`),
+                                });
+                              }}
+                            />
+                          </label>
+                          <label>
+                            <span>重置周期</span>
+                            <Select
+                              value={selectedEncodingRule.resetCycle}
+                              options={encodingResetCycleOptions}
+                              onChange={(resetCycle) => updateSelectedEncodingRule({ resetCycle })}
+                            />
+                          </label>
+                          <label><span>依赖变化重算</span><Switch checked={selectedEncodingRule.regenerateOnDependencyChange} onChange={(regenerateOnDependencyChange) => updateSelectedEncodingRule({ regenerateOnDependencyChange })} /></label>
+                          <label><span>允许手工改号</span><Switch checked={selectedEncodingRule.allowManualOverride} onChange={(allowManualOverride) => updateSelectedEncodingRule({ allowManualOverride })} /></label>
+                          <label><span>唯一校验</span><Switch checked={selectedEncodingRule.unique} onChange={(unique) => updateSelectedEncodingRule({ unique })} /></label>
+                          <label className="designer-prop-row-wide"><span>组成说明</span><Input value={getEncodingComposition(selectedEncodingRule)} readOnly /></label>
+                          <label className="designer-prop-row-wide"><span>编码示例</span><Input value={renderEncodingSample(selectedEncodingRule, baseConfig.fields)} readOnly /></label>
                         </section>
                       )}
                       <section className="designer-prop-section">

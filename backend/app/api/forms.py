@@ -65,6 +65,10 @@ class FormFieldCreate(BaseModel):
     field_name: str
     label: str
     field_type: str = "string"
+    business_type: Optional[str] = None
+    control_type: Optional[str] = None
+    data_source: Optional[str] = None
+    encoding_rule: Optional[dict] = None
     required: bool = False
     visible_in_list: bool = True
     visible_in_form: bool = True
@@ -80,6 +84,10 @@ class FormFieldCreate(BaseModel):
 class FormFieldUpdate(BaseModel):
     label: Optional[str] = None
     field_type: Optional[str] = None
+    business_type: Optional[str] = None
+    control_type: Optional[str] = None
+    data_source: Optional[str] = None
+    encoding_rule: Optional[dict] = None
     required: Optional[bool] = None
     visible_in_list: Optional[bool] = None
     visible_in_form: Optional[bool] = None
@@ -200,6 +208,88 @@ def _validate_field_name(field_name: str) -> None:
     assert_safe_identifier(field_name)
 
 
+FIELD_TYPE_ALIASES = {
+    "string": "string",
+    "text": "text",
+    "longText": "text",
+    "long_text": "text",
+    "number": "number",
+    "integer": "integer",
+    "int": "integer",
+    "decimal": "decimal",
+    "float": "float",
+    "boolean": "boolean",
+    "bool": "boolean",
+    "date": "date",
+    "datetime": "datetime",
+    "enum": "enum",
+    "select": "enum",
+    "person": "string",
+    "relation": "relation",
+    "attachment": "json",
+    "json": "json",
+    "code": "code",
+}
+
+
+def _normalize_field_type(field_type: Optional[str]) -> str:
+    raw = (field_type or "string").strip()
+    normalized = FIELD_TYPE_ALIASES.get(raw, FIELD_TYPE_ALIASES.get(raw.lower()))
+    if normalized:
+        return normalized
+    raise HTTPException(422, f"Unsupported field_type: {field_type}")
+
+
+def _normalize_form_field_data(
+    data: dict,
+    *,
+    current_field_type: Optional[str] = None,
+    current_ui_config: Optional[dict] = None,
+) -> dict:
+    normalized = dict(data)
+    business_type = normalized.pop("business_type", None)
+    control_type = normalized.pop("control_type", None)
+    data_source = normalized.pop("data_source", None)
+    encoding_rule = normalized.pop("encoding_rule", None)
+    ui_config_input = normalized.pop("ui_config", None)
+
+    explicit_type = business_type or normalized.get("field_type")
+    effective_type = _normalize_field_type(explicit_type or current_field_type)
+    if explicit_type is not None or current_field_type is None:
+        normalized["field_type"] = effective_type
+
+    ui_config = dict(current_ui_config or {})
+    ui_config_touched = False
+    if ui_config_input is not None:
+        ui_config.update(ui_config_input or {})
+        ui_config_touched = True
+    if control_type is not None:
+        ui_config["controlType"] = control_type
+        ui_config_touched = True
+    if data_source is not None:
+        ui_config["dataSource"] = data_source
+        ui_config_touched = True
+
+    ui_config_adds_encoding = isinstance(ui_config_input, dict) and "encodingRule" in ui_config_input
+    if (encoding_rule is not None or ui_config_adds_encoding) and effective_type != "code":
+        raise HTTPException(422, "encoding_rule requires field_type=code")
+    if effective_type == "code":
+        if encoding_rule is not None:
+            ui_config["encodingRule"] = encoding_rule
+            ui_config_touched = True
+        elif ui_config.get("autoNumber") and not ui_config.get("encodingRule"):
+            ui_config["encodingRule"] = {"enabled": True, "template": ui_config["autoNumber"]}
+            ui_config_touched = True
+    elif explicit_type is not None:
+        ui_config.pop("encodingRule", None)
+        ui_config.pop("autoNumber", None)
+        ui_config_touched = True
+
+    if ui_config_touched:
+        normalized["ui_config"] = ui_config or None
+    return normalized
+
+
 def _form_payload(form, *, fields: Optional[list] = None, applications: Optional[list] = None) -> dict:
     payload = {
         "id": form.id,
@@ -224,6 +314,7 @@ def _form_payload(form, *, fields: Optional[list] = None, applications: Optional
 
 
 def _field_payload(field) -> dict:
+    ui_config = field.ui_config or {}
     return {
         "id": field.id,
         "form_id": field.form_id,
@@ -231,6 +322,10 @@ def _field_payload(field) -> dict:
         "field_name": field.field_name,
         "label": field.label,
         "field_type": field.field_type,
+        "business_type": field.field_type,
+        "control_type": ui_config.get("controlType"),
+        "data_source": ui_config.get("dataSource") or ui_config.get("relation"),
+        "encoding_rule": ui_config.get("encodingRule"),
         "required": field.required,
         "visible_in_list": field.visible_in_list,
         "visible_in_form": field.visible_in_form,
@@ -240,7 +335,7 @@ def _field_payload(field) -> dict:
         "default_value": field.default_value,
         "enum_values": field.enum_values,
         "validation": field.validation,
-        "ui_config": field.ui_config,
+        "ui_config": ui_config,
         "sort_order": field.sort_order,
     }
 
@@ -343,6 +438,8 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
             raise HTTPException(422, f"Field {name} must be a boolean")
         if field_type in {"date", "datetime"} and not isinstance(value, str):
             raise HTTPException(422, f"Field {name} must be an ISO date string")
+        if field_type == "code" and not isinstance(value, str):
+            raise HTTPException(422, f"Field {name} must be a code string")
         if field_type == "enum":
             allowed = _field_allowed_values(field)
             if allowed and str(value) not in allowed:
@@ -543,6 +640,8 @@ def _field_value_is_compatible(field, value) -> bool:
     if field_type == "boolean":
         return isinstance(value, bool)
     if field_type in {"date", "datetime"}:
+        return isinstance(value, str)
+    if field_type == "code":
         return isinstance(value, str)
     if field_type == "enum":
         allowed = _field_allowed_values(field)
@@ -964,7 +1063,7 @@ DEFAULT_BUSINESS_FORMS = [
         "table_name": "equipment_alerts",
         "app_codes": ["maintenance-analysis", "production-dashboard"],
         "fields": [
-            {"field_name": "alertId", "label": "告警编号", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"autoNumber": "AL-{yyyyMMdd}-{seq:3}"}},
+            {"field_name": "alertId", "label": "告警编号", "field_type": "code", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"controlType": "readonly-text", "encodingRule": {"enabled": True, "template": "AL-{yyyyMMdd}-{seq:3}", "prefix": "AL", "datePattern": "YYYYMMDD", "sequenceLength": 3, "fixedLength": 15, "dependencies": [], "resetCycle": "day", "regenerateOnDependencyChange": True, "allowManualOverride": False, "unique": True}}},
             {"field_name": "title", "label": "告警标题", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True},
             {"field_name": "device", "label": "关联设备", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "ui_config": {"relation": "equipment"}},
             {"field_name": "level", "label": "告警等级", "field_type": "enum", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["严重", "一般", "提醒"]}},
@@ -996,7 +1095,7 @@ DEFAULT_BUSINESS_FORMS = [
         "table_name": "risk_reviews",
         "app_codes": ["supply-risk"],
         "fields": [
-            {"field_name": "riskNo", "label": "风险单号", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"autoNumber": "SR-{yyyyMMdd}-{seq:3}"}},
+            {"field_name": "riskNo", "label": "风险单号", "field_type": "code", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"controlType": "readonly-text", "encodingRule": {"enabled": True, "template": "SR-{yyyyMMdd}-{seq:3}", "prefix": "SR", "datePattern": "YYYYMMDD", "sequenceLength": 3, "fixedLength": 15, "dependencies": [], "resetCycle": "day", "regenerateOnDependencyChange": True, "allowManualOverride": False, "unique": True}}},
             {"field_name": "subject", "label": "风险主题", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True},
             {"field_name": "level", "label": "风险等级", "field_type": "enum", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["高", "中", "低"]}},
             {"field_name": "owner", "label": "处理人", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "ui_config": {"relation": "users"}},
@@ -1140,7 +1239,7 @@ def _default_view_config(fields: list[dict]) -> dict:
                 "fieldName": field["field_name"],
                 "label": field["label"],
                 "enabled": True,
-                "operator": "contains" if field.get("field_type") == "string" else "equals",
+                "operator": "contains" if field.get("field_type") in {"string", "text", "code"} else "equals",
                 "advanced": index > 2,
                 "sortOrder": index,
             }
@@ -1801,7 +1900,8 @@ async def create_form_field(
     if existing:
         raise HTTPException(409, "Field already exists on this form")
 
-    field = FormField(tenant_id=tenant_id, form_id=form_id, **body.dict())
+    field_data = _normalize_form_field_data(body.dict())
+    field = FormField(tenant_id=tenant_id, form_id=form_id, **field_data)
     db.add(field)
     await db.commit()
     await db.refresh(field)
@@ -1811,7 +1911,7 @@ async def create_form_field(
         action="create_field",
         resource_type="form",
         resource_id=form_id,
-        new_values=body.dict(),
+        new_values=field_data,
     )
     return {"data": _field_payload(field)}
 
@@ -1830,7 +1930,11 @@ async def update_form_field(
     field = await db.get(FormField, field_id)
     if not field or field.form_id != form_id or field.tenant_id != tenant_id:
         raise HTTPException(404, "Field not found")
-    updates = body.dict(exclude_unset=True)
+    updates = _normalize_form_field_data(
+        body.dict(exclude_unset=True),
+        current_field_type=field.field_type,
+        current_ui_config=field.ui_config,
+    )
     old_values = _field_payload(field)
     changed = False
     for key, value in updates.items():

@@ -2681,9 +2681,9 @@ button {
 
 .dynamic-view-filter-bar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
-  gap: 10px;
-  align-items: end;
+  grid-template-columns: repeat(4, minmax(220px, 1fr)) auto;
+  gap: 10px 14px;
+  align-items: center;
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid #e4eaf0;
@@ -2692,11 +2692,49 @@ button {
 }
 
 .dynamic-view-filter-bar .ant-form-item {
+  min-width: 0;
   margin-bottom: 0;
 }
 
+.dynamic-view-filter-bar .ant-form-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dynamic-view-filter-bar .ant-form-item-label {
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.dynamic-view-filter-bar .ant-form-item-label > label {
+  min-width: 44px;
+  max-width: 72px;
+  height: 32px;
+  overflow: hidden;
+  color: #415563;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dynamic-view-filter-bar .ant-form-item-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dynamic-view-filter-bar .ant-form-item-control-input {
+  min-height: 32px;
+}
+
 .dynamic-view-filter-actions {
+  grid-column: 1 / -1;
   min-width: 140px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .runtime-alerts {
@@ -2708,6 +2746,17 @@ button {
 @media (max-width: 960px) {
   .dynamic-view-filter-bar {
     grid-template-columns: 1fr;
+  }
+
+  .dynamic-view-filter-bar .ant-form-item-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .dynamic-view-filter-bar .ant-form-item-label > label {
+    max-width: none;
+    height: auto;
   }
 }
 

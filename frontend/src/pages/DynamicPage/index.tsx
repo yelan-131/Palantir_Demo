@@ -526,7 +526,8 @@ export default function DynamicPage() {
       <Form
         className="dynamic-view-filter-bar"
         form={filterForm}
-        layout="vertical"
+        colon={false}
+        layout="horizontal"
         onFinish={(values) => {
           setPage(1);
           setSearch(String(values.keyword || ''));

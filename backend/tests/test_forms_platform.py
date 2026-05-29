@@ -48,6 +48,31 @@ def test_create_field_schema_is_metadata_only():
     assert "alter_table" not in payload
 
 
+def test_code_field_options_are_stored_as_field_metadata():
+    pytest.importorskip("fastapi")
+    from app.api.forms import FormFieldCreate, _normalize_form_field_data
+
+    body = FormFieldCreate(
+        field_name="alert_no",
+        label="Alert No",
+        field_type="code",
+        control_type="readonly-text",
+        encoding_rule={
+            "enabled": True,
+            "template": "AL-{yyyyMMdd}-{seq:3}",
+            "fixedLength": 15,
+        },
+    )
+
+    payload = _normalize_form_field_data(body.dict())
+
+    assert payload["field_type"] == "code"
+    assert payload["ui_config"]["controlType"] == "readonly-text"
+    assert payload["ui_config"]["encodingRule"]["fixedLength"] == 15
+    assert "ddl" not in payload
+    assert "alter_table" not in payload
+
+
 def test_dynamic_record_schema_accepts_json_payload():
     pytest.importorskip("fastapi")
     from app.api.forms import DynamicRecordCreate
@@ -198,6 +223,8 @@ def test_field_change_compatibility_flags_existing_bad_values():
     assert _field_value_is_compatible(Field("integer"), "7") is False
     assert _field_value_is_compatible(Field("boolean"), True) is True
     assert _field_value_is_compatible(Field("boolean"), "true") is False
+    assert _field_value_is_compatible(Field("code"), "AL-20260529-001") is True
+    assert _field_value_is_compatible(Field("code"), 20260529001) is False
 
 
 def test_publish_preview_blocks_new_required_field_with_existing_records():

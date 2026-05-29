@@ -16,7 +16,7 @@ import {
   createAgentConversation,
   listAgentConversationMessages,
   listAgentConversations,
-  sendAgentChat,
+  streamAgentChat,
 } from '@/services/api';
 import { useAiWorkbench } from './context';
 import type { AiKnowledgeContext } from './context';
@@ -33,6 +33,7 @@ interface MockSkillAction {
   summary: string;
   fields: Array<{ label: string; value: string }>;
   nextSteps: string[];
+  payload?: Record<string, unknown>;
 }
 
 interface AgentProcessStep {
@@ -87,6 +88,13 @@ interface AgentMessagePayload {
   created_at?: string | null;
   model_name?: string | null;
   usage?: Record<string, unknown> | null;
+  run_id?: string;
+  mode?: string;
+  steps?: Array<Record<string, unknown>>;
+  actions?: AgentSkillAction[];
+  risk_level?: string;
+  requires_confirmation?: boolean;
+  confirmation_payload?: Record<string, unknown>;
 }
 
 interface PageContext {
@@ -289,12 +297,19 @@ function formatServerTime(value?: string | null): string {
 }
 
 function mapServerMessage(message: AgentMessagePayload): ChatMessage {
+  const isAssistant = message.role !== 'user';
   return {
     id: message.message_id || message.id || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    role: message.role === 'user' ? 'user' : 'assistant',
+    role: isAssistant ? 'assistant' : 'user',
     content: message.content || '',
+    actions: isAssistant ? mapAgentActions(message.actions) : undefined,
+    steps: isAssistant ? mapAgentSteps(message.steps) : undefined,
     createdAt: formatServerTime(message.created_at),
-    source: message.role === 'assistant' && message.model_name ? `model: ${message.model_name}` : undefined,
+    source: isAssistant && message.model_name ? `model: ${message.model_name}` : undefined,
+    contextSources: isAssistant ? getContextSources({ steps: message.steps }) : undefined,
+    runId: isAssistant ? message.run_id : undefined,
+    requiresConfirmation: isAssistant ? Boolean(message.requires_confirmation) : undefined,
+    confirmationPayload: isAssistant ? message.confirmation_payload : undefined,
   };
 }
 
@@ -355,6 +370,15 @@ function mapAgentSteps(steps?: Array<Record<string, unknown>>): AgentProcessStep
   }));
 }
 
+function mapAgentStep(step: Record<string, unknown>): AgentProcessStep {
+  return {
+    id: String(step.id || `step-${Date.now()}`),
+    label: getAgentStepLabel(step),
+    status: String(step.status || 'completed'),
+    detail: getAgentStepDetail(step),
+  };
+}
+
 function mapServerConversation(
   conversation: AgentConversationPayload,
   contextKey: string,
@@ -378,6 +402,39 @@ function formatActionValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => (
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+  )) : [];
+}
+
+function getLowCodeReview(action: MockSkillAction) {
+  if (action.skill !== 'low_code.create_form_definition') return undefined;
+  const payload = asRecord(action.payload);
+  const form = asRecord(payload.form);
+  const menu = asRecord(payload.menu);
+  const fields = asRecordArray(payload.fields);
+  return {
+    formName: formatActionValue(form.name),
+    formCode: formatActionValue(form.code),
+    description: formatActionValue(form.description),
+    menuEnabled: Boolean(menu.create),
+    menuTitle: formatActionValue(menu.title),
+    fieldCount: fields.length,
+    fields: fields.slice(0, 8).map((field) => ({
+      name: formatActionValue(field.field_name),
+      label: formatActionValue(field.label),
+      type: formatActionValue(field.field_type),
+      required: Boolean(field.required),
+    })),
+    hiddenFieldCount: Math.max(0, fields.length - 8),
+  };
+}
+
 function mapAgentActions(actions?: AgentSkillAction[]): MockSkillAction[] | undefined {
   if (!actions?.length) return undefined;
   return actions.map((action) => {
@@ -395,8 +452,9 @@ function mapAgentActions(actions?: AgentSkillAction[]): MockSkillAction[] | unde
         value: formatActionValue(value),
       })),
       nextSteps: action.requires_confirmation
-        ? ['复核字段和证据', '确认后再保存草稿或提交流程']
+        ? ['复核关键配置', '需要调整就补充说明', '确认后再写入系统']
         : ['按需继续追问或调整建议'],
+      payload,
     };
   });
 }
@@ -440,6 +498,24 @@ function isStepComplete(status: string): boolean {
   return ['completed', 'skipped', 'waiting_confirmation'].includes(status);
 }
 
+function getVisibleAgentSteps(steps?: AgentProcessStep[]): AgentProcessStep[] {
+  if (!steps?.length) return [];
+  return steps.slice(-5);
+}
+
+function getAgentProcessTitle(steps: AgentProcessStep[], hasContent: boolean): string {
+  if (steps.some((step) => step.status === 'failed' || step.status === 'blocked')) return 'Agent 遇到问题';
+  if (hasContent || steps.some((step) => step.status === 'waiting_confirmation')) return 'Agent 已整理完成';
+  return 'Agent 正在处理';
+}
+
+function isAgentProcessActive(steps: AgentProcessStep[], hasContent: boolean): boolean {
+  if (hasContent) return false;
+  if (steps.some((step) => step.status === 'failed' || step.status === 'blocked')) return false;
+  if (steps.some((step) => step.status === 'waiting_confirmation')) return false;
+  return true;
+}
+
 function getStatusLabel(status: MockSkillStatus) {
   return status === 'draft_created' ? '草稿已生成' : '待复核';
 }
@@ -460,6 +536,7 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
+  const [confirmationNotes, setConfirmationNotes] = useState<Record<string, string>>({});
   const bodyRef = useRef<HTMLDivElement>(null);
   const promptScrollerRef = useRef<HTMLDivElement>(null);
   const promptDragRef = useRef<{ pointerId: number; startX: number; scrollLeft: number; dragging: boolean } | null>(null);
@@ -560,28 +637,54 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
     )));
   };
 
+  const updateSessionMessage = (
+    sessionId: string,
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) => {
+    setSessions((prev) => prev.map((session) => (
+      session.id === sessionId
+        ? {
+          ...session,
+          messages: session.messages.map((message) => (
+            message.id === messageId ? updater(message) : message
+          )),
+          updatedAt: nowText(),
+        }
+        : session
+    )));
+  };
+
   useEffect(() => {
     if (!activeSession?.id) return;
-    const typingMessage = messages.find((message) => message.role === 'assistant' && message.typing && message.fullContent !== undefined);
+    const typingMessage = messages.find((message) => (
+      message.role === 'assistant'
+      && message.typing
+      && message.fullContent !== undefined
+    ));
     if (!typingMessage) return;
-    const fullContent = typingMessage.fullContent || '';
-    if (typingMessage.content.length >= fullContent.length) {
+
+    const targetChars = Array.from(typingMessage.fullContent || '');
+    const currentSize = Array.from(typingMessage.content).length;
+    if (currentSize >= targetChars.length) {
       setSessionMessages(activeSession.id, messages.map((message) => (
         message.id === typingMessage.id
-          ? { ...message, content: fullContent, typing: false, fullContent: undefined }
+          ? { ...message, content: typingMessage.fullContent || '', fullContent: undefined, typing: false }
           : message
       )));
       return;
     }
+
     const timer = window.setTimeout(() => {
-      const nextSize = fullContent.charCodeAt(typingMessage.content.length) > 255 ? 1 : 2;
+      const nextContent = targetChars.slice(0, currentSize + 1).join('');
       setSessionMessages(activeSession.id, messages.map((message) => (
         message.id === typingMessage.id
-          ? { ...message, content: fullContent.slice(0, message.content.length + nextSize) }
+          ? { ...message, content: nextContent }
           : message
       )));
       bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
-    }, 26);
+    }, 18);
+
     return () => window.clearTimeout(timer);
   }, [activeSession?.id, messages]);
 
@@ -639,7 +742,20 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
     if (!trimmed || sending || !activeSession) return;
 
     const userMessage = createUserMessage(trimmed);
-    const pending = [...messages, userMessage];
+    const assistantMessageId = `assistant-stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const assistantPlaceholder: ChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      createdAt: nowText(),
+      steps: [{
+        id: 'run-accepted-local',
+        label: '连接 AI Agent',
+        status: 'active',
+        detail: '等待后端确认任务已接收',
+      }],
+    };
+    const pending = [...messages, userMessage, assistantPlaceholder];
     const sessionId = activeSession.id;
     setSessionMessages(sessionId, pending);
     setInput('');
@@ -654,58 +770,83 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
         applicationName,
         knowledgeContext,
       });
-      const response = await sendAgentChat({
+      await streamAgentChat({
         message: trimmed,
         page: AI_WORKBENCH_PAGE,
         context: runtimeContext,
-      });
-      const payload = (response.data ?? {}) as AgentChatResponse;
-      const persistedUserMessage = payload.user_message ? mapServerMessage(payload.user_message) : userMessage;
-      const assistantMessage = createAssistantMessage({
-        content: payload.answer || '我已收到你的问题，但后端没有返回可展示的回答。',
-        actions: mapAgentActions(payload.actions),
-      }, getAgentResponseSource(payload));
-      assistantMessage.contextSources = getContextSources(payload);
-      assistantMessage.steps = mapAgentSteps(payload.steps);
-      assistantMessage.runId = payload.run_id;
-      assistantMessage.requiresConfirmation = Boolean(payload.requires_confirmation);
-      assistantMessage.confirmationPayload = payload.confirmation_payload;
-      const persistedAssistantMessage = payload.assistant_message
-        ? {
-          ...mapServerMessage(payload.assistant_message),
-          content: '',
-          fullContent: payload.answer || payload.assistant_message.content || '',
-          typing: true,
-          actions: assistantMessage.actions,
-          steps: assistantMessage.steps,
-          source: assistantMessage.source,
-          contextSources: assistantMessage.contextSources,
-          runId: assistantMessage.runId,
-          requiresConfirmation: assistantMessage.requiresConfirmation,
-          confirmationPayload: assistantMessage.confirmationPayload,
+      }, ({ event, data }) => {
+        if (event === 'run.accepted') {
+          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+            ...message,
+            steps: [{
+              id: 'run-accepted',
+              label: '后端已接收任务',
+              status: 'completed',
+              detail: typeof data.message === 'string' ? data.message : undefined,
+            }],
+          }));
+          return;
         }
-        : undefined;
-      const animatedAssistantMessage = persistedAssistantMessage || {
-        ...assistantMessage,
-        content: '',
-        fullContent: assistantMessage.content,
-        typing: true,
-      };
-      setSessionMessages(sessionId, [
-        ...messages,
-        persistedUserMessage,
-        animatedAssistantMessage,
-      ]);
-      if (payload.conversation) {
-        const updated = mapServerConversation(payload.conversation, contextKey, intro);
-        setSessions((prev) => prev.map((session) => (
-          session.id === sessionId
-            ? { ...session, title: updated.title, updatedAt: updated.updatedAt }
-            : session
-        )));
-      }
+        if (event === 'step.completed') {
+          const rawStep = data.step && typeof data.step === 'object'
+            ? data.step as Record<string, unknown>
+            : data;
+          const nextStep = mapAgentStep(rawStep);
+          updateSessionMessage(sessionId, assistantMessageId, (message) => {
+            const steps = message.steps || [];
+            const existing = steps.findIndex((step) => step.id === nextStep.id);
+            const nextSteps = existing >= 0
+              ? steps.map((step, index) => (index === existing ? nextStep : step))
+              : [...steps, nextStep];
+            return { ...message, steps: nextSteps };
+          });
+          return;
+        }
+        if (event === 'answer.completed') {
+          const payload = data as AgentChatResponse;
+          const answerContent = payload.answer || payload.assistant_message?.content || '后端没有返回可展示的回答。';
+          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+            ...message,
+            content: '',
+            fullContent: answerContent,
+            typing: true,
+            actions: mapAgentActions(payload.actions),
+            steps: mapAgentSteps(payload.steps) || message.steps,
+            source: getAgentResponseSource(payload),
+            contextSources: getContextSources(payload),
+            runId: payload.run_id,
+            requiresConfirmation: Boolean(payload.requires_confirmation),
+            confirmationPayload: payload.confirmation_payload,
+          }));
+          if (payload.conversation) {
+            const updated = mapServerConversation(payload.conversation, contextKey, intro);
+            setSessions((prev) => prev.map((session) => (
+              session.id === sessionId
+                ? { ...session, title: updated.title, updatedAt: updated.updatedAt }
+                : session
+            )));
+          }
+          return;
+        }
+        if (event === 'run.failed') {
+          const errorContent = `执行失败：${String(data.detail || '未知错误')}`;
+          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+            ...message,
+            content: '',
+            fullContent: errorContent,
+            typing: true,
+            source: 'Agent 事件流',
+          }));
+        }
+      });
     } catch {
-      setSessionMessages(sessionId, [...pending, createAssistantMessage(generateUnavailableReply(), '无法连接后端 AI 服务')]);
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        content: '',
+        fullContent: generateUnavailableReply().content,
+        typing: true,
+        source: '无法连接后端 AI 事件流',
+      }));
     } finally {
       setSending(false);
     }
@@ -732,21 +873,31 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
       const routePath = typeof result.route_path === 'string' ? result.route_path : '';
       const nextMessages = messages.map((item) => (
         item.id === message.id
-          ? {
-            ...item,
-            content: routePath
-              ? `${item.content}\n\n已确认执行，表单已创建：${routePath}`
-              : `${item.content}\n\n已确认执行。`,
-            requiresConfirmation: false,
-            source: 'backend Agent: confirmed execution',
-          }
+          ? (() => {
+            const currentContent = item.fullContent || item.content;
+            return {
+              ...item,
+              content: routePath
+                ? `${currentContent}\n\n已确认执行，表单已创建：${routePath}`
+                : `${currentContent}\n\n已确认执行。`,
+              fullContent: undefined,
+              typing: false,
+              requiresConfirmation: false,
+              source: 'backend Agent: confirmed execution',
+            };
+          })()
           : item
       ));
       setSessionMessages(activeSession.id, nextMessages);
     } catch {
       const nextMessages = messages.map((item) => (
         item.id === message.id
-          ? { ...item, content: `${item.content}\n\n确认执行失败，请检查权限或稍后重试。` }
+          ? {
+            ...item,
+            content: `${item.fullContent || item.content}\n\n确认执行失败，请检查权限或稍后重试。`,
+            fullContent: undefined,
+            typing: false,
+          }
           : item
       ));
       setSessionMessages(activeSession.id, nextMessages);
@@ -754,6 +905,15 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
       setConfirmingRunId(undefined);
     }
   };
+
+  const sendConfirmationAdjustment = (action: MockSkillAction) => {
+    const note = messageScopedNote(action.id).trim();
+    if (!note) return;
+    setConfirmationNotes((prev) => ({ ...prev, [action.id]: '' }));
+    void sendMessage(`请调整刚才的 ${action.title}：${note}`);
+  };
+
+  const messageScopedNote = (actionId: string) => confirmationNotes[actionId] || '';
 
   const scrollPromptsWithWheel = (event: WheelEvent<HTMLDivElement>) => {
     const scroller = promptScrollerRef.current;
@@ -801,30 +961,46 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
   const chatWorkbench = (
           <div className="ai-workbench-chat">
           <div className="ai-chat-body" ref={bodyRef}>
-            {messages.map((message) => (
+            {messages.map((message) => {
+              const processSteps = message.role === 'assistant' ? getVisibleAgentSteps(message.steps) : [];
+              const hasProcess = processSteps.length > 0;
+              const hasContent = Boolean(message.content.trim());
+              const isTypingAssistant = message.role === 'assistant' && Boolean(message.typing);
+              const hasAnswer = hasContent || Boolean(message.fullContent?.trim());
+              const isPendingAssistant = message.role === 'assistant' && hasProcess && !hasAnswer;
+              const canShowAssistantMeta = message.role === 'assistant' && !isTypingAssistant;
+              const isProcessActive = hasProcess && isAgentProcessActive(processSteps, hasAnswer);
+
+              return (
               <div className={`ai-chat-message ${message.role}`} key={message.id}>
                 <div className="ai-chat-bubble">
-                  {message.role === 'assistant' && message.steps?.length ? (
+                  {hasProcess ? (
                     <div className="ai-agent-process">
-                      {message.steps.map((step) => (
-                        <div className={`ai-agent-process-step ${isStepComplete(step.status) ? 'done' : 'active'}`} key={step.id}>
-                          <span className="ai-agent-process-dot" />
-                          <div>
-                            <span>{step.label}</span>
-                            {step.detail ? <small>{step.detail}</small> : null}
+                      <div className="ai-agent-process-title">
+                        <span className={`ai-agent-process-dot ${isProcessActive ? 'active' : 'done'}`} />
+                        <span>{getAgentProcessTitle(processSteps, hasAnswer)}</span>
+                      </div>
+                      <div className="ai-agent-process-steps">
+                        {processSteps.map((step) => (
+                          <div className={`ai-agent-process-step ${isStepComplete(step.status) ? 'done' : 'active'}`} key={step.id}>
+                            <span className="ai-agent-process-dot" />
+                            <div>
+                              <span>{step.label}</span>
+                              {step.detail ? <small>{step.detail}</small> : null}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   ) : null}
-                  <Typography.Text>
-                    {message.content}
-                    {message.typing ? <span className="ai-typing-cursor" /> : null}
+                  <Typography.Text className={isPendingAssistant ? 'ai-chat-pending-text' : undefined} type={isPendingAssistant ? 'secondary' : undefined}>
+                    {hasContent ? message.content : (isPendingAssistant ? '正在处理...' : '')}
+                    {isTypingAssistant ? <span className="ai-typing-cursor" /> : null}
                   </Typography.Text>
-                  {message.role === 'assistant' && message.source ? (
+                  {canShowAssistantMeta && message.source ? (
                     <span className="ai-chat-source">{message.source}</span>
                   ) : null}
-                  {message.role === 'assistant' && message.contextSources ? (
+                  {canShowAssistantMeta && message.contextSources ? (
                     <div className="ai-context-source-row">
                       <Tag>最近消息 {message.contextSources.recent_messages ?? 0}</Tag>
                       <Tag>记忆 {message.contextSources.memories ?? 0}</Tag>
@@ -833,9 +1009,12 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
                       {message.contextSources.semantic_records ? <Tag>数据记录 {message.contextSources.semantic_records}</Tag> : null}
                     </div>
                   ) : null}
-                  {message.actions?.length ? (
+                  {canShowAssistantMeta && message.actions?.length ? (
                     <div className="ai-skill-action-list">
-                      {message.actions.map((action) => (
+                      {message.actions.map((action) => {
+                        const review = getLowCodeReview(action);
+                        const note = messageScopedNote(action.id);
+                        return (
                         <article className="ai-skill-action-card" key={action.id}>
                           <div className="ai-skill-action-head">
                             <span className="ai-skill-action-icon">
@@ -852,14 +1031,74 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
                           <Typography.Paragraph className="ai-skill-action-summary">
                             {action.summary}
                           </Typography.Paragraph>
-                          <dl className="ai-skill-action-fields">
-                            {action.fields.map((field) => (
-                              <div key={`${action.id}-${field.label}`}>
-                                <dt>{field.label}</dt>
-                                <dd>{field.value}</dd>
+                          {review ? (
+                            <div className="ai-confirm-review">
+                              <div className="ai-confirm-review-head">
+                                <div>
+                                  <Typography.Text strong>{review.formName}</Typography.Text>
+                                  <small>{review.formCode}</small>
+                                </div>
+                                <Tag color={review.menuEnabled ? 'blue' : 'default'}>
+                                  {review.menuEnabled ? `菜单：${review.menuTitle}` : '不创建菜单入口'}
+                                </Tag>
                               </div>
-                            ))}
-                          </dl>
+                              <div className="ai-confirm-review-meta">
+                                <span>字段 {review.fieldCount}</span>
+                                <span>{review.description}</span>
+                              </div>
+                              <div className="ai-confirm-field-list">
+                                {review.fields.map((field) => (
+                                  <div className="ai-confirm-field-item" key={`${action.id}-${field.name}`}>
+                                    <span>{field.label}</span>
+                                    <small>{field.name} · {field.type}{field.required ? ' · 必填' : ''}</small>
+                                  </div>
+                                ))}
+                                {review.hiddenFieldCount ? (
+                                  <div className="ai-confirm-field-more">还有 {review.hiddenFieldCount} 个字段</div>
+                                ) : null}
+                              </div>
+                              {message.requiresConfirmation && message.runId ? (
+                                <div className="ai-confirm-adjust">
+                                  <Input.TextArea
+                                    value={note}
+                                    rows={2}
+                                    placeholder="需要调整就写在这里，例如：字段增加供应商等级，菜单放到供应链风险下面"
+                                    disabled={sending || confirmingRunId === message.runId}
+                                    onChange={(event) => {
+                                      setConfirmationNotes((prev) => ({ ...prev, [action.id]: event.target.value }));
+                                    }}
+                                  />
+                                  <div className="ai-confirm-actions">
+                                    <Button
+                                      size="small"
+                                      disabled={!note.trim() || sending || confirmingRunId === message.runId}
+                                      onClick={() => sendConfirmationAdjustment(action)}
+                                    >
+                                      提交调整
+                                    </Button>
+                                    <Button
+                                      type="primary"
+                                      size="small"
+                                      icon={<CheckCircleOutlined />}
+                                      loading={confirmingRunId === message.runId}
+                                      onClick={() => { void confirmAgentAction(message); }}
+                                    >
+                                      确认写入
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <dl className="ai-skill-action-fields">
+                              {action.fields.map((field) => (
+                                <div key={`${action.id}-${field.label}`}>
+                                  <dt>{field.label}</dt>
+                                  <dd>{field.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          )}
                           <div className="ai-skill-action-next">
                             <Typography.Text type="secondary">后续动作</Typography.Text>
                             <ol>
@@ -868,7 +1107,7 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
                               ))}
                             </ol>
                           </div>
-                          {message.requiresConfirmation && message.runId ? (
+                          {!review && message.requiresConfirmation && message.runId ? (
                             <Button
                               type="primary"
                               size="small"
@@ -880,30 +1119,15 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
                             </Button>
                           ) : null}
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : null}
                 </div>
                 <span>{message.createdAt}</span>
               </div>
-            ))}
-            {sending ? (
-              <div className="ai-chat-message assistant">
-                <div className="ai-chat-bubble">
-                  <div className="ai-agent-process">
-                    <div className="ai-agent-process-step active">
-                      <span className="ai-agent-process-dot" />
-                      <div>
-                        <span>连接 AI Agent</span>
-                        <small>正在提交问题并等待后端返回可见步骤</small>
-                      </div>
-                    </div>
-                  </div>
-                  <Typography.Text type="secondary">正在处理...</Typography.Text>
-                </div>
-                <span>{nowText()}</span>
-              </div>
-            ) : null}
+              );
+            })}
           </div>
 
           <div

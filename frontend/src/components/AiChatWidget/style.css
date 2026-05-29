@@ -180,52 +180,82 @@
 }
 
 .ai-agent-process {
-  margin: 0 0 10px;
-  padding: 8px 9px;
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
   display: grid;
-  gap: 7px;
-  border: 1px solid #dce8ec;
-  border-radius: 8px;
-  background: #f8fbfc;
+  gap: 5px;
+  border-left: 2px solid #d6e5ea;
+  color: #566b74;
+}
+
+.ai-agent-process-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #435b65;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.ai-agent-process-steps {
+  display: grid;
+  gap: 3px;
 }
 
 .ai-agent-process-step {
   min-width: 0;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 7px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 6px;
   align-items: start;
-  color: #263b44;
-  font-size: 12px;
-  line-height: 17px;
+  color: #5b6f78;
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .ai-agent-process-step small {
   display: block;
   overflow: hidden;
-  color: #667a83;
-  font-size: 11px;
-  line-height: 16px;
+  color: #87979e;
+  font-size: 10px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ai-agent-process-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   margin-top: 5px;
   border-radius: 50%;
   background: #2f5f73;
-  box-shadow: 0 0 0 3px rgba(47, 95, 115, 0.12);
 }
 
-.ai-agent-process-step.active .ai-agent-process-dot {
+.ai-agent-process-title .ai-agent-process-dot {
+  flex: 0 0 auto;
+  margin-top: 0;
+  box-shadow: 0 0 0 3px rgba(47, 95, 115, 0.1);
+}
+
+.ai-agent-process-step.active .ai-agent-process-dot,
+.ai-agent-process-title .ai-agent-process-dot.active {
   animation: ai-process-pulse 1s ease-in-out infinite;
 }
 
 .ai-agent-process-step.done .ai-agent-process-dot {
   background: #2f7d52;
-  box-shadow: 0 0 0 3px rgba(47, 125, 82, 0.12);
+}
+
+.ai-agent-process-title .ai-agent-process-dot.done {
+  background: #2f7d52;
+  box-shadow: 0 0 0 3px rgba(47, 125, 82, 0.1);
+}
+
+.ai-chat-pending-text.ant-typography {
+  color: #6f8087;
+  font-size: 13px;
 }
 
 .ai-typing-cursor {
@@ -348,6 +378,105 @@
   line-height: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-confirm-review {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.ai-confirm-review-head {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  border: 1px solid #dce8ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ai-confirm-review-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ai-confirm-review-head small {
+  overflow: hidden;
+  color: #6d7d85;
+  font-size: 11px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-confirm-review-head .ant-tag {
+  margin: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-confirm-review-meta {
+  display: grid;
+  gap: 3px;
+  color: #566b74;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ai-confirm-field-list {
+  display: grid;
+  gap: 5px;
+}
+
+.ai-confirm-field-item {
+  min-width: 0;
+  padding: 7px 8px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #e2ebef;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ai-confirm-field-item span,
+.ai-confirm-field-item small,
+.ai-confirm-field-more {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-confirm-field-item span {
+  color: #20353d;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17px;
+}
+
+.ai-confirm-field-item small,
+.ai-confirm-field-more {
+  color: #72828a;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.ai-confirm-field-more {
+  padding: 2px 1px 0;
+}
+
+.ai-confirm-adjust {
+  display: grid;
+  gap: 7px;
+}
+
+.ai-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .ai-skill-action-next {

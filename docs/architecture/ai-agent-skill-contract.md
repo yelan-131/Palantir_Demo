@@ -1,6 +1,6 @@
 # AI Agent Skill/Tool Contract
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 Status: scaffold implemented + roadmap. This document defines the intended
 AI skill/tool contract and staged migration path. Current API entry points are
@@ -63,6 +63,7 @@ The first OpenClaw-style enterprise scaffold is now present in the backend:
 | Audit | `backend/app/services/ai/audit.py`, `GET /api/v1/ai/audit` | Shared in-memory AI audit helper used by agent and draft flows. |
 | Knowledge Agent Persistence | `backend/app/api/knowledge.py`, migration `0015_ai_agent_runtime.py` | Relational persistence for knowledge-center conversations, messages, runs, tool calls, and memory entries. |
 | Knowledge Directories | `GET/POST/PUT /api/v1/knowledge/directories`, `POST /api/v1/knowledge/directories/{id}/move` | Demo directory tree API for the Obsidian-style knowledge page. |
+| Low-Code Agent Tools | `backend/app/services/ai/planner.py`, `backend/app/services/ai/low_code_tools.py` | Deterministic planning and confirmed admin-only creation of form definitions, fields, layouts, application bindings, and optional menu nodes. |
 
 The legacy `/api/v1/ai/agent` endpoint remains compatible, but it now also
 creates an observable `run_id` and returns `steps`, `risk_level`, and
@@ -70,10 +71,12 @@ creates an observable `run_id` and returns `steps`, `risk_level`, and
 
 Durability is currently split:
 
-- `/api/v1/ai/agent-runs` uses the in-memory scaffold and is suitable for demo
-  and contract iteration.
+- `/api/v1/ai/agent-runs` uses the general Agent scaffold and is suitable for
+  demo and contract iteration.
+- `/api/v1/ai/agent/conversations/*` stores general Agent conversations and
+  memories for the floating assistant.
 - `/api/v1/knowledge/agent/conversations/*` writes relational AI runtime rows
-  and is the implemented persistent path for knowledge-center chat.
+  for knowledge-center chat.
 
 Before general-purpose agentic work is considered production-ready, the
 in-memory scaffold should be moved behind the same database-backed repository
@@ -416,6 +419,8 @@ backend/app/services/ai/
   skills.py             # skill registry and skill contracts
   tools.py              # current mock business draft helpers
   tool_registry.py      # typed tool registry and tool contracts
+  planner.py            # deterministic turn planner for action vs Q&A
+  low_code_tools.py     # confirmed low-code form creation helpers
   policies.py           # risk, permission, and confirmation policy
   schemas.py            # shared Pydantic input/output schemas
   agent_runs.py         # run state, steps, evidence, status

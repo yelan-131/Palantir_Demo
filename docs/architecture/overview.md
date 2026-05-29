@@ -1,6 +1,6 @@
 # ManuFoundry Architecture Overview
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 This is the current high-level architecture document. It describes what the codebase implements now, and it separates that from Palantir-inspired reference direction.
 
@@ -12,7 +12,7 @@ ManuFoundry is a manufacturing low-code analytics workbench. It borrows three im
 - **Operational applications**: users work in role-oriented applications instead of raw tables or disconnected dashboards.
 - **Data-to-action loop**: data, graph context, rules, workflows, notifications, and AI assistance should help users move from insight to action.
 
-This project is a prototype, not a full Palantir clone. The current system implements a usable workbench shell, manufacturing APIs, low-code form metadata persistence, workflow/rules/reporting modules, and several Palantir-inspired design documents.
+This project is a prototype, not a full Palantir clone. The current system implements a usable workbench shell, manufacturing APIs, SaaS tenant foundations, low-code form metadata/version persistence, workflow/rules/reporting modules, AI-assisted low-code planning, and several Palantir-inspired design documents.
 
 ## 2. Current Technology Stack
 
@@ -88,6 +88,9 @@ System endpoints:
 
 - `GET /`
 - `GET /health`
+- `GET /api/v1/system/readiness`
+- `GET /api/v1/system/metrics`
+- `GET /api/v1/release/current`
 
 Main API modules:
 
@@ -120,6 +123,9 @@ Main API modules:
 | Search | `/api/v1/search` |
 | AI builder | `/api/v1/ai-builder` |
 | Productization | `/api/v1/productization` |
+| Platform tenant operations | `/api/v1/platform` |
+| Current tenant profile | `/api/v1/tenant` |
+| Release metadata | `/api/v1/release` |
 
 ## 6. Data And Persistence
 
@@ -131,21 +137,26 @@ The persistence layer has two major parts:
 
 2. **Low-code platform metadata**
    - Applications, application menus, roles.
-   - Forms platform tables introduced by migration `0006_platform_forms.py`.
+   - Forms platform tables introduced by migration `0006_platform_forms.py`, versioned by `0021_form_versions.py`, and seeded into production-like application assemblies by `0024_seed_application_assembly.py`.
    - Dynamic form records stored as JSON/JSONB rather than creating a physical table for every user-defined form.
 
-3. **AI runtime observability**
+3. **SaaS tenant and identity operations**
+   - Tenants, tenant domains, invites, redacted exports, password reset tokens, sessions, password history, and OIDC state rows.
+   - Tenant isolation is progressively applied across low-code, workflow, reports, notifications, rules, scheduler, knowledge, and AI runtime rows.
+
+4. **Knowledge and AI runtime observability**
+   - Knowledge documents, chunks, ingestion jobs, extraction jobs, and object links have relational persistence for the current MVP.
    - Knowledge Agent conversations, messages, runs, tool calls, and memory rows
      are stored in the relational database through migration
      `0015_ai_agent_runtime.py`.
-   - General `/api/v1/ai/agent-runs` still uses an in-memory scaffold for run
-     lifecycle while the contract stabilizes.
+   - General `/api/v1/ai` conversations and memory APIs now have persisted runtime surfaces, while low-code writes remain admin-only and confirmation-gated.
 
 Forms platform tables:
 
 | Table | Purpose |
 | --- | --- |
 | `forms` | Form/business object definition |
+| `form_versions` | Immutable published form snapshots |
 | `application_forms` | Application-form binding |
 | `application_menu_nodes` | Application-specific menu tree |
 | `form_fields` | Field metadata |
@@ -190,7 +201,7 @@ sequenceDiagram
 | Foundry Pipeline Builder | Data source management, pipeline APIs, scheduler APIs |
 | Object actions | Form actions, rules engine, workflow bindings, notifications |
 | Operational decision apps | Dashboard, maintenance, quality, supply-chain, workflow, reports |
-| AIP-style assistance | Floating AI widget, `/api/v1/ai`, skill/tool registry, confirmation-token scaffold, AI builder suggestions, local `/api/v1/knowledge` evidence retrieval, persisted knowledge Agent chat runtime |
+| AIP-style assistance | Floating AI widget, `/api/v1/ai`, persisted conversations/memories, skill/tool registry, confirmation-token scaffold, AI builder suggestions, admin-gated low-code planning tools, local `/api/v1/knowledge` evidence retrieval, persisted knowledge Agent chat runtime |
 | Gotham-style command UI | Event/risk workbench reference docs, notification center, graph impact/trace endpoints |
 
 The important architectural lesson is not a visual copy of Palantir. The lesson is the **object-centric operating model**: users act on meaningful business objects, not disconnected screens.
@@ -225,9 +236,10 @@ Implemented now:
 
 - Workbench shell, app switcher, dynamic menus, workspace, system admin surfaces.
 - Backend APIs for applications, forms platform, workflow, rules, reports, notifications, scheduler, search, templates, AI builder.
-- Local knowledge base APIs with static demo documents, upload simulation, Markdown, cards, directories, binding candidates, OCR workflow metadata, TF-IDF retrieval, and persisted knowledge Agent conversations.
+- Local knowledge base APIs with persistent document/chunk/runtime rows, upload simulation, Markdown, cards, directories, binding candidates, OCR workflow metadata, TF-IDF retrieval, and persisted knowledge Agent conversations.
 - Productization readiness contract under `/api/v1/productization/readiness`.
-- Forms metadata persistence and JSON dynamic records.
+- Forms metadata persistence, published form versions, JSON dynamic records, and database-seeded application assembly menus.
+- Tenant operation APIs under `/api/v1/platform`, public tenant profile under `/api/v1/tenant/profile/public`, and system/release status endpoints.
 - Docker development and production-style compose files.
 - Backend test coverage across security, workflow, rules, notifications, forms, config import/export, templates, scheduler/search/AI builder, graph safety, and model-driven safety.
 

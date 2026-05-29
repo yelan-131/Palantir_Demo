@@ -1,6 +1,6 @@
 # Frontend Development Guide
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 Source of truth: `frontend/src/App.tsx`, `frontend/src/services/api.ts`,
 `frontend/src/config/menus.ts`, and `frontend/package.json`.
@@ -83,6 +83,20 @@ There are two menu sources:
 Runtime menus prefer the backend response. Local/static menus remain as a
 fallback for demo resilience and legacy pages.
 
+Application assembly is now database-seeded for the default tenant through
+`0024_seed_application_assembly.py`. The frontend should continue to tolerate
+legacy/static menu fallbacks, but production-like flows should prefer
+`/api/v1/applications/{id}/menus` and `/api/v1/forms/applications/{id}/menu-nodes`.
+
+`SystemAdmin/AppMenuManagement.tsx` should treat backend application, role, and
+platform form APIs as the source of truth. It no longer derives extra form rows
+from ontology objects or shows synthetic field/metric previews when the backend
+does not provide real form metadata.
+
+Generated `/program/:programId` pages still own their layout in
+`src/pages/AppPrograms/index.tsx`, but production-facing rows and metrics should
+come from `/api/v1/dashboard/programs/{program_id}` when available.
+
 Account Center now separates the semantic/knowledge workbench into four
 admin-facing sections:
 
@@ -126,14 +140,16 @@ Implemented client groups include:
 - Auth, dashboard, data sources, ontology, graph, pipelines.
 - Analytics, maintenance, quality, supply chain, reports.
 - Applications and application admin APIs.
+- Platform tenant APIs and current tenant profile APIs.
 - Platform forms: forms, fields, layouts, actions, permissions, workflow
-  bindings, dynamic records, and application menu nodes.
+  bindings, publish versions, dynamic records, and application menu nodes.
 - Workflow, notifications, templates, rules, scheduler, search.
 - Knowledge base: spaces, sources, documents, upload simulation, ingestion jobs,
   Markdown, chunks, cards, related evidence, binding candidates, OCR workflow
   metadata, directories, local RAG search, and persisted knowledge Agent
   conversations/messages.
-- AI platform settings, including GLM-compatible defaults and provider testing.
+- AI platform settings, conversation/memory APIs, low-code Agent actions, GLM-compatible defaults, and provider testing.
+- Release metadata from `/api/v1/release/current`.
 - Productization readiness is consumed by backend tests today; add a frontend
   service wrapper only when a page needs to render it.
 

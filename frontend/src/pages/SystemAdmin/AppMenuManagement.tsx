@@ -55,7 +55,6 @@ import {
   upsertApplicationFormBinding,
   listPlatformForms,
   listPlatformMenuNodes,
-  listSemanticOntologyObjects,
   updatePlatformMenuNode,
   type PlatformForm,
   type PlatformMenuNode,
@@ -471,11 +470,10 @@ export default function AppMenuManagement() {
   const selectedMenu = findMenuNode(currentMenus, selectedMenuKey);
 
   useEffect(() => {
-    Promise.all([adminListApplications(), adminListRoles(), listSemanticOntologyObjects(), listPlatformForms()])
-      .then(([appsRes, rolesRes, objectsRes, formsRes]) => {
+    Promise.all([adminListApplications(), adminListRoles(), listPlatformForms()])
+      .then(([appsRes, rolesRes, formsRes]) => {
         const apiApps = appsRes.data?.data ?? [];
         const apiRoles = rolesRes.data?.data ?? [];
-        const ontologyObjects = objectsRes.data?.data ?? [];
         const platformForms = unwrapApiList<PlatformForm>(formsRes);
         if (apiApps.length) {
           setApplications(apiApps);
@@ -486,9 +484,6 @@ export default function AppMenuManagement() {
           const mappedPlatformForms = platformForms.map(mapPlatformFormToRecord);
           setForms((prev) => mergeFormRecords(prev, mappedPlatformForms));
           setSelectedFormId(String(platformForms[0].id));
-        }
-        if (ontologyObjects.length) {
-          setForms((prev) => mergeOntologyForms(prev, ontologyObjects));
         }
       })
       .catch(() => {
@@ -2128,42 +2123,11 @@ function statusColor(status: string) {
 }
 
 function buildFieldRows(form?: FormRecord): FieldRecord[] {
-  if (!form || form.fields <= 0) return [];
-  const presets = [
-    { label: '名称', code: 'name', dataType: 'string', length: '100', component: 'Text', list: true, form: true, search: true, allowNull: false, unique: false, indexed: true },
-    { label: '编码', code: 'code', dataType: 'string', length: '64', component: 'Text', list: true, form: true, search: true, allowNull: false, unique: true, indexed: true },
-    { label: '状态', code: 'status', dataType: 'enum', length: '-', component: 'Select', list: true, form: true, search: true, allowNull: false, unique: false, indexed: true },
-    { label: '负责人', code: 'owner', dataType: 'string', length: '80', component: 'Text', list: true, form: true, search: false, allowNull: true, unique: false, indexed: false },
-    { label: '描述', code: 'description', dataType: 'text', length: '-', component: 'Textarea', list: false, form: true, search: false, allowNull: true, unique: false, indexed: false },
-    { label: '创建时间', code: 'created_at', dataType: 'datetime', length: '-', component: 'DateTime', list: true, form: false, search: true, allowNull: false, unique: false, indexed: true },
-    { label: '更新时间', code: 'updated_at', dataType: 'datetime', length: '-', component: 'DateTime', list: true, form: false, search: false, allowNull: false, unique: false, indexed: true },
-  ];
-
-  return Array.from({ length: form.fields }, (_, index) => {
-    const preset = presets[index % presets.length];
-    const code = index < presets.length ? preset.code : `${form.code.replace(/-/g, '_')}_field_${index + 1}`;
-    return {
-      ...preset,
-      id: `${form.id}-${code}`,
-      label: index < presets.length ? preset.label : `扩展字段 ${index + 1}`,
-      code,
-      columnName: code,
-    };
-  });
+  return [];
 }
 
 function buildMetricRows(form?: FormRecord): MetricRecord[] {
-  if (!form) return [];
-  const base = [
-    { name: '记录数量', role: '指标', sourceField: 'id', aggregation: 'count', granularity: '-', defaultFilter: '时间范围', chartRole: 'Y 轴', drilldown: '明细列表' },
-    { name: '状态分布', role: '维度', sourceField: 'status', aggregation: 'group by', granularity: '-', defaultFilter: '状态', chartRole: '系列', drilldown: '状态详情' },
-    { name: '时间趋势', role: '维度', sourceField: 'created_at', aggregation: 'date group', granularity: '月/周/日', defaultFilter: '最近 90 天', chartRole: 'X 轴', drilldown: '时间明细' },
-    { name: '负责人分布', role: '维度', sourceField: 'owner', aggregation: 'group by', granularity: '-', defaultFilter: '负责人', chartRole: '筛选器', drilldown: '负责人详情' },
-  ];
-  return base.map((item, index) => ({
-    id: `${form.id}-metric-${index + 1}`,
-    ...item,
-  }));
+  return [];
 }
 
 function statusText(status: string) {
@@ -2171,28 +2135,6 @@ function statusText(status: string) {
   if (status === 'draft') return '草稿';
   if (status === 'disabled') return '停用';
   return status;
-}
-
-function mergeOntologyForms(forms: FormRecord[], ontologyObjects: any[]) {
-  const byCode = new Map(forms.map((item) => [item.entity, item]));
-  ontologyObjects.forEach((item) => {
-    if (byCode.has(item.code ?? item.id)) return;
-    forms.push({
-      id: `${item.code ?? item.id}-form`,
-      name: `${item.name ?? item.label}表单`,
-      code: `${item.code ?? item.id}-form`,
-      category: 'interaction',
-      mode: 'entry_form',
-      structureLocked: true,
-      entity: item.code ?? item.id,
-      source: item.source ?? '-',
-      status: 'draft',
-      owner: '平台管理员',
-      description: item.description ?? '由本体对象生成的表单。',
-      fields: item.fields?.length ?? item.properties?.length ?? 0,
-    });
-  });
-  return [...forms];
 }
 
 function getMenuLabel(node?: MenuNode) {

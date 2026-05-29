@@ -71,6 +71,58 @@ def test_admin_agent_can_confirm_low_code_form_creation():
         assert [field["field_name"] for field in created["fields"]] == ["supplier_name", "issue_type"]
 
 
+def test_agent_conversation_history_restores_run_steps_and_actions():
+    from app.main import app
+
+    suffix = uuid.uuid4().hex[:8]
+    with TestClient(app) as client:
+        login = _assert_ok(
+            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
+            context="login",
+        )
+        headers = _headers(login["token"])
+        conversation = _assert_ok(
+            client.post(
+                "/api/v1/ai/agent/conversations",
+                headers=headers,
+                json={"title": "History restore", "page": "ai-workbench", "context": {"surface": "global"}},
+            ),
+            context="create conversation",
+        )["data"]
+
+        response = _assert_ok(
+            client.post(
+                "/api/v1/ai/agent",
+                headers=headers,
+                json={
+                    "message": "create a form for supplier issue handling",
+                    "context": {
+                        "conversation_id": conversation["conversation_id"],
+                        "formName": f"AI Supplier History {suffix}",
+                        "formCode": f"ai_supplier_history_{suffix}",
+                    },
+                },
+            ),
+            context="agent plan",
+        )
+        assert response["requires_confirmation"] is True
+
+        messages = _assert_ok(
+            client.get(
+                f"/api/v1/ai/agent/conversations/{conversation['conversation_id']}/messages",
+                headers=headers,
+            ),
+            context="list messages",
+        )["data"]
+        assistant = [item for item in messages if item["role"] == "assistant"][-1]
+
+        assert assistant["run_id"] == response["run_id"]
+        assert assistant["requires_confirmation"] is True
+        assert assistant["confirmation_payload"]["confirmation_token"] == response["confirmation_payload"]["confirmation_token"]
+        assert assistant["actions"][0]["skill"] == "low_code.create_form_definition"
+        assert any(step["id"] == "step-planner" for step in assistant["steps"])
+
+
 def test_chinese_low_code_request_uses_backend_planner():
     from app.services.ai.planner import plan_agent_turn
     from app.services.ai.low_code_tools import build_low_code_form_payload

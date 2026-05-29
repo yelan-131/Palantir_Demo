@@ -326,6 +326,53 @@ export const sendChat = (message: string, sessionId?: string) =>
   api.post('/ai/chat', { message, session_id: sessionId });
 export const smartAnalyze = (query: string) => api.post('/ai/analyze', { query });
 export const sendAgentChat = (data: Record<string, unknown>) => api.post('/ai/agent', data);
+export interface AgentStreamEvent {
+  event: string;
+  data: Record<string, unknown>;
+}
+
+export const streamAgentChat = async (
+  data: Record<string, unknown>,
+  onEvent: (event: AgentStreamEvent) => void,
+) => {
+  const token = localStorage.getItem('mf_token');
+  const response = await fetch(`${apiBaseURL}/ai/agent/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`Agent stream failed: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const flushBlock = (block: string) => {
+    const lines = block.split(/\r?\n/);
+    const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim() || 'message';
+    const dataText = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!dataText) return;
+    onEvent({ event, data: JSON.parse(dataText) as Record<string, unknown> });
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || '';
+    blocks.forEach(flushBlock);
+    if (done) break;
+  }
+  if (buffer.trim()) flushBlock(buffer);
+};
 export const confirmAgentRun = (runId: string, data: Record<string, unknown>) =>
   api.post(`/ai/agent-runs/${runId}/confirm`, data);
 export const createAgentConversation = (data: Record<string, unknown>) =>
@@ -655,6 +702,7 @@ export type PlatformFieldType =
   | 'date'
   | 'datetime'
   | 'enum'
+  | 'code'
   | 'json'
   | 'relation';
 
