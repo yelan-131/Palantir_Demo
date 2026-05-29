@@ -692,11 +692,14 @@ async def create_tenant_export(
             "tables": {},
         }
         for table_name in EXPORT_TABLES:
+            nested = await db.begin_nested()
             try:
                 sql = "SELECT * FROM tenants WHERE id = :tenant_id" if table_name == "tenants" else f"SELECT * FROM {table_name} WHERE tenant_id = :tenant_id"
                 rows = (await db.execute(text(sql), {"tenant_id": tenant_id})).mappings().all()
                 payload["tables"][table_name] = [_export_payload(row) for row in rows]
+                await nested.commit()
             except Exception:
+                await nested.rollback()
                 payload["tables"][table_name] = []
 
         export_dir = Path(__file__).resolve().parents[2] / "storage" / "tenant_exports"
