@@ -35,7 +35,7 @@ import {
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Button, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Button, Checkbox, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   adminListOrgUnits,
@@ -61,6 +61,8 @@ import {
   type PlatformFormPublishReport,
 } from '@/services/api';
 import {
+  controlTypeForField,
+  defaultOperatorForControl,
   makeDefaultViewConfig,
   normalizeViewConfig,
   sortByOrder,
@@ -1124,6 +1126,7 @@ export default function FormSettingsPage() {
   const baseConfig = (formId && configs[formId]) || { ...defaultConfig, id: formId || defaultConfig.id };
   const [viewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
   const [expandedViewRow, setExpandedViewRow] = useState<string>('filter-0');
+  const [filterFieldPickerOpen, setFilterFieldPickerOpen] = useState(false);
   const [viewPreviewDevice, setViewPreviewDevice] = useState<'desktop' | 'narrow'>('desktop');
   const [layoutControls, setLayoutControls] = useState<LayoutControl[]>(baseConfig.fields.map(makeFieldControl));
   const [selectedControlId, setSelectedControlId] = useState<string>('');
@@ -1218,6 +1221,7 @@ export default function FormSettingsPage() {
     setSelectedAssetKey(baseConfig.fields[0]?.key || '');
     setViewConfig(makeDesignerViewConfig(baseConfig));
     setExpandedViewRow('filter-0');
+    setFilterFieldPickerOpen(false);
     setViewPreviewDevice('desktop');
     setVersion(baseConfig.version);
     setCopiedControl(null);
@@ -1569,6 +1573,35 @@ export default function FormSettingsPage() {
       ...current,
       table: { ...current.table, ...patch },
     }));
+  };
+
+  const syncViewFiltersByFields = (fieldNames: string[]) => {
+    updateViewConfig((current) => {
+      const selected = new Set(fieldNames);
+      const existingByField = new Map(current.filters.map((filter) => [filter.fieldName, filter]));
+      const filters = fieldNames
+        .map((fieldName, index) => {
+          const existing = existingByField.get(fieldName);
+          if (existing) {
+            return { ...existing, enabled: true, sortOrder: index };
+          }
+          const field = baseConfig.fields.find((item) => item.key === fieldName);
+          const controlType = controlTypeForField(field?.type);
+          return {
+            id: `filter-${fieldName}-${Date.now()}-${index}`,
+            fieldName,
+            label: field?.name || fieldName,
+            controlType,
+            operator: defaultOperatorForControl(controlType),
+            placeholder: controlType === 'keyword' || controlType === 'text' ? `请输入${field?.name || fieldName}` : `请选择${field?.name || fieldName}`,
+            enabled: true,
+            advanced: index > 3,
+            sortOrder: index,
+          } satisfies ViewFilterConfig;
+        })
+        .filter((filter) => selected.has(filter.fieldName));
+      return { ...current, filters };
+    });
   };
 
   const ensurePlatformForm = async () => {
@@ -2572,51 +2605,19 @@ export default function FormSettingsPage() {
 
   const renderDataViewDesigner = () => (
     <div className="data-view-designer">
-      <section className="data-view-hero">
-        <div>
-          <strong>{baseConfig.name}数据视图配置</strong>
-          <span>配置运行页面的上方筛选区和下方数据展示区，保存发布后同步作用于程序页与动态表单页。</span>
-        </div>
-        <Space wrap>
-          <Segmented value={viewPreviewDevice} onChange={(value) => setViewPreviewDevice(value as 'desktop' | 'narrow')} options={[{ value: 'desktop', label: '桌面预览' }, { value: 'narrow', label: '窄屏预览' }]} />
-          <Tag color="blue">{enabledViewFilters.length} 个筛选</Tag>
-          <Tag color="green">{enabledViewColumns.length} 个展示列</Tag>
-          <Tag color={viewConfigMeta.status === 'draft' ? 'orange' : 'success'}>
-            {viewConfigMeta.status === 'draft' ? `草稿 v${viewConfigMeta.draftVersion || 1}` : `已发布 v${viewConfigMeta.publishedVersion || 1}`}
-          </Tag>
-        </Space>
-      </section>
-
       <section className="view-config-section">
         <div className="view-config-section-head">
-          <div><strong>上方筛选区</strong><span>配置查询条件、操作符、默认值和常用/高级位置。</span></div>
-          <Button size="small" onClick={() => {
-            const field = baseConfig.fields.find((item) => !viewConfig.filters.some((filter) => filter.fieldName === item.key)) || baseConfig.fields[0];
-            if (!field) return;
-            updateViewConfig((current) => ({
-              ...current,
-              filters: [...current.filters, {
-                id: `filter-${field.key}-${Date.now()}`,
-                fieldName: field.key,
-                label: field.name,
-                controlType: 'text',
-                operator: 'contains',
-                placeholder: `请输入${field.name}`,
-                enabled: true,
-                advanced: current.filters.length > 3,
-                sortOrder: current.filters.length,
-              }],
-            }));
-          }}>新增筛选项</Button>
+          <div><strong>筛选区</strong><span>配置查询条件、操作符、默认值和常用/高级位置。</span></div>
+          <Button size="small" onClick={() => setFilterFieldPickerOpen(true)}>新增筛选项</Button>
         </div>
-        <div className="view-config-list">
+        <div className="view-config-list view-config-filter-grid">
           {sortedViewFilters.map(renderViewFilterRow)}
         </div>
       </section>
 
       <section className="view-config-section">
         <div className="view-config-section-head">
-          <div><strong>下方数据展示区</strong><span>配置表格列、操作、排序、分页和行交互。</span></div>
+          <div><strong>数据列表区</strong><span>配置表格列、操作、排序、分页和行交互。</span></div>
           <Space wrap>
             <Select size="small" value={viewConfig.table.density} options={tableDensityOptions} onChange={(density) => updateViewTable({ density })} />
             <Select size="small" value={String(viewConfig.table.pageSize)} options={[10, 20, 50, 100].map((value) => ({ value: String(value), label: `${value} 条/页` }))} onChange={(value) => updateViewTable({ pageSize: Number(value) })} />

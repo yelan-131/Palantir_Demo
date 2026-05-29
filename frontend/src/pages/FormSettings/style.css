@@ -2964,7 +2964,6 @@
   width: 100%;
 }
 
-.data-view-hero,
 .view-config-section,
 .view-runtime-preview {
   border: 1px solid #dce5ec;
@@ -2972,15 +2971,6 @@
   background: #fff;
 }
 
-.data-view-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-}
-
-.data-view-hero div,
 .view-config-section-head div,
 .view-runtime-preview-head {
   display: flex;
@@ -2988,14 +2978,12 @@
   gap: 4px;
 }
 
-.data-view-hero strong,
 .view-config-section-head strong,
 .view-runtime-preview-head strong {
   color: #172026;
   font-size: 14px;
 }
 
-.data-view-hero span,
 .view-config-section-head span,
 .view-runtime-preview-head span {
   color: #71818c;

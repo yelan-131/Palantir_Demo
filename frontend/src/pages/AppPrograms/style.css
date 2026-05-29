@@ -469,34 +469,13 @@
   width: 100%;
 }
 
-.app-business-detail-drawer .ant-drawer-body {
-  padding: 18px;
-  background: #f7fafc;
-}
-
 .app-business-detail-body {
   width: 100%;
 }
 
-.app-business-detail-summary {
-  padding: 14px;
-  border: 1px solid #dce6ee;
-  border-radius: 8px;
+.app-business-detail-drawer .workflow-business-form .ant-input {
+  color: #263945;
   background: #ffffff;
-}
-
-.app-business-detail-summary .ant-typography {
-  margin: 0 0 8px;
-}
-
-.app-business-detail-drawer .ant-descriptions {
-  background: #ffffff;
-}
-
-.app-business-detail-drawer .ant-descriptions-item-label {
-  width: 108px;
-  color: #52606b;
-  font-weight: 700;
 }
 
 .app-program-filter-card .ant-card-body {
