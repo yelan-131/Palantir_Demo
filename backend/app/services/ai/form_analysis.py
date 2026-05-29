@@ -93,14 +93,21 @@ def build_local_form_analysis_answer(summary: dict[str, Any], *, can_write: bool
             "\u4f60\u6709\u53d1\u8d77\u540e\u7eed\u52a8\u4f5c\u7684 AI \u6388\u6743\uff0c"
             "\u4f46\u5199\u5165\u6216\u6d41\u7a0b\u7c7b\u52a8\u4f5c\u4ecd\u4f1a\u5148\u8fdb\u5165\u8349\u7a3f\u548c\u786e\u8ba4\u3002"
         )
+    field_list_text = ", ".join(visible_fields[:12]) if visible_fields else "\u6682\u65e0\u53ef\u89c1\u5b57\u6bb5"
+    status_counts_text = json.dumps(status_counts, ensure_ascii=False) if status_counts else "\u6682\u65e0\u72b6\u6001\u6570\u636e"
+    complete_fields_text = (
+        ", ".join(f"{name}({count})" for name, count in top_complete_fields)
+        if top_complete_fields
+        else "\u6682\u65e0"
+    )
     return "\n".join(
         [
             f"\u5df2\u6309\u6743\u9650\u8bfb\u53d6 `{form_name}` \u7684 {summary.get('record_count', 0)} \u6761\u8bb0\u5f55\uff0c\u672c\u6b21\u7528 {summary.get('sample_count', 0)} \u6761\u53ef\u89c1\u6837\u672c\u505a\u5206\u6790\u3002",
             "",
             "\u521d\u6b65\u89c2\u5bdf\uff1a",
-            f"1. \u53ef\u89c1\u5b57\u6bb5\uff1a{', '.join(visible_fields[:12]) if visible_fields else '\u6682\u65e0\u53ef\u89c1\u5b57\u6bb5'}",
-            f"2. \u72b6\u6001\u5206\u5e03\uff1a{json.dumps(status_counts, ensure_ascii=False) if status_counts else '\u6682\u65e0\u72b6\u6001\u6570\u636e'}",
-            f"3. \u6570\u636e\u8986\u76d6\u8f83\u9ad8\u7684\u5b57\u6bb5\uff1a{', '.join(f'{name}({count})' for name, count in top_complete_fields) if top_complete_fields else '\u6682\u65e0'}",
+            f"1. \u53ef\u89c1\u5b57\u6bb5\uff1a{field_list_text}",
+            f"2. \u72b6\u6001\u5206\u5e03\uff1a{status_counts_text}",
+            f"3. \u6570\u636e\u8986\u76d6\u8f83\u9ad8\u7684\u5b57\u6bb5\uff1a{complete_fields_text}",
             "",
             action_hint,
         ]
