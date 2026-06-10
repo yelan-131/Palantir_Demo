@@ -8,6 +8,7 @@ import API modules from each other.
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from sqlalchemy import select, text
@@ -103,6 +104,13 @@ DEFAULT_SAFETY_POLICY: dict[str, Any] = {
     "toolTimeoutSeconds": 30,
 }
 
+SENSITIVE_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)\b(sk-[A-Za-z0-9_\-]{12,})\b"),
+    re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd)\s*[:=]\s*([^\s,;\"']{4,})"),
+    re.compile(r"(?i)\b(bearer\s+)([A-Za-z0-9._\-]{12,})"),
+)
+SENSITIVE_KEY_MARKERS = ("api_key", "apikey", "password", "passwd", "secret", "token", "credential")
+
 DEEPSEEK_DEFAULTS: dict[str, str] = {
     "baseUrl": "https://api.deepseek.com",
     "chatModel": "deepseek-chat",
@@ -148,6 +156,54 @@ def settings_snapshot() -> dict[str, Any]:
     """Return a defensive copy for prompt/runtime use."""
 
     return deepcopy(AI_SYSTEM_SETTINGS)
+
+
+def safety_policy_snapshot(settings_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = settings_data or AI_SYSTEM_SETTINGS
+    safety_policy = _merge_nested(DEFAULT_SAFETY_POLICY, data.get("safetyPolicy"))
+    risk_policy = data.get("riskPolicy") or {}
+    if safety_policy.get("maxToolSteps") in (None, "") and risk_policy.get("maxToolSteps") not in (None, ""):
+        safety_policy["maxToolSteps"] = risk_policy.get("maxToolSteps")
+    return safety_policy
+
+
+def audit_enabled(settings_data: dict[str, Any] | None = None) -> bool:
+    data = settings_data or AI_SYSTEM_SETTINGS
+    return bool(data.get("auditEnabled", True))
+
+
+def record_tool_calls_enabled(settings_data: dict[str, Any] | None = None) -> bool:
+    data = settings_data or AI_SYSTEM_SETTINGS
+    return bool(data.get("recordToolCalls", True))
+
+
+def mask_sensitive_text(text: str) -> str:
+    masked = text
+    masked = SENSITIVE_VALUE_PATTERNS[0].sub("[REDACTED_SECRET]", masked)
+    masked = SENSITIVE_VALUE_PATTERNS[1].sub(lambda match: f"{match.group(1)}=[REDACTED_SECRET]", masked)
+    masked = SENSITIVE_VALUE_PATTERNS[2].sub(lambda match: f"{match.group(1)}[REDACTED_SECRET]", masked)
+    return masked
+
+
+def mask_sensitive_payload(value: Any, *, key_hint: str = "") -> Any:
+    lowered_key = key_hint.lower()
+    if any(marker in lowered_key for marker in SENSITIVE_KEY_MARKERS):
+        return "[REDACTED_SECRET]" if value not in (None, "") else value
+    if isinstance(value, dict):
+        return {key: mask_sensitive_payload(item, key_hint=str(key)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [mask_sensitive_payload(item, key_hint=key_hint) for item in value]
+    if isinstance(value, tuple):
+        return tuple(mask_sensitive_payload(item, key_hint=key_hint) for item in value)
+    if isinstance(value, str):
+        return mask_sensitive_text(value)
+    return value
+
+
+def maybe_mask_sensitive_payload(value: Any, settings_data: dict[str, Any] | None = None) -> Any:
+    if not safety_policy_snapshot(settings_data).get("sensitiveMasking", True):
+        return value
+    return mask_sensitive_payload(value)
 
 
 def settings_to_provider_config(settings_data: dict[str, Any] | None = None) -> AIProviderConfig:
@@ -231,6 +287,8 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
     merged["memoryPolicy"] = _merge_nested(DEFAULT_MEMORY_POLICY, merged.get("memoryPolicy"))
     merged["compactionPolicy"] = _merge_nested(DEFAULT_COMPACTION_POLICY, merged.get("compactionPolicy"))
     merged["safetyPolicy"] = _merge_nested(DEFAULT_SAFETY_POLICY, merged.get("safetyPolicy"))
+    if merged["safetyPolicy"].get("maxToolSteps") not in (None, ""):
+        merged.setdefault("riskPolicy", {})["maxToolSteps"] = merged["safetyPolicy"].get("maxToolSteps")
     return merged
 
 

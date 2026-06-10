@@ -876,6 +876,100 @@
   writing-mode: horizontal-tb;
 }
 
+.runtime-analytics-page {
+  min-height: 100%;
+}
+
+.runtime-analytics-canvas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.runtime-analytics-widget {
+  min-height: 210px;
+  border-color: #dce3ea;
+  border-radius: 8px;
+}
+
+.runtime-analytics-widget .ant-card-body {
+  height: calc(100% - 45px);
+  overflow: auto;
+}
+
+.runtime-analytics-widget-quarter {
+  grid-column: span 1;
+}
+
+.runtime-analytics-widget-half {
+  grid-column: span 2;
+}
+
+.runtime-analytics-widget-full {
+  grid-column: 1 / -1;
+}
+
+.runtime-analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-analytics-metrics > div {
+  min-height: 86px;
+  padding: 12px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.runtime-analytics-metrics span {
+  display: block;
+  color: #667783;
+  font-size: 12px;
+}
+
+.runtime-analytics-metrics strong {
+  display: block;
+  margin-top: 4px;
+  color: #12313f;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.runtime-analytics-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-height: 150px;
+  padding: 16px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfcfd, #f4f8fb);
+}
+
+.runtime-analytics-chart span {
+  flex: 1;
+  min-height: 18px;
+  border-radius: 5px 5px 0 0;
+  background: #2c6e84;
+}
+
+.runtime-analytics-chart span:nth-child(2n) {
+  background: #7c8b2e;
+}
+
+.runtime-analytics-chart span:nth-child(3n) {
+  background: #d28b36;
+}
+
+.runtime-analytics-widget-pie .ant-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 @media (max-width: 768px) {
   .app-program-header {
     align-items: flex-start;
@@ -897,6 +991,18 @@
   .app-program-analysis .app-program-filter-grid,
   .app-business-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-analytics-canvas,
+  .runtime-analytics-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-analytics-widget,
+  .runtime-analytics-widget-quarter,
+  .runtime-analytics-widget-half,
+  .runtime-analytics-widget-full {
+    grid-column: 1;
   }
 
   .app-business-page {

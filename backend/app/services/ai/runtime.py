@@ -17,7 +17,7 @@ from .form_record_tools import query_form_records
 from .knowledge_ingestion import search_ingested_knowledge
 from .prompt_builder import PromptBuildInput, PromptBuilder
 from .schemas import AgentRequest, AgentResponse, ChatMessage, ChatOptions
-from .settings import settings_snapshot, settings_to_provider_config
+from .settings import safety_policy_snapshot, settings_snapshot, settings_to_provider_config
 from .tenant_profile import TenantProfile, default_tenant_profile
 from .intent_router import route_intent, route_intent_async
 from .tools import choose_draft_actions, create_contract_draft_action, create_low_code_form_definition_action
@@ -726,8 +726,8 @@ class AgentRuntime:
     ) -> AgentResponse:
         profile = tenant_profile or default_tenant_profile()
         settings_data = settings_snapshot()
-        risk_policy = settings_data.get("riskPolicy") or {}
-        max_iterations = max(3, min(int(risk_policy.get("maxToolSteps") or 5) + 4, 12))
+        safety_policy = safety_policy_snapshot(settings_data)
+        max_iterations = max(3, min(int(safety_policy.get("maxToolSteps") or 5) + 4, 12))
         steps: list[dict[str, Any]] = []
         state: dict[str, Any] = {
             "profile": profile,

@@ -102,6 +102,8 @@ interface ReleaseInfo {
 
 const runtimeRouteAliasMap: Record<string, string> = {
   '/dynamic/equipment-inspection': '/program/equipment-inspection',
+  '/dynamic/inventory-impact': '/program/inventory-impact',
+  '/dynamic/supplier-scorecard': '/program/supplier-scorecard',
   '/supply-chain': '/program/supply-overview',
 };
 
@@ -165,6 +167,8 @@ const programTitleMap: Record<string, string> = {
   'quality-event': '\u8d28\u91cf\u8ffd\u6eaf',
   'supplier-risk': '\u4f9b\u5e94\u5546\u98ce\u9669',
   'supply-overview': '\u4f9b\u5e94\u603b\u89c8',
+  'inventory-impact': '\u5e93\u5b58\u5f71\u54cd',
+  'supplier-scorecard': '\u4f9b\u5e94\u5546\u8bc4\u5206',
   'material-impact-report': '\u7269\u6599\u5f71\u54cd\u62a5\u8868',
   'supply-risk-dashboard': '\u4f9b\u5e94\u98ce\u9669\u770b\u677f',
   'material-impact': '\u7269\u6599\u5f71\u54cd',

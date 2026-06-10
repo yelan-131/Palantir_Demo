@@ -48,14 +48,15 @@ import {
   adminListApplications,
   adminListRoles,
   adminUpdateApplication,
-  adminUpdateApplicationBindings,
   createPlatformMenuNode,
   deletePlatformMenuNode,
+  deletePlatformForm,
   upsertApplicationFormBinding,
   listPlatformForms,
   listPlatformMenuNodes,
   updatePlatformMenuNode,
   type PlatformForm,
+  type PlatformFormField,
   type PlatformMenuNode,
 } from '@/services/api';
 import {
@@ -103,6 +104,7 @@ type FormRecord = {
   owner: string;
   description: string;
   fields: number;
+  fieldRows?: FieldRecord[];
 };
 
 type FieldRecord = {
@@ -179,18 +181,11 @@ const iconOptions = [
   { value: 'AppstoreOutlined', label: 'Application' },
 ];
 
-const interactionModeOptions = [
-  { label: '录入表单', value: 'entry_form' },
-  { label: '流程表单', value: 'workflow_form' },
-  { label: '配置表单', value: 'settings_form' },
-  { label: '详情编辑页', value: 'detail_editor' },
-];
-
 const analyticsModeOptions = [
   { label: '列表分析', value: 'list_analysis' },
   { label: 'BI 报表', value: 'bi_report' },
   { label: '指标看板', value: 'metric_dashboard' },
-  { label: '驾驶舱', value: 'cockpit' },
+  { label: '经营驾驶舱', value: 'cockpit' },
 ];
 
 function menuNode(
@@ -259,7 +254,11 @@ function cleanMenuNodeConfig(config?: Record<string, unknown> | null): Record<st
   return rest;
 }
 
-function resolveMenuRoutePath(formId?: unknown, fallback?: string): string | undefined {
+function resolveMenuRoutePath(formId?: unknown, forms: FormRecord[] = [], fallback?: string): string | undefined {
+  const form = formId ? forms.find((item) => item.id === String(formId)) : undefined;
+  if (form?.code) {
+    return form.category === 'analytics' ? `/program/${form.code}` : `/dynamic/${form.code}`;
+  }
   if (fallback) return fallback;
   const numericFormId = formId ? Number(formId) : undefined;
   return numericFormId && !Number.isNaN(numericFormId) ? `/dynamic/${numericFormId}` : undefined;
@@ -322,20 +321,67 @@ function unwrapApiItem<T>(payload: unknown): T | null {
   return (data as T) ?? null;
 }
 
+function stringFromConfigValue(...values: unknown[]): string | undefined {
+  const value = values.find((item) => item !== undefined && item !== null && item !== '');
+  return value === undefined ? undefined : String(value);
+}
+
+function boolFromConfigValue(...values: unknown[]): boolean {
+  const value = values.find((item) => item !== undefined && item !== null);
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function mapPlatformFieldToRow(field: PlatformFormField): FieldRecord {
+  const validation = field.validation ?? {};
+  const uiConfig = field.ui_config ?? {};
+  const controlType = field.control_type ?? stringFromConfigValue(uiConfig.controlType, uiConfig.component);
+  return {
+    id: String(field.id),
+    label: field.label || field.field_name,
+    code: field.field_name,
+    columnName: field.field_name,
+    dataType: field.business_type || field.field_type,
+    length: stringFromConfigValue(validation.maxLength, validation.max_length, validation.length, uiConfig.length),
+    allowNull: !field.required,
+    unique: boolFromConfigValue(validation.unique, uiConfig.unique),
+    indexed: boolFromConfigValue(validation.indexed, uiConfig.indexed),
+    component: controlType || field.field_type,
+    list: Boolean(field.visible_in_list),
+    form: Boolean(field.visible_in_form),
+    search: Boolean(field.searchable),
+  };
+}
+
 function mapPlatformFormToRecord(form: PlatformForm): FormRecord {
+  const status: FormRecord['status'] = form.status === 'active' || form.status === 'published'
+    ? 'published'
+    : form.status === 'archived' || form.status === 'disabled'
+      ? 'disabled'
+      : 'draft';
+  const config = form.config ?? {};
+  const assemblyKind = String(config.assemblyKind ?? config.kind ?? config.type ?? '').toLowerCase();
+  const hasAnalyticsDesign = Boolean(config.analyticsDesign || config.analyticsDesignDraft);
+  const analyticsCodes = new Set(['inventory-impact', 'supplier-scorecard']);
+  const isAnalytics = assemblyKind === 'analysis' || hasAnalyticsDesign || analyticsCodes.has(form.code);
+  const fieldRows = (form.fields ?? [])
+    .filter((field) => !field.archived)
+    .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.id - right.id)
+    .map(mapPlatformFieldToRow);
+
   return {
     id: String(form.id),
     name: form.name,
     code: form.code,
-    category: 'interaction',
-    mode: 'entry_form',
+    category: isAnalytics ? 'analytics' : 'interaction',
+    mode: isAnalytics ? 'metric_dashboard' : undefined,
     structureLocked: form.status !== 'draft',
     entity: form.code,
     source: form.table_name || 'dynamic_records',
-    status: form.status === 'active' ? 'published' : form.status === 'archived' ? 'disabled' : 'draft',
+    status,
     owner: form.owner_id ? String(form.owner_id) : 'system',
     description: form.description || 'Database-backed platform form.',
-    fields: form.fields?.length ?? 0,
+    fields: fieldRows.length,
+    fieldRows,
   };
 }
 
@@ -534,7 +580,6 @@ export default function AppMenuManagement() {
       sort_order: selectedApp.sort_order,
       status: selectedApp.status,
       is_pinned: selectedApp.is_pinned,
-      role_ids: selectedApp.roles?.map((role) => role.id) ?? [],
     });
   }, [appForm, selectedApp]);
 
@@ -542,7 +587,7 @@ export default function AppMenuManagement() {
     if (!selectedForm) return;
     formForm.setFieldsValue({
       category: 'interaction',
-      mode: 'entry_form',
+      mode: undefined,
       structureLocked: selectedForm?.status !== 'draft',
       ...selectedForm,
     });
@@ -566,18 +611,15 @@ export default function AppMenuManagement() {
 
   const saveApp = async () => {
     const values = await appForm.validateFields();
-    const roleList = roles.filter((role) => (values.role_ids ?? []).includes(role.id));
     const nextApp = {
       ...selectedApp,
       ...values,
       sort_order: Number(values.sort_order || 0),
       is_pinned: Boolean(values.is_pinned),
-      roles: roleList,
     };
     setApplications((prev) => prev.map((item) => (item.id === selectedApp.id ? nextApp : item)));
     try {
       await adminUpdateApplication(selectedApp.id, nextApp);
-      await adminUpdateApplicationBindings(selectedApp.id, { role_ids: values.role_ids ?? [], menu_ids: [] });
       message.success('应用配置已保存');
     } catch {
       message.success('应用配置已保存到演示状态');
@@ -664,7 +706,7 @@ export default function AppMenuManagement() {
       name: '\u65b0\u5efa\u4e1a\u52a1\u8868\u5355',
       code: nextId,
       category: 'interaction',
-      mode: 'entry_form',
+      mode: undefined,
       structureLocked: false,
       entity: 'NewEntity',
       source: 'generated_table',
@@ -672,6 +714,7 @@ export default function AppMenuManagement() {
       owner: '\u7cfb\u7edf\u7ba1\u7406\u5458',
       description: '\u7528\u4e8e\u5f55\u5165\u3001\u7f16\u8f91\u3001\u5ba1\u6279\u548c\u914d\u7f6e\u4e1a\u52a1\u6570\u636e\u7684\u8349\u7a3f\u3002',
       fields: 0,
+      fieldRows: [],
     };
     setForms((prev) => [nextForm, ...prev]);
     setSelectedFormId(nextId);
@@ -704,7 +747,7 @@ export default function AppMenuManagement() {
     message.success('表单已启用');
   };
 
-  const deleteSelectedDraftForm = () => {
+  const deleteSelectedDraftForm = async () => {
     if (selectedForm.status !== 'draft') {
       message.warning('已发布或停用的表单不能直接删除');
       return;
@@ -712,6 +755,15 @@ export default function AppMenuManagement() {
     if (configs.some((item) => item.formId === selectedForm.id)) {
       message.warning('该表单已被菜单管理使用，请先解除绑定');
       return;
+    }
+    const isPersistedForm = /^\d+$/.test(selectedForm.id);
+    if (isPersistedForm) {
+      try {
+        await deletePlatformForm(selectedForm.id);
+      } catch {
+        message.error('删除草稿失败，请确认表单仍为草稿且未绑定菜单');
+        return;
+      }
     }
     const nextForms = forms.filter((item) => item.id !== selectedForm.id);
     setForms(nextForms);
@@ -911,7 +963,7 @@ export default function AppMenuManagement() {
         await updatePlatformMenuNode(selectedApp.id, selectedMenu.dbId, {
           title: values.title,
           form_id: numericFormId,
-          route_path: resolveMenuRoutePath(values.formId, selectedMenu.routePath),
+          route_path: resolveMenuRoutePath(values.formId, forms, selectedMenu.routePath),
           node_type: numericFormId ? 'form' : 'group',
           visible: values.visible,
           default_entry: values.defaultEntry,
@@ -931,7 +983,7 @@ export default function AppMenuManagement() {
     }
     setMenusByApp((prev) => ({
       ...prev,
-      [selectedApp.id]: updateMenuNode(prev[selectedApp.id] ?? [], selectedMenuKey, values),
+      [selectedApp.id]: updateMenuNode(prev[selectedApp.id] ?? [], selectedMenuKey, values, forms),
     }));
     message.success('菜单节点已更新');
   };
@@ -977,7 +1029,6 @@ export default function AppMenuManagement() {
             children: (
               <AppManagementPanel
                 apps={applications}
-                roles={roles}
                 selectedAppId={selectedApp.id}
                 onSelect={setSelectedAppId}
                 form={appForm}
@@ -1050,7 +1101,7 @@ export default function AppMenuManagement() {
         onClose={() => setAppDrawerOpen(false)}
         extra={<Button type="primary" icon={<SaveOutlined />} onClick={saveApp}>保存</Button>}
       >
-        <AppConfigForm form={appForm} roles={roles} />
+        <AppConfigForm form={appForm} />
       </Drawer>
 
       <Drawer
@@ -1069,7 +1120,6 @@ export default function AppMenuManagement() {
 
 function AppManagementPanel({
   apps,
-  roles,
   selectedAppId,
   onSelect,
   form,
@@ -1082,7 +1132,6 @@ function AppManagementPanel({
   onCopyDraft,
 }: {
   apps: AppRecord[];
-  roles: RoleRecord[];
   selectedAppId: number;
   onSelect: (id: number) => void;
   form: ReturnType<typeof Form.useForm>[0];
@@ -1161,17 +1210,11 @@ function AppManagementPanel({
               </div>
               <Tag color={statusColor(status)}>{statusText(status)}</Tag>
             </div>
-            <AppConfigForm form={form} roles={roles} />
+            <AppConfigForm form={form} />
           </Card>
 
           <Card className="config-editor-card" title="访问与入口">
             <Row gutter={[12, 12]}>
-              <Col xs={24} md={12}>
-                <InfoBlock label="默认路由" value={selected?.default_route ?? '-'} />
-              </Col>
-              <Col xs={24} md={12}>
-                <InfoBlock label="可见角色" value={(selected?.roles ?? roles).map((role) => role.label).join(' / ') || '未配置'} />
-              </Col>
               <Col xs={24} md={12}>
                 <InfoBlock label="排序" value={`${selected?.sort_order ?? 0}`} />
               </Col>
@@ -1387,13 +1430,11 @@ function LifecycleActions({
 
 function AppManagement({
   apps,
-  roles,
   selectedAppId,
   onSelect,
   onOpenConfig,
 }: {
   apps: AppRecord[];
-  roles: RoleRecord[];
   selectedAppId: number;
   onSelect: (id: number) => void;
   onOpenConfig: () => void;
@@ -1430,12 +1471,6 @@ function AppManagement({
             </Col>
             <Col xs={24} md={12}>
               <InfoBlock label="应用编码" value={selected.code} />
-            </Col>
-            <Col xs={24} md={12}>
-              <InfoBlock label="默认首页" value={selected.default_route} />
-            </Col>
-            <Col xs={24} md={12}>
-              <InfoBlock label="可见角色" value={(selected.roles ?? roles).map((role) => role.label).join(' / ')} />
             </Col>
             <Col span={24}>
               <InfoBlock label="应用描述" value={selected.description ?? '-'} />
@@ -1754,7 +1789,7 @@ function AssemblyWorkspace({
                           <Form.Item name="permissionMode" label="入口策略">
                             <Select
                               options={[
-                                { label: '跟随应用可见角色', value: 'inherit' },
+                                { label: '继承默认权限', value: 'inherit' },
                                 { label: '指定入口角色', value: 'custom' },
                               ]}
                             />
@@ -1765,7 +1800,7 @@ function AssemblyWorkspace({
                               if (permissionMode !== 'custom') {
                                 return (
                                   <div className="entry-role-inherit">
-                                    当前菜单继承应用可见角色；需要单独授权时切换为“指定入口角色”。
+                                    当前菜单继承默认入口权限；需要单独授权时切换为“指定入口角色”。
                                   </div>
                                 );
                               }
@@ -1818,7 +1853,7 @@ function AssemblyWorkspace({
   );
 }
 
-function AppConfigForm({ form, roles }: { form: ReturnType<typeof Form.useForm>[0]; roles: RoleRecord[] }) {
+function AppConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) {
   return (
     <Form form={form} layout="vertical" className="app-config-form">
       <Row gutter={12}>
@@ -1852,26 +1887,13 @@ function AppConfigForm({ form, roles }: { form: ReturnType<typeof Form.useForm>[
         </Col>
       </Row>
       <Row gutter={12}>
-        <Col xs={24} md={14}>
+        <Col xs={24}>
           <Form.Item name="description" label="应用说明">
             <Input.TextArea rows={2} />
           </Form.Item>
         </Col>
-        <Col xs={24} md={10}>
-          <Form.Item name="default_route" label="默认入口">
-            <Input />
-          </Form.Item>
-        </Col>
       </Row>
       <Row gutter={12}>
-        <Col xs={24} md={12}>
-          <Form.Item name="role_ids" label="可见角色">
-            <Select
-              mode="multiple"
-              options={roles.map((role) => ({ label: `${role.label} / ${role.name}`, value: role.id }))}
-            />
-          </Form.Item>
-        </Col>
         <Col xs={24} sm={8} md={5}>
           <Form.Item name="status" label="发布状态">
             <Select
@@ -1901,7 +1923,7 @@ function AppConfigForm({ form, roles }: { form: ReturnType<typeof Form.useForm>[
 function FormConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) {
   const category = Form.useWatch('category', form) ?? 'interaction';
   const structureLocked = Boolean(Form.useWatch('structureLocked', form));
-  const modeOptions = category === 'analytics' ? analyticsModeOptions : interactionModeOptions;
+  const isAnalytics = category === 'analytics';
 
   return (
     <Form form={form} layout="vertical" className="form-config-form">
@@ -1924,7 +1946,7 @@ function FormConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) 
             <Select
               disabled={structureLocked}
               onChange={(value) => {
-                form.setFieldValue('mode', value === 'analytics' ? 'bi_report' : 'entry_form');
+                form.setFieldValue('mode', value === 'analytics' ? 'bi_report' : undefined);
                 form.setFieldValue('source', value === 'analytics' ? 'existing_dataset' : 'generated_table');
                 form.setFieldValue('entity', value === 'analytics' ? 'MetricDataset' : 'NewEntity');
               }}
@@ -1936,9 +1958,15 @@ function FormConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) 
           </Form.Item>
         </Col>
         <Col xs={12} md={5}>
-          <Form.Item name="mode" label={'\u6a21\u5f0f'}>
-            <Select disabled={structureLocked} options={modeOptions} />
-          </Form.Item>
+          {isAnalytics ? (
+            <Form.Item name="mode" label={'\u5c55\u793a\u6a21\u5f0f'}>
+              <Select disabled={structureLocked} options={analyticsModeOptions} />
+            </Form.Item>
+          ) : (
+            <Form.Item label={'\u5c55\u793a\u6a21\u5f0f'}>
+              <Input disabled value="" />
+            </Form.Item>
+          )}
         </Col>
       </Row>
       <Row gutter={12}>
@@ -1974,7 +2002,9 @@ function FormConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) 
       </Form.Item>
       {structureLocked && (
         <div className="structure-lock-note">
-          {'\u7c7b\u578b\u3001\u6a21\u5f0f\u3001\u7f16\u7801\u3001\u6570\u636e\u5b9e\u4f53\u548c\u6570\u636e\u6765\u6e90\u4f1a\u5f71\u54cd\u8bbe\u8ba1\u5668\u5206\u652f\u4e0e\u5e95\u5c42\u7ed3\u6784\uff0c\u4fdd\u5b58\u540e\u53ea\u80fd\u67e5\u770b\uff0c\u907f\u514d\u540e\u7eed\u914d\u7f6e\u5931\u6548\u3002'}
+          {isAnalytics
+            ? '\u7c7b\u578b\u3001\u5c55\u793a\u6a21\u5f0f\u3001\u7f16\u7801\u3001\u5206\u6790\u5bf9\u8c61\u548c\u6570\u636e\u96c6\u6765\u6e90\u4f1a\u5f71\u54cd\u770b\u677f\u8bbe\u8ba1\u4e0e\u5e95\u5c42\u7ed3\u6784\uff0c\u4fdd\u5b58\u540e\u53ea\u80fd\u67e5\u770b\uff0c\u907f\u514d\u540e\u7eed\u914d\u7f6e\u5931\u6548\u3002'
+            : '\u7c7b\u578b\u3001\u7f16\u7801\u3001\u6570\u636e\u5b9e\u4f53\u548c\u6570\u636e\u6765\u6e90\u4f1a\u5f71\u54cd\u8868\u5355\u8bbe\u8ba1\u4e0e\u5e95\u5c42\u4e1a\u52a1\u8868\u7ed3\u6784\uff0c\u4fdd\u5b58\u540e\u53ea\u80fd\u67e5\u770b\uff0c\u907f\u514d\u540e\u7eed\u914d\u7f6e\u5931\u6548\u3002'}
         </div>
       )}
     </Form>
@@ -2016,7 +2046,7 @@ function statusColor(status: string) {
 }
 
 function buildFieldRows(form?: FormRecord): FieldRecord[] {
-  return [];
+  return form?.fieldRows ?? [];
 }
 
 function buildMetricRows(form?: FormRecord): MetricRecord[] {
@@ -2069,14 +2099,14 @@ function removeMenuNodePromoteChildren(nodes: MenuNode[], key: string): MenuNode
   });
 }
 
-function updateMenuNode(nodes: MenuNode[], key: string, values: any): MenuNode[] {
+function updateMenuNode(nodes: MenuNode[], key: string, values: any, forms: FormRecord[] = []): MenuNode[] {
   return nodes.map((node) => {
     if (node.key === key) {
       return {
         ...node,
         title: <MenuTitle label={values.title} formId={values.formId} defaultEntry={values.defaultEntry} />,
         formId: values.formId,
-        routePath: resolveMenuRoutePath(values.formId, node.routePath),
+        routePath: resolveMenuRoutePath(values.formId, forms, node.routePath),
         visible: values.visible,
         defaultEntry: values.defaultEntry,
         permissionMode: values.permissionMode,
@@ -2093,7 +2123,7 @@ function updateMenuNode(nodes: MenuNode[], key: string, values: any): MenuNode[]
         },
       };
     }
-    return { ...node, children: updateMenuNode(node.children ?? [], key, values) };
+    return { ...node, children: updateMenuNode(node.children ?? [], key, values, forms) };
   });
 }
 

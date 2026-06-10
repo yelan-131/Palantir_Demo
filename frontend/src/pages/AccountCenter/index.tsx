@@ -3,9 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   ApiOutlined,
   AppstoreOutlined,
-  AuditOutlined,
-  BankOutlined,
-  BellOutlined,
+  AuditOutlined,  BellOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   FileSearchOutlined,
@@ -46,7 +44,6 @@ import AppMenuManagement from '../SystemAdmin/AppMenuManagement';
 import IdentityAccessManagement from '../SystemAdmin/IdentityAccessManagement';
 import ReferenceDataManagement from '../SystemAdmin/ReferenceDataManagement';
 import SemanticAssetCenter, { KnowledgeCenter } from '../SystemAdmin/SemanticAssetCenter';
-import TenantManagement from '../SystemAdmin/TenantManagement';
 import {
   adminListUsers,
   closeAgentConversation,
@@ -144,8 +141,8 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
   const user = useAuthStore((s) => s.user);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSection = searchParams.get('section') || 'account';
-  const identityDefaultTab = activeSection === 'roles' ? 'roles' : activeSection === 'orgs' ? 'orgs' : activeSection === 'users' ? 'users' : 'overview';
-  const normalizedSection = ['users', 'roles', 'orgs'].includes(activeSection)
+  const identityDefaultTab = activeSection === 'tenants' ? 'tenants' : activeSection === 'roles' || activeSection === 'ai-role-policies' ? 'roles' : activeSection === 'orgs' ? 'orgs' : activeSection === 'users' ? 'users' : 'overview';
+  const normalizedSection = ['tenants', 'users', 'roles', 'orgs', 'ai-role-policies'].includes(activeSection)
     ? 'identity-access'
     : activeSection === 'ai-personal' || activeSection === 'preferences'
       ? 'account'
@@ -187,12 +184,6 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         children: <AIPlatformPanelV2 />,
       },
       {
-        key: 'tenants',
-        label: '租户管理',
-        icon: <BankOutlined />,
-        children: <TenantManagement />,
-      },
-      {
         key: 'app-menu',
         label: '应用与菜单',
         icon: <AppstoreOutlined />,
@@ -212,7 +203,7 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
       },
       {
         key: 'ontology-modeling',
-        label: '本体建模中心',
+        label: '对象与关系中心',
         icon: <NodeIndexOutlined />,
         children: <SemanticAssetCenter view="ontology" />,
       },
@@ -224,9 +215,15 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
       },
       {
         key: 'identity-access',
-        label: '用户与权限',
+        label: '身份与权限',
         icon: <SafetyCertificateOutlined />,
-        children: <IdentityAccessManagement key={identityDefaultTab} defaultActiveKey={identityDefaultTab} />,
+        children: (
+          <IdentityAccessManagement
+            key={identityDefaultTab}
+            defaultActiveKey={identityDefaultTab}
+            onTabChange={(key) => setSearchParams({ section: key === 'overview' ? 'identity-access' : key })}
+          />
+        ),
       },
       {
         key: 'audit',
@@ -235,7 +232,7 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         children: <AuditPanel />,
       },
     ];
-  }, [accountDefaultSubTab, currentApplication, identityDefaultTab, roleLabel, roles, user]);
+  }, [accountDefaultSubTab, currentApplication, identityDefaultTab, roleLabel, roles, setSearchParams, user]);
 
   return (
     <div className="account-center-page">
@@ -333,12 +330,18 @@ function AccountSecurityPanel({
       </Card>
 
       <Card title="安全设置" className="account-panel-card">
-        <Form layout="vertical">
-          <Form.Item label="当前密码">
-            <Input.Password placeholder="当前环境暂不校验真实密码" />
+        <Form layout="vertical" autoComplete="off">
+          <Form.Item label="当前密码" name="currentPassword">
+            <Input.Password
+              autoComplete="new-password"
+              placeholder="请输入当前密码"
+            />
           </Form.Item>
-          <Form.Item label="新密码">
-            <Input.Password placeholder="请输入新密码" />
+          <Form.Item label="新密码" name="newPassword">
+            <Input.Password
+              autoComplete="new-password"
+              placeholder="请输入新密码"
+            />
           </Form.Item>
           <Form.Item label="登录保护" valuePropName="checked">
             <Switch defaultChecked /> <Text type="secondary"> 异地登录提醒</Text>
@@ -1967,3 +1970,4 @@ function auditResourceLabel(resource?: string) {
   };
   return labels[resource ?? ''] || resource || '-';
 }
+

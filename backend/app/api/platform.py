@@ -275,6 +275,7 @@ async def _tenant_detail_payload(db: AsyncSession, tenant) -> dict:
             "username": user.username,
             "displayName": user.display_name,
             "email": user.email,
+            "avatarUrl": getattr(user, "avatar_url", None),
             "isActive": user.is_active,
             "isAdmin": user.is_admin,
             "lastLoginAt": _iso(user.last_login_at),

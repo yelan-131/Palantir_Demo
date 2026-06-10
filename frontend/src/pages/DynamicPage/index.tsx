@@ -158,6 +158,8 @@ function getPublishedFormFieldNames(config: Record<string, unknown> | null | und
 
 const dynamicProgramRouteAliases: Record<string, string> = {
   'equipment-inspection': '/program/equipment-inspection',
+  'inventory-impact': '/program/inventory-impact',
+  'supplier-scorecard': '/program/supplier-scorecard',
 };
 
 function renderFormField(field: FieldDef) {

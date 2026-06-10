@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._model_driven_shared import assert_safe_identifier
@@ -33,6 +33,64 @@ SUPPORTED_FIELD_TYPES = {
     "json",
     "relation",
 }
+
+
+def _physical_table_name(code: str, assembly_kind: str) -> str:
+    normalized = _slugify(code)
+    prefix = "analysis" if assembly_kind == "analysis" else "business"
+    table_name = f"{prefix}_{normalized}"
+    assert_safe_identifier(table_name)
+    return table_name
+
+
+def _physical_column_type(field_type: str) -> str:
+    kind = (field_type or "string").lower()
+    if kind in {"integer", "int"}:
+        return "INTEGER"
+    if kind in {"number", "decimal", "float"}:
+        return "DOUBLE PRECISION"
+    if kind == "boolean":
+        return "BOOLEAN"
+    if kind == "date":
+        return "DATE"
+    if kind == "datetime":
+        return "TIMESTAMP"
+    return "TEXT"
+
+
+async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fields: list[FormField]) -> None:
+    assert_safe_identifier(table_name)
+    await session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id SERIAL PRIMARY KEY,
+            tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
+            record_status VARCHAR(50) NOT NULL DEFAULT 'active',
+            created_by INTEGER NULL REFERENCES users(id),
+            updated_by INTEGER NULL REFERENCES users(id),
+            source_dynamic_record_id INTEGER NULL UNIQUE,
+            deleted_at TIMESTAMP NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP NOT NULL DEFAULT now()
+        )
+    """))
+    await session.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_tenant_deleted_id ON {table_name} (tenant_id, deleted_at, id)"))
+    rows = await session.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = :table_name
+            """
+        ),
+        {"table_name": table_name},
+    )
+    existing_columns = {str(row[0]) for row in rows.all()}
+    for field in fields:
+        field_name = _slugify(str(field.field_name), "field")
+        assert_safe_identifier(field_name)
+        if field_name not in existing_columns:
+            await session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {field_name} {_physical_column_type(field.field_type)} NULL"))
+            existing_columns.add(field_name)
 
 
 CREATE_FORM_DEFINITION_CONTRACT = {
@@ -439,7 +497,8 @@ def build_low_code_form_payload(message: str, context: dict[str, Any] | None = N
             "code": form_code,
             "description": str(context.get("description") or "Created from an AI Agent low-code plan."),
             "status": "draft" if assembly_kind == "analysis" else "published",
-            "storage_mode": "dynamic",
+            "storage_mode": "physical_table",
+            "table_name": _physical_table_name(form_code, assembly_kind),
             "application_id": context.get("application_id") or context.get("applicationId"),
             "config": standard_config,
             "assembly_kind": assembly_kind,
@@ -506,13 +565,19 @@ async def execute_create_form_definition(
     initial_status = "draft" if assembly_kind == "analysis" else "published"
     if requested_status and requested_status != "draft":
         initial_status = requested_status
+    table_name = str(form_data.get("table_name") or _physical_table_name(code, assembly_kind))
+    assert_safe_identifier(table_name)
+    storage_mode = str(form_data.get("storage_mode") or "physical_table")
+    if storage_mode == "dynamic":
+        storage_mode = "physical_table"
 
     form = Form(
         tenant_id=tenant_id,
         name=str(form_data.get("name") or code),
         code=code,
         description=form_data.get("description"),
-        storage_mode=str(form_data.get("storage_mode") or "dynamic"),
+        table_name=table_name,
+        storage_mode=storage_mode,
         status=initial_status,
         owner_id=current_user_id(user),
         config=form_config,
@@ -556,6 +621,8 @@ async def execute_create_form_definition(
         )
         session.add(field)
         created_fields.append(field)
+
+    await _ensure_physical_form_table(session, table_name, created_fields)
 
     view_config = form_config.get("viewConfig") or _standard_view_config(field_configs)
     form_layout = form_config.get("formLayout") or _standard_form_layout(field_configs)

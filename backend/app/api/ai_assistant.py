@@ -31,9 +31,12 @@ from app.services.ai.runtime import agent_runtime
 from app.services.ai.schemas import AIProviderConfig, AgentRequest, AgentResponse, ChatMessage, ChatOptions, DraftSaveRequest
 from app.services.ai.settings import (
     AI_SYSTEM_SETTINGS,
+    audit_enabled,
     load_persisted_ai_settings,
     mask_settings as _mask_settings,
+    maybe_mask_sensitive_payload,
     merge_ai_settings,
+    record_tool_calls_enabled,
     save_persisted_ai_settings,
     settings_to_provider_config as _settings_to_provider_config,
 )
@@ -197,7 +200,9 @@ def _raise_for_ai_decision(decision):
 
 
 def _audit_ai_event(user: dict, event_type: str, payload: dict):
-    return record_ai_event(user, event_type, payload)
+    if not audit_enabled(AI_SYSTEM_SETTINGS):
+        return None
+    return record_ai_event(user, event_type, maybe_mask_sensitive_payload(payload, AI_SYSTEM_SETTINGS))
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -285,8 +290,9 @@ async def _execute_confirmed_agent_run(
         current_user=current_user,
         persist_ai_draft=_persist_ai_draft,
         update_ai_draft_status=_update_ai_draft_status,
-        audit_ai_event=_audit_ai_event,
+        audit_ai_event=_audit_ai_event if record_tool_calls_enabled(AI_SYSTEM_SETTINGS) else None,
         event_sink=event_sink,
+        settings=AI_SYSTEM_SETTINGS,
     )
 
 
@@ -947,6 +953,8 @@ async def _run_knowledge_agent_surface_with_context(body: AgentRequest) -> Agent
 
 
 async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current_user: dict) -> dict[str, Any] | None:
+    if not audit_enabled(AI_SYSTEM_SETTINGS):
+        return None
     conversation_id = str((body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId") or "")
     if not conversation_id:
         return None
@@ -965,12 +973,18 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
         if not conversation:
             raise HTTPException(status_code=404, detail="Agent conversation not found")
 
+        safe_message = str(maybe_mask_sensitive_payload(body.message, AI_SYSTEM_SETTINGS))
+        safe_answer = str(maybe_mask_sensitive_payload(result.answer, AI_SYSTEM_SETTINGS))
+        safe_evidence = maybe_mask_sensitive_payload(result.evidence, AI_SYSTEM_SETTINGS)
+        safe_steps = maybe_mask_sensitive_payload(result.steps, AI_SYSTEM_SETTINGS)
+        safe_actions = maybe_mask_sensitive_payload([action.model_dump() for action in result.actions], AI_SYSTEM_SETTINGS)
+        safe_confirmation = maybe_mask_sensitive_payload(result.confirmation_payload or None, AI_SYSTEM_SETTINGS)
         user_message = AIMessage(
             tenant_id=tenant_id,
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
             role="user",
-            content=body.message,
+            content=safe_message,
             evidence=[],
             status="completed",
         )
@@ -979,8 +993,8 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
             role="assistant",
-            content=result.answer,
-            evidence=result.evidence,
+            content=safe_answer,
+            evidence=safe_evidence,
             model_name=next(
                 (
                     str(step.get("model"))
@@ -1000,17 +1014,17 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
             assistant_message_id=assistant_message.message_id,
             status="waiting_confirmation" if result.requires_confirmation else "completed",
             mode=result.mode,
-            input_message=body.message,
-            answer=result.answer,
-            steps=result.steps,
-            evidence=result.evidence,
-            actions=[action.model_dump() for action in result.actions],
+            input_message=safe_message,
+            answer=safe_answer,
+            steps=safe_steps,
+            evidence=safe_evidence,
+            actions=safe_actions,
             risk_level=result.risk_level,
             requires_confirmation=result.requires_confirmation,
-            confirmation_payload=result.confirmation_payload or None,
+            confirmation_payload=safe_confirmation,
         )
         records: list[Any] = [user_message, assistant_message, run]
-        if result.evidence or (body.context or {}).get("surface") == "knowledge":
+        if record_tool_calls_enabled(AI_SYSTEM_SETTINGS) and (result.evidence or (body.context or {}).get("surface") == "knowledge"):
             records.append(
                 AIToolCall(
                     tenant_id=tenant_id,
@@ -1019,15 +1033,15 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
                     tool_name="knowledge.search",
                     skill_name="knowledge.answer_question",
                     input={
-                        "query": body.message,
+                        "query": safe_message,
                         "document_id": (body.context or {}).get("document_id") or (body.context or {}).get("documentId"),
                     },
-                    output={"result_count": len(result.evidence), "results": result.evidence},
+                    output={"result_count": len(result.evidence), "results": safe_evidence},
                     status="completed",
                     duration_ms=0,
                 )
             )
-        conversation.last_message = body.message
+        conversation.last_message = safe_message
         conversation.metadata_json = {
             **(conversation.metadata_json or {}),
             "last_run_id": run.run_id,

@@ -11,6 +11,7 @@ from app.models.relational import AIMessage
 
 from .memory import memory_service
 from .schemas import AgentRequest
+from .settings import maybe_mask_sensitive_payload, safety_policy_snapshot
 
 
 def estimate_tokens(value: Any) -> int:
@@ -92,6 +93,8 @@ class ContextBuilder:
         }
         if payload["budget_exceeded"]:
             payload = self._trim_to_budget(payload, max_context_tokens)
+        if safety_policy_snapshot(settings).get("sensitiveMasking", True):
+            payload = maybe_mask_sensitive_payload(payload, settings)
         return payload
 
     async def _recent_messages(self, session: AsyncSession, conversation_id: str | None, limit: int) -> list[dict[str, Any]]:

@@ -1,13 +1,9 @@
 import React from 'react';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { useNavigate, useParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
-import MaintenancePage from '../Maintenance';
-import QualityPage from '../Quality';
-import QualityImpactWorkbench from '../QualityImpact';
-import SupplyChainPage from '../SupplyChain';
 import {
   createPlatformDynamicRecord,
   getAppProgramData,
@@ -57,269 +53,46 @@ interface ProgramDataPayload {
   metrics?: ProgramDefinition['metrics'];
   rows?: ProgramRow[];
   viewConfig?: ViewConfig;
+  analyticsDesign?: RuntimeAnalyticsDesign | null;
+  analyticsData?: {
+    metricValues?: Record<string, string | number>;
+    rows?: ProgramRow[];
+  };
+  form?: {
+    id: number;
+    code: string;
+    name: string;
+    kind?: string;
+  } | null;
   source?: string;
 }
 
+type RuntimeAnalyticsWidgetType = 'metric-card' | 'line' | 'bar' | 'pie' | 'rank-table' | 'detail-table';
+
+interface RuntimeAnalyticsMetric {
+  id: string;
+  name: string;
+  format?: 'number' | 'percent' | 'currency' | string;
+}
+
+interface RuntimeAnalyticsWidget {
+  id: string;
+  title: string;
+  type: RuntimeAnalyticsWidgetType | string;
+  datasetId?: string;
+  metricIds?: string[];
+  dimension?: string;
+  width?: 'quarter' | 'half' | 'full' | string;
+  interaction?: string;
+}
+
+interface RuntimeAnalyticsDesign {
+  metrics?: RuntimeAnalyticsMetric[];
+  widgets?: RuntimeAnalyticsWidget[];
+  style?: Record<string, unknown>;
+}
+
 const programDefinitions: Record<string, ProgramDefinition> = {
-  'production-overview': {
-    id: 'production-overview',
-    title: '生产总览',
-    subtitle: '面向车间调度的产量、节拍、达成率和异常状态汇总。',
-    kind: 'analysis',
-    owner: '生产运营',
-    icon: <LineChartOutlined />,
-    metrics: [
-      { label: '今日达成率', value: 94.6, suffix: '%', tone: 'green' },
-      { label: '计划产量', value: 12840, tone: 'blue' },
-      { label: '异常工单', value: 37, tone: 'orange' },
-      { label: '平均节拍', value: 48, suffix: 's', tone: 'blue' },
-    ],
-    focus: ['按班次汇总产量与良率', '对比计划与实际进度', '暴露影响交付的异常点'],
-    columns: [
-      { title: '班次', dataIndex: 'shift' },
-      { title: '产线', dataIndex: 'line' },
-      { title: '计划', dataIndex: 'plan', sorter: (a, b) => Number(a.plan) - Number(b.plan) },
-      { title: '实际', dataIndex: 'actual', sorter: (a, b) => Number(a.actual) - Number(b.actual) },
-      { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === '正常' ? 'green' : 'orange'}>{value}</Tag> },
-    ],
-    rows: [],
-  },
-  'oee-trend-report': {
-    id: 'oee-trend-report',
-    title: 'OEE 趋势报表',
-    subtitle: '聚焦 OEE 的日趋势、目标差异、产线对比和异常波动原因。',
-    kind: 'analysis',
-    owner: '生产运营',
-    icon: <LineChartOutlined />,
-    metrics: [
-      { label: '本周 OEE', value: 86.8, suffix: '%', tone: 'green' },
-      { label: '较目标差异', value: -2.4, suffix: '%', tone: 'orange' },
-      { label: '低于目标产线', value: 3, tone: 'red' },
-      { label: '最高产线 OEE', value: 91.6, suffix: '%', tone: 'blue' },
-    ],
-    focus: ['OEE 趋势与目标线', '可用率、性能、质量三因子拆解', '异常日期和产线下钻'],
-    columns: [
-      { title: '日期', dataIndex: 'date', width: 120 },
-      { title: '产线', dataIndex: 'line', width: 140 },
-      { title: 'OEE', dataIndex: 'oee', width: 100 },
-      { title: '可用率', dataIndex: 'availability', width: 100 },
-      { title: '主要原因', dataIndex: 'reason', width: 180 },
-    ],
-    rows: [],
-  },
-  'line-status': {
-    id: 'line-status',
-    title: '产线状态',
-    subtitle: '查看每条产线的运行模式、瓶颈工位和实时负荷。',
-    kind: 'business',
-    owner: '车间班组',
-    icon: <FieldTimeOutlined />,
-    metrics: [
-      { label: '运行产线', value: 214, tone: 'green' },
-      { label: '待料产线', value: 21, tone: 'orange' },
-      { label: '换型中', value: 18, tone: 'blue' },
-      { label: '停线', value: 7, tone: 'red' },
-    ],
-    focus: ['产线当前工况', '瓶颈工位与节拍差异', '换型和待料影响'],
-    columns: [
-      { title: '产线', dataIndex: 'line' },
-      { title: '当前产品', dataIndex: 'product' },
-      { title: '瓶颈工位', dataIndex: 'station' },
-      { title: '负荷', dataIndex: 'load', render: (value) => <Progress percent={Number(value)} size="small" /> },
-    ],
-    rows: [],
-  },
-  'line-load-analysis': {
-    id: 'line-load-analysis',
-    title: '产线负荷分析',
-    subtitle: '按产线、班次和瓶颈工位分析负荷水平，辅助排产均衡。',
-    kind: 'analysis',
-    owner: '计划调度',
-    icon: <FieldTimeOutlined />,
-    metrics: [
-      { label: '平均负荷', value: 78.5, suffix: '%', tone: 'blue' },
-      { label: '过载产线', value: 2, tone: 'orange' },
-      { label: '空闲产能', value: 16.2, suffix: '%', tone: 'green' },
-      { label: '瓶颈工位', value: 5, tone: 'red' },
-    ],
-    focus: ['产线负荷热区', '班次能力差异', '瓶颈工位转移建议'],
-    columns: [
-      { title: '产线', dataIndex: 'line', width: 140 },
-      { title: '班次', dataIndex: 'shift', width: 100 },
-      { title: '负荷率', dataIndex: 'load', width: 120, render: (value) => <Progress percent={Number(value)} size="small" /> },
-      { title: '瓶颈工位', dataIndex: 'station', width: 160 },
-      { title: '建议动作', dataIndex: 'action', width: 180 },
-    ],
-    rows: [],
-  },
-  'production-plan-entry': {
-    id: 'production-plan-entry',
-    title: '生产计划填报',
-    subtitle: '维护计划产量、产品、班次和确认状态。',
-    kind: 'business',
-    owner: '生产计划',
-    icon: <AppstoreOutlined />,
-    metrics: [
-      { label: '待提交计划', value: 46, tone: 'orange' },
-      { label: '已确认计划', value: 238, tone: 'green' },
-      { label: '待调整批次', value: 34, tone: 'red' },
-      { label: '覆盖产线', value: 96, tone: 'blue' },
-    ],
-    focus: ['计划录入和保存草稿', '班次产量确认', '排产调整原因留痕'],
-    columns: [
-      { title: '计划单号', dataIndex: 'planNo', width: 150 },
-      { title: '产品', dataIndex: 'product', width: 150 },
-      { title: '产线', dataIndex: 'line', width: 130 },
-      { title: '计划数量', dataIndex: 'quantity', width: 110, sorter: (a, b) => Number(a.quantity) - Number(b.quantity) },
-      { title: '状态', dataIndex: 'status', width: 100, render: (value) => <Tag color={value === '已确认' ? 'green' : 'orange'}>{value}</Tag> },
-    ],
-    rows: [],
-  },
-  'device-health': {
-    id: 'device-health',
-    title: '设备健康',
-    subtitle: '沉淀关键设备的健康评分、风险因子和维护建议。',
-    kind: 'analysis',
-    owner: '设备工程',
-    icon: <ToolOutlined />,
-    metrics: [
-      { label: '平均健康度', value: 88.2, suffix: '%', tone: 'green' },
-      { label: '高风险设备', value: 4, tone: 'red' },
-      { label: '待保养', value: 13, tone: 'orange' },
-      { label: '在线设备', value: 216, tone: 'blue' },
-    ],
-    focus: ['设备健康评分', '振动与温度异常', '保养策略推荐'],
-    columns: [
-      { title: '设备', dataIndex: 'asset' },
-      { title: '健康度', dataIndex: 'health', render: (value) => <Progress percent={Number(value)} size="small" /> },
-      { title: '主要风险', dataIndex: 'risk' },
-      { title: '建议', dataIndex: 'action' },
-    ],
-    rows: [],
-  },
-  'device-health-dashboard': {
-    id: 'device-health-dashboard',
-    title: '设备健康看板',
-    subtitle: '面向预测性维护的总览看板，汇总设备健康度、风险分布、待处理建议和关键设备排行。',
-    kind: 'analysis',
-    owner: '设备团队',
-    icon: <ToolOutlined />,
-    metrics: [
-      { label: '平均健康度', value: 88.6, suffix: '%', tone: 'green' },
-      { label: '高风险设备', value: 5, tone: 'red' },
-      { label: '待保养设备', value: 14, tone: 'orange' },
-      { label: '在线设备', value: 216, tone: 'blue' },
-    ],
-    focus: ['设备健康度分布', '高风险设备排行', '保养建议闭环'],
-    columns: [
-      { title: '设备', dataIndex: 'asset', width: 150 },
-      { title: '健康度', dataIndex: 'health', width: 160, render: (value) => <Progress percent={Number(value)} size="small" /> },
-      { title: '风险等级', dataIndex: 'level', width: 120 },
-      { title: '主要风险', dataIndex: 'risk', width: 180 },
-      { title: '建议动作', dataIndex: 'action', width: 180 },
-    ],
-    rows: [],
-  },
-  'fault-prediction': {
-    id: 'fault-prediction',
-    title: '故障预测',
-    subtitle: '根据历史维修、传感器趋势和运行时长预测故障窗口。',
-    kind: 'analysis',
-    owner: '可靠性团队',
-    icon: <WarningOutlined />,
-    metrics: [
-      { label: '预测命中率', value: 82.5, suffix: '%', tone: 'green' },
-      { label: '未来 7 天风险', value: 9, tone: 'orange' },
-      { label: '严重预警', value: 2, tone: 'red' },
-      { label: '模型版本', value: 'v3.4', tone: 'blue' },
-    ],
-    focus: ['故障概率排序', '预测依据解释', '维护窗口建议'],
-    columns: [
-      { title: '对象', dataIndex: 'asset' },
-      { title: '预测故障', dataIndex: 'fault' },
-      { title: '概率', dataIndex: 'probability' },
-      { title: '预计窗口', dataIndex: 'window' },
-    ],
-    rows: [],
-  },
-  'maintenance-order': {
-    id: 'maintenance-order',
-    title: '维修工单',
-    subtitle: '跟踪维修工单的派发、执行、备件和验收闭环。',
-    kind: 'business',
-    owner: '维修班组',
-    icon: <AppstoreOutlined />,
-    metrics: [
-      { label: '打开工单', value: 18, tone: 'orange' },
-      { label: '今日完成', value: 11, tone: 'green' },
-      { label: '待备件', value: 3, tone: 'red' },
-      { label: '平均处理', value: 2.6, suffix: 'h', tone: 'blue' },
-    ],
-    focus: ['工单责任人', '维修进度', '备件与验收状态'],
-    columns: [
-      { title: '工单号', dataIndex: 'orderNo' },
-      { title: '设备', dataIndex: 'asset' },
-      { title: '负责人', dataIndex: 'owner' },
-      { title: '进度', dataIndex: 'status', render: (value) => <Tag color={value === '已完成' ? 'green' : 'processing'}>{value}</Tag> },
-    ],
-    rows: [],
-  },
-  'equipment-inspection': {
-    id: 'equipment-inspection',
-    title: '点检计划',
-    subtitle: '按设备、点检项、周期、责任人和执行状态管理设备点检计划，与告警中心使用同一套业务表格交互模板。',
-    kind: 'business',
-    owner: '维护执行',
-    icon: <FileSearchOutlined />,
-    metrics: [
-      { label: '计划总数', value: 360, tone: 'blue' },
-      { label: '待点检', value: 86, tone: 'orange' },
-      { label: '逾期计划', value: 18, tone: 'red' },
-      { label: '完成率', value: 93.4, suffix: '%', tone: 'green' },
-    ],
-    focus: ['点检周期', '责任人', '执行状态'],
-    columns: [
-      { title: '点检单号', dataIndex: 'planNo', width: 150 },
-      { title: '设备', dataIndex: 'asset', width: 160 },
-      { title: '点检项', dataIndex: 'item', width: 140 },
-      { title: '周期', dataIndex: 'cycle', width: 100 },
-      { title: '负责人', dataIndex: 'owner', width: 120 },
-      {
-        title: '状态',
-        dataIndex: 'status',
-        width: 110,
-        render: (value) => (
-          <Tag color={value === '逾期' ? 'red' : value === '已完成' ? 'green' : value === '执行中' ? 'blue' : 'orange'}>
-            {String(value)}
-          </Tag>
-        ),
-      },
-    ],
-    rows: [],
-  },
-  'failure-trend-analysis': {
-    id: 'failure-trend-analysis',
-    title: '故障趋势分析',
-    subtitle: '按时间、设备类型和故障原因分析维修故障趋势，区别于单台设备预测。',
-    kind: 'analysis',
-    owner: '维护团队',
-    icon: <LineChartOutlined />,
-    metrics: [
-      { label: '本月故障数', value: 42, tone: 'orange' },
-      { label: '环比变化', value: -8.6, suffix: '%', tone: 'green' },
-      { label: '重复故障', value: 7, tone: 'red' },
-      { label: '平均间隔', value: 18.4, suffix: 'h', tone: 'blue' },
-    ],
-    focus: ['故障趋势按周分析', '重复故障设备识别', '主要原因与责任区域'],
-    columns: [
-      { title: '周次', dataIndex: 'week', width: 120 },
-      { title: '设备类型', dataIndex: 'type', width: 140 },
-      { title: '故障次数', dataIndex: 'count', width: 100 },
-      { title: '主要原因', dataIndex: 'reason', width: 180 },
-      { title: '趋势', dataIndex: 'trend', width: 100 },
-    ],
-    rows: [],
-  },
   'alert-center': {
     id: 'alert-center',
     title: '告警中心',
@@ -342,251 +115,7 @@ const programDefinitions: Record<string, ProgramDefinition> = {
     ],
     rows: [],
   },
-  'quality-overview': {
-    id: 'quality-overview',
-    title: '质量总览',
-    subtitle: '汇总检验合格率、缺陷分布、返工趋势和关键质量事件。',
-    kind: 'analysis',
-    owner: '质量部',
-    icon: <CheckCircleOutlined />,
-    metrics: [
-      { label: '一次合格率', value: 97.8, suffix: '%', tone: 'green' },
-      { label: '待复检', value: 42, tone: 'orange' },
-      { label: '重大事件', value: 1, tone: 'red' },
-      { label: 'CPK 均值', value: 1.43, tone: 'blue' },
-    ],
-    focus: ['批次质量表现', '缺陷趋势', '过程能力监控'],
-    columns: [
-      { title: '产品族', dataIndex: 'family' },
-      { title: '抽检数', dataIndex: 'sample' },
-      { title: '合格率', dataIndex: 'yieldRate' },
-      { title: '主要缺陷', dataIndex: 'defect' },
-    ],
-    rows: [],
-  },
-  'inspection-batch': {
-    id: 'inspection-batch',
-    title: '检验批次',
-    subtitle: '管理来料、过程和出货检验批次的抽检结论。',
-    kind: 'business',
-    owner: '检验小组',
-    icon: <FileSearchOutlined />,
-    metrics: [
-      { label: '今日批次', value: 67, tone: 'blue' },
-      { label: '已放行', value: 51, tone: 'green' },
-      { label: '隔离中', value: 6, tone: 'orange' },
-      { label: '判退', value: 2, tone: 'red' },
-    ],
-    focus: ['批次状态', '抽样方案', '放行与隔离记录'],
-    columns: [
-      { title: '批次号', dataIndex: 'batch' },
-      { title: '物料', dataIndex: 'material' },
-      { title: '检验类型', dataIndex: 'type' },
-      { title: '结论', dataIndex: 'result', render: (value) => <Tag color={value === '放行' ? 'green' : 'orange'}>{value}</Tag> },
-    ],
-    rows: [],
-  },
-  'defect-analysis': {
-    id: 'defect-analysis',
-    title: '缺陷分析',
-    subtitle: '对缺陷类型、工位、供应商和责任原因进行分层分析。',
-    kind: 'analysis',
-    owner: '质量工程',
-    icon: <ExperimentOutlined />,
-    metrics: [
-      { label: '缺陷件数', value: 128, tone: 'orange' },
-      { label: '重复缺陷', value: 19, tone: 'red' },
-      { label: 'Top1 占比', value: 31.4, suffix: '%', tone: 'blue' },
-      { label: '关闭率', value: 86, suffix: '%', tone: 'green' },
-    ],
-    focus: ['缺陷 Pareto', '责任原因归类', '改善效果跟踪'],
-    columns: [
-      { title: '缺陷类型', dataIndex: 'defect' },
-      { title: '发生工位', dataIndex: 'station' },
-      { title: '数量', dataIndex: 'count' },
-      { title: '趋势', dataIndex: 'trend' },
-    ],
-    rows: [],
-  },
-  'defect-analysis-report': {
-    id: 'defect-analysis-report',
-    title: '缺陷分析报表',
-    subtitle: '按缺陷类型、责任工位和改善状态拆解质量问题，避免与缺陷处理表单共用一个页面。',
-    kind: 'analysis',
-    owner: '质量团队',
-    icon: <ExperimentOutlined />,
-    metrics: [
-      { label: '本月缺陷数', value: 96, tone: 'orange' },
-      { label: '重大缺陷', value: 8, tone: 'red' },
-      { label: '重复发生率', value: 12.5, suffix: '%', tone: 'blue' },
-      { label: '改善关闭率', value: 84.2, suffix: '%', tone: 'green' },
-    ],
-    focus: ['缺陷 Pareto 分析', '责任工位归因', '改善闭环趋势'],
-    columns: [
-      { title: '缺陷类型', dataIndex: 'defect', width: 150 },
-      { title: '责任工位', dataIndex: 'station', width: 140 },
-      { title: '发生次数', dataIndex: 'count', width: 110 },
-      { title: '主要原因', dataIndex: 'reason', width: 180 },
-      { title: '改善状态', dataIndex: 'status', width: 120 },
-    ],
-    rows: [],
-  },
-  'process-capability-dashboard': {
-    id: 'process-capability-dashboard',
-    title: '过程能力看板',
-    subtitle: '聚焦 CPK、PPK、超限批次和稳定性趋势，是质量监控看板，不再复用质量总览。',
-    kind: 'analysis',
-    owner: '质量团队',
-    icon: <CheckCircleOutlined />,
-    metrics: [
-      { label: '平均 CPK', value: 1.42, tone: 'green' },
-      { label: '低能力工序', value: 4, tone: 'red' },
-      { label: '超限批次', value: 6, tone: 'orange' },
-      { label: '受控特性', value: 38, tone: 'blue' },
-    ],
-    focus: ['关键特性能力排名', 'SPC 超限追踪', '低 CPK 工序改善'],
-    columns: [
-      { title: '工序', dataIndex: 'process', width: 150 },
-      { title: '质量特性', dataIndex: 'feature', width: 150 },
-      { title: 'CPK', dataIndex: 'cpk', width: 100 },
-      { title: 'PPK', dataIndex: 'ppk', width: 100 },
-      { title: '状态', dataIndex: 'status', width: 120 },
-    ],
-    rows: [],
-  },  'quality-event': {
-    id: 'quality-event',
-    title: '料号追踪',
-    subtitle: '围绕料号查看供应、检验、库存、生产、交付、异常和知识证据。',
-    kind: 'business',
-    owner: '质量 / 供应链',
-    icon: <CheckCircleOutlined />,
-    metrics: [
-      { label: '关联对象', value: 16, tone: 'blue' },
-      { label: '关系链路', value: 24, tone: 'green' },
-      { label: '风险节点', value: 4, tone: 'orange' },
-      { label: '证据条目', value: 3, tone: 'blue' },
-    ],
-    focus: ['料号全链路', 'Neo4j 子图', '异常与证据'],
-    columns: [
-      { title: '对象编号', dataIndex: 'eventNo' },
-      { title: '对象名称', dataIndex: 'subject' },
-      { title: '归属', dataIndex: 'owner' },
-      { title: '状态', dataIndex: 'stage' },
-    ],
-    rows: [],
-  },
-  'supplier-risk': {
-    id: 'supplier-risk',
-    title: '供应商风险',
-    subtitle: '评估供应商交付、质量、产能和地域风险。',
-    kind: 'analysis',
-    owner: '采购管理',
-    icon: <ShopOutlined />,
-    metrics: [
-      { label: '高风险供应商', value: 5, tone: 'red' },
-      { label: '交付准时率', value: 91.2, suffix: '%', tone: 'green' },
-      { label: '待整改', value: 8, tone: 'orange' },
-      { label: '覆盖品类', value: 23, tone: 'blue' },
-    ],
-    focus: ['供应商风险评分', '交付与质量波动', '替代来源建议'],
-    columns: [
-      { title: '供应商', dataIndex: 'supplier' },
-      { title: '品类', dataIndex: 'category' },
-      { title: '风险', dataIndex: 'risk', render: (value) => <Tag color={value === '高' ? 'red' : 'orange'}>{value}</Tag> },
-      { title: '原因', dataIndex: 'reason' },
-    ],
-    rows: [],
-  },
-  'supply-overview': {
-    id: 'supply-overview',
-    title: '供应总览',
-    subtitle: '查看供应链库存水位、缺料风险和交付承诺。',
-    kind: 'analysis',
-    owner: '供应链计划',
-    icon: <DatabaseOutlined />,
-    metrics: [
-      { label: '缺料风险', value: 14, tone: 'orange' },
-      { label: '安全库存命中', value: 88.7, suffix: '%', tone: 'green' },
-      { label: '在途批次', value: 126, tone: 'blue' },
-      { label: '停线风险', value: 1, tone: 'red' },
-    ],
-    focus: ['库存覆盖天数', '供应承诺差异', '缺料风险预警'],
-    columns: [
-      { title: '物料组', dataIndex: 'group' },
-      { title: '覆盖天数', dataIndex: 'days' },
-      { title: '在途', dataIndex: 'transit' },
-      { title: '风险等级', dataIndex: 'risk' },
-    ],
-    rows: [],
-  },
-  'material-impact': {
-    id: 'material-impact',
-    title: '物料影响',
-    subtitle: '分析物料短缺对工单、产线和客户交付的影响范围。',
-    kind: 'analysis',
-    owner: '计划协同',
-    icon: <DatabaseOutlined />,
-    metrics: [
-      { label: '受影响工单', value: 21, tone: 'orange' },
-      { label: '客户订单', value: 9, tone: 'red' },
-      { label: '可替代料', value: 6, tone: 'green' },
-      { label: '预计缺口', value: 1840, tone: 'blue' },
-    ],
-    focus: ['缺料影响链路', '替代料可用性', '客户交期冲击'],
-    columns: [
-      { title: '物料', dataIndex: 'material' },
-      { title: '缺口', dataIndex: 'gap' },
-      { title: '影响产线', dataIndex: 'line' },
-      { title: '缓解动作', dataIndex: 'action' },
-    ],
-    rows: [],
-  },
-  'material-impact-report': {
-    id: 'material-impact-report',
-    title: '物料影响报表',
-    subtitle: '把缺料对产线、工单和客户订单的影响拆开分析，不再复用通用物料影响页。',
-    kind: 'analysis',
-    owner: '供应链团队',
-    icon: <DatabaseOutlined />,
-    metrics: [
-      { label: '受影响工单', value: 18, tone: 'orange' },
-      { label: '停线风险', value: 5, tone: 'red' },
-      { label: '可替代物料', value: 12, tone: 'green' },
-      { label: '预计缺口', value: 3260, tone: 'blue' },
-    ],
-    focus: ['缺料影响工单', '客户订单风险', '替代料可用性'],
-    columns: [
-      { title: '物料', dataIndex: 'material', width: 150 },
-      { title: '影响对象', dataIndex: 'target', width: 150 },
-      { title: '缺口数量', dataIndex: 'gap', width: 110 },
-      { title: '预计影响', dataIndex: 'impact', width: 160 },
-      { title: '应对动作', dataIndex: 'action', width: 180 },
-    ],
-    rows: [],
-  },
-  'supply-risk-dashboard': {
-    id: 'supply-risk-dashboard',
-    title: '供应风险看板',
-    subtitle: '展示供应风险等级、关键品类和替代方案，是供应链风险看板，不再复用供应链总览。',
-    kind: 'analysis',
-    owner: '供应链团队',
-    icon: <ShopOutlined />,
-    metrics: [
-      { label: '高风险供应商', value: 6, tone: 'red' },
-      { label: '风险品类', value: 14, tone: 'orange' },
-      { label: '替代方案覆盖', value: 72.4, suffix: '%', tone: 'green' },
-      { label: '待复核风险', value: 9, tone: 'blue' },
-    ],
-    focus: ['高风险供应商排行', '关键物料风险', '替代方案覆盖缺口'],
-    columns: [
-      { title: '供应商', dataIndex: 'supplier', width: 160 },
-      { title: '风险品类', dataIndex: 'category', width: 140 },
-      { title: '风险等级', dataIndex: 'level', width: 110 },
-      { title: '主要原因', dataIndex: 'reason', width: 180 },
-      { title: '缓解方案', dataIndex: 'mitigation', width: 180 },
-    ],
-    rows: [],
-  },  'risk-review': {
+  'risk-review': {
     id: 'risk-review',
     title: '风险复核',
     subtitle: '对供应链风险进行人工复核、定级、分派和关闭。',
@@ -634,22 +163,86 @@ const toneClassMap: Record<ProgramDefinition['metrics'][number]['tone'], string>
   orange: 'program-stat-orange',
   red: 'program-stat-red',
 };
-const routedProgramIds = new Set(['production-overview', 'device-health', 'quality-overview', 'quality-event', 'supply-overview']);
+const routedProgramIds = new Set<string>();
+const configuredFormProgramIds = new Set([
+  'production-plan-entry',
+  'maintenance-order',
+  'equipment-inspection',
+  'inspection-batch',
+  'quality-event',
+  'capa-tracking',
+  'inventory-impact',
+  'supplier-scorecard',
+  'ai_material_master_form_5',
+  'production-overview',
+  'oee-trend-report',
+  'line-status',
+  'line-load-analysis',
+  'device-health',
+  'device-health-dashboard',
+  'fault-prediction',
+  'failure-trend-analysis',
+  'quality-overview',
+  'defect-analysis',
+  'defect-analysis-report',
+  'process-capability-dashboard',
+  'supplier-risk',
+  'material-impact',
+  'material-impact-report',
+  'supply-overview',
+  'supply-risk-dashboard',
+]);
+
+function hasRuntimeAnalyticsDesign(payload: ProgramDataPayload | null | undefined): payload is ProgramDataPayload & { analyticsDesign: RuntimeAnalyticsDesign } {
+  return Boolean(payload?.analyticsDesign?.widgets?.length);
+}
+
+function hasConfiguredFormRuntime(payload: ProgramDataPayload | null | undefined): payload is ProgramDataPayload & { form: NonNullable<ProgramDataPayload['form']> } {
+  return Boolean(payload?.form);
+}
+
+function buildConfiguredProgram(programId: string, payload: ProgramDataPayload, fallback?: ProgramDefinition): ProgramDefinition {
+  const form = payload.form;
+  const viewColumns = payload.viewConfig?.table?.columns || [];
+  const columns: ColumnsType<ProgramRow> = viewColumns.map((column) => ({
+    title: column.label,
+    dataIndex: column.fieldName,
+    key: column.fieldName,
+    width: column.width,
+  }));
+  return {
+    id: form?.code || programId,
+    title: form?.name || fallback?.title || programId,
+    subtitle: fallback?.subtitle || '后台配置驱动的业务交互表',
+    kind: form?.kind === 'analysis' ? 'analysis' : 'business',
+    owner: fallback?.owner || '业务配置',
+    icon: fallback?.icon || <DatabaseOutlined />,
+    metrics: Array.isArray(payload.metrics) ? payload.metrics : [],
+    focus: fallback?.focus || [],
+    columns,
+    rows: Array.isArray(payload.rows) ? payload.rows : [],
+    viewConfig: payload.viewConfig || fallback?.viewConfig,
+  };
+}
 
 function AppProgramPage() {
   const { programId } = useParams();
   const navigate = useNavigate();
-  const [programData, setProgramData] = React.useState<ProgramDataPayload | null>(null);
+  const [programData, setProgramData] = React.useState<ProgramDataPayload | null | undefined>(undefined);
   const [programLoading, setProgramLoading] = React.useState(false);
 
-  const baseProgram = programId ? programDefinitions[programId] : undefined;
+  const staticProgram = programId ? programDefinitions[programId] : undefined;
+  const baseProgram = programId && configuredFormProgramIds.has(programId) ? undefined : staticProgram;
   const loadProgramData = React.useCallback(async () => {
-    if (!programId || routedProgramIds.has(programId) || !programDefinitions[programId]) return;
+    if (!programId || routedProgramIds.has(programId)) {
+      setProgramData(null);
+      return;
+    }
     setProgramLoading(true);
     try {
       const response = await getAppProgramData(programId, 500);
       const payload = response.data as ProgramDataPayload;
-      setProgramData(payload?.rows || payload?.metrics ? payload : null);
+      setProgramData(payload?.form || payload?.viewConfig || payload?.rows || payload?.metrics || payload?.analyticsDesign ? payload : null);
     } catch {
       setProgramData(null);
     } finally {
@@ -658,11 +251,14 @@ function AppProgramPage() {
   }, [programId]);
 
   React.useEffect(() => {
-    setProgramData(null);
+    setProgramData(undefined);
     void loadProgramData();
   }, [loadProgramData]);
 
   const program = React.useMemo(() => {
+    if (hasConfiguredFormRuntime(programData) && programId) {
+      return buildConfiguredProgram(programId, programData, baseProgram);
+    }
     if (!baseProgram) return undefined;
     const serverRows = Array.isArray(programData?.rows) ? programData.rows : [];
     const serverMetrics = Array.isArray(programData?.metrics) ? programData.metrics : [];
@@ -672,26 +268,48 @@ function AppProgramPage() {
       rows: serverRows,
       viewConfig: programData?.viewConfig || baseProgram.viewConfig,
     };
-  }, [baseProgram, programData]);
+  }, [baseProgram, programData, programId]);
+
+  if (programData === undefined || programLoading) {
+    return (
+      <div className="dashboard-page">
+        <Skeleton active paragraph={{ rows: 12 }} />
+      </div>
+    );
+  }
 
   if (programId === 'production-overview') {
+    if (programData === undefined || programLoading) {
+      return (
+        <div className="dashboard-page">
+          <Skeleton active paragraph={{ rows: 12 }} />
+        </div>
+      );
+    }
+    if (hasRuntimeAnalyticsDesign(programData) && program) {
+      return (
+        <ConfiguredAnalysisDashboard
+          program={program}
+          payload={programData}
+          onSettings={() => navigate('/form-settings/production-overview?tab=dashboard')}
+          onReload={loadProgramData}
+          loading={programLoading}
+        />
+      );
+    }
+    if (hasConfiguredFormRuntime(programData) && program) {
+      return (
+        <div className="app-program-page app-program-business">
+          <BusinessProgram
+            program={{ ...program, kind: 'business' }}
+            onSettings={() => navigate('/form-settings/production-overview?tab=dashboard')}
+            onReload={loadProgramData}
+            loading={programLoading}
+          />
+        </div>
+      );
+    }
     return <DashboardPage />;
-  }
-
-  if (programId === 'device-health') {
-    return <MaintenancePage />;
-  }
-
-  if (programId === 'quality-overview') {
-    return <QualityPage />;
-  }
-
-  if (programId === 'quality-event') {
-    return <QualityImpactWorkbench />;
-  }
-
-  if (programId === 'supply-overview') {
-    return <SupplyChainPage />;
   }
 
   if (!program) {
@@ -705,12 +323,15 @@ function AppProgramPage() {
   }
 
   const openSettings = () => {
-    navigate(`/form-settings/${program.id}`);
+    const tab = programData?.form?.kind === 'analysis' ? '?tab=dashboard' : '';
+    navigate(`/form-settings/${program.id}${tab}`);
   };
 
   return (
     <div className={`app-program-page app-program-${program.kind}`}>
-      {program.kind === 'business' ? (
+      {hasRuntimeAnalyticsDesign(programData) ? (
+        <ConfiguredAnalysisDashboard program={program} payload={programData} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
+      ) : hasConfiguredFormRuntime(programData) || program.kind === 'business' ? (
         <BusinessProgram program={program} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
       ) : (
         <>
@@ -754,6 +375,130 @@ function ProgramHeader({
         <Button icon={<BarChartOutlined />}>切换维度</Button>
         <Button icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
       </Space>
+    </div>
+  );
+}
+
+function formatRuntimeMetricValue(value: string | number | undefined, metric?: RuntimeAnalyticsMetric) {
+  if (value === undefined || value === null || value === '') return metric?.format === 'percent' ? '0%' : '0';
+  if (metric?.format === 'percent') return `${value}%`;
+  if (metric?.format === 'currency') return `¥${Number(value || 0).toLocaleString('zh-CN')}`;
+  return typeof value === 'number' ? value.toLocaleString('zh-CN') : value;
+}
+
+function pickRuntimeRows(payload: ProgramDataPayload): ProgramRow[] {
+  const runtimeRows = payload.analyticsData?.rows;
+  if (Array.isArray(runtimeRows) && runtimeRows.length) return runtimeRows;
+  return Array.isArray(payload.rows) ? payload.rows : [];
+}
+
+function readRuntimeNumber(row: ProgramRow, keys: string[], fallback: number) {
+  for (const key of keys) {
+    const value = row[key];
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return fallback;
+}
+
+function ConfiguredAnalysisDashboard({
+  program,
+  payload,
+  onSettings,
+  onReload,
+  loading,
+}: {
+  program: ProgramDefinition;
+  payload: ProgramDataPayload & { analyticsDesign: RuntimeAnalyticsDesign };
+  onSettings: () => void;
+  onReload: () => void;
+  loading?: boolean;
+}) {
+  const design = payload.analyticsDesign;
+  const widgets = design.widgets || [];
+  const metrics = design.metrics || [];
+  const metricMap = new Map(metrics.map((metric) => [metric.id, metric]));
+  const metricValues = payload.analyticsData?.metricValues || {};
+  const rows = pickRuntimeRows(payload);
+  const chartRows = rows.length ? rows.slice(-8) : Array.from({ length: 4 }).map((_, index) => ({ key: `sample-${index}`, actual: 24 + index * 12 }));
+
+  const renderMetricCards = (widget: RuntimeAnalyticsWidget) => {
+    const metricIds = widget.metricIds?.length ? widget.metricIds : metrics.slice(0, 3).map((metric) => metric.id);
+    return (
+      <div className="runtime-analytics-metrics">
+        {metricIds.map((metricId) => {
+          const metric = metricMap.get(metricId);
+          return (
+            <div key={metricId}>
+              <span>{metric?.name || metricId}</span>
+              <strong>{formatRuntimeMetricValue(metricValues[metricId], metric)}</strong>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderChart = (widget: RuntimeAnalyticsWidget) => {
+    const values = chartRows.map((row, index) => readRuntimeNumber(row, ['actual', 'planned', 'yieldRate', 'value'], 24 + index * 16));
+    const max = Math.max(...values, 1);
+    return (
+      <div className={`runtime-analytics-chart runtime-analytics-chart-${widget.type}`}>
+        {values.map((value, index) => (
+          <span key={`${widget.id}-${index}`} style={{ height: `${Math.max(18, Math.round((value / max) * 100))}%` }} />
+        ))}
+      </div>
+    );
+  };
+
+  const renderTable = (widget: RuntimeAnalyticsWidget) => {
+    const sample = rows[0] || {};
+    const keys = Object.keys(sample).filter((key) => !key.startsWith('_') && key !== 'key').slice(0, 4);
+    const dataKeys = keys.length ? keys : ['date', 'planned', 'actual', 'status'];
+    const columns = dataKeys.map((key) => ({
+      title: key === widget.dimension ? '对象' : fieldLabelMap[key] || key,
+      dataIndex: key,
+      key,
+      ellipsis: true,
+      render: (value: unknown) => formatDetailValue(value),
+    }));
+    return (
+      <Table
+        columns={columns}
+        dataSource={rows.slice(0, widget.type === 'rank-table' ? 6 : 8)}
+        pagination={false}
+        rowKey={(row, index) => String(row.key || row.date || row.id || `row-${index}`)}
+        size="small"
+      />
+    );
+  };
+
+  const renderWidgetBody = (widget: RuntimeAnalyticsWidget) => {
+    if (widget.type === 'metric-card') return renderMetricCards(widget);
+    if (widget.type === 'rank-table' || widget.type === 'detail-table') return renderTable(widget);
+    if (widget.type === 'pie') {
+      const percentValue = Number(metricValues[widget.metricIds?.[0] || ''] || 68);
+      return <Progress type="circle" percent={Math.max(0, Math.min(100, percentValue))} size={142} />;
+    }
+    return renderChart(widget);
+  };
+
+  return (
+    <div className="app-program-page app-program-analysis runtime-analytics-page">
+      <ProgramHeader program={program} onSettings={onSettings} onReload={onReload} loading={loading} />
+      <div className="runtime-analytics-canvas">
+        {widgets.map((widget) => (
+          <Card
+            className={`runtime-analytics-widget runtime-analytics-widget-${widget.width || 'half'}`}
+            key={widget.id}
+            size="small"
+            title={widget.title}
+            extra={<Tag>{widget.type}</Tag>}
+          >
+            {renderWidgetBody(widget)}
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

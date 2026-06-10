@@ -53,6 +53,8 @@ const formRouteMap: Record<string, { route: string; icon: string }> = {
   'quality-event': { route: '/program/quality-event', icon: 'SafetyCertificateOutlined' },
   'supplier-risk': { route: '/program/supplier-risk', icon: 'ShopOutlined' },
   'supply-overview': { route: '/program/supply-overview', icon: 'ShopOutlined' },
+  'inventory-impact': { route: '/program/inventory-impact', icon: 'ShopOutlined' },
+  'supplier-scorecard': { route: '/program/supplier-scorecard', icon: 'ShopOutlined' },
   'material-impact': { route: '/program/material-impact', icon: 'ShopOutlined' },
   'material-impact-report': { route: '/program/material-impact-report', icon: 'ShopOutlined' },
   'supply-risk-dashboard': { route: '/program/supply-risk-dashboard', icon: 'ShopOutlined' },

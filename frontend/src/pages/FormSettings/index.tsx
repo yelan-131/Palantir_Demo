@@ -45,6 +45,7 @@ import {
   createPlatformFormField,
   deletePlatformFormPermission,
   getPlatformForm,
+  getPlatformFormByCode,
   listPlatformFormLayouts,
   listPlatformFormPermissions,
   listPlatformForms,
@@ -1218,7 +1219,7 @@ const configs: Record<string, DesignerConfig> = {
     dataSource: 'risk_reviews',
     primaryKey: 'riskNo',
     status: '草稿',
-    version: 'v0.1',
+    version: 'v1',
     description: '用于新增风险复核业务数据，而不是配置整个运行页面。',
     fields: [
       { key: 'riskNo', name: '风险单号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成 SR-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
@@ -1242,10 +1243,10 @@ const configs: Record<string, DesignerConfig> = {
     createTitle: '新增设备告警',
     kind: 'business',
     appName: '预测性维护',
-    dataSource: 'equipment_alerts',
+    dataSource: 'business_alert_center',
     primaryKey: 'alertId',
     status: '已发布',
-    version: 'v0.1',
+    version: 'v1',
     description: '用于新增设备告警数据，字段和风险复核不同。',
     fields: [
       { key: 'alertId', name: '告警编号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成 AL-2605-001', locked: true, required: true, listVisible: true, searchable: true, sortable: true, validation: '系统唯一编号，不允许重复' },
@@ -1280,7 +1281,7 @@ const defaultConfig: DesignerConfig = {
   dataSource: 'business_records',
   primaryKey: 'id',
   status: '草稿',
-  version: 'v0.1',
+  version: 'v1',
   description: '用于配置新增业务数据的表单。',
   fields: [
     { key: 'id', name: '编号', type: '文本 / 自动编号', businessType: 'code', placeholder: '自动生成编号', locked: true, required: true, listVisible: true, searchable: true, validation: '系统唯一编号' },
@@ -1304,6 +1305,13 @@ async function resolvePlatformFormForConfig(configId: string) {
     const detailResponse = await getPlatformForm(configId);
     const form = detailResponse.data?.data as PlatformForm | undefined;
     return form || null;
+  }
+  try {
+    const detailResponse = await getPlatformFormByCode(configId);
+    const form = detailResponse.data?.data as PlatformForm | undefined;
+    if (form) return form;
+  } catch {
+    // Keep compatibility with older backends that only support list + id lookup.
   }
   const formsResponse = await listPlatformForms();
   const forms = (formsResponse.data?.data || []) as PlatformForm[];
@@ -1889,6 +1897,13 @@ function makeProfessionalFlowConfig(config: DesignerConfig): FlowDesignerConfig 
   });
 }
 
+function shouldShiftLegacyDefaultWorkflow(nodes: FlowDesignerNode[]) {
+  const legacyIds = ['start-1', 'task-1', 'task-2', 'end-1'];
+  const legacyY = [80, 200, 320, 440];
+  return nodes.length === legacyIds.length
+    && nodes.every((node, index) => node.id === legacyIds[index] && node.x === 420 && node.y === legacyY[index]);
+}
+
 function normalizeProfessionalFlowConfig(
   source: Partial<FlowDesignerConfig> & Record<string, unknown>,
   fallback: FlowDesignerConfig,
@@ -1906,7 +1921,7 @@ function normalizeProfessionalFlowConfig(
     endEvent: 'bpmn:EndEvent',
     userTask: 'bpmn:UserTask',
     serviceTask: 'bpmn:ServiceTask',
-    manualTask: 'bpmn:ManualTask',
+    manualTask: 'bpmn:UserTask',
     ccTask: 'bpmn:SendTask',
     exclusiveGateway: 'bpmn:ExclusiveGateway',
     parallelGateway: 'bpmn:ParallelGateway',
@@ -1914,12 +1929,13 @@ function normalizeProfessionalFlowConfig(
   };
   const executableTypes = new Set(['startEvent', 'endEvent', 'userTask', 'serviceTask', 'manualTask', 'ccTask', 'exclusiveGateway', 'parallelGateway', 'joinGateway']);
   const rawNodes = Array.isArray(source.nodes) ? source.nodes : fallback.nodes;
-  const nodes = rawNodes
+  let nodes = rawNodes
     .filter(Boolean)
     .map((raw, index) => {
       const node = raw as Partial<FlowDesignerNode> & { data?: Record<string, unknown>; assigneeType?: string };
       const fallbackNode = fallback.nodes[index] || fallback.nodes[0];
-      const type = String(node.type || node.data?.type || fallbackNode?.type || 'manualTask');
+      const rawType = String(node.type || node.data?.type || fallbackNode?.type || 'userTask');
+      const type = rawType === 'manualTask' ? 'userTask' : rawType;
       const x = Number(node.x);
       const y = Number(node.y);
       return {
@@ -1933,15 +1949,20 @@ function normalizeProfessionalFlowConfig(
         y: Number.isFinite(y) ? y : 90 + index * 120,
         assigneeSource: node.assigneeSource || (node.assigneeType as FlowDesignerNode['assigneeSource']) || fallbackNode?.assigneeSource,
         assigneeValue: node.assigneeValue || fallbackNode?.assigneeValue,
+        assigneeRules: node.assigneeRules || fallbackNode?.assigneeRules,
         approvalMode: node.approvalMode || fallbackNode?.approvalMode,
         slaHours: node.slaHours ?? fallbackNode?.slaHours,
         notificationEnabled: node.notificationEnabled ?? fallbackNode?.notificationEnabled,
         errorPolicy: node.errorPolicy || fallbackNode?.errorPolicy,
         retryTimes: node.retryTimes ?? fallbackNode?.retryTimes,
+        externalAction: node.externalAction || fallbackNode?.externalAction,
         bpmnType: node.bpmnType || bpmnByType[type] || fallbackNode?.bpmnType,
         fieldPermissions: node.fieldPermissions || fallbackNode?.fieldPermissions,
       } satisfies FlowDesignerNode;
     });
+  if (shouldShiftLegacyDefaultWorkflow(nodes)) {
+    nodes = nodes.map((node) => ({ ...node, y: node.y + 60 }));
+  }
   const nodeIds = new Set(nodes.map((node) => node.id));
   const rawEdges = Array.isArray(source.edges) ? source.edges : fallback.edges;
   const edges = rawEdges
@@ -1956,8 +1977,12 @@ function normalizeProfessionalFlowConfig(
         targetSide: edge.targetSide || 'top',
         label: String(edge.label || ''),
         condition: edge.condition,
+        conditionField: edge.conditionField,
+        conditionOperator: edge.conditionOperator,
+        conditionValue: edge.conditionValue,
         priority: Number.isFinite(Number(edge.priority)) ? Number(edge.priority) : index + 1,
         isDefault: Boolean(edge.isDefault),
+        routeY: edge.routeY,
       } satisfies FlowDesignerEdge;
     })
     .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
@@ -2337,7 +2362,7 @@ export default function FormSettingsPage() {
   }, [databaseFieldsByForm, databaseMetaByForm, staticBaseConfig]);
   const [activeTab, setActiveTab] = useState<DesignerTab>(() => (staticBaseConfig.kind === 'analysis' ? 'dashboard' : 'form'));
   const [componentPanel, setComponentPanel] = useState<ComponentPanel>('components');
-  const [version, setVersion] = useState('v0.1');
+  const [version, setVersion] = useState('v1');
   const [viewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
   const [analyticsDesign, setAnalyticsDesign] = useState<AnalyticsDesign>(() => makeDefaultAnalyticsDesign(baseConfig));
   const [selectedAnalyticsWidgetId, setSelectedAnalyticsWidgetId] = useState('');
@@ -2376,7 +2401,7 @@ export default function FormSettingsPage() {
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const viewConfigMeta = getViewConfigMeta(platformForm);
   const [formPermissionRows, setFormPermissionRows] = useState<FormPermissionRow[]>([]);
-  const [isResolvingPlatformConfig, setResolvingPlatformConfig] = useState(isPlatformFormRoute);
+  const [isResolvingPlatformConfig, setResolvingPlatformConfig] = useState(Boolean(formId));
   const designerMeta = useMemo(() => getDesignerMeta(platformForm), [platformForm]);
   const {
     controlTypeOptions,
@@ -2600,8 +2625,7 @@ export default function FormSettingsPage() {
   useEffect(() => {
     let cancelled = false;
     const loadPersistedFlow = async () => {
-      const shouldResolveRemoteConfig = !configs[staticBaseConfig.id];
-      if (shouldResolveRemoteConfig) setResolvingPlatformConfig(true);
+      setResolvingPlatformConfig(true);
       try {
         const formDetail = await resolvePlatformFormForConfig(staticBaseConfig.id);
         if (!formDetail || cancelled) return;
@@ -5313,24 +5337,23 @@ export default function FormSettingsPage() {
     safeFieldPermissionPage * permissionFieldPageSize,
   );
   const currentDesignerTabLabel = designerTabs.find((item) => item.key === activeTab)?.label || '';
-  const hasStaticDesignerConfig = Boolean(configs[staticBaseConfig.id]);
   const hasResolvedRemoteDesignerConfig = Boolean(
     databaseMetaByForm[staticBaseConfig.id]
     || platformForm?.code === staticBaseConfig.id
     || String(platformForm?.id) === staticBaseConfig.id,
   );
-  const shouldDelayUnknownBusinessFallback = (
+  const shouldWaitForDatabaseConfig = (
     isResolvingPlatformConfig
-    && !hasStaticDesignerConfig
     && !hasResolvedRemoteDesignerConfig
-    && staticBaseConfig.kind !== 'analysis'
   );
 
-  if (shouldDelayUnknownBusinessFallback) {
+  if (shouldWaitForDatabaseConfig) {
     return (
       <div className="form-designer-page">
-        <div style={{ paddingTop: 48, textAlign: 'center' }}><Spin /></div>
-        <div style={{ padding: 48, textAlign: 'center', color: '#667085' }}>正在加载设计器配置...</div>
+        <div className="form-designer-loading-state">
+          <Spin />
+          <Typography.Text type="secondary">正在加载数据库表单配置...</Typography.Text>
+        </div>
       </div>
     );
   }
@@ -5373,7 +5396,7 @@ export default function FormSettingsPage() {
         </Space>
       </header>
 
-      <section className={`form-designer-shell ${isNoLeftTab ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' || activeTab === 'style' || activeTab === 'dataset' || activeTab === 'dashboard' ? 'form-designer-shell-data-view' : ''} ${activeTab === 'permission' ? 'form-designer-shell-permission' : ''}`}>
+      <section className={`form-designer-shell ${isNoLeftTab ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' || activeTab === 'style' || activeTab === 'dataset' || activeTab === 'dashboard' ? 'form-designer-shell-data-view' : ''} ${activeTab === 'flow' ? 'form-designer-shell-flow' : ''} ${activeTab === 'permission' ? 'form-designer-shell-permission' : ''}`}>
         {!isNoLeftTab && (
           <aside className="form-designer-left">
             <div className="designer-panel-head">

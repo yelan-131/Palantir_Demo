@@ -11,7 +11,6 @@ import { Button, Skeleton, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { listNotifications, wfListInstances } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
-import { workflowCases } from '@/pages/Workflow';
 
 interface WorkflowInstance {
   id: number | string;
@@ -68,25 +67,18 @@ export default function WorkspacePage() {
   const userId = typeof user?.id === 'number' ? user.id : undefined;
   const activeStatuses = new Set(['pending', 'running', 'in_progress']);
   const doneStatuses = new Set(['approved', 'done']);
-  const useBackendWorkflow = workflowInstances.length > 0;
-  const demoPendingCount = workflowCases.filter((item) => item.status === 'pending').length;
-  const demoRunningCount = workflowCases.filter((item) => item.status === 'running').length;
-  const demoDoneCount = workflowCases.filter((item) => item.status === 'done').length;
-  const backendPendingCount = workflowInstances.filter((item) => {
+  const pendingCount = workflowInstances.filter((item) => {
     if (item.status !== 'pending') return false;
     if (user?.is_admin) return true;
     return item.approvals?.some((approval) => approval.approver_id === userId && !approval.action);
   }).length;
-  const backendRunningCount = workflowInstances.filter((item) => (
+  const runningCount = workflowInstances.filter((item) => (
     item.initiator_id === userId && activeStatuses.has(item.status)
   )).length;
-  const backendDoneCount = workflowInstances.filter((item) => (
+  const doneCount = workflowInstances.filter((item) => (
     doneStatuses.has(item.status)
     || item.approvals?.some((approval) => approval.approver_id === userId && Boolean(approval.action))
   )).length;
-  const pendingCount = useBackendWorkflow ? backendPendingCount : demoPendingCount;
-  const runningCount = useBackendWorkflow ? backendRunningCount : demoRunningCount;
-  const doneCount = useBackendWorkflow ? backendDoneCount : demoDoneCount;
   const unreadCount = notifications.filter((item) => !item.is_read).length;
 
   const todoMetrics = [

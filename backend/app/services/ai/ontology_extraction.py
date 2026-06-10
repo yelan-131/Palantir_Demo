@@ -38,6 +38,7 @@ from app.services.ai.knowledge_ingestion import (
     parse_to_markdown_with_metadata,
 )
 from app.services.ai.ocr_service import save_original_asset
+from app.services.ontology_candidate_service import upsert_candidate
 
 logger = get_logger(__name__)
 
@@ -871,6 +872,71 @@ async def commit_extraction_to_graph(job_id: str, tenant_id: int = 1) -> dict[st
                     status="committed",
                 ))
                 committed["object_links"] += 1
+                await upsert_candidate(
+                    session,
+                    tenant_id=tenant_id,
+                    candidate_type="object",
+                    candidate_key=f"knowledge:{job_id}:{entity.get('candidate_id')}:object",
+                    title=f"{entity.get('name')} -> {entity.get('entity_type')}",
+                    payload={
+                        "object": {
+                            "code": entity.get("entity_type") or "KnowledgeEntity",
+                            "name": entity.get("entity_type") or "KnowledgeEntity",
+                            "domain": job.get("domain") or "manufacturing",
+                            "description": entity.get("description"),
+                            "source_type": "knowledge",
+                            "source_ref": f"knowledge_job:{job_id}:{entity.get('candidate_id')}",
+                        },
+                        "field": {
+                            "object_code": entity.get("entity_type") or "KnowledgeEntity",
+                            "code": "name",
+                            "name": "Name",
+                            "field_type": "string",
+                            "source_type": "knowledge",
+                            "source_ref": entity.get("source_location"),
+                        },
+                        "mapping": {
+                            "source_system": "knowledge",
+                            "source_type": "knowledge",
+                            "source_entity": job["document_id"],
+                            "source_field": entity.get("source_location") or "document",
+                            "source_field_type": "text",
+                            "target_object_code": entity.get("entity_type") or "KnowledgeEntity",
+                            "target_field_code": "name",
+                            "evidence": entity.get("source_location"),
+                        },
+                        "source": {"document_id": job["document_id"], "job_id": job_id},
+                        "evidence": [entity.get("source_location")],
+                    },
+                    confidence=float(entity.get("confidence") or 0),
+                    source_type="knowledge",
+                    source_ref=f"knowledge_job:{job_id}",
+                )
+            for relation in result.get("relations", []):
+                await upsert_candidate(
+                    session,
+                    tenant_id=tenant_id,
+                    candidate_type="relation",
+                    candidate_key=f"knowledge:{job_id}:{relation.get('candidate_id')}:relation",
+                    title=f"{relation.get('source_type')} {relation.get('relation_type')} {relation.get('target_type')}",
+                    payload={
+                        "relation": {
+                            "code": f"{relation.get('source_type')}_{relation.get('relation_type') or 'RELATED_TO'}_{relation.get('target_type')}",
+                            "name": relation.get("relation_type") or "RELATED_TO",
+                            "relation_type": relation.get("relation_type") or "RELATED_TO",
+                            "source_object_code": relation.get("source_type") or "KnowledgeEntity",
+                            "target_object_code": relation.get("target_type") or "KnowledgeEntity",
+                            "description": relation.get("source_location"),
+                            "source_type": "knowledge",
+                            "source_ref": f"knowledge_job:{job_id}:{relation.get('candidate_id')}",
+                        },
+                        "source": {"document_id": job["document_id"], "job_id": job_id},
+                        "evidence": [relation.get("source_location")],
+                    },
+                    confidence=float(relation.get("confidence") or 0),
+                    source_type="knowledge",
+                    source_ref=f"knowledge_job:{job_id}",
+                )
             await session.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Object-link persistence skipped: %s", exc)

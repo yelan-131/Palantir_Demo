@@ -91,6 +91,103 @@ export interface KnowledgeOcrResult {
   status?: string;
 }
 
+export interface OntologyFieldInfo {
+  id?: number;
+  name: string;
+  label: string;
+  code?: string;
+  type: string;
+  source_field?: string | null;
+  list?: boolean;
+  form?: boolean;
+  search?: boolean;
+  status?: string;
+  confidence?: number;
+}
+
+export interface OntologyObjectInfo {
+  id: string;
+  db_id?: number;
+  name: string;
+  code: string;
+  domain?: string;
+  source: string;
+  source_type?: string;
+  source_ref?: string | null;
+  description: string;
+  status?: string;
+  version?: number;
+  confidence?: number;
+  review_status?: string;
+  fields: OntologyFieldInfo[];
+}
+
+export interface OntologyRelationInfo {
+  id: string;
+  db_id?: number;
+  code?: string;
+  source: string;
+  target: string;
+  label: string;
+  name?: string;
+  type: string;
+  relation_type?: string;
+  source_object_code?: string;
+  target_object_code?: string;
+  graph?: boolean;
+  graph_enabled?: boolean;
+  description?: string;
+  status?: string;
+  version?: number;
+  confidence?: number;
+  review_status?: string;
+  source_type?: string;
+  source_ref?: string | null;
+}
+
+export interface OntologyMappingInfo {
+  id: number;
+  source_system: string;
+  source_type: string;
+  source_entity: string;
+  source_field: string;
+  source_field_type?: string | null;
+  target_object_code: string;
+  target_field_code?: string | null;
+  confidence: number;
+  status: string;
+  evidence?: string | null;
+}
+
+export interface OntologyCandidateInfo {
+  id: number;
+  candidate_key: string;
+  candidate_type: 'object' | 'field' | 'relation' | 'mapping' | string;
+  title: string;
+  payload: Record<string, unknown>;
+  source_type: string;
+  source_ref?: string | null;
+  confidence: number;
+  status: string;
+  merge_target_id?: number | null;
+  review_note?: string | null;
+  created_at?: string | null;
+}
+
+export interface DataSourceMetadataInfo {
+  id: number;
+  source_id: number;
+  source_type: string;
+  entity_name: string;
+  entity_label?: string;
+  row_count: number;
+  fields: Array<Record<string, unknown>>;
+  relationships: Array<Record<string, unknown>>;
+  sample_rows: Array<Record<string, unknown>>;
+  status: string;
+  error?: string | null;
+}
+
 // ── Request interceptor: attach Authorization: Bearer <token> ─────
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem('mf_token');
@@ -131,12 +228,19 @@ export const getAppProgramData = (programId: string, limit?: number) =>
 export const listDataSources = (params?: Record<string, string>) => api.get('/data-sources', { params });
 export const createDataSource = (data: Record<string, unknown>) => api.post('/data-sources', data);
 export const getDataSource = (id: number) => api.get(`/data-sources/${id}`);
+export const updateDataSource = (id: number, data: Record<string, unknown>) => api.put(`/data-sources/${id}`, data);
 export const deleteDataSource = (id: number) => api.delete(`/data-sources/${id}`);
 export const testConnection = (id: number) => api.post(`/data-sources/${id}/test`);
 export const testDataSourceConfig = (data: Record<string, unknown>) => api.post('/data-sources/test-config', data);
 export const triggerSync = (id: number) => api.post(`/data-sources/${id}/sync`);
 export const getSyncStatus = (id: number) => api.get(`/data-sources/${id}/status`);
 export const previewData = (id: number, limit?: number) => api.get(`/data-sources/${id}/preview`, { params: { limit } });
+export const scanDataSourceMetadata = (id: number, data?: { limit_tables?: number; sample_limit?: number }) =>
+  api.post(`/data-sources/${id}/metadata-scan`, data ?? {});
+export const getDataSourceMetadata = (id: number) => api.get<{ data: DataSourceMetadataInfo[] }>(`/data-sources/${id}/metadata`);
+export const getDataSourceSyncStatus = (id: number) => api.get(`/data-sources/${id}/sync-status`);
+export const sampleDataSourceMetadata = (id: number, entityName?: string) =>
+  api.post(`/data-sources/${id}/sample`, null, { params: { entity_name: entityName } });
 
 // Ontology
 export const listEntityTypes = () => api.get('/ontology/entities');
@@ -185,8 +289,28 @@ export const getEntityRelationships = (entityType: string, entityId: number, rel
 
 // Semantic low-code assets
 export const listSemanticDataAssets = () => api.get('/semantic-assets/data-assets');
-export const listSemanticOntologyObjects = () => api.get('/semantic-assets/ontology-objects');
-export const listSemanticOntologyRelations = () => api.get('/semantic-assets/ontology-relations');
+export const scanSemanticDataAssetMetadata = (assetId: number, data?: { limit_tables?: number; sample_limit?: number }) =>
+  api.post('/semantic-assets/data-assets/' + assetId + '/metadata-scan', data ?? {});
+export const listSemanticOntologyObjects = () => api.get<{ data: OntologyObjectInfo[]; source?: string }>('/semantic-assets/ontology-objects');
+export const listSemanticOntologyRelations = () => api.get<{ data: OntologyRelationInfo[]; source?: string }>('/semantic-assets/ontology-relations');
+export const createSemanticOntologyObject = (data: Partial<OntologyObjectInfo> & { fields?: OntologyFieldInfo[] }) =>
+  api.post('/semantic-assets/ontology-objects', data);
+export const createSemanticOntologyRelation = (data: Partial<OntologyRelationInfo> & { source_object_code: string; target_object_code: string }) =>
+  api.post('/semantic-assets/ontology-relations', data);
+export const listSemanticOntologyMappings = (params?: { source_type?: string; object_code?: string }) =>
+  api.get<{ data: OntologyMappingInfo[] }>('/semantic-assets/ontology-mappings', { params });
+export const generateSemanticOntologyCandidates = (data?: { source_id?: number; document_job_id?: string }) =>
+  api.post<{ data: OntologyCandidateInfo[]; count: number }>('/semantic-assets/ontology-candidates/generate', data ?? {});
+export const listSemanticOntologyCandidates = (params?: { status?: string; candidate_type?: string }) =>
+  api.get<{ data: OntologyCandidateInfo[] }>('/semantic-assets/ontology-candidates', { params });
+export const approveSemanticOntologyCandidate = (id: number, data?: { note?: string }) =>
+  api.post(`/semantic-assets/ontology-candidates/${id}/approve`, data ?? {});
+export const rejectSemanticOntologyCandidate = (id: number, data?: { note?: string }) =>
+  api.post(`/semantic-assets/ontology-candidates/${id}/reject`, data ?? {});
+export const publishSemanticOntology = (data?: { title?: string }) => api.post('/semantic-assets/ontology/publish', data ?? {});
+export const listSemanticOntologyVersions = () => api.get('/semantic-assets/ontology/versions');
+export const getSemanticOntologyImpact = (params?: { object_code?: string; field_code?: string }) =>
+  api.get('/semantic-assets/ontology/impact', { params });
 export const listSemanticPageContracts = () => api.get('/semantic-assets/page-contracts');
 export const getSemanticPageContract = (route: string) =>
   api.get('/semantic-assets/page-contracts/by-route', { params: { route } });
@@ -679,6 +803,8 @@ export const wfApproveOrReject = (instId: number, data: Record<string, unknown>)
 export const wfCancelInstance = (instId: number) =>
   api.post(`/workflow/instances/${instId}/cancel`);
 export const wfGetStats = () => api.get('/workflow/stats');
+export const wfListBusinessItems = (params?: Record<string, unknown>) =>
+  api.get('/workflow/business-items', { params });
 export const wfListNotifications = (userId: number) =>
   api.get('/workflow/notifications', { params: { user_id: userId } });
 export const wfMarkNotificationRead = (id: number) =>
@@ -874,6 +1000,8 @@ export const createPlatformForm = (data: Record<string, unknown>) =>
   api.post('/forms', data);
 export const getPlatformForm = (id: number | string, params?: { schema?: 'draft' | 'published' }) =>
   api.get(`/forms/${id}`, { params });
+export const getPlatformFormByCode = (code: string, params?: { schema?: 'draft' | 'published' }) =>
+  api.get(`/forms/code/${code}`, { params });
 export const updatePlatformForm = (id: number | string, data: Record<string, unknown>) =>
   api.put(`/forms/${id}`, data);
 export const deletePlatformForm = (id: number | string) =>

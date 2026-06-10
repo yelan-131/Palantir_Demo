@@ -1,0 +1,49 @@
+{
+  "id": "manufacturing-demo",
+  "name": "制造业运营 Demo 包",
+  "category": "production",
+  "version": "0.1.0",
+  "description": "面向制造业演示空间的样例应用、看板、业务表、知识资产和种子数据包。该包不属于平台核心，需显式安装或通过 ENABLE_MANUFACTURING_DEMO_SEED=1 加载。",
+  "entrypoints": {
+    "seedScript": "scripts/seed_data.py",
+    "externalSourceDemo": "scripts/create_demo_source_databases.py",
+    "simulator": "data/simulators/generate_sample_data.py"
+  },
+  "seedData": {
+    "path": "data/seed",
+    "mode": "optional",
+    "notes": "历史制造业 seed 数据暂时保留在 data/seed，由该模板包声明归属；平台启动默认不会加载。"
+  },
+  "assets": {
+    "knowledge": "data/knowledge_assets"
+  },
+  "tables": {
+    "businessPrefix": "business_",
+    "analysisPrefix": "analysis_",
+    "legacyDemoTables": [
+      "factories",
+      "workshops",
+      "production_lines",
+      "equipment",
+      "sensors",
+      "sensor_readings",
+      "products",
+      "materials",
+      "bom",
+      "process_routes",
+      "customers",
+      "sales_orders",
+      "work_orders",
+      "operations",
+      "workers",
+      "suppliers",
+      "warehouses",
+      "inventory",
+      "shipments",
+      "inspections",
+      "defects",
+      "spc_points",
+      "capa"
+    ]
+  }
+}

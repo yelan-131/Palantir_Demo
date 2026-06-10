@@ -902,6 +902,7 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(100))
     display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1248,6 +1249,212 @@ class KnowledgeObjectLink(TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     source_location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="candidate")
+
+
+class OntologyObject(TimestampMixin, Base):
+    __tablename__ = "ontology_objects"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_ontology_objects_tenant_code"),
+        Index("ix_ontology_objects_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(120))
+    domain: Mapped[str] = mapped_column(String(100), default="manufacturing")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_type: Mapped[str] = mapped_column(String(80), default="manual")
+    source_ref: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(50), default="approved")
+    reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    fields: Mapped[list["OntologyField"]] = relationship(back_populates="object", cascade="all, delete-orphan")
+
+
+class OntologyField(TimestampMixin, Base):
+    __tablename__ = "ontology_fields"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "object_id", "code", name="uq_ontology_fields_tenant_object_code"),
+        Index("ix_ontology_fields_tenant_object", "tenant_id", "object_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    object_id: Mapped[int] = mapped_column(ForeignKey("ontology_objects.id"))
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(120))
+    field_type: Mapped[str] = mapped_column(String(80), default="string")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    searchable: Mapped[bool] = mapped_column(Boolean, default=False)
+    sortable: Mapped[bool] = mapped_column(Boolean, default=False)
+    visible_in_list: Mapped[bool] = mapped_column(Boolean, default=True)
+    visible_in_form: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(50), default="published")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_type: Mapped[str] = mapped_column(String(80), default="manual")
+    source_ref: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    object: Mapped["OntologyObject"] = relationship(back_populates="fields")
+
+
+class OntologyRelation(TimestampMixin, Base):
+    __tablename__ = "ontology_relations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_ontology_relations_tenant_code"),
+        Index("ix_ontology_relations_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    code: Mapped[str] = mapped_column(String(180))
+    name: Mapped[str] = mapped_column(String(200))
+    relation_type: Mapped[str] = mapped_column(String(100), default="RELATED_TO")
+    source_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ontology_objects.id"), nullable=True)
+    target_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ontology_objects.id"), nullable=True)
+    source_object_code: Mapped[str] = mapped_column(String(120))
+    target_object_code: Mapped[str] = mapped_column(String(120))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    graph_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_type: Mapped[str] = mapped_column(String(80), default="manual")
+    source_ref: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(50), default="approved")
+    reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class OntologyMapping(TimestampMixin, Base):
+    __tablename__ = "ontology_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "source_system",
+            "source_entity",
+            "source_field",
+            "target_object_code",
+            "target_field_code",
+            name="uq_ontology_mappings_source_target",
+        ),
+        Index("ix_ontology_mappings_tenant_target", "tenant_id", "target_object_code", "target_field_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    source_system: Mapped[str] = mapped_column(String(120))
+    source_type: Mapped[str] = mapped_column(String(80), default="database")
+    source_entity: Mapped[str] = mapped_column(String(200))
+    source_field: Mapped[str] = mapped_column(String(200))
+    source_field_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    target_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ontology_objects.id"), nullable=True)
+    target_field_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ontology_fields.id"), nullable=True)
+    target_object_code: Mapped[str] = mapped_column(String(120))
+    target_field_code: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(50), default="candidate")
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class OntologyCandidate(TimestampMixin, Base):
+    __tablename__ = "ontology_candidates"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "candidate_key", name="uq_ontology_candidates_tenant_key"),
+        Index("ix_ontology_candidates_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    candidate_key: Mapped[str] = mapped_column(String(300))
+    candidate_type: Mapped[str] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(String(300))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    source_type: Mapped[str] = mapped_column(String(80), default="metadata")
+    source_ref: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(50), default="pending_review")
+    merge_target_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class OntologyVersion(TimestampMixin, Base):
+    __tablename__ = "ontology_versions"
+    __table_args__ = (Index("ix_ontology_versions_tenant_version", "tenant_id", "version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200))
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(50), default="published")
+    published_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class OntologyPublishLog(TimestampMixin, Base):
+    __tablename__ = "ontology_publish_logs"
+    __table_args__ = (Index("ix_ontology_publish_logs_tenant_action", "tenant_id", "action"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    action: Mapped[str] = mapped_column(String(50))
+    resource_type: Mapped[str] = mapped_column(String(80))
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DataSourceMetadata(TimestampMixin, Base):
+    __tablename__ = "data_source_metadata"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_id", "entity_name", name="uq_data_source_metadata_source_entity"),
+        Index("ix_data_source_metadata_tenant_source", "tenant_id", "source_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    source_type: Mapped[str] = mapped_column(String(80), default="database")
+    entity_name: Mapped[str] = mapped_column(String(200))
+    entity_label: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    fields: Mapped[list] = mapped_column(JSON, default=list)
+    relationships: Mapped[list] = mapped_column(JSON, default=list)
+    sample_rows: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(50), default="scanned")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class DataSourceSyncStatus(TimestampMixin, Base):
+    __tablename__ = "data_source_sync_status"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_id", name="uq_data_source_sync_status_tenant_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    status: Mapped[str] = mapped_column(String(50), default="idle")
+    last_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tables_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    fields_scanned: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class AIConversation(TimestampMixin, Base):

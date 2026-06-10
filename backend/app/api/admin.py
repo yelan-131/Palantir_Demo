@@ -26,6 +26,7 @@ class UserCreate(BaseModel):
     username: str
     display_name: Optional[str] = None
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
     password: str
     is_admin: bool = False
     role_ids: list[int] = []
@@ -37,6 +38,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     role_ids: Optional[list[int]] = None
@@ -310,7 +312,8 @@ async def list_users(user_ctx: dict = Depends(require_admin)):
             )
             out.append({
                 "id": u.id, "username": u.username, "display_name": u.display_name,
-                "email": u.email, "is_active": u.is_active, "is_admin": u.is_admin,
+                "email": u.email, "avatar_url": getattr(u, "avatar_url", None),
+                "is_active": u.is_active, "is_admin": u.is_admin,
                 "login_failed_count": getattr(u, "login_failed_count", 0),
                 "locked_until": u.locked_until.isoformat() if getattr(u, "locked_until", None) else None,
                 "force_password_change": getattr(u, "force_password_change", False),
@@ -355,7 +358,9 @@ async def create_user(body: UserCreate, user_ctx: dict = Depends(require_admin))
         user = User(
             tenant_id=tenant_id,
             username=body.username, display_name=body.display_name,
-            email=body.email.lower() if body.email else None, hashed_password=_hash_password(body.password),
+            email=body.email.lower() if body.email else None,
+            avatar_url=body.avatar_url,
+            hashed_password=_hash_password(body.password),
             is_admin=body.is_admin,
         )
         db.add(user)
@@ -402,6 +407,8 @@ async def update_user(user_id: int, body: UserUpdate, user_ctx: dict = Depends(r
             user.display_name = body.display_name
         if body.email is not None:
             user.email = body.email
+        if body.avatar_url is not None:
+            user.avatar_url = body.avatar_url
         if body.is_active is not None:
             user.is_active = body.is_active
         if body.is_admin is not None:

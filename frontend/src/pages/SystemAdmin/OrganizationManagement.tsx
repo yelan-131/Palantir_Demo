@@ -458,7 +458,7 @@ export default function OrganizationManagement() {
               onChange: setSelectedRowKeys,
             }}
             rowClassName={(record) => (record.id === selectedOrgId ? 'org-row-selected' : '')}
-            scroll={{ x: 1080, y: 'calc(100vh / var(--app-ui-scale) - 600px)' }}
+            scroll={{ x: 1080, y: '100%' }}
             onRow={(record) => ({
               onClick: () => setSelectedOrgId(record.id),
             })}
@@ -633,8 +633,15 @@ function OrgPreviewPanel({
             <Typography.Title level={5}>{org.name}</Typography.Title>
             {org.status === 'active' ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>}
           </Space>
-          <Typography.Text type="secondary">{typeMeta.label} / {org.path.join(' / ')}</Typography.Text>
         </div>
+        <Space className="org-head-actions" wrap>
+          <Button size="small" onClick={() => onEdit(org)}>编辑</Button>
+          <Button size="small" onClick={() => onToggleStatus(org)}>{org.status === 'active' ? '停用' : '启用'}</Button>
+          <Button size="small" onClick={() => onCreateChild(org.id)}>新增下级</Button>
+          <Popconfirm title="确定删除该组织？" onConfirm={() => onDelete(org)}>
+            <Button size="small" danger disabled={org.childCount > 0 || memberCount > 0}>删除</Button>
+          </Popconfirm>
+        </Space>
       </div>
 
       <Tabs
@@ -644,28 +651,6 @@ function OrgPreviewPanel({
         items={tabs}
       />
 
-      <section className="org-action-card">
-        <Typography.Text strong>快速操作</Typography.Text>
-        <Space wrap>
-          <Button size="small" onClick={() => onEdit(org)}>编辑</Button>
-          <Button size="small" onClick={() => onToggleStatus(org)}>
-            {org.status === 'active' ? '停用' : '启用'}
-          </Button>
-          <Button size="small" onClick={() => onCreateChild(org.id)}>新增下级</Button>
-          <Popconfirm
-            title="确定删除该组织？"
-            onConfirm={() => onDelete(org)}
-          >
-            <Button
-              size="small"
-              danger
-              disabled={org.childCount > 0 || memberCount > 0}
-            >
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      </section>
     </aside>
   );
 }

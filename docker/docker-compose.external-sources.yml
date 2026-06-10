@@ -1,0 +1,114 @@
+# Isolated PostgreSQL instances for demo external systems.
+# Start with:
+#   docker compose -f docker/docker-compose.external-sources.yml up -d
+
+services:
+  mes-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-mes-postgres
+    environment:
+      POSTGRES_USER: mf_mes_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_mes_execution
+    ports:
+      - "15432:5432"
+    volumes:
+      - source_mes_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_mes_admin -d mf_mes_execution"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  erp-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-erp-postgres
+    environment:
+      POSTGRES_USER: mf_erp_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_erp_core
+    ports:
+      - "15433:5432"
+    volumes:
+      - source_erp_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_erp_admin -d mf_erp_core"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qms-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-qms-postgres
+    environment:
+      POSTGRES_USER: mf_qms_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_qms_quality
+    ports:
+      - "15434:5432"
+    volumes:
+      - source_qms_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_qms_admin -d mf_qms_quality"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wms-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-wms-postgres
+    environment:
+      POSTGRES_USER: mf_wms_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_wms_inventory
+    ports:
+      - "15435:5432"
+    volumes:
+      - source_wms_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_wms_admin -d mf_wms_inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  scm-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-scm-postgres
+    environment:
+      POSTGRES_USER: mf_scm_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_scm_supply
+    ports:
+      - "15436:5432"
+    volumes:
+      - source_scm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_scm_admin -d mf_scm_supply"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  crm-postgres:
+    image: postgres:16-alpine
+    container_name: manufoundry-source-crm-postgres
+    environment:
+      POSTGRES_USER: mf_crm_admin
+      POSTGRES_PASSWORD: source_admin_123
+      POSTGRES_DB: mf_crm_sales
+    ports:
+      - "15437:5432"
+    volumes:
+      - source_crm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mf_crm_admin -d mf_crm_sales"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  source_mes_pg_data:
+  source_erp_pg_data:
+  source_qms_pg_data:
+  source_wms_pg_data:
+  source_scm_pg_data:
+  source_crm_pg_data:

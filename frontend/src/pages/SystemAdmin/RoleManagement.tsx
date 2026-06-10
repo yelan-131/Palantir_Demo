@@ -20,7 +20,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons';
 import {
   adminCreateRole,
   adminDeleteRole,
@@ -30,6 +30,8 @@ import {
   adminSetPermissions,
   adminSimulatePermission,
   adminUpdateUser,
+  getAISettings,
+  updateAISettings,
 } from '@/services/api';
 
 interface PermissionItem {
@@ -98,6 +100,33 @@ const dataScopeLabels: Record<string, string> = {
   selected_orgs: '指定组织',
   condition: '按条件规则',
 };
+
+const aiCapabilityOptions = [
+  { label: 'Page Q&A', value: 'qa' },
+  { label: 'Knowledge RAG', value: 'rag' },
+  { label: 'Business query', value: 'business_query' },
+  { label: 'Report summary', value: 'report' },
+  { label: 'Generate draft', value: 'draft' },
+  { label: 'Save draft after confirm', value: 'save_draft' },
+  { label: 'Start workflow', value: 'workflow' },
+  { label: 'Config assistant', value: 'config' },
+];
+
+const aiDomainOptions = [
+  { label: 'Production', value: 'production' },
+  { label: 'Quality', value: 'quality' },
+  { label: 'Maintenance', value: 'maintenance' },
+  { label: 'Supply chain', value: 'supply-chain' },
+  { label: 'Workflow', value: 'workflow' },
+  { label: 'Low-code', value: 'low-code' },
+];
+
+const aiAgentModeOptions = [
+  { label: '只读', value: 'readonly' },
+  { label: '仅生成草稿', value: 'draft' },
+  { label: '确认后保存/执行', value: 'save_after_confirm' },
+  { label: '关闭', value: 'off' },
+];
 
 const toOptions = (values: string[], labels: Record<string, string>) => (
   values.map((value) => ({ label: `${labels[value] || value} (${value})`, value }))
@@ -273,6 +302,11 @@ export default function RoleManagement() {
     return roles.slice(start, start + rolePageSize);
   }, [roles, rolePage, rolePageSize]);
 
+  const getBoundUsers = useCallback(
+    (role: RoleItem) => users.filter((user) => user.roles?.some((item) => item.id === role.id || item.name === role.name)),
+    [users],
+  );
+
   const deleteRole = async (role: RoleItem) => {
     await adminDeleteRole(role.id);
     message.success('角色已删除');
@@ -336,29 +370,49 @@ export default function RoleManagement() {
             loading={loading}
             size="small"
             className="role-management-table"
-            scroll={{ x: 920, y: 'calc(100vh / var(--app-ui-scale) - 598px)' }}
+            scroll={{ x: 1300, y: '100%' }}
             pagination={false}
             rowClassName={(role) => (role.id === selectedRoleId ? 'role-row-selected' : '')}
             onRow={(role) => ({
               onClick: () => setSelectedRoleId(role.id),
             })}
             columns={[
-              { title: '角色编码', dataIndex: 'name', width: 170 },
-              { title: '显示名称', dataIndex: 'label', width: 150 },
-              { title: '描述', dataIndex: 'description', ellipsis: true },
+              { title: '角色编码', dataIndex: 'name', width: 180 },
+              { title: '显示名称', dataIndex: 'label', width: 170 },
+              { title: '描述', dataIndex: 'description', width: 330, ellipsis: true },
+              {
+                title: '绑定用户',
+                width: 280,
+                render: (_value, role: RoleItem) => {
+                  const boundUsers = getBoundUsers(role);
+                  return boundUsers.length ? (
+                    <span className="management-tag-line">
+                      {boundUsers.slice(0, 2).map((user) => (
+                        <Tag key={user.id} color={user.is_admin ? 'red' : 'green'}>
+                          {user.display_name || user.username}
+                        </Tag>
+                      ))}
+                      {boundUsers.length > 2 && <Tag>+{boundUsers.length - 2}</Tag>}
+                    </span>
+                  ) : (
+                    <Typography.Text type="secondary">未绑定</Typography.Text>
+                  );
+                },
+              },
               {
                 title: '权限',
-                width: 90,
+                width: 150,
                 align: 'center',
-                render: (_value, role: RoleItem) => <Tag color="blue">{role.permissions?.length || 0}</Tag>,
+                render: (_value, role: RoleItem) => <Tag color="blue">{role.permissions?.length || 0} 条</Tag>,
               },
               {
                 title: '操作',
-                width: 138,
+                width: 190,
                 fixed: 'right',
                 render: (_value, role: RoleItem) => (
                   <Space size={4} onClick={(event) => event.stopPropagation()}>
-                    <Button size="small" icon={<EditOutlined />} onClick={() => openPermissions(role)}>权限矩阵</Button>
+                    <Button size="small" icon={<EditOutlined />} onClick={() => openPermissions(role)}>权限</Button>
+                    <Button size="small" onClick={() => openUserBinding(role)}>用户</Button>
                     {role.name !== 'admin' && (
                       <Popconfirm title="确定删除该角色？" onConfirm={() => deleteRole(role)}>
                         <Button size="small" danger icon={<DeleteOutlined />} />
@@ -578,6 +632,91 @@ export default function RoleManagement() {
   );
 }
 
+function AIRolePolicyPanel({ role }: { role: RoleItem }) {
+  const [form] = Form.useForm();
+  const [settings, setSettings] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadPolicy = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await getAISettings();
+      const nextSettings = response.data?.settings || response.data?.data?.settings || response.data?.data || {};
+      const policies = Array.isArray(nextSettings.rolePolicies) ? nextSettings.rolePolicies : [];
+      const policy = policies.find((item: any) => item.role === role.name) || {
+        role: role.name,
+        enabled: true,
+        capabilities: role.name === 'admin' ? ['qa', 'rag', 'business_query', 'report', 'draft', 'save_draft', 'workflow', 'config'] : ['qa', 'rag', 'report'],
+        domains: [],
+        agentMode: role.name === 'viewer' ? 'readonly' : 'save_after_confirm',
+      };
+      setSettings(nextSettings);
+      form.setFieldsValue(policy);
+    } catch {
+      message.error('AI 策略加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [form, role.name]);
+
+  useEffect(() => { loadPolicy(); }, [loadPolicy]);
+
+  const savePolicy = async () => {
+    const values = await form.validateFields();
+    setSaving(true);
+    try {
+      const policies = Array.isArray(settings.rolePolicies) ? settings.rolePolicies : [];
+      const nextPolicy = { ...values, role: role.name };
+      const found = policies.some((item: any) => item.role === role.name);
+      const nextPolicies = found
+        ? policies.map((item: any) => (item.role === role.name ? nextPolicy : item))
+        : [...policies, nextPolicy];
+      await updateAISettings({ rolePolicies: nextPolicies });
+      message.success('AI 角色策略已保存');
+      loadPolicy();
+    } catch {
+      message.error('AI 角色策略保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="role-section-card">
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
+          <Space>
+            <RobotOutlined />
+            <Typography.Text strong>{role.label} 的 AI 策略</Typography.Text>
+          </Space>
+          <Space>
+            <Button size="small" onClick={loadPolicy} loading={loading}>刷新</Button>
+            <Button size="small" type="primary" onClick={savePolicy} loading={saving}>保存</Button>
+          </Space>
+        </Space>
+        <Typography.Text type="secondary">
+          这里控制当前角色能使用哪些 AI 能力、可进入哪些业务域，以及写入动作是否必须先确认。
+        </Typography.Text>
+        <Form form={form} layout="vertical">
+          <Form.Item name="enabled" label="启用该角色 AI 策略" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item name="agentMode" label="Agent 执行模式" rules={[{ required: true }]}>
+            <Select options={aiAgentModeOptions} />
+          </Form.Item>
+          <Form.Item name="capabilities" label="AI 能力" rules={[{ required: true }]}>
+            <Select mode="multiple" options={aiCapabilityOptions} />
+          </Form.Item>
+          <Form.Item name="domains" label="可访问业务域">
+            <Select mode="multiple" options={aiDomainOptions} />
+          </Form.Item>
+        </Form>
+      </Space>
+    </section>
+  );
+}
+
 function RolePreviewPanel({
   role,
   users,
@@ -699,6 +838,11 @@ function RolePreviewPanel({
       ),
     },
     {
+      key: 'ai-policy',
+      label: 'AI 策略',
+      children: <AIRolePolicyPanel role={role} />,
+    },
+    {
       key: 'scope',
       label: '资源分布',
       children: (
@@ -732,8 +876,16 @@ function RolePreviewPanel({
             <Typography.Title level={5}>{role.label}</Typography.Title>
             <Tag color={role.name === 'admin' ? 'gold' : 'blue'}>{role.name === 'admin' ? '系统角色' : '业务角色'}</Tag>
           </Space>
-          <Typography.Text type="secondary">{role.name}</Typography.Text>
         </div>
+        <Space className="role-head-actions" wrap>
+          <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(role)}>权限矩阵</Button>
+          <Button size="small" onClick={() => onBindUsers(role)}>绑定用户</Button>
+          {role.name !== 'admin' && (
+            <Popconfirm title="确定删除该角色？" onConfirm={() => onDelete(role)}>
+              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+            </Popconfirm>
+          )}
+        </Space>
       </div>
 
       <Tabs
@@ -743,18 +895,6 @@ function RolePreviewPanel({
         items={tabs}
       />
 
-      <section className="role-action-card">
-        <Typography.Text strong>快速操作</Typography.Text>
-        <Space wrap>
-          <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(role)}>权限矩阵</Button>
-          <Button size="small" onClick={() => onBindUsers(role)}>绑定用户</Button>
-          {role.name !== 'admin' && (
-            <Popconfirm title="确定删除该角色？" onConfirm={() => onDelete(role)}>
-              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-            </Popconfirm>
-          )}
-        </Space>
-      </section>
     </aside>
   );
 }

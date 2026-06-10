@@ -1,22 +1,42 @@
 import { useEffect, useState } from 'react';
-import { AuditOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, UserSwitchOutlined } from '@ant-design/icons';
+import {
+  AuditOutlined,
+  BankOutlined,
+  SafetyCertificateOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  UserSwitchOutlined,
+} from '@ant-design/icons';
 import { Button, Card, Form, Input, InputNumber, Space, Statistic, Switch, Tabs, Typography, message } from 'antd';
 import { adminGetIamSettings, adminUpdateIamSettings } from '@/services/api';
 import OrganizationManagement from './OrganizationManagement';
 import RoleManagement from './RoleManagement';
+import TenantManagement from './TenantManagement';
 import UserManagement from './UserManagement';
 
 interface IdentityAccessManagementProps {
   defaultActiveKey?: string;
+  onTabChange?: (key: string) => void;
 }
 
-export default function IdentityAccessManagement({ defaultActiveKey = 'overview' }: IdentityAccessManagementProps) {
+export default function IdentityAccessManagement({ defaultActiveKey = 'overview', onTabChange }: IdentityAccessManagementProps) {
+  const [activeKey, setActiveKey] = useState(defaultActiveKey);
+
+  useEffect(() => {
+    setActiveKey(defaultActiveKey);
+  }, [defaultActiveKey]);
+
   return (
     <div className="identity-access-workspace">
       <Tabs
         className="identity-access-tabs"
-        defaultActiveKey={defaultActiveKey}
+        activeKey={activeKey}
+        onChange={(key) => {
+          setActiveKey(key);
+          onTabChange?.(key);
+        }}
         items={[
+          { key: 'tenants', label: <span><BankOutlined /> 租户管理</span>, children: <TenantManagement /> },
           { key: 'overview', label: <span><AuditOutlined /> 访问控制总览</span>, children: <IdentityOverview /> },
           { key: 'users', label: <span><TeamOutlined /> 用户管理</span>, children: <UserManagement /> },
           { key: 'roles', label: <span><SafetyCertificateOutlined /> 角色管理</span>, children: <RoleManagement /> },
@@ -125,7 +145,7 @@ function IdentityOverview() {
 
       <Card title="账号安全策略">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          控制账号密码、失败锁定和 SSO 后是否继续要求平台 MFA。生产环境里建议开启复杂度、历史密码和失败锁定。
+          控制账号密码、失败锁定和 SSO 后是否继续要求平台 MFA。生产环境建议开启复杂度、历史密码和失败锁定。
         </Typography.Paragraph>
         <Form form={form} layout="vertical">
           <Space wrap align="start">

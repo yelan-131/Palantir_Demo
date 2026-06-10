@@ -29,6 +29,7 @@ DEMO_PASSWORD = "readonly_demo_123"
 DATABASES = {
     "mf_erp_core": {
         "comment": "ERP core planning, orders, material master, and BOM data",
+        "role": "mf_erp_readonly",
         "schema": """
             CREATE TABLE materials (
               material_id text PRIMARY KEY,
@@ -51,14 +52,14 @@ DATABASES = {
             CREATE TABLE purchase_orders (
               po_id text PRIMARY KEY,
               supplier_id text NOT NULL,
-              material_id text NOT NULL,
+              material_id text NOT NULL REFERENCES materials(material_id),
               quantity numeric(12,2) NOT NULL,
               promised_date date NOT NULL,
               po_status text NOT NULL
             );
             CREATE TABLE bill_of_materials (
-              product_id text NOT NULL,
-              component_id text NOT NULL,
+              product_id text NOT NULL REFERENCES materials(material_id),
+              component_id text NOT NULL REFERENCES materials(material_id),
               quantity_per numeric(12,4) NOT NULL,
               PRIMARY KEY (product_id, component_id)
             );
@@ -81,6 +82,7 @@ DATABASES = {
     },
     "mf_mes_execution": {
         "comment": "MES execution data for equipment, work orders, routing, and shopfloor events",
+        "role": "mf_mes_readonly",
         "schema": """
             CREATE TABLE equipment (
               equipment_id text PRIMARY KEY,
@@ -102,8 +104,8 @@ DATABASES = {
             );
             CREATE TABLE operation_events (
               event_id text PRIMARY KEY,
-              work_order_id text NOT NULL,
-              equipment_id text NOT NULL,
+              work_order_id text NOT NULL REFERENCES work_orders(work_order_id),
+              equipment_id text NOT NULL REFERENCES equipment(equipment_id),
               event_type text NOT NULL,
               event_time timestamp NOT NULL,
               description text
@@ -124,6 +126,7 @@ DATABASES = {
     },
     "mf_qms_quality": {
         "comment": "QMS quality defects, inspections, CAPA, and audit findings",
+        "role": "mf_qms_readonly",
         "schema": """
             CREATE TABLE quality_defects (
               defect_id text PRIMARY KEY,
@@ -145,7 +148,7 @@ DATABASES = {
             );
             CREATE TABLE capa_actions (
               capa_id text PRIMARY KEY,
-              defect_id text NOT NULL,
+              defect_id text NOT NULL REFERENCES quality_defects(defect_id),
               action_owner text NOT NULL,
               action_type text NOT NULL,
               due_date date NOT NULL,
@@ -165,6 +168,7 @@ DATABASES = {
     },
     "mf_scm_supply": {
         "comment": "SCM supplier, material risk, shipment, and procurement collaboration data",
+        "role": "mf_scm_readonly",
         "schema": """
             CREATE TABLE suppliers (
               supplier_id text PRIMARY KEY,
@@ -176,7 +180,7 @@ DATABASES = {
             );
             CREATE TABLE shipments (
               shipment_id text PRIMARY KEY,
-              supplier_id text NOT NULL,
+              supplier_id text NOT NULL REFERENCES suppliers(supplier_id),
               material_id text NOT NULL,
               quantity numeric(12,2) NOT NULL,
               eta timestamp NOT NULL,
@@ -184,7 +188,7 @@ DATABASES = {
             );
             CREATE TABLE supply_risks (
               risk_id text PRIMARY KEY,
-              supplier_id text NOT NULL,
+              supplier_id text NOT NULL REFERENCES suppliers(supplier_id),
               risk_type text NOT NULL,
               severity text NOT NULL,
               mitigation text NOT NULL
@@ -203,6 +207,7 @@ DATABASES = {
     },
     "mf_wms_inventory": {
         "comment": "WMS inventory, warehouse lots, reservations, and movements",
+        "role": "mf_wms_readonly",
         "schema": """
             CREATE TABLE inventory_balances (
               material_id text PRIMARY KEY,
@@ -214,7 +219,7 @@ DATABASES = {
             );
             CREATE TABLE material_lots (
               lot_id text PRIMARY KEY,
-              material_id text NOT NULL,
+              material_id text NOT NULL REFERENCES inventory_balances(material_id),
               supplier_id text,
               received_at timestamp NOT NULL,
               expiry_date date,
@@ -222,7 +227,7 @@ DATABASES = {
             );
             CREATE TABLE inventory_movements (
               movement_id text PRIMARY KEY,
-              material_id text NOT NULL,
+              material_id text NOT NULL REFERENCES inventory_balances(material_id),
               movement_type text NOT NULL,
               quantity numeric(12,2) NOT NULL,
               reference_doc text NOT NULL,
@@ -241,7 +246,74 @@ DATABASES = {
             "('MOV-9902','MAT-PCBA-CTRL','issue',356,'WO-260521-017','2026-05-26 08:12:00')",
         ],
     },
+    "mf_crm_sales": {
+        "comment": "CRM customer, contact, sales order, and service-ticket data",
+        "role": "mf_crm_readonly",
+        "schema": """
+            CREATE TABLE customers (
+              customer_id text PRIMARY KEY,
+              customer_name text NOT NULL,
+              industry text NOT NULL,
+              region text NOT NULL,
+              tier text NOT NULL,
+              status text NOT NULL
+            );
+            CREATE TABLE customer_contacts (
+              contact_id text PRIMARY KEY,
+              customer_id text NOT NULL REFERENCES customers(customer_id),
+              contact_name text NOT NULL,
+              role text NOT NULL,
+              email text NOT NULL,
+              phone text
+            );
+            CREATE TABLE sales_orders (
+              order_id text PRIMARY KEY,
+              customer_id text NOT NULL REFERENCES customers(customer_id),
+              product_id text NOT NULL,
+              quantity integer NOT NULL,
+              due_date date NOT NULL,
+              order_status text NOT NULL
+            );
+            CREATE TABLE service_tickets (
+              ticket_id text PRIMARY KEY,
+              customer_id text NOT NULL REFERENCES customers(customer_id),
+              order_id text REFERENCES sales_orders(order_id),
+              issue_type text NOT NULL,
+              severity text NOT NULL,
+              opened_at timestamp NOT NULL,
+              status text NOT NULL
+            );
+        """,
+        "inserts": [
+            "INSERT INTO customers VALUES "
+            "('CUS-NORTHWIND','Northwind Auto','Automotive','East China','A','active'),"
+            "('CUS-HAIXIN','Haixin Robotics','Industrial Robotics','South China','B','active')",
+            "INSERT INTO customer_contacts VALUES "
+            "('CNT-1001','CUS-NORTHWIND','Mia Chen','Supply Chain Manager','mia.chen@northwind.example','13800001001'),"
+            "('CNT-1002','CUS-HAIXIN','Jason Liu','Operations Director','jason.liu@haixin.example','13800001002')",
+            "INSERT INTO sales_orders VALUES "
+            "('SO-8821','CUS-NORTHWIND','PRD-CTRL-A',800,'2026-06-05','confirmed'),"
+            "('SO-8834','CUS-HAIXIN','PRD-CTRL-A',420,'2026-06-12','planned')",
+            "INSERT INTO service_tickets VALUES "
+            "('TCK-260526-01','CUS-NORTHWIND','SO-8821','delivery risk','major','2026-05-26 15:20:00','open')",
+        ],
+    },
 }
+
+
+def source_roles() -> list[str]:
+    return sorted(str(spec["role"]) for spec in DATABASES.values())
+
+
+def selected_databases(args: argparse.Namespace) -> dict[str, dict[str, object]]:
+    if not args.only:
+        return DATABASES
+    selected = {}
+    for name in args.only:
+        if name not in DATABASES:
+            raise SystemExit(f"Unknown demo source database: {name}")
+        selected[name] = DATABASES[name]
+    return selected
 
 
 def connect(dbname: str, args: argparse.Namespace):
@@ -261,18 +333,20 @@ def execute_many(cur, statements: Iterable[str]) -> None:
             cur.execute(statement)
 
 
-def create_database_and_role(args: argparse.Namespace) -> None:
+def create_database_and_role(args: argparse.Namespace, databases: dict[str, dict[str, object]]) -> None:
     conn = connect(args.admin_db, args)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", ("mf_readonly",))
-            if not cur.fetchone():
-                cur.execute("CREATE ROLE mf_readonly LOGIN PASSWORD %s", (DEMO_PASSWORD,))
-            else:
-                cur.execute("ALTER ROLE mf_readonly WITH LOGIN PASSWORD %s", (DEMO_PASSWORD,))
+            selected_roles = sorted(str(spec["role"]) for spec in databases.values())
+            for role in selected_roles:
+                cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+                if not cur.fetchone():
+                    cur.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(sql.Identifier(role)), (DEMO_PASSWORD,))
+                else:
+                    cur.execute(sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD %s").format(sql.Identifier(role)), (DEMO_PASSWORD,))
 
-            for dbname in DATABASES:
+            for dbname, spec in databases.items():
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
                 if not cur.fetchone():
                     cur.execute(
@@ -281,11 +355,21 @@ def create_database_and_role(args: argparse.Namespace) -> None:
                             sql.Identifier(args.user),
                         )
                     )
+                cur.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM PUBLIC").format(sql.Identifier(dbname)))
+                for role in selected_roles:
+                    cur.execute(sql.SQL("REVOKE CONNECT ON DATABASE {} FROM {}").format(sql.Identifier(dbname), sql.Identifier(role)))
+                cur.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(dbname), sql.Identifier(args.user)))
+                cur.execute(
+                    sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                        sql.Identifier(dbname),
+                        sql.Identifier(str(spec["role"])),
+                    )
+                )
     finally:
         conn.close()
 
 
-def seed_database(dbname: str, spec: dict[str, object], args: argparse.Namespace) -> None:
+def seed_database(dbname: str, spec: dict[str, object], args: argparse.Namespace, roles_to_revoke: list[str]) -> None:
     conn = connect(dbname, args)
     try:
         with conn:
@@ -299,12 +383,15 @@ def seed_database(dbname: str, spec: dict[str, object], args: argparse.Namespace
                     sql.SQL("COMMENT ON DATABASE {} IS %s").format(sql.Identifier(dbname)),
                     (spec["comment"],),
                 )
-                cur.execute(
-                    sql.SQL("GRANT CONNECT ON DATABASE {} TO mf_readonly").format(sql.Identifier(dbname))
-                )
-                cur.execute("GRANT USAGE ON SCHEMA source TO mf_readonly")
-                cur.execute("GRANT SELECT ON ALL TABLES IN SCHEMA source TO mf_readonly")
-                cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA source GRANT SELECT ON TABLES TO mf_readonly")
+                source_role = str(spec["role"])
+                cur.execute("REVOKE ALL ON SCHEMA source FROM PUBLIC")
+                cur.execute("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA source FROM PUBLIC")
+                for role in roles_to_revoke:
+                    cur.execute(sql.SQL("REVOKE ALL ON SCHEMA source FROM {}").format(sql.Identifier(role)))
+                    cur.execute(sql.SQL("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA source FROM {}").format(sql.Identifier(role)))
+                cur.execute(sql.SQL("GRANT USAGE ON SCHEMA source TO {}").format(sql.Identifier(source_role)))
+                cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA source TO {}").format(sql.Identifier(source_role)))
+                cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA source GRANT SELECT ON TABLES TO {}").format(sql.Identifier(source_role)))
     finally:
         conn.close()
 
@@ -316,21 +403,24 @@ def main() -> None:
     parser.add_argument("--user", default=os.getenv("POSTGRES_USER", "manufoundry"))
     parser.add_argument("--password", default=os.getenv("POSTGRES_PASSWORD", "manufoundry123"))
     parser.add_argument("--admin-db", default=os.getenv("POSTGRES_ADMIN_DB", "postgres"))
+    parser.add_argument("--only", action="append", help="Create/seed only this demo database. Can be used more than once.")
     args = parser.parse_args()
 
-    create_database_and_role(args)
-    for dbname, spec in DATABASES.items():
-        seed_database(dbname, spec, args)
+    databases = selected_databases(args)
+    create_database_and_role(args, databases)
+    selected_roles = sorted(str(spec["role"]) for spec in databases.values())
+    for dbname, spec in databases.items():
+        seed_database(dbname, spec, args, selected_roles)
 
     print("Created demo source databases:")
-    for dbname, spec in DATABASES.items():
+    for dbname, spec in databases.items():
         print(f"- {dbname}: {spec['comment']}")
     print("\nReadonly connection for the onboarding wizard:")
     print(f"  host={args.host}")
     print(f"  port={args.port}")
     print("  schema=source")
-    print("  username=mf_readonly")
-    print(f"  password={DEMO_PASSWORD}")
+    for dbname, spec in databases.items():
+        print(f"  {dbname}: username={spec['role']} password={DEMO_PASSWORD}")
 
 
 if __name__ == "__main__":

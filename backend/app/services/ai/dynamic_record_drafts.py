@@ -6,10 +6,11 @@ import re
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_tenant_id, current_user_id
+from app.api._model_driven_shared import assert_safe_identifier
 from app.core.audit import write_audit_log
 from app.core.permissions import has_form_permission
 from app.models.relational import DynamicRecord, Form, FormField, FormVersion
@@ -47,10 +48,7 @@ async def resolve_dynamic_record_form(
         return None
     forms = (
         await session.execute(
-            select(Form).where(
-                Form.tenant_id == tenant_id,
-                Form.storage_mode == "dynamic",
-            )
+            select(Form).where(Form.tenant_id == tenant_id)
         )
     ).scalars().all()
     normalized_candidates = [_normalize(item) for item in candidates if item]
@@ -167,6 +165,55 @@ async def create_dynamic_record_draft_from_agent(
         .order_by(FormVersion.version.desc())
         .limit(1)
     )
+    if form.table_name and str(form.storage_mode or "").lower() in {"physical_table", "business_table"}:
+        table_name = str(form.table_name)
+        assert_safe_identifier(table_name)
+        columns = ["tenant_id", "record_status", "created_by", "updated_by"]
+        params: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "record_status": "draft",
+            "created_by": current_user_id(user),
+            "updated_by": current_user_id(user),
+        }
+        for field in fields:
+            if field.archived:
+                continue
+            column = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(field.field_name))
+            column = re.sub(r"[^a-z0-9_]+", "_", column.lower()).strip("_")
+            if not column:
+                continue
+            assert_safe_identifier(column)
+            columns.append(column)
+            params[column] = data.get(field.field_name)
+        result = await session.execute(
+            text(
+                f"INSERT INTO {table_name} ({', '.join(columns)}) "
+                f"VALUES ({', '.join(':' + column for column in columns)}) "
+                "RETURNING id, created_at, updated_at"
+            ),
+            params,
+        )
+        row = result.first()
+        await session.commit()
+        record_id = int(row.id) if row is not None else 0
+        result_payload = {
+            "record_id": record_id,
+            "form_id": form.id,
+            "form_code": form.code,
+            "form_name": form.name,
+            "status": "draft",
+            "data": data,
+        }
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="create",
+            resource_type="physical_record",
+            resource_id=record_id,
+            new_values={**result_payload, "createdByAgent": True},
+        )
+        return result_payload
+
     record = DynamicRecord(
         tenant_id=tenant_id,
         form_id=form.id,

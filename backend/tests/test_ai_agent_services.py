@@ -220,6 +220,107 @@ def test_preflight_blocks_viewer_business_query_without_capability():
     assert decision.capability == "business_query"
 
 
+def test_safety_policy_max_tool_steps_is_mirrored_for_runtime_compatibility():
+    from app.services.ai.settings import merge_ai_settings, safety_policy_snapshot
+
+    merged = merge_ai_settings({"safetyPolicy": {"maxToolSteps": 2, "toolTimeoutSeconds": 9}}, existing={})
+
+    assert safety_policy_snapshot(merged)["maxToolSteps"] == 2
+    assert merged["riskPolicy"]["maxToolSteps"] == 2
+
+
+def test_high_risk_confirm_switch_controls_high_risk_confirmation():
+    from app.services.ai.policies import decide_ai_permission
+
+    settings = {
+        "highRiskConfirm": True,
+        "safetyPolicy": {"highRiskConfirm": False},
+        "riskPolicy": {"high": "confirm_and_audit"},
+        "rolePolicies": [],
+    }
+    decision = decide_ai_permission(
+        {"sub": "admin", "is_admin": True},
+        settings,
+        "config",
+        risk_level="high",
+    )
+
+    assert decision.allowed is True
+    assert decision.requires_confirmation is False
+    assert decision.audit_required is False
+
+
+def test_sensitive_payload_masking_redacts_keys_and_inline_secrets():
+    from app.services.ai.settings import maybe_mask_sensitive_payload
+
+    payload = {
+        "apiKey": "sk-demo-secret-value",
+        "message": "token=abc1234567890 and Authorization: Bearer abcdefghijklmnop",
+        "nested": [{"password": "plain-text"}],
+    }
+
+    masked = maybe_mask_sensitive_payload(payload, {"safetyPolicy": {"sensitiveMasking": True}})
+
+    assert masked["apiKey"] == "[REDACTED_SECRET]"
+    assert "abc1234567890" not in masked["message"]
+    assert "abcdefghijklmnop" not in masked["message"]
+    assert masked["nested"][0]["password"] == "[REDACTED_SECRET]"
+
+
+@pytest.mark.asyncio
+async def test_context_builder_masks_sensitive_context_before_prompt():
+    from app.services.ai.context_builder import context_builder
+    from app.services.ai.schemas import AgentRequest
+
+    payload = await context_builder.build(
+        None,
+        request=AgentRequest(
+            message="check this",
+            context={"semanticContext": {"records": [{"api_key": "sk-test-secret"}]}},
+        ),
+        user={"sub": "admin", "is_admin": True},
+        settings={"safetyPolicy": {"sensitiveMasking": True}},
+    )
+
+    assert payload["semantic_context"]["records"][0]["api_key"] == "[REDACTED_SECRET]"
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_respects_configured_timeout(monkeypatch):
+    import asyncio
+
+    from app.services.ai.tool_executor import AgentToolExecutor
+
+    executor = AgentToolExecutor()
+
+    async def slow_execute_action(**kwargs):
+        await asyncio.sleep(2)
+        return {"status": "completed"}
+
+    async def noop_update(**kwargs):
+        return None
+
+    async def noop_persist(*args, **kwargs):
+        return {"draft_id": "draft-test"}
+
+    audit_events = []
+    monkeypatch.setattr(executor, "_execute_action", slow_execute_action)
+
+    run = await executor.execute_confirmed_run(
+        {"run_id": "run-test", "status": "confirmed", "actions": [{"skill": "demo.slow", "payload": {}}]},
+        current_user={"sub": "admin"},
+        persist_ai_draft=noop_persist,
+        update_ai_draft_status=noop_update,
+        audit_ai_event=lambda user, event_type, payload: audit_events.append((event_type, payload)),
+        settings={"safetyPolicy": {"toolTimeoutSeconds": 1}},
+    )
+
+    assert run["status"] == "failed"
+    assert run["tool_results"][0]["status"] == "failed"
+    assert run["tool_results"][0]["error"] == "Tool execution exceeded 1 seconds"
+    assert audit_events[0][0] == "agent_tool_timeout"
+
+
 def test_form_record_analysis_summarizes_visible_records():
     from app.services.ai.form_analysis import (
         build_form_record_evidence,

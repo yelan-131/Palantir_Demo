@@ -43,6 +43,10 @@ def _role_names(user: dict[str, Any]) -> set[str]:
 
 
 def _risk_action(settings: dict[str, Any], risk_level: str) -> str:
+    safety_policy = settings.get("safetyPolicy") or {}
+    high_risk_confirm = bool(settings.get("highRiskConfirm", True)) and bool(safety_policy.get("highRiskConfirm", True))
+    if risk_level == "high" and not high_risk_confirm:
+        return "allow"
     return (settings.get("riskPolicy") or {}).get(risk_level, "confirm" if risk_level in {"medium", "high"} else "allow")
 
 

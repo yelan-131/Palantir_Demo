@@ -9,6 +9,7 @@ Strategy:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 
@@ -18,6 +19,10 @@ from app.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _json_serializer(value):
+    return json.dumps(value, ensure_ascii=False)
 
 # ── Engine selection ──────────────────────────────────────
 _sqlite_path = settings.SQLITE_DB_PATH or os.path.join(os.path.dirname(__file__), "..", "manufoundry.db")
@@ -45,6 +50,7 @@ else:
         _engine = create_async_engine(
             settings.DATABASE_URL,
             echo=settings.DEBUG,
+            json_serializer=_json_serializer,
             pool_size=5,
             max_overflow=5,
             pool_pre_ping=True,
@@ -63,11 +69,11 @@ if _engine is None:
     if settings.IS_PRODUCTION:
         raise RuntimeError("SQLite fallback is disabled when APP_MODE=production")
     try:
-        _engine = create_async_engine(_sqlite_url, echo=False)
+        _engine = create_async_engine(_sqlite_url, echo=False, json_serializer=_json_serializer)
         DB_TYPE = "sqlite"
     except Exception as exc:
         logger.warning("SQLite file engine failed (%s); using in-memory SQLite", exc)
-        _engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+        _engine = create_async_engine("sqlite+aiosqlite://", echo=False, json_serializer=_json_serializer)
         DB_TYPE = "sqlite"
 
 logger.info("Database backend: %s", DB_TYPE)
@@ -140,12 +146,11 @@ async def init_db():
         await _ensure_sqlite_saas_hardening_columns(conn)
     logger.info("SQLite schema ensured")
 
-    from sqlalchemy import func, select
-    from app.models.relational import Factory
-    async with AsyncSessionLocal() as session:
-        count = await session.scalar(select(func.count(Factory.id)))
-        if count == 0:
+    if os.getenv("ENABLE_MANUFACTURING_DEMO_SEED") == "1":
+        async with AsyncSessionLocal() as session:
             await _seed_sqlite(session)
+    else:
+        logger.info("Manufacturing demo seed skipped; set ENABLE_MANUFACTURING_DEMO_SEED=1 to load demo data")
 
 
 async def _build_graph_from_seed() -> None:
@@ -393,6 +398,7 @@ async def _ensure_sqlite_identity_access_columns(conn) -> None:
     user_columns = {row[1] for row in existing.fetchall()}
     user_definitions = {
         "login_failed_count": "INTEGER NOT NULL DEFAULT 0",
+        "avatar_url": "VARCHAR(1000)",
         "locked_until": "DATETIME",
         "force_password_change": "BOOLEAN NOT NULL DEFAULT 0",
         "last_login_at": "DATETIME",
@@ -594,33 +600,10 @@ async def _ensure_sqlite_tenant_onboarding(conn) -> None:
 
 
 async def _ensure_sqlite_business_tenant_columns(conn) -> None:
-    """Patch old demo SQLite schemas with tenant_id for business modules."""
+    """Patch domain-neutral SQLite schemas with tenant_id."""
     from sqlalchemy import text
 
     tables = [
-        "factories",
-        "workshops",
-        "production_lines",
-        "equipment",
-        "sensors",
-        "sensor_readings",
-        "products",
-        "materials",
-        "bom",
-        "process_routes",
-        "customers",
-        "sales_orders",
-        "work_orders",
-        "operations",
-        "workers",
-        "suppliers",
-        "warehouses",
-        "inventory",
-        "shipments",
-        "inspections",
-        "defects",
-        "spc_points",
-        "capa",
         "data_sources",
         "pipelines",
         "pipeline_runs",
