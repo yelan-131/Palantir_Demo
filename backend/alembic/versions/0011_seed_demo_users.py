@@ -6,6 +6,9 @@ Create Date: 2026-05-24
 """
 from __future__ import annotations
 
+import os
+import warnings
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -16,8 +19,48 @@ depends_on = None
 
 
 TENANT_ID = 1
-ADMIN_PASSWORD_HASH = "sha256$240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
-DEMO_PASSWORD_HASH = "sha256$8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92"
+ADMIN_PASSWORD_ENV = "PALANTIR_SEED_ADMIN_PASSWORD"
+DEMO_PASSWORD_ENV = "PALANTIR_SEED_DEMO_PASSWORD"
+
+
+def _hash_seed_password(password: str) -> str:
+    try:
+        from passlib.hash import bcrypt as _bcrypt
+    except Exception as exc:
+        raise RuntimeError(
+            f"Migration {revision} requires passlib with bcrypt support to hash seed user passwords. "
+            "Install the backend password-hashing dependencies before running deployable account migrations."
+        ) from exc
+
+    try:
+        return _bcrypt.hash(password)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Migration {revision} could not hash a seed user password with bcrypt. "
+            "Refusing to create a deploy-reachable account with an insecure fallback hash."
+        ) from exc
+
+
+def _seed_password_hash(
+    seed_password_hashes: dict[str, str],
+    env_name: str,
+    username: str,
+) -> str | None:
+    if env_name in seed_password_hashes:
+        return seed_password_hashes[env_name]
+
+    password = os.getenv(env_name)
+    if not password:
+        warnings.warn(
+            f"{env_name} is not set; migration {revision} will not create missing seed user '{username}'. "
+            "Existing user password hashes are never changed by seed env vars.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+
+    seed_password_hashes[env_name] = _hash_seed_password(password)
+    return seed_password_hashes[env_name]
 
 
 ROLE_DEFINITIONS = [
@@ -134,7 +177,7 @@ USER_DEFINITIONS = [
         "username": "admin",
         "display_name": "系统超级管理员",
         "email": "admin@manufoundry.local",
-        "password_hash": ADMIN_PASSWORD_HASH,
+        "password_env": ADMIN_PASSWORD_ENV,
         "is_admin": True,
         "roles": ["admin"],
     },
@@ -142,7 +185,7 @@ USER_DEFINITIONS = [
         "username": "pm_li",
         "display_name": "李明 · 生产经理",
         "email": "pm.li@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["production_manager", "approval_lead"],
     },
@@ -150,7 +193,7 @@ USER_DEFINITIONS = [
         "username": "qe_wang",
         "display_name": "王敏 · 质量工程师",
         "email": "qe.wang@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["quality_engineer"],
     },
@@ -158,7 +201,7 @@ USER_DEFINITIONS = [
         "username": "mm_zhou",
         "display_name": "周强 · 设备维护经理",
         "email": "mm.zhou@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["maintenance_manager"],
     },
@@ -166,7 +209,7 @@ USER_DEFINITIONS = [
         "username": "me_sun",
         "display_name": "孙浩 · 维修工程师",
         "email": "me.sun@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["maintenance_engineer"],
     },
@@ -174,7 +217,7 @@ USER_DEFINITIONS = [
         "username": "pe_huang",
         "display_name": "黄婷 · 工艺工程师",
         "email": "pe.huang@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["process_engineer"],
     },
@@ -182,7 +225,7 @@ USER_DEFINITIONS = [
         "username": "scm_liu",
         "display_name": "刘洋 · 供应链经理",
         "email": "scm.liu@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["supply_chain_manager"],
     },
@@ -190,7 +233,7 @@ USER_DEFINITIONS = [
         "username": "wh_feng",
         "display_name": "冯宇 · 仓储操作员",
         "email": "wh.feng@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["warehouse_operator"],
     },
@@ -198,7 +241,7 @@ USER_DEFINITIONS = [
         "username": "ds_he",
         "display_name": "何静 · 数据专员",
         "email": "ds.he@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["data_steward"],
     },
@@ -206,7 +249,7 @@ USER_DEFINITIONS = [
         "username": "auditor_gu",
         "display_name": "顾安 · 审计观察员",
         "email": "auditor.gu@manufoundry.local",
-        "password_hash": DEMO_PASSWORD_HASH,
+        "password_env": DEMO_PASSWORD_ENV,
         "is_admin": False,
         "roles": ["viewer"],
     },
@@ -289,23 +332,25 @@ def _ensure_permission(bind, role_id: int, permission: tuple[str, str, str]) -> 
         })
 
 
-def _upsert_user(bind, user: dict) -> int:
+def _upsert_user(bind, user: dict, seed_password_hashes: dict[str, str]) -> int | None:
     user_id = bind.execute(sa.text(
         "SELECT id FROM users WHERE username = :username LIMIT 1"
     ), {"username": user["username"]}).scalar()
     if user_id is None:
+        password_hash = _seed_password_hash(seed_password_hashes, user["password_env"], user["username"])
+        if password_hash is None:
+            return None
         bind.execute(sa.text(
             f"INSERT INTO users ({_tenant_columns('users')}username, display_name, email, hashed_password, is_active, is_admin) "
             f"VALUES ({_tenant_values() if _has_column('users', 'tenant_id') else ''}"
             ":username, :display_name, :email, :password_hash, TRUE, :is_admin)"
-        ), user)
+        ), {**user, "password_hash": password_hash})
         user_id = bind.execute(sa.text(
             "SELECT id FROM users WHERE username = :username LIMIT 1"
         ), {"username": user["username"]}).scalar()
     else:
         bind.execute(sa.text(
-            "UPDATE users SET display_name = :display_name, email = :email, "
-            "hashed_password = :password_hash, is_active = TRUE "
+            "UPDATE users SET display_name = :display_name, email = :email, is_active = TRUE "
             "WHERE id = :user_id"
         ), {**user, "user_id": user_id})
         if user["username"] == "admin":
@@ -332,6 +377,7 @@ def upgrade() -> None:
 
     bind = op.get_bind()
     _ensure_tenant(bind)
+    seed_password_hashes: dict[str, str] = {}
 
     role_ids: dict[str, int] = {}
     for role in ROLE_DEFINITIONS:
@@ -341,7 +387,9 @@ def upgrade() -> None:
             _ensure_permission(bind, role_id, permission)
 
     for user in USER_DEFINITIONS:
-        user_id = _upsert_user(bind, user)
+        user_id = _upsert_user(bind, user, seed_password_hashes)
+        if user_id is None:
+            continue
         for role_name in user["roles"]:
             role_id = role_ids.get(role_name)
             if role_id is not None:
@@ -351,4 +399,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Keep seeded demo users on downgrade to avoid breaking demo login flows.
     pass
-

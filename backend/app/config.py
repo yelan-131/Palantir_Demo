@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.7"
+    APP_VERSION: str = "0.3.8"
     APP_MODE: str = "demo"
     DEBUG: bool = True
 
@@ -29,10 +29,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "manufoundry-secret-key-change-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8h
 
-    # Auth mode: when True, missing/invalid tokens fall back to a guest user
-    # so existing demo endpoints continue to work without breaking changes.
-    # Set to False in production to enforce 401 on protected routes.
-    DEMO_AUTH_OPTIONAL: bool = True
+    # Guest auth fallback is disabled by default. Protected routes require
+    # explicit bearer tokens carrying tenant context.
+    DEMO_AUTH_OPTIONAL: bool = False
 
     # CORS — comma-separated origins; "*" allowed but disables credentials.
     CORS_ORIGINS: List[str] = [

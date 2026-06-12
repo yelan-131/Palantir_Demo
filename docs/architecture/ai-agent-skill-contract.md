@@ -68,6 +68,7 @@ The first OpenClaw-style enterprise scaffold is now present in the backend:
 | Knowledge Agent Persistence | `backend/app/api/knowledge.py`, migration `0015_ai_agent_runtime.py` | Relational persistence for knowledge-center conversations, messages, runs, tool calls, and memory entries. |
 | Knowledge Directories | `GET/POST/PUT /api/v1/knowledge/directories`, `POST /api/v1/knowledge/directories/{id}/move` | Demo directory tree API for the Obsidian-style knowledge page. |
 | Low-Code Agent Tools | `backend/app/services/ai/planner.py`, `backend/app/services/ai/low_code_tools.py`, `backend/app/services/ai/dynamic_record_drafts.py` | Deterministic planning, confirmed admin-only form-definition creation, and confirmed domain draft creation into platform dynamic records when a matching form exists. |
+| Model-Driven Tool Loop | `backend/app/services/ai/tool_use_loop.py`, safety policy `agentLoopMode` | Opt-in LLM function-calling loop: the model plans tool calls, read/analyze tools execute through the envelope, side-effect tools freeze into `FrozenContext` + confirmation token, `resume()` continues after explicit confirmation. Default stays `pipeline`. |
 
 The legacy `/api/v1/ai/agent` endpoint remains compatible, but it now also
 creates an observable `run_id` and returns `steps`, `risk_level`, and
@@ -151,6 +152,28 @@ LLM provider settings, including GLM system configuration, are backend-owned.
 The Agent may request a model capability such as "chat", "summarize", or
 "embed", but it must not accept a raw API key, arbitrary base URL, or unreviewed
 system prompt from the browser.
+
+### 3.3.1 Loop Modes
+
+The runtime supports two scheduling modes selected by the
+`safetyPolicy.agentLoopMode` setting:
+
+| Mode | Module | Planner | Notes |
+| --- | --- | --- | --- |
+| `pipeline` (default) | `runtime._run_agent_loop` | Deterministic operation state machine (preflight -> intent -> retrieve -> prepare -> answer). LLM is used for semantic slot extraction and final answer only. | Stable demo behavior; works without tool-calling models. |
+| `model` / `tool_use` | `tool_use_loop.ToolUseLoopRunner` | The LLM plans each turn via OpenAI-format function calling. | Requires a configured external provider; falls back to `pipeline` when unconfigured. |
+
+Both modes share the same enforcement plane: every tool call flows through
+`ToolExecutionEnvelope` (permission hooks, payload validation, confirmation
+gating, timeout, audit), token usage is tracked by `BudgetTracker`, and one
+`EventBus` per run carries `PRE_TOOL_USE` / `POST_TOOL_USE` / compaction /
+budget events.
+
+In `model` mode, side-effecting tool calls never execute inline: the loop
+freezes the full conversation into a `FrozenContext`, issues a confirmation
+token through the pluggable `ConfirmationStore` (atomic single-use consume),
+and `AgentRuntime.resume_tool_use()` thaws the context after the user
+confirms.
 
 ## 4. Skill Contract
 

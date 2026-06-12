@@ -6,6 +6,34 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from types import SimpleNamespace
+
+
+def test_workflow_view_status_is_user_scoped():
+    from app.api.workflow import _workflow_view_status_for_user
+
+    user = {"uid": 2, "is_admin": False}
+    pending_instance = SimpleNamespace(status="pending", initiator_id=9)
+    assert _workflow_view_status_for_user(
+        pending_instance,
+        [SimpleNamespace(approver_id=2, action=None)],
+        user,
+    ) == "pending"
+    assert _workflow_view_status_for_user(
+        pending_instance,
+        [SimpleNamespace(approver_id=2, action="approve")],
+        user,
+    ) == "running"
+    assert _workflow_view_status_for_user(
+        SimpleNamespace(status="rejected", initiator_id=2),
+        [SimpleNamespace(approver_id=3, action="reject")],
+        user,
+    ) == "rejected"
+    assert _workflow_view_status_for_user(
+        pending_instance,
+        [SimpleNamespace(approver_id=3, action=None)],
+        user,
+    ) is None
 
 
 # ── Fixtures ──────────────────────────────────────────────

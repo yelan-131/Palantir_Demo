@@ -19,6 +19,7 @@ class SkillDefinition(BaseModel):
     description: str
     capability_level: CapabilityLevel
     risk_level: RiskLevel = "low"
+    default_tool: str | None = None
     allowed_tools: list[str] = Field(default_factory=list)
     required_permissions: list[str] = Field(default_factory=list)
     confirmation_policy: Literal["none", "confirm", "confirm_token", "blocked"] = "none"

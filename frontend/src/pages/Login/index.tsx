@@ -1,8 +1,7 @@
-import { Alert, Button, Card, Divider, Form, Input, Modal, Select, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Typography, message } from 'antd';
 import {
   ApiOutlined,
   BulbOutlined,
-  CheckCircleOutlined,
   DashboardOutlined,
   LockOutlined,
   PartitionOutlined,
@@ -16,19 +15,6 @@ import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { authLoginWithMfa, getOidcLoginUrl } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
-
-const demoAccounts = [
-  { name: 'admin', label: '平台管理员', role: '全局配置', pass: 'admin123' },
-  { name: 'pm_li', label: '李明', role: '生产经理 / 审批负责人', pass: '123456' },
-  { name: 'qe_wang', label: '王敏', role: '质量工程师', pass: '123456' },
-  { name: 'mm_zhou', label: '周强', role: '设备维护经理', pass: '123456' },
-  { name: 'me_sun', label: '孙浩', role: '维修工程师', pass: '123456' },
-  { name: 'pe_huang', label: '黄婷', role: '工艺工程师', pass: '123456' },
-  { name: 'scm_liu', label: '刘洋', role: '供应链经理', pass: '123456' },
-  { name: 'wh_feng', label: '冯宇', role: '仓储操作员', pass: '123456' },
-  { name: 'ds_he', label: '何静', role: '数据专员', pass: '123456' },
-  { name: 'auditor_gu', label: '顾安', role: '审计观察员', pass: '123456' },
-];
 
 const commandSlides = [
   {
@@ -89,6 +75,12 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const currentSlide = commandSlides[activeSlide];
+
+  const clearMfaPending = () => {
+    setMfaOpen(false);
+    setMfaPending(null);
+    mfaForm.resetFields();
+  };
 
   const renderSceneContent = () => {
     if (activeSlide === 0) {
@@ -202,12 +194,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleDemoLogin = (account: (typeof demoAccounts)[number]) => {
-    const values = { username: account.name, password: account.pass };
-    loginForm.setFieldsValue({ environment: 'demo', ...values });
-    void handleLogin(values);
-  };
-
   const submitMfa = async () => {
     if (!mfaPending) return;
     const values = await mfaForm.validateFields();
@@ -222,6 +208,7 @@ export default function LoginPage() {
       navigate('/');
     } catch {
       message.error('MFA 验证失败');
+      clearMfaPending();
     } finally {
       setLoading(false);
     }
@@ -230,7 +217,8 @@ export default function LoginPage() {
   const handleSsoLogin = async () => {
     setSsoLoading(true);
     try {
-      const res = await getOidcLoginUrl(`${window.location.origin}/login`);
+      const username = String(loginForm.getFieldValue('username') || '').trim();
+      const res = await getOidcLoginUrl(`${window.location.origin}/login`, { loginHint: username || undefined });
       if (res.data?.url) {
         window.location.href = res.data.url;
         return;
@@ -336,17 +324,7 @@ export default function LoginPage() {
           form={loginForm}
           layout="vertical"
           onFinish={handleLogin}
-          initialValues={{ environment: 'demo', username: 'admin', password: 'admin123' }}
         >
-          <Form.Item name="environment" label="组织环境">
-            <Select
-              options={[
-                { value: 'demo', label: 'Demo Workspace / 制造业演示空间' },
-                { value: 'sandbox', label: 'Sandbox / 配置沙箱' },
-                { value: 'prod', label: 'Production / 生产环境' },
-              ]}
-            />
-          </Form.Item>
           <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
             <Input prefix={<UserOutlined />} placeholder="请输入账号" />
           </Form.Item>
@@ -368,32 +346,11 @@ export default function LoginPage() {
           style={{ marginTop: 12 }}
         />
 
-        <Divider />
-        <div className="demo-account-row">
-          <Typography.Text type="secondary">演示账号</Typography.Text>
-          <div className="demo-account-grid">
-            {demoAccounts.map((account) => (
-              <Button
-                key={account.name}
-                type="text"
-                className="demo-account-button"
-                icon={<CheckCircleOutlined />}
-                onClick={() => handleDemoLogin(account)}
-              >
-                <span>
-                  <strong>{account.label}</strong>
-                  <small>{account.role}</small>
-                  <small>{account.name} / {account.pass}</small>
-                </span>
-              </Button>
-            ))}
-          </div>
-        </div>
       </Card>
-      <Modal title="MFA 验证" open={mfaOpen} onOk={submitMfa} onCancel={() => setMfaOpen(false)} confirmLoading={loading}>
+      <Modal title="MFA 验证" open={mfaOpen} onOk={submitMfa} onCancel={clearMfaPending} confirmLoading={loading}>
         <Form form={mfaForm} layout="vertical">
           <Form.Item name="code" label="6 位动态验证码" rules={[{ required: true, message: '请输入 MFA 验证码' }]}>
-            <Input placeholder="123456" maxLength={8} />
+            <Input placeholder="请输入动态验证码" maxLength={8} />
           </Form.Item>
         </Form>
       </Modal>

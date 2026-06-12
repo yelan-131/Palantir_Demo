@@ -28,6 +28,7 @@ from .ocr_service import (
     save_original_asset,
     source_type_for_file,
 )
+from .tenant_context import require_tenant_id
 
 
 ASSETS: dict[str, dict[str, Any]] = {}
@@ -44,7 +45,25 @@ def _source_type(file_name: str) -> str:
     return source_type_for_file(file_name)
 
 
-def markdown_to_chunks(markdown: str, document_id: str, permission_scope: str = "enterprise") -> list[dict[str, Any]]:
+def _normalize_tenant_id(tenant_id: int | str | None) -> int:
+    return require_tenant_id({"tenant_id": tenant_id})
+
+
+def _belongs_to_tenant(record: dict[str, Any], tenant_id: int) -> bool:
+    try:
+        return _normalize_tenant_id(record.get("tenant_id")) == tenant_id
+    except ValueError:
+        return False
+
+
+def markdown_to_chunks(
+    markdown: str,
+    document_id: str,
+    permission_scope: str = "enterprise",
+    *,
+    tenant_id: int | str,
+) -> list[dict[str, Any]]:
+    tenant_id = _normalize_tenant_id(tenant_id)
     sections = re.split(r"(?m)(?=^#{1,4}\s+)", markdown.strip())
     raw_chunks = [section.strip() for section in sections if section.strip()] or [markdown.strip()]
     chunks = []
@@ -56,6 +75,7 @@ def markdown_to_chunks(markdown: str, document_id: str, permission_scope: str = 
         chunk_id = f"chunk-{uuid.uuid4().hex[:12]}"
         chunks.append({
             "chunk_id": chunk_id,
+            "tenant_id": tenant_id,
             "document_id": document_id,
             "title": title,
             "chunk_text": text[:4000],
@@ -178,9 +198,15 @@ def parse_to_markdown(file_name: str, content: bytes) -> tuple[str, str]:
     return source_type, markdown
 
 
-def update_ocr_corrections(document_id: str, blocks: list[dict[str, Any]]) -> dict[str, Any] | None:
+def update_ocr_corrections(
+    document_id: str,
+    blocks: list[dict[str, Any]],
+    *,
+    tenant_id: int | str,
+) -> dict[str, Any] | None:
+    tenant_id = _normalize_tenant_id(tenant_id)
     document = DOCUMENTS.get(document_id)
-    if not document:
+    if not document or not _belongs_to_tenant(document, tenant_id):
         return None
     ocr_result = dict(document.get("ocr_result") or {})
     existing_by_id = {str(block.get("id") or index): block for index, block in enumerate(ocr_result.get("blocks") or [])}
@@ -197,9 +223,18 @@ def update_ocr_corrections(document_id: str, blocks: list[dict[str, Any]]) -> di
     ocr_result["markdown_content"] = ocr_markdown_from_blocks(document["source_file_name"], next_blocks)
     document["ocr_result"] = ocr_result
     document["markdown_content"] = ocr_result["markdown_content"]
-    for chunk_id in [chunk_id for chunk_id, chunk in CHUNKS.items() if chunk["document_id"] == document_id]:
+    for chunk_id in [
+        chunk_id
+        for chunk_id, chunk in CHUNKS.items()
+        if chunk["document_id"] == document_id and _belongs_to_tenant(chunk, tenant_id)
+    ]:
         CHUNKS.pop(chunk_id, None)
-    for chunk in markdown_to_chunks(document["markdown_content"], document_id, document["permission_scope"]):
+    for chunk in markdown_to_chunks(
+        document["markdown_content"],
+        document_id,
+        document["permission_scope"],
+        tenant_id=tenant_id,
+    ):
         CHUNKS[chunk["chunk_id"]] = chunk
     document["updated_at"] = _now()
     return document
@@ -210,13 +245,17 @@ def ingest_asset(
     content: bytes,
     owner_user_id: str = "demo-user",
     permission_scope: str = "enterprise",
+    *,
+    tenant_id: int | str,
 ) -> dict[str, Any]:
+    tenant_id = _normalize_tenant_id(tenant_id)
     job_id = f"job-{uuid.uuid4().hex[:12]}"
     asset_id = f"asset-{uuid.uuid4().hex[:12]}"
     document_id = f"doc-{uuid.uuid4().hex[:12]}"
     created_at = _now()
     JOBS[job_id] = {
         "job_id": job_id,
+        "tenant_id": tenant_id,
         "asset_id": asset_id,
         "document_id": document_id,
         "status": "running",
@@ -227,6 +266,7 @@ def ingest_asset(
 
     ASSETS[asset_id] = {
         "asset_id": asset_id,
+        "tenant_id": tenant_id,
         "source_file_name": file_name,
         "owner_user_id": owner_user_id,
         "permission_scope": permission_scope,
@@ -241,6 +281,7 @@ def ingest_asset(
         document = {
             "asset_id": asset_id,
             "document_id": document_id,
+            "tenant_id": tenant_id,
             "source_file_name": file_name,
             "source_type": source_type,
             "title": Path(file_name).stem,
@@ -254,7 +295,7 @@ def ingest_asset(
             "updated_at": _now(),
         }
         DOCUMENTS[document_id] = document
-        for chunk in markdown_to_chunks(markdown, document_id, permission_scope):
+        for chunk in markdown_to_chunks(markdown, document_id, permission_scope, tenant_id=tenant_id):
             CHUNKS[chunk["chunk_id"]] = chunk
         ASSETS[asset_id]["status"] = "indexed"
         JOBS[job_id].update({"status": "completed", "updated_at": _now()})
@@ -266,7 +307,11 @@ def ingest_asset(
         "job": JOBS[job_id],
         "asset": ASSETS[asset_id],
         "document": DOCUMENTS.get(document_id),
-        "chunks": [chunk for chunk in CHUNKS.values() if chunk["document_id"] == document_id],
+        "chunks": [
+            chunk
+            for chunk in CHUNKS.values()
+            if chunk["document_id"] == document_id and _belongs_to_tenant(chunk, tenant_id)
+        ],
     }
 
 
@@ -279,20 +324,46 @@ def cosine_score(left: list[float], right: list[float]) -> float:
     return round(numerator / (left_norm * right_norm), 6)
 
 
-def search_ingested_knowledge(query: str, limit: int = 5, permission_scope: str | None = None) -> list[dict[str, Any]]:
+def lexical_score(query: str, text: str) -> float:
+    tokens = {
+        token
+        for token in re.split(r"[^a-z0-9_-]+", query.lower())
+        if len(token) >= 2
+    }
+    if not tokens:
+        return 0.0
+    haystack = text.lower()
+    return sum(1 for token in tokens if token in haystack) / len(tokens)
+
+
+def search_ingested_knowledge(
+    query: str,
+    *,
+    tenant_id: int | str,
+    limit: int = 5,
+    permission_scope: str | None = None,
+) -> list[dict[str, Any]]:
+    tenant_id = _normalize_tenant_id(tenant_id)
     query_embedding = _stable_embedding(query)
     candidates = []
     for chunk in CHUNKS.values():
+        if not _belongs_to_tenant(chunk, tenant_id):
+            continue
         if permission_scope and chunk["permission_scope"] != permission_scope:
             continue
         document = DOCUMENTS.get(chunk["document_id"], {})
+        if not document or not _belongs_to_tenant(document, tenant_id):
+            continue
+        chunk_text = str(chunk["chunk_text"])
+        score = cosine_score(query_embedding, chunk["embedding"]) + lexical_score(query, chunk_text) * 2
         candidates.append({
             "chunk_id": chunk["chunk_id"],
+            "tenant_id": tenant_id,
             "document_id": chunk["document_id"],
             "title": chunk["title"],
-            "snippet": chunk["chunk_text"][:300],
+            "snippet": chunk_text[:300],
             "source_location": chunk["source_location"],
             "source_file_name": document.get("source_file_name"),
-            "score": cosine_score(query_embedding, chunk["embedding"]),
+            "score": round(score, 6),
         })
     return sorted(candidates, key=lambda item: item["score"], reverse=True)[: max(1, min(limit, 20))]

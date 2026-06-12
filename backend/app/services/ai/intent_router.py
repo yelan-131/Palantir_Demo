@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .agent_context_router import ContextNeed, classify_context_need
 from .planner import plan_agent_turn
@@ -106,13 +106,14 @@ async def route_intent_async(
     context: dict[str, Any] | None = None,
     *,
     provider_config: AIProviderConfig | None = None,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> IntentRoute:
     context = context or {}
     normalized = message.strip()
     if not normalized:
         return IntentRoute(intent="conversation", reason="empty_message", source_message=message)
 
-    plan = await plan_agent_turn_semantic(message, context, provider_config=provider_config)
+    plan = await plan_agent_turn_semantic(message, context, provider_config=provider_config, usage_sink=usage_sink)
     if plan.intent == "action" and plan.skill:
         return IntentRoute(
             intent="action_prepare",

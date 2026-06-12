@@ -8,21 +8,21 @@ or "add a field" is handled as structured intent instead of brittle slicing.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .client import get_provider
 from .planner import AgentPlan, plan_agent_turn
 from .schemas import AIProviderConfig, ChatMessage, ChatOptions
+
+logger = logging.getLogger(__name__)
 
 
 EXTERNAL_PROVIDER_NAMES = {"openai-compatible", "openai", "azure-openai", "deepseek", "qwen", "glm"}
 
 
 def _is_model_available(config: AIProviderConfig | None) -> bool:
-    if os.getenv("PYTEST_CURRENT_TEST") and not (config and config.api_key == "semantic-key"):
-        return False
     return bool(config and config.provider in EXTERNAL_PROVIDER_NAMES and config.api_key)
 
 
@@ -162,6 +162,7 @@ async def plan_agent_turn_semantic(
     context: dict[str, Any] | None = None,
     *,
     provider_config: AIProviderConfig | None = None,
+    usage_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> AgentPlan:
     context = context or {}
     fallback = plan_agent_turn(message, context)
@@ -179,6 +180,12 @@ async def plan_agent_turn_semantic(
         )
     except Exception:
         return fallback
+
+    if usage_sink and result.usage:
+        try:
+            usage_sink(result.usage)
+        except Exception:  # noqa: BLE001 - budget accounting must not break planning
+            logger.exception("Semantic planner usage_sink failed")
 
     parsed = _json_object_from_text(result.content)
     if not parsed:

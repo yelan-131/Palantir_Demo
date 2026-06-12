@@ -1,16 +1,11 @@
-"""Knowledge base APIs for the local RAG MVP.
-
-The first version intentionally keeps data in a stable demo contract and uses
-local TF-IDF retrieval. This makes the feature runnable without external
-embedding services while preserving the API shape needed for a future vector
-store.
-"""
+"""Knowledge base APIs for persisted RAG assets and extraction jobs."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Any
 
@@ -42,12 +37,15 @@ from app.services.ai.knowledge_ingestion import (
     search_ingested_knowledge,
     update_ocr_corrections,
     cosine_score,
+    lexical_score,
 )
+from app.services.ai.agent_items import items_from_steps
 from app.services.ai.providers import _stable_embedding
 from app.services.ai.ocr_service import ocr_extract
 from app.services.ai.memory import memory_service
 from app.services.ai.runtime import agent_runtime
 from app.services.ai.settings import load_persisted_ai_settings, settings_snapshot, settings_to_provider_config
+from app.services.ai.tenant_context import require_tenant_id
 from app.services.ai.tenant_profile import load_tenant_profile
 from app.services.ai.ontology_extraction import (
     approve_extraction_job,
@@ -61,6 +59,25 @@ from app.services.ai.ontology_extraction import (
 )
 
 router = APIRouter()
+
+STATIC_KNOWLEDGE_RUNTIME_ENV = "PALANTIR_ENABLE_STATIC_KNOWLEDGE_RUNTIME"
+
+
+def _static_knowledge_runtime_enabled() -> bool:
+    return os.getenv(STATIC_KNOWLEDGE_RUNTIME_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _static_knowledge_documents() -> list[dict[str, Any]]:
+    return KNOWLEDGE_DOCUMENTS if _static_knowledge_runtime_enabled() else []
+
+
+def _static_knowledge_chunks() -> list[dict[str, Any]]:
+    return KNOWLEDGE_CHUNKS if _static_knowledge_runtime_enabled() else []
+
+
+def _static_knowledge_cards() -> list[dict[str, Any]]:
+    return KNOWLEDGE_CARDS if _static_knowledge_runtime_enabled() else []
+
 
 DEMO_KNOWLEDGE_DOCUMENT_ORDER = [
     "kb-doc-quality-sop-docx",
@@ -108,7 +125,7 @@ class OntologyIntakeBody(BaseModel):
 class DocumentExtractionJobBody(BaseModel):
     domain: str = "manufacturing"
     prompt_name: str = "manufacturing_ontology_v1"
-    model_name: str = "mock-chat"
+    model_name: str = "rules-ontology-extractor"
 
 
 class OcrCorrectionBody(BaseModel):
@@ -119,7 +136,7 @@ class KnowledgeDirectoryCreateBody(BaseModel):
     name: str
     parent_id: str | None = None
     scope: str = "enterprise"
-    owner_user_id: str = "demo-user"
+    owner_user_id: str | None = None
     sort_order: int = 100
 
 
@@ -446,13 +463,35 @@ KNOWLEDGE_CHUNKS = [
 def _document_by_id(document_id: str) -> dict[str, Any]:
     if document_id == "doc-welding-sop":
         document_id = "doc-sop-qe-001"
-    return next(item for item in KNOWLEDGE_DOCUMENTS if item["id"] == document_id)
+    return next(item for item in _static_knowledge_documents() if item["id"] == document_id)
 
 
 def _canonical_document_id(document_id: str | None) -> str | None:
     if document_id == "doc-welding-sop":
         return "doc-sop-qe-001"
     return document_id
+
+
+def _record_belongs_to_tenant(record: dict[str, Any], tenant_id: int) -> bool:
+    try:
+        return require_tenant_id(record) == tenant_id
+    except ValueError:
+        return False
+
+
+def _ingested_document_for_tenant(document_id: str, tenant_id: int) -> dict[str, Any] | None:
+    document = INGESTED_DOCUMENTS.get(document_id)
+    if not document or not _record_belongs_to_tenant(document, tenant_id):
+        return None
+    return document
+
+
+def _ingested_chunks_for_tenant(document_id: str, tenant_id: int) -> list[dict[str, Any]]:
+    return [
+        chunk
+        for chunk in INGESTED_CHUNKS.values()
+        if chunk["document_id"] == document_id and _record_belongs_to_tenant(chunk, tenant_id)
+    ]
 
 
 def _source_by_id(source_id: str) -> dict[str, Any]:
@@ -500,7 +539,7 @@ def _card_payload(card: dict[str, Any]) -> dict[str, Any]:
 def _retriever():
     corpus = [
         f"{_document_by_id(chunk['document_id'])['title']} {_document_by_id(chunk['document_id'])['summary']} {chunk['chunk_text']}"
-        for chunk in KNOWLEDGE_CHUNKS
+        for chunk in _static_knowledge_chunks()
     ]
     vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
     matrix = vectorizer.fit_transform(corpus)
@@ -579,6 +618,7 @@ def _serialize_message(row: AIMessage) -> dict[str, Any]:
 
 
 def _serialize_run(row: AIAgentRun) -> dict[str, Any]:
+    items = getattr(row, "items", None) or []
     return {
         "id": row.run_id,
         "run_id": row.run_id,
@@ -589,18 +629,17 @@ def _serialize_run(row: AIAgentRun) -> dict[str, Any]:
         "mode": row.mode,
         "input_message": row.input_message,
         "answer": row.answer,
-        "steps": row.steps or [],
+        "items": items,
         "evidence": row.evidence or [],
-        "actions": row.actions or [],
         "risk_level": row.risk_level,
         "requires_confirmation": row.requires_confirmation,
-        "confirmation_payload": row.confirmation_payload,
         "created_at": _now_iso(row.created_at),
         "updated_at": _now_iso(row.updated_at),
     }
 
 
-async def _persist_document_and_chunks(document: dict[str, Any], tenant_id: int = 1) -> None:
+async def _persist_document_and_chunks(document: dict[str, Any], tenant_id: int | None = None) -> None:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     try:
         async with db_session() as session:
             row = await session.scalar(
@@ -619,7 +658,7 @@ async def _persist_document_and_chunks(document: dict[str, Any], tenant_id: int 
                     KnowledgeChunk.document_id == document["document_id"],
                 )
             )
-            for chunk in [item for item in INGESTED_CHUNKS.values() if item["document_id"] == document["document_id"]]:
+            for chunk in _ingested_chunks_for_tenant(document["document_id"], tenant_id):
                 session.add(KnowledgeChunk(
                     tenant_id=tenant_id,
                     chunk_id=chunk["chunk_id"],
@@ -688,7 +727,8 @@ def _db_chunk_payload(
     return payload
 
 
-async def _load_document_links(session, document_ids: list[str], tenant_id: int = 1) -> dict[str, list[dict[str, Any]]]:
+async def _load_document_links(session, document_ids: list[str], tenant_id: int | None = None) -> dict[str, list[dict[str, Any]]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     if not document_ids:
         return {}
     rows = (
@@ -712,7 +752,8 @@ async def _load_document_links(session, document_ids: list[str], tenant_id: int 
     return grouped
 
 
-async def _get_persisted_document(document_id: str, tenant_id: int = 1) -> dict[str, Any] | None:
+async def _get_persisted_document(document_id: str, tenant_id: int | None = None) -> dict[str, Any] | None:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     try:
         async with db_session() as session:
             row = await session.scalar(
@@ -729,7 +770,8 @@ async def _get_persisted_document(document_id: str, tenant_id: int = 1) -> dict[
         return None
 
 
-async def _list_persisted_documents(source_id: str | None = None, tenant_id: int = 1) -> list[dict[str, Any]]:
+async def _list_persisted_documents(source_id: str | None = None, tenant_id: int | None = None) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     if source_id and source_id not in {"database", "uploaded"}:
         return []
     try:
@@ -752,7 +794,8 @@ async def _list_persisted_documents(source_id: str | None = None, tenant_id: int
         return []
 
 
-async def _list_persisted_chunks(document_id: str, tenant_id: int = 1) -> list[dict[str, Any]]:
+async def _list_persisted_chunks(document_id: str, tenant_id: int | None = None) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     try:
         async with db_session() as session:
             document = await session.scalar(
@@ -783,8 +826,9 @@ async def _search_persisted_knowledge_payload(
     document_id: str | None = None,
     object_type: str | None = None,
     object_id: str | None = None,
-    tenant_id: int = 1,
+    tenant_id: int | None = None,
 ) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     try:
         async with db_session() as session:
             allowed_document_ids: set[str] | None = None
@@ -818,6 +862,7 @@ async def _search_persisted_knowledge_payload(
             candidates = []
             for chunk, document in (await session.execute(chunk_stmt)).all():
                 score = cosine_score(query_embedding, chunk.embedding or _stable_embedding(chunk.chunk_text))
+                score += lexical_score(query, chunk.chunk_text) * 2
                 candidates.append(_db_chunk_payload(chunk, document, score))
             return sorted(candidates, key=lambda item: item.get("score", 0), reverse=True)[: max(1, min(limit, 10))]
     except Exception:
@@ -827,25 +872,35 @@ async def _search_persisted_knowledge_payload(
 def _search_knowledge_payload(
     query: str,
     *,
+    tenant_id: int | None = None,
     limit: int = 5,
     document_id: str | None = None,
     object_type: str | None = None,
     object_id: str | None = None,
+    include_static: bool = True,
 ) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
+    results: list[dict[str, Any]] = []
+    canonical_document_id = _canonical_document_id(document_id)
+    for item in search_ingested_knowledge(query, tenant_id=tenant_id, limit=limit):
+        if canonical_document_id and item.get("document_id") != canonical_document_id:
+            continue
+        if object_type or object_id:
+            continue
+        results.append(item)
+
+    if not include_static:
+        return results[: max(1, min(limit, 10))]
+
     vectorizer, matrix = _retriever()
     query_vector = vectorizer.transform([query])
     scores = cosine_similarity(query_vector, matrix).flatten()
     ranked = sorted(enumerate(scores), key=lambda item: item[1], reverse=True)
 
-    results: list[dict[str, Any]] = []
-    for item in search_ingested_knowledge(query, limit=limit):
-        results.append(item)
-
     for index, score in ranked:
         if score <= 0:
             continue
-        chunk = KNOWLEDGE_CHUNKS[index]
-        canonical_document_id = _canonical_document_id(document_id)
+        chunk = _static_knowledge_chunks()[index]
         if canonical_document_id and chunk["document_id"] != canonical_document_id:
             continue
         document = _document_by_id(chunk["document_id"])
@@ -864,12 +919,13 @@ def _search_knowledge_payload(
 async def _search_knowledge_payload_async(
     query: str,
     *,
+    tenant_id: int | None = None,
     limit: int = 5,
     document_id: str | None = None,
     object_type: str | None = None,
     object_id: str | None = None,
-    tenant_id: int = 1,
 ) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     persisted = await _search_persisted_knowledge_payload(
         query,
         limit=limit,
@@ -880,13 +936,15 @@ async def _search_knowledge_payload_async(
     )
     memory_and_static = _search_knowledge_payload(
         query,
+        tenant_id=tenant_id,
         limit=limit,
         document_id=document_id,
         object_type=object_type,
         object_id=object_id,
+        include_static=_static_knowledge_runtime_enabled(),
     )
     by_key: dict[str, dict[str, Any]] = {}
-    for item in [*memory_and_static, *persisted]:
+    for item in [*persisted, *memory_and_static]:
         key = str(item.get("chunk_id") or item.get("document_id") or item.get("source_location"))
         if key not in by_key:
             by_key[key] = item
@@ -901,7 +959,7 @@ def _document_context_payload(document_id: str | None) -> list[dict[str, Any]]:
         document = _document_by_id(document_id)
     except StopIteration:
         return []
-    chunks = [chunk for chunk in KNOWLEDGE_CHUNKS if chunk["document_id"] == document_id]
+    chunks = [chunk for chunk in _static_knowledge_chunks() if chunk["document_id"] == document_id]
     if chunks:
         return [_chunk_payload(chunk, 1.0) for chunk in chunks]
     return [
@@ -918,7 +976,8 @@ def _document_context_payload(document_id: str | None) -> list[dict[str, Any]]:
     ]
 
 
-async def _document_context_payload_async(document_id: str | None, tenant_id: int = 1) -> list[dict[str, Any]]:
+async def _document_context_payload_async(document_id: str | None, tenant_id: int | None = None) -> list[dict[str, Any]]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     document_id = _canonical_document_id(document_id)
     if not document_id:
         return []
@@ -939,6 +998,31 @@ async def _document_context_payload_async(document_id: str | None, tenant_id: in
             "linked_objects": persisted_document.get("linked_objects", []),
             "score": 1.0,
         }]
+    ingested_document = _ingested_document_for_tenant(document_id, tenant_id)
+    if ingested_document:
+        chunks = _ingested_chunks_for_tenant(document_id, tenant_id)
+        if chunks:
+            return [
+                {
+                    **chunk,
+                    "document_title": ingested_document["title"],
+                    "document_type": ingested_document["source_type"],
+                    "snippet": chunk["chunk_text"][:300],
+                    "source_file_name": ingested_document["source_file_name"],
+                    "score": 1.0,
+                }
+                for chunk in chunks
+            ]
+        return [{
+            "document_id": ingested_document["document_id"],
+            "document_title": ingested_document["title"],
+            "document_type": ingested_document["source_type"],
+            "snippet": ingested_document["markdown_content"][:300],
+            "source_location": ingested_document["source_file_name"],
+            "score": 1.0,
+        }]
+    if not _static_knowledge_runtime_enabled():
+        return []
     return _document_context_payload(document_id)
 
 
@@ -979,6 +1063,7 @@ async def _generate_knowledge_agent_answer(
     evidence: list[dict[str, Any]],
     history: list[AIMessage],
     tenant_profile=None,
+    tenant_id: int | None = None,
     memory: list[dict[str, Any]] | None = None,
     intent: str | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
@@ -989,26 +1074,37 @@ async def _generate_knowledge_agent_answer(
         evidence=evidence,
         history=history,
         tenant_profile=tenant_profile,
+        tenant_id=tenant_id,
         provider_config=settings_to_provider_config(settings_snapshot()),
         memory=memory or [],
         intent=intent,
     )
 
 
-def _directory_document_count(directory_id: str) -> int:
+def _directory_document_count(directory_id: str, tenant_id: int) -> int:
+    tenant_uploads = [item for item in INGESTED_DOCUMENTS.values() if _record_belongs_to_tenant(item, tenant_id)]
+    static_documents = _static_knowledge_documents()
     if directory_id == "dir-quality":
-        return sum(1 for item in KNOWLEDGE_DOCUMENTS if item["source_id"] in {"quality-sop", "historical-capa"})
+        return sum(1 for item in static_documents if item["source_id"] in {"quality-sop", "historical-capa"})
     if directory_id == "dir-enterprise":
-        return len(KNOWLEDGE_DOCUMENTS) + len(INGESTED_DOCUMENTS)
+        return len(static_documents) + len(tenant_uploads)
     if directory_id == "dir-personal":
-        return sum(1 for item in INGESTED_DOCUMENTS.values() if item.get("owner_user_id") == "demo-user")
+        return sum(1 for item in tenant_uploads if item.get("owner_user_id") == "demo-user")
     return 0
 
 
-def _directory_tree() -> list[dict[str, Any]]:
+def _directory_payload(directory: dict[str, Any], tenant_id: int) -> dict[str, Any]:
+    return {**directory, "tenant_id": directory.get("tenant_id") or tenant_id}
+
+
+def _directory_tree(tenant_id: int) -> list[dict[str, Any]]:
     by_parent: dict[str | None, list[dict[str, Any]]] = {}
     for directory in KNOWLEDGE_DIRECTORIES:
-        payload = {**directory, "document_count": _directory_document_count(directory["id"]), "children": []}
+        payload = {
+            **_directory_payload(directory, tenant_id),
+            "document_count": _directory_document_count(directory["id"], tenant_id),
+            "children": [],
+        }
         by_parent.setdefault(directory.get("parent_id"), []).append(payload)
     for children in by_parent.values():
         children.sort(key=lambda item: (item["sort_order"], item["name"]))
@@ -1028,12 +1124,19 @@ async def list_spaces():
 
 
 @router.get("/directories")
-async def list_directories():
-    return {"data": {"items": KNOWLEDGE_DIRECTORIES, "tree": _directory_tree()}}
+async def list_directories(user: dict = Depends(get_current_user)):
+    tenant_id = current_tenant_id(user)
+    return {
+        "data": {
+            "items": [_directory_payload(item, tenant_id) for item in KNOWLEDGE_DIRECTORIES],
+            "tree": _directory_tree(tenant_id),
+        }
+    }
 
 
 @router.post("/directories")
-async def create_directory(body: KnowledgeDirectoryCreateBody):
+async def create_directory(body: KnowledgeDirectoryCreateBody, user: dict = Depends(get_current_user)):
+    tenant_id = current_tenant_id(user)
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="Directory name cannot be empty")
     if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
@@ -1044,7 +1147,8 @@ async def create_directory(body: KnowledgeDirectoryCreateBody):
         "name": body.name.strip(),
         "parent_id": body.parent_id,
         "scope": body.scope,
-        "owner_user_id": body.owner_user_id,
+        "owner_user_id": body.owner_user_id or _user_key(user),
+        "tenant_id": tenant_id,
         "sort_order": body.sort_order,
         "status": "active",
         "created_at": now,
@@ -1055,9 +1159,12 @@ async def create_directory(body: KnowledgeDirectoryCreateBody):
 
 
 @router.put("/directories/{directory_id}")
-async def update_directory(directory_id: str, body: KnowledgeDirectoryUpdateBody):
+async def update_directory(directory_id: str, body: KnowledgeDirectoryUpdateBody, user: dict = Depends(get_current_user)):
+    tenant_id = current_tenant_id(user)
     record = next((item for item in KNOWLEDGE_DIRECTORIES if item["id"] == directory_id), None)
     if not record:
+        raise HTTPException(status_code=404, detail="Knowledge directory not found")
+    if record.get("tenant_id") and record.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Knowledge directory not found")
     if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
         raise HTTPException(status_code=404, detail="Parent directory not found")
@@ -1072,9 +1179,12 @@ async def update_directory(directory_id: str, body: KnowledgeDirectoryUpdateBody
 
 
 @router.post("/directories/{directory_id}/move")
-async def move_directory(directory_id: str, body: KnowledgeDirectoryMoveBody):
+async def move_directory(directory_id: str, body: KnowledgeDirectoryMoveBody, user: dict = Depends(get_current_user)):
+    tenant_id = current_tenant_id(user)
     record = next((item for item in KNOWLEDGE_DIRECTORIES if item["id"] == directory_id), None)
     if not record:
+        raise HTTPException(status_code=404, detail="Knowledge directory not found")
+    if record.get("tenant_id") and record.get("tenant_id") != tenant_id:
         raise HTTPException(status_code=404, detail="Knowledge directory not found")
     if body.parent_id and not any(item["id"] == body.parent_id for item in KNOWLEDGE_DIRECTORIES):
         raise HTTPException(status_code=404, detail="Parent directory not found")
@@ -1092,6 +1202,7 @@ async def create_or_resume_agent_conversation(
     user: dict = Depends(get_current_user),
 ):
     user_key = _user_key(user)
+    tenant_id = current_tenant_id(user)
     document_id = body.document_id or "general"
     title = body.document_title or "Knowledge assistant conversation"
     page = body.page or "knowledge-center"
@@ -1099,6 +1210,7 @@ async def create_or_resume_agent_conversation(
         existing = await session.scalar(
             select(AIConversation)
             .where(
+                AIConversation.tenant_id == tenant_id,
                 AIConversation.user_id == user_key,
                 AIConversation.page == page,
                 AIConversation.document_id == document_id,
@@ -1115,6 +1227,7 @@ async def create_or_resume_agent_conversation(
             return {"data": _serialize_conversation(existing), "ok": True}
 
         record = AIConversation(
+            tenant_id=tenant_id,
             conversation_id=f"conv-{uuid.uuid4().hex[:12]}",
             user_id=user_key,
             page=page,
@@ -1137,10 +1250,11 @@ async def list_agent_conversations(
     user: dict = Depends(get_current_user),
 ):
     user_key = _user_key(user)
+    tenant_id = current_tenant_id(user)
     async with db_session() as session:
         stmt = (
             select(AIConversation)
-            .where(AIConversation.user_id == user_key, AIConversation.page == page)
+            .where(AIConversation.tenant_id == tenant_id, AIConversation.user_id == user_key, AIConversation.page == page)
             .order_by(desc(AIConversation.updated_at))
             .limit(max(1, min(limit, 100)))
         )
@@ -1161,6 +1275,7 @@ async def list_agent_messages(
         tenant_profile = await load_tenant_profile(tenant_id, session=session)
         conversation = await session.scalar(
             select(AIConversation).where(
+                AIConversation.tenant_id == tenant_id,
                 AIConversation.conversation_id == conversation_id,
                 AIConversation.user_id == user_key,
             )
@@ -1170,7 +1285,7 @@ async def list_agent_messages(
         messages = (
             await session.execute(
                 select(AIMessage)
-                .where(AIMessage.conversation_id == conversation_id)
+                .where(AIMessage.tenant_id == tenant_id, AIMessage.conversation_id == conversation_id)
                 .order_by(AIMessage.id)
             )
         ).scalars().all()
@@ -1193,6 +1308,7 @@ async def send_agent_message(
         tenant_profile = await load_tenant_profile(tenant_id, session=session)
         conversation = await session.scalar(
             select(AIConversation).where(
+                AIConversation.tenant_id == tenant_id,
                 AIConversation.conversation_id == conversation_id,
                 AIConversation.user_id == user_key,
             )
@@ -1203,7 +1319,7 @@ async def send_agent_message(
         history = (
             await session.execute(
                 select(AIMessage)
-                .where(AIMessage.conversation_id == conversation_id)
+                .where(AIMessage.tenant_id == tenant_id, AIMessage.conversation_id == conversation_id)
                 .order_by(desc(AIMessage.id))
                 .limit(12)
             )
@@ -1230,6 +1346,7 @@ async def send_agent_message(
         )
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         user_message = AIMessage(
+            tenant_id=tenant_id,
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
             role="user",
@@ -1243,10 +1360,12 @@ async def send_agent_message(
             evidence=evidence,
             history=list(reversed(history)),
             tenant_profile=tenant_profile,
+            tenant_id=tenant_id,
             memory=memory_context,
             intent=intent,
         )
         assistant_message = AIMessage(
+            tenant_id=tenant_id,
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
             role="assistant",
@@ -1269,6 +1388,7 @@ async def send_agent_message(
             {"id": "step-answer", "type": "respond", "status": "completed", "model": model_name, "mode": usage.get("mode")},
         ]
         run = AIAgentRun(
+            tenant_id=tenant_id,
             run_id=run_id,
             conversation_id=conversation_id,
             user_message_id=user_message.message_id,
@@ -1277,18 +1397,18 @@ async def send_agent_message(
             mode="qa",
             input_message=content,
             answer=answer,
-            steps=steps,
+            items=items_from_steps(steps, run_id=run_id),
             evidence=evidence,
-            actions=[],
             risk_level="low",
             requires_confirmation=False,
         )
         tool_call = AIToolCall(
+            tenant_id=tenant_id,
             call_id=f"call-{uuid.uuid4().hex[:12]}",
             run_id=run_id,
             tool_name="knowledge.search",
             skill_name="knowledge.answer_question",
-            input={"query": content, "limit": 5, "document_id": conversation.document_id},
+            input={"query": content, "limit": 5, "document_id": conversation.document_id, "tenant_id": tenant_id},
             output={"result_count": len(evidence), "results": evidence},
             status="completed",
             duration_ms=0,
@@ -1341,13 +1461,14 @@ async def send_agent_message(
 @router.get("/documents")
 async def list_documents(source_id: str | None = None, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    documents = [] if source_id == "database" else KNOWLEDGE_DOCUMENTS
+    documents = [] if source_id == "database" else _static_knowledge_documents()
     if source_id and source_id != "database":
         documents = [item for item in documents if item["source_id"] == source_id]
     persisted = await _list_persisted_documents(source_id, tenant_id)
     ingested = [
         {
             "id": item["document_id"],
+            "tenant_id": item["tenant_id"],
             "source_id": "uploaded",
             "title": item["title"],
             "doc_type": item["source_type"],
@@ -1359,6 +1480,7 @@ async def list_documents(source_id: str | None = None, user: dict = Depends(get_
             "linked_objects": [],
         }
         for item in INGESTED_DOCUMENTS.values()
+        if _record_belongs_to_tenant(item, tenant_id)
     ]
     persisted_ids = {item["id"] for item in persisted}
     ingested = [item for item in ingested if item["id"] not in persisted_ids]
@@ -1379,6 +1501,7 @@ async def upload_knowledge_asset(
         content=content,
         owner_user_id=owner_user_id,
         permission_scope=permission_scope,
+        tenant_id=tenant_id,
     )
     if result.get("job"):
         result["job"]["tenant_id"] = tenant_id
@@ -1399,7 +1522,7 @@ async def create_document_ontology_intake(
     user: dict = Depends(get_current_user),
 ):
     tenant_id = current_tenant_id(user)
-    document = INGESTED_DOCUMENTS.get(document_id)
+    document = _ingested_document_for_tenant(document_id, tenant_id)
     if not document:
         document = await _get_persisted_document(document_id, tenant_id)
     if not document:
@@ -1440,7 +1563,7 @@ async def create_knowledge_extraction_job(
     file: UploadFile = File(...),
     domain: str = Form("manufacturing"),
     prompt_name: str = Form("manufacturing_ontology_v1"),
-    model_name: str = Form("mock-chat"),
+    model_name: str = Form("rules-ontology-extractor"),
     permission_scope: str = Form("enterprise"),
     owner_user_id: str = Form("demo-user"),
     user: dict = Depends(get_current_user),
@@ -1507,7 +1630,7 @@ async def export_knowledge_extraction_job(job_id: str, format: str = "json", use
 async def get_ingestion_job(job_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
     job = INGESTION_JOBS.get(job_id)
-    if job and int(job.get("tenant_id") or tenant_id) != tenant_id:
+    if job and not _record_belongs_to_tenant(job, tenant_id):
         job = None
     if not job:
         try:
@@ -1540,13 +1663,13 @@ async def get_ingestion_job(job_id: str, user: dict = Depends(get_current_user))
 @router.get("/documents/{document_id}")
 async def get_document(document_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    ingested = INGESTED_DOCUMENTS.get(document_id)
+    ingested = _ingested_document_for_tenant(document_id, tenant_id)
     if ingested:
         return {"data": ingested}
     persisted = await _get_persisted_document(document_id, tenant_id)
     if persisted:
         return {"data": persisted}
-    document = next((item for item in KNOWLEDGE_DOCUMENTS if item["id"] == document_id), None)
+    document = next((item for item in _static_knowledge_documents() if item["id"] == document_id), None)
     if not document:
         raise HTTPException(status_code=404, detail="Knowledge document not found")
     return {"data": document}
@@ -1555,7 +1678,7 @@ async def get_document(document_id: str, user: dict = Depends(get_current_user))
 @router.get("/documents/{document_id}/markdown")
 async def get_document_markdown(document_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    ingested = INGESTED_DOCUMENTS.get(document_id)
+    ingested = _ingested_document_for_tenant(document_id, tenant_id)
     if not ingested:
         persisted = await _get_persisted_document(document_id, tenant_id)
         if persisted:
@@ -1579,7 +1702,7 @@ async def get_document_markdown(document_id: str, user: dict = Depends(get_curre
 @router.get("/documents/{document_id}/ocr")
 async def get_document_ocr(document_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    ingested = INGESTED_DOCUMENTS.get(document_id)
+    ingested = _ingested_document_for_tenant(document_id, tenant_id)
     if not ingested:
         persisted = await _get_persisted_document(document_id, tenant_id)
         if persisted and persisted.get("ocr_result"):
@@ -1594,7 +1717,7 @@ async def get_document_ocr(document_id: str, user: dict = Depends(get_current_us
 @router.put("/documents/{document_id}/ocr/corrections")
 async def save_document_ocr_corrections(document_id: str, body: OcrCorrectionBody, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    document = update_ocr_corrections(document_id, body.blocks)
+    document = update_ocr_corrections(document_id, body.blocks, tenant_id=tenant_id)
     if not document:
         raise HTTPException(status_code=404, detail="OCR document not found")
     await _persist_document_and_chunks(document, tenant_id)
@@ -1604,7 +1727,7 @@ async def save_document_ocr_corrections(document_id: str, body: OcrCorrectionBod
 @router.post("/documents/{document_id}/ocr/enhance")
 async def enhance_document_ocr(document_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    document = INGESTED_DOCUMENTS.get(document_id)
+    document = _ingested_document_for_tenant(document_id, tenant_id)
     if not document:
         raise HTTPException(status_code=404, detail="OCR document not found")
     source_path = document.get("source_path")
@@ -1617,9 +1740,18 @@ async def enhance_document_ocr(document_id: str, user: dict = Depends(get_curren
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     document["ocr_result"] = ocr_result
     document["markdown_content"] = ocr_result["markdown_content"]
-    for chunk_id in [chunk_id for chunk_id, chunk in INGESTED_CHUNKS.items() if chunk["document_id"] == document_id]:
+    for chunk_id in [
+        chunk_id
+        for chunk_id, chunk in INGESTED_CHUNKS.items()
+        if chunk["document_id"] == document_id and _record_belongs_to_tenant(chunk, tenant_id)
+    ]:
         INGESTED_CHUNKS.pop(chunk_id, None)
-    for chunk in markdown_to_chunks(document["markdown_content"], document_id, document["permission_scope"]):
+    for chunk in markdown_to_chunks(
+        document["markdown_content"],
+        document_id,
+        document["permission_scope"],
+        tenant_id=tenant_id,
+    ):
         INGESTED_CHUNKS[chunk["chunk_id"]] = chunk
     await _persist_document_and_chunks(document, tenant_id)
     return {"data": {"document_id": document_id, **ocr_result}, "ok": True}
@@ -1628,21 +1760,21 @@ async def enhance_document_ocr(document_id: str, user: dict = Depends(get_curren
 @router.get("/documents/{document_id}/chunks")
 async def list_document_chunks(document_id: str, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    if document_id in INGESTED_DOCUMENTS:
-        chunks = [chunk for chunk in INGESTED_CHUNKS.values() if chunk["document_id"] == document_id]
+    if _ingested_document_for_tenant(document_id, tenant_id):
+        chunks = _ingested_chunks_for_tenant(document_id, tenant_id)
         return {"data": chunks}
     persisted = await _list_persisted_chunks(document_id, tenant_id)
     if persisted:
         return {"data": persisted}
-    if not any(item["id"] == document_id for item in KNOWLEDGE_DOCUMENTS):
+    if not any(item["id"] == document_id for item in _static_knowledge_documents()):
         raise HTTPException(status_code=404, detail="Knowledge document not found")
-    chunks = [chunk for chunk in KNOWLEDGE_CHUNKS if chunk["document_id"] == document_id]
+    chunks = [chunk for chunk in _static_knowledge_chunks() if chunk["document_id"] == document_id]
     return {"data": [_chunk_payload(chunk) for chunk in chunks]}
 
 
 @router.get("/cards")
 async def list_cards(space_id: str | None = None, status: str | None = None):
-    cards = KNOWLEDGE_CARDS
+    cards = _static_knowledge_cards()
     if space_id:
         cards = [item for item in cards if item["space_id"] == space_id]
     if status:
@@ -1652,7 +1784,7 @@ async def list_cards(space_id: str | None = None, status: str | None = None):
 
 @router.get("/cards/{card_id}")
 async def get_card(card_id: str):
-    card = next((item for item in KNOWLEDGE_CARDS if item["id"] == card_id), None)
+    card = next((item for item in _static_knowledge_cards() if item["id"] == card_id), None)
     if not card:
         raise HTTPException(status_code=404, detail="Knowledge card not found")
     return {"data": _card_payload(card)}
@@ -1662,7 +1794,7 @@ async def get_card(card_id: str):
 async def get_related_cards(object_type: str | None = None, object_id: str | None = None, limit: int = 4):
     cards = [
         _card_payload(card)
-        for card in KNOWLEDGE_CARDS
+        for card in _static_knowledge_cards()
         if _matches_card(card, object_type, object_id)
     ]
     return {"data": cards[: max(1, min(limit, 10))]}
@@ -1700,14 +1832,16 @@ async def get_ocr_pipeline():
 @router.get("/related")
 async def get_related_knowledge(object_type: str | None = None, object_id: str | None = None, limit: int = 4, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    matched_documents = [
-        document
-        for document in KNOWLEDGE_DOCUMENTS
-        if _matches_object(document, object_type, object_id)
-    ]
+    matched_documents = []
+    if _static_knowledge_runtime_enabled():
+        matched_documents = [
+            document
+            for document in _static_knowledge_documents()
+            if _matches_object(document, object_type, object_id)
+        ]
     related = []
     for document in matched_documents:
-        chunks = [chunk for chunk in KNOWLEDGE_CHUNKS if chunk["document_id"] == document["id"]]
+        chunks = [chunk for chunk in _static_knowledge_chunks() if chunk["document_id"] == document["id"]]
         first_chunk = chunks[0] if chunks else None
         source = _source_by_id(document["source_id"])
         related.append({
@@ -1774,17 +1908,22 @@ async def search_knowledge(body: KnowledgeSearchBody, user: dict = Depends(get_c
     query = body.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
+    results = await _search_knowledge_payload_async(
+        query,
+        limit=body.limit,
+        object_type=body.object_type,
+        object_id=body.object_id,
+        tenant_id=tenant_id,
+    )
 
     return {
         "data": {
             "query": query,
-            "answer": "\u5df2\u68c0\u7d22\u5230\u76f8\u5173\u77e5\u8bc6\u8bc1\u636e\u3002\u8bf7\u7ed3\u5408 results \u4e2d\u7684\u6765\u6e90\u3001\u7247\u6bb5\u548c\u5173\u8054\u5bf9\u8c61\u8fdb\u884c\u590d\u6838\u3002",
-            "results": await _search_knowledge_payload_async(
-                query,
-                limit=body.limit,
-                object_type=body.object_type,
-                object_id=body.object_id,
-                tenant_id=tenant_id,
+            "answer": (
+                "\u5df2\u68c0\u7d22\u5230\u76f8\u5173\u77e5\u8bc6\u8bc1\u636e\u3002\u8bf7\u7ed3\u5408 results \u4e2d\u7684\u6765\u6e90\u3001\u7247\u6bb5\u548c\u5173\u8054\u5bf9\u8c61\u8fdb\u884c\u590d\u6838\u3002"
+                if results
+                else "\u5f53\u524d\u79df\u6237\u77e5\u8bc6\u5e93\u672a\u68c0\u7d22\u5230\u53ef\u7528\u8bc1\u636e\u3002\u8bf7\u5148\u4e0a\u4f20\u6216\u7d22\u5f15\u76f8\u5173\u6587\u6863\u540e\u518d\u8bd5\u3002"
             ),
+            "results": results,
         }
     }

@@ -13,17 +13,23 @@ def test_markdown_ingestion_creates_document_chunks_and_search_result():
         b"# Material Application\n\nMaterial number applications require category and unit.",
         owner_user_id="tester",
         permission_scope="enterprise",
+        tenant_id=7,
     )
 
     assert result["job"]["status"] == "completed"
+    assert result["document"]["tenant_id"] == 7
     assert result["document"]["markdown_content"].startswith("# Material Application")
     assert result["chunks"][0]["source_location"] == "section:1"
     assert result["chunks"][0]["permission_scope"] == "enterprise"
+    assert result["chunks"][0]["tenant_id"] == 7
 
-    search_results = search_ingested_knowledge("material number category", limit=3, permission_scope="enterprise")
+    search_results = search_ingested_knowledge("material number category", tenant_id=7, limit=3, permission_scope="enterprise")
     assert search_results
     assert any(item["document_id"] == result["document"]["document_id"] for item in search_results)
     assert "source_location" in search_results[0]
+
+    other_tenant_results = search_ingested_knowledge("material number category", tenant_id=8, limit=3, permission_scope="enterprise")
+    assert not any(item["document_id"] == result["document"]["document_id"] for item in other_tenant_results)
 
 
 def test_excel_ingestion_generates_markdown_summary():
@@ -34,7 +40,7 @@ def test_excel_ingestion_generates_markdown_summary():
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         frame.to_excel(writer, sheet_name="Rules", index=False)
 
-    result = ingest_asset("rules.xlsx", buffer.getvalue())
+    result = ingest_asset("rules.xlsx", buffer.getvalue(), tenant_id=1)
 
     assert result["job"]["status"] == "completed"
     assert "## Sheet: Rules" in result["document"]["markdown_content"]
@@ -44,7 +50,7 @@ def test_excel_ingestion_generates_markdown_summary():
 def test_unsupported_ingestion_records_failed_job():
     from app.services.ai.knowledge_ingestion import ingest_asset
 
-    result = ingest_asset("archive.zip", b"not supported")
+    result = ingest_asset("archive.zip", b"not supported", tenant_id=1)
 
     assert result["job"]["status"] == "failed"
     assert result["asset"]["status"] == "failed"
@@ -79,7 +85,7 @@ def test_image_ingestion_uses_ocr_metadata(monkeypatch, tmp_path):
         },
     )
 
-    result = knowledge_ingestion.ingest_asset("label.png", b"fake image")
+    result = knowledge_ingestion.ingest_asset("label.png", b"fake image", tenant_id=1)
 
     assert result["job"]["status"] == "completed"
     assert result["document"]["source_type"] == "image"
@@ -109,7 +115,7 @@ def test_scanned_pdf_falls_back_to_ocr(monkeypatch, tmp_path):
         },
     )
 
-    result = knowledge_ingestion.ingest_asset("scan.pdf", b"%PDF fake")
+    result = knowledge_ingestion.ingest_asset("scan.pdf", b"%PDF fake", tenant_id=1)
 
     assert result["job"]["status"] == "completed"
     assert result["document"]["source_type"] == "pdf"
@@ -133,12 +139,13 @@ def test_ocr_corrections_refresh_markdown_and_chunks(monkeypatch, tmp_path):
             "enhanced_by_vision": False,
         },
     )
-    result = knowledge_ingestion.ingest_asset("field.png", b"fake image")
+    result = knowledge_ingestion.ingest_asset("field.png", b"fake image", tenant_id=1)
     document_id = result["document"]["document_id"]
 
     updated = knowledge_ingestion.update_ocr_corrections(
         document_id,
         [{"id": "ocr-1-1", "page_number": 1, "text": "Bad reccognition", "corrected_text": "Good recognition", "confidence": 0.55}],
+        tenant_id=1,
     )
 
     assert updated is not None

@@ -9,6 +9,21 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _platform_headers() -> dict[str, str]:
+    from app.core.security import create_access_token
+
+    token = create_access_token(
+        "platform-admin",
+        extra={
+            "uid": 1,
+            "tenant_id": 1,
+            "is_admin": True,
+            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
+        },
+    )
+    return _headers(token)
+
+
 def _ok(response, context: str) -> dict:
     assert response.status_code < 400, f"{context}: {response.status_code} {response.text}"
     return response.json()
@@ -19,11 +34,7 @@ def test_tenant_onboarding_invite_email_login_reset_and_cross_tenant_guard():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        platform_login = _ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            "platform login",
-        )
-        platform_headers = _headers(platform_login["token"])
+        platform_headers = _platform_headers()
 
         tenant_a = _ok(
             client.post(
@@ -125,11 +136,7 @@ def test_tenant_domain_status_and_quota_guards():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        token = _ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            "platform login",
-        )["token"]
-        headers = _headers(token)
+        headers = _platform_headers()
         tenant = _ok(
             client.post(
                 "/api/v1/platform/tenants",
@@ -190,11 +197,7 @@ def test_platform_tenant_operations_invite_history_resend_revoke_and_reset():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        token = _ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            "platform login",
-        )["token"]
-        headers = _headers(token)
+        headers = _platform_headers()
         tenant = _ok(
             client.post(
                 "/api/v1/platform/tenants",

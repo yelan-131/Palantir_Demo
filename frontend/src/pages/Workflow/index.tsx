@@ -6,15 +6,15 @@ import {
   FormOutlined,
   HistoryOutlined,
   InboxOutlined,
-  RightOutlined,
   RollbackOutlined,
 } from '@ant-design/icons';
-import { Button, Col, Drawer, Empty, Form, Input, Row, Space, Tabs, Tag, Timeline, Typography } from 'antd';
+import { Button, Drawer, Empty, Space, Tabs, Tag, Timeline, Tooltip, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { wfListBusinessItems } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
-export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned';
+export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned' | 'rejected';
 type WorkflowViewTab = WorkflowTab | 'all';
 
 type WorkflowBusinessApplication = {
@@ -38,6 +38,15 @@ type WorkflowBusinessField = {
   label: string;
   value?: unknown;
   field_type?: string;
+  control_type?: string | null;
+  required?: boolean;
+  enum_values?: Record<string, unknown> | null;
+  ui_config?: Record<string, unknown> | null;
+  changed?: boolean;
+  old_value?: unknown;
+  previous_value?: unknown;
+  before_value?: unknown;
+  new_value?: unknown;
 };
 
 type WorkflowBusinessItem = {
@@ -55,10 +64,12 @@ type WorkflowBusinessItem = {
     id: number;
     workflow_id: number;
     initiator_id?: number | null;
-    approvals?: Array<{ id: number; node_id?: string | null; action?: string | null; comment?: string | null; acted_at?: string | null }>;
+    approvals?: Array<{ id: number; node_id?: string | null; approver_id?: number | null; approver_name?: string | null; action?: string | null; comment?: string | null; acted_at?: string | null }>;
+    current_assignees?: Array<{ id: number; name: string; username?: string | null }>;
   } | null;
   fields?: WorkflowBusinessField[];
   current_node?: string;
+  current_assignees?: Array<{ id: number; name: string; username?: string | null }>;
   updated_at?: string | null;
   created_at?: string | null;
   route_path?: string | null;
@@ -71,15 +82,17 @@ type WorkflowBusinessDataset = {
   counts?: Partial<Record<WorkflowViewTab, number>>;
 };
 
-const statusMeta: Record<WorkflowTab, { label: string; color: string; icon: JSX.Element; description: string }> = {
+const statusMeta: Record<string, { label: string; color: string; icon: JSX.Element; description: string }> = {
   draft: { label: '草稿', color: 'default', icon: <EditOutlined />, description: '已保存但还没有提交' },
-  pending: { label: '待审批', color: 'orange', icon: <InboxOutlined />, description: '需要当前用户处理' },
-  running: { label: '审批中', color: 'blue', icon: <ClockCircleOutlined />, description: '正在流程中流转' },
-  done: { label: '已审批', color: 'green', icon: <CheckCircleOutlined />, description: '已完成闭环' },
-  returned: { label: '已退回', color: 'red', icon: <RollbackOutlined />, description: '需要补充后重新提交' },
+  pending: { label: '待审批', color: 'warning', icon: <InboxOutlined />, description: '需要当前用户处理' },
+  running: { label: '审批中', color: 'processing', icon: <ClockCircleOutlined />, description: '正在流程中流转' },
+  done: { label: '已审批', color: 'success', icon: <CheckCircleOutlined />, description: '已完成闭环' },
+  returned: { label: '已退回', color: 'error', icon: <RollbackOutlined />, description: '需要补充后重新提交' },
 };
 
-const orderedTabs: WorkflowTab[] = ['draft', 'pending', 'running', 'done', 'returned'];
+statusMeta.rejected = { label: '拒绝', color: 'error', icon: <RollbackOutlined />, description: '审批已拒绝' };
+
+const orderedTabs: WorkflowTab[] = ['draft', 'pending', 'running', 'done', 'returned', 'rejected'];
 const approvalTabs: Array<{ key: WorkflowViewTab; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'draft', label: '草稿' },
@@ -87,6 +100,7 @@ const approvalTabs: Array<{ key: WorkflowViewTab; label: string }> = [
   { key: 'running', label: '审批中' },
   { key: 'done', label: '已审批' },
   { key: 'returned', label: '已退回' },
+  { key: 'rejected', label: '拒绝' },
 ];
 
 function unwrapDataset(payload: unknown): WorkflowBusinessDataset {
@@ -112,16 +126,90 @@ function formatValue(value: unknown) {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', { hour12: false });
+  return formatServerDateTime(value);
+}
+
+function fieldOldValue(field: WorkflowBusinessField) {
+  if ('old_value' in field) return field.old_value;
+  if ('previous_value' in field) return field.previous_value;
+  if ('before_value' in field) return field.before_value;
+  return undefined;
+}
+
+function fieldNewValue(field: WorkflowBusinessField) {
+  if ('new_value' in field) return field.new_value;
+  return field.value;
+}
+
+function isChangedField(field: WorkflowBusinessField) {
+  const oldValue = fieldOldValue(field);
+  if (field.changed) return true;
+  if (oldValue === undefined) return false;
+  return formatValue(oldValue) !== formatValue(fieldNewValue(field));
+}
+
+function isChoiceField(field: WorkflowBusinessField) {
+  const fieldType = String(field.field_type || '').toLowerCase();
+  const controlType = String(field.control_type || field.ui_config?.controlType || field.ui_config?.control_type || '').toLowerCase();
+  return ['enum', 'select', 'radio', 'checkbox', 'relation', 'lookup', 'status'].some((type) => fieldType.includes(type) || controlType.includes(type));
+}
+
+function splitChoiceValues(value: unknown) {
+  if (Array.isArray(value)) return value.map(formatValue);
+  return [formatValue(value)];
+}
+
+function changeTooltipTitle(field: WorkflowBusinessField) {
+  return (
+    <div className="workflow-field-change-tooltip">
+      <div><span>变更前</span><strong>{formatValue(fieldOldValue(field))}</strong></div>
+      <div><span>变更后</span><strong>{formatValue(fieldNewValue(field))}</strong></div>
+    </div>
+  );
+}
+
+function renderBusinessFieldValue(field: WorkflowBusinessField) {
+  const changed = isChangedField(field);
+  const value = fieldNewValue(field);
+  const content = isChoiceField(field) && formatValue(value) !== '-' ? (
+    <span className="workflow-business-choice-values">
+      {splitChoiceValues(value).map((item) => (
+        <Tag className="workflow-business-choice-tag" key={item}>{item}</Tag>
+      ))}
+    </span>
+  ) : (
+    <strong>{formatValue(value)}</strong>
+  );
+
+  const valueNode = <div className={changed ? 'workflow-business-sheet-value is-changed' : 'workflow-business-sheet-value'}>{content}</div>;
+  return changed ? <Tooltip title={changeTooltipTitle(field)}>{valueNode}</Tooltip> : valueNode;
 }
 
 function sourceLabel(item: WorkflowBusinessItem) {
   if (item.source === 'dynamic_record') return '表单记录';
   if (item.source === 'workflow_instance') return '流程实例';
   return item.source;
+}
+
+function currentAssigneeLabel(item: WorkflowBusinessItem) {
+  const assignees = item.current_assignees || item.workflow?.current_assignees || [];
+  if (!assignees.length) return item.status === 'done' ? '已完成' : '-';
+  return assignees.map((assignee) => assignee.name || assignee.username || `用户 #${assignee.id}`).join('、');
+}
+
+function workflowCardPrimaryFields(item: WorkflowBusinessItem) {
+  const fields = Array.isArray(item.fields) ? item.fields : [];
+  return fields
+    .slice(0, 4)
+    .map((field) => ({
+      key: field.field_name,
+      label: field.label || field.field_name,
+      value: formatValue(field.value),
+    }));
+}
+
+function workflowStatusClass(status: string) {
+  return `workflow-status-${statusMeta[status] ? status : 'default'}`;
 }
 
 export default function WorkflowPage() {
@@ -188,7 +276,13 @@ export default function WorkflowPage() {
       { label: '业务表单', value: selectedItem.form?.name || '未绑定表单' },
       { label: '记录编号', value: selectedItem.record?.id ? `#${selectedItem.record.id}` : '-' },
       { label: '当前节点', value: selectedItem.current_node || statusMeta[selectedItem.status].description },
+      { label: '当前处理人', value: currentAssigneeLabel(selectedItem) },
     ];
+    const detailFields = fields.map((field) => ({
+      ...field,
+      label: field.label || field.field_name,
+      value: fieldNewValue(field),
+    }));
     const timelineItems = [
       {
         color: selectedItem.status === 'returned' ? 'red' : selectedItem.status === 'done' ? 'green' : 'blue',
@@ -204,9 +298,21 @@ export default function WorkflowPage() {
         children: (
           <div className="workflow-step-item">
             <strong>{approval.node_id || '审批节点'}</strong>
-            <span>{approval.action ? `${approval.action} · ${formatTime(approval.acted_at)}` : '等待处理'}</span>
+            <span>{approval.action ? `${approval.approver_name || '处理人'} ${approval.action} · ${formatTime(approval.acted_at)}` : `等待 ${approval.approver_name || '处理人'} 处理`}</span>
           </div>
         ),
+      }))),
+    ];
+    const operationLogs = [
+      {
+        title: '发起申请',
+        meta: selectedItem.form?.name || '业务表单',
+        description: formatTime(selectedItem.created_at),
+      },
+      ...((selectedItem.workflow?.approvals || []).map((approval) => ({
+        title: approval.action ? (approval.action === 'approve' ? '审批通过' : approval.action) : '等待处理',
+        meta: approval.node_id || '审批节点',
+        description: approval.acted_at ? formatTime(approval.acted_at) : `等待 ${approval.approver_name || '处理人'} 处理`,
       }))),
     ];
 
@@ -222,7 +328,9 @@ export default function WorkflowPage() {
           </div>
           <Tag color={statusMeta[selectedItem.status].color}>{statusMeta[selectedItem.status].label}</Tag>
         </div>
-        <div className="workflow-approval-stamp">{sourceLabel(selectedItem)}</div>
+        <div className={`workflow-approval-stamp ${workflowStatusClass(selectedItem.status)}`}>
+          {statusMeta[selectedItem.status].label}
+        </div>
         <Tabs
           className="workflow-detail-tabs"
           items={[
@@ -231,24 +339,25 @@ export default function WorkflowPage() {
               label: '表单数据',
               children: (
                 <div className="workflow-tab-page">
-                  <Form layout="vertical" className="workflow-business-form">
-                    <Row gutter={12}>
-                      {metaFields.map((field) => (
-                        <Col xs={24} md={12} key={field.label}>
-                          <Form.Item label={field.label}>
-                            <Input value={formatValue(field.value)} readOnly />
-                          </Form.Item>
-                        </Col>
+                  <section className="workflow-business-sheet">
+                    <div className="workflow-business-sheet-grid">
+                      {detailFields.map((field) => (
+                        <div className="workflow-business-sheet-cell" key={field.label}>
+                          <span className="workflow-business-sheet-label">
+                            {field.required ? <em>*</em> : null}
+                            {field.label}
+                          </span>
+                          {renderBusinessFieldValue(field)}
+                        </div>
                       ))}
-                      {fields.map((field) => (
-                        <Col xs={24} md={12} key={field.field_name}>
-                          <Form.Item label={field.label || field.field_name}>
-                            <Input value={formatValue(field.value)} readOnly />
-                          </Form.Item>
-                        </Col>
-                      ))}
-                    </Row>
-                  </Form>
+                    </div>
+                    <div className="workflow-business-sheet-footer">
+                      <button type="button"><HistoryOutlined />审批历史</button>
+                      <button type="button"><FileSearchOutlined />历史版本</button>
+                      <button type="button"><ClockCircleOutlined />操作日志</button>
+                      <button type="button"><FormOutlined />发布记录</button>
+                    </div>
+                  </section>
                 </div>
               ),
             },
@@ -272,11 +381,29 @@ export default function WorkflowPage() {
                     <div className="workflow-form-section-title">后台流程轨迹</div>
                     <Timeline items={timelineItems} />
                   </div>
+                  <div className="workflow-operation-log-card">
+                    <div className="workflow-form-section-title">操作日志</div>
+                    <div className="workflow-operation-log-list">
+                      {operationLogs.map((log, index) => (
+                        <div className="workflow-operation-log-row" key={`${log.title}-${index}`}>
+                          <strong>{log.title}</strong>
+                          <span>{log.meta}</span>
+                          <time>{log.description}</time>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ),
             },
           ]}
         />
+        <div className="workflow-detail-footer">
+          <button type="button"><HistoryOutlined />审批历史</button>
+          <button type="button"><FileSearchOutlined />历史版本</button>
+          <button type="button"><ClockCircleOutlined />操作日志</button>
+          <button type="button"><FormOutlined />发布记录</button>
+        </div>
       </div>
     );
   };
@@ -314,30 +441,33 @@ export default function WorkflowPage() {
       <div className="workflow-approval-list">
         {loading ? (
           <div className="workflow-empty-state">正在读取后台表单数据...</div>
-        ) : filteredItems.length ? filteredItems.map((item) => (
-          <button className="workflow-approval-card" key={item.id} onClick={() => openWorkflowDetail(item)}>
-            <div className="workflow-approval-card-main">
-              <div className="workflow-approval-card-title">
-                <strong>{item.title}</strong>
-                <Tag>{sourceLabel(item)}</Tag>
+        ) : filteredItems.length ? filteredItems.map((item) => {
+          const primaryFields = workflowCardPrimaryFields(item);
+          return (
+            <button className="workflow-approval-card" key={item.id} onClick={() => openWorkflowDetail(item)}>
+              <div className="workflow-approval-card-main">
+                <div className="workflow-approval-card-primary">
+                  {primaryFields.length ? primaryFields.map((field) => (
+                    <span key={field.key}>
+                      <small>{field.label}</small>
+                      <strong>{field.value}</strong>
+                    </span>
+                  )) : (
+                    <strong>{item.title}</strong>
+                  )}
+                </div>
+                <div className="workflow-approval-card-meta">
+                  <span>应用：{item.application?.name || '未绑定应用'}</span>
+                  <span>表单：{item.form?.name || '未绑定表单'}</span>
+                  <span>申请时间：{formatTime(item.created_at || item.updated_at)}</span>
+                </div>
               </div>
-              <p>{item.summary || '来自后台业务表单数据'}</p>
-              <div className="workflow-approval-card-fields">
-                <span><small>所属应用</small><strong>{item.application?.name || '未绑定应用'}</strong></span>
-                <span><small>业务表单</small><strong>{item.form?.name || '未绑定表单'}</strong></span>
-                <span><small>当前节点</small><strong>{item.current_node || statusMeta[item.status].label}</strong></span>
-                <span><small>记录编号</small><strong>{item.record?.id ? `#${item.record.id}` : '-'}</strong></span>
+              <div className="workflow-approval-card-side">
+                <Tag className="workflow-approval-card-status" color={statusMeta[item.status].color}>{statusMeta[item.status].label}</Tag>
               </div>
-            </div>
-            <div className="workflow-approval-card-side">
-              <Tag color={statusMeta[item.status].color}>{statusMeta[item.status].label}</Tag>
-              <small>{formatTime(item.updated_at || item.created_at)}</small>
-              <Button size="small" type={item.status === 'pending' ? 'primary' : 'default'} disabled={!item.route_path}>
-                {item.route_path ? '打开表单' : '查看'} <RightOutlined />
-              </Button>
-            </div>
-          </button>
-        )) : (
+            </button>
+          );
+        }) : (
           <Empty description="后台暂时没有符合当前状态的表单记录" />
         )}
       </div>
@@ -352,7 +482,6 @@ export default function WorkflowPage() {
         extra={selectedItem ? (
           <Space size={6}>
             <Button size="small" disabled={!selectedItem.route_path} onClick={() => openSourceRecord(selectedItem)}>打开表单</Button>
-            <Button size="small">操作日志</Button>
           </Space>
         ) : null}
       >

@@ -13,6 +13,10 @@ class _SemanticFakeProvider:
         return ChatResult(provider="glm", model="semantic-test", content=self.content, usage={"mode": "test"})
 
 
+def _tenant_user() -> dict:
+    return {"sub": "agent-test", "tenant_id": 1, "is_admin": True, "roles": [{"name": "admin"}]}
+
+
 @pytest.mark.asyncio
 async def test_glm_provider_requires_api_key():
     from app.services.ai.providers import ProviderConfigurationError, make_provider
@@ -27,17 +31,12 @@ async def test_glm_provider_requires_api_key():
 
 
 @pytest.mark.asyncio
-async def test_mock_provider_returns_embeddings():
-    from app.services.ai.providers import make_provider
+async def test_mock_provider_is_rejected_by_schema():
     from app.services.ai.schemas import AIProviderConfig
+    from pydantic import ValidationError
 
-    provider = make_provider(AIProviderConfig(provider="mock", embedding_model="mock-embedding"))
-    result = await provider.embed(["material application process"])
-
-    assert result.provider == "mock"
-    assert result.model == "mock-embedding"
-    assert len(result.embeddings) == 1
-    assert len(result.embeddings[0]) == 16
+    with pytest.raises(ValidationError):
+        AIProviderConfig(provider="mock", embedding_model="mock-embedding")
 
 
 @pytest.mark.asyncio
@@ -45,7 +44,7 @@ async def test_agent_returns_confirmed_draft_skill():
     from app.services.ai.orchestrator import run_agent
     from app.services.ai.schemas import AgentRequest
 
-    result = await run_agent(AgentRequest(message="生成维修工单草稿"))
+    result = await run_agent(AgentRequest(message="生成维修工单草稿"), user=_tenant_user())
 
     assert result.mode == "qa"
     assert result.requires_confirmation is False
@@ -60,7 +59,7 @@ async def test_agent_returns_confirmed_draft_after_guided_requirements():
     from app.services.ai.orchestrator import run_agent
     from app.services.ai.schemas import AgentRequest
 
-    result = await run_agent(AgentRequest(message="为设备 CNC-17 生成维修工单草稿，主轴振动异常，优先级高，48 小时内处理"))
+    result = await run_agent(AgentRequest(message="为设备 CNC-17 生成维修工单草稿，主轴振动异常，优先级高，48 小时内处理"), user=_tenant_user())
 
     assert result.mode == "assisted"
     assert result.requires_confirmation is True
@@ -76,14 +75,14 @@ async def test_agent_continues_pending_action_slot_state():
     from app.services.ai.orchestrator import run_agent
     from app.services.ai.schemas import AgentRequest
 
-    first = await run_agent(AgentRequest(message="生成维修工单草稿"))
+    first = await run_agent(AgentRequest(message="生成维修工单草稿"), user=_tenant_user())
     assert first.action_state
     assert first.action_state["status"] == "collecting"
 
     second = await run_agent(AgentRequest(
         message="设备 A 出现故障异常，优先级高，48 小时内处理",
         context={"pendingActionState": first.action_state},
-    ))
+    ), user=_tenant_user())
 
     assert second.requires_confirmation is True
     assert second.action_state
@@ -99,14 +98,14 @@ async def test_low_code_adjustment_updates_confirmation_payload():
 
     first = await run_agent(AgentRequest(
         message="帮我新建一个物料主数据表单，字段包括物料编码、物料名称、物料类型、安全库存；物料编码和物料名称必填；创建菜单入口",
-    ))
+    ), user=_tenant_user())
     assert first.requires_confirmation is True
     assert first.action_state
 
     second = await run_agent(AgentRequest(
         message="请调整刚才的 Low-code form creation plan：表单名称改成阀类物料主数据",
         context={"pendingActionState": first.action_state},
-    ))
+    ), user=_tenant_user())
 
     assert second.requires_confirmation is True
     assert second.action_state
@@ -121,7 +120,7 @@ async def test_generic_draft_payload_uses_action_contract_slots():
 
     result = await run_agent(AgentRequest(
         message="create maintenance work order draft for equipment CNC-17, problem spindle vibration, priority high due in 8 hours",
-    ))
+    ), user=_tenant_user())
 
     assert result.requires_confirmation is True
     assert result.actions[0].skill == "maintenance.create_work_order_draft"
@@ -278,7 +277,7 @@ async def test_context_builder_masks_sensitive_context_before_prompt():
             message="check this",
             context={"semanticContext": {"records": [{"api_key": "sk-test-secret"}]}},
         ),
-        user={"sub": "admin", "is_admin": True},
+        user={"sub": "admin", "tenant_id": 1, "is_admin": True},
         settings={"safetyPolicy": {"sensitiveMasking": True}},
     )
 
@@ -319,6 +318,151 @@ async def test_tool_executor_respects_configured_timeout(monkeypatch):
     assert run["tool_results"][0]["status"] == "failed"
     assert run["tool_results"][0]["error"] == "Tool execution exceeded 1 seconds"
     assert audit_events[0][0] == "agent_tool_timeout"
+
+
+@pytest.mark.asyncio
+async def test_tool_envelope_pre_hook_abort_generates_validation_item():
+    from app.services.ai.events import AgentEvent, EventBus, HookResult
+    from app.services.ai.tool_envelope import tool_execution_envelope
+
+    bus = EventBus()
+
+    async def blocker(event, payload):
+        return HookResult(action="abort", reason="blocked by test hook")
+
+    bus.on(AgentEvent.PRE_TOOL_USE, blocker)
+    result = await tool_execution_envelope.execute_tool(
+        tool_name="knowledge.search",
+        payload={"query": "quality", "limit": 1},
+        current_user={"sub": "admin", "tenant_id": 1, "is_admin": True},
+        settings={"safetyPolicy": {"enabledHooks": ["validate_before_tool"]}},
+        event_bus=bus,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "blocked by test hook"
+    assert any(item["type"] == "validation" and item["status"] == "failed" for item in result["items"])
+
+
+@pytest.mark.asyncio
+async def test_tool_envelope_pre_hook_can_modify_payload():
+    from app.services.ai.events import AgentEvent, EventBus, HookResult
+    from app.services.ai.tool_envelope import tool_execution_envelope
+
+    bus = EventBus()
+
+    async def modifier(event, payload):
+        return HookResult(action="modify", modified_payload={"payload": {"limit": 7}})
+
+    async def callback(payload):
+        return {"status": "completed", "result": {"seen": payload}}
+
+    bus.on(AgentEvent.PRE_TOOL_USE, modifier)
+    result = await tool_execution_envelope.execute_callable(
+        tool_name="forms.query_records",
+        skill_name="analysis.analyze_form_records",
+        payload={"limit": 1},
+        current_user={"sub": "admin", "is_admin": True},
+        callback=callback,
+        settings={"safetyPolicy": {"enabledHooks": ["validate_before_tool", "validate_after_tool"]}},
+        event_bus=bus,
+    )
+
+    assert result["status"] == "completed"
+    assert result["result"]["seen"] == {"limit": 7}
+    assert [item["type"] for item in result["items"]].count("validation") >= 2
+
+
+def test_confirmation_validation_error_blocks_token():
+    from app.services.ai.agent_runs import create_agent_run
+    from app.services.ai.schemas import AgentRequest, AgentResponse
+
+    response = AgentResponse(answer="Need confirmation", requires_confirmation=True, mode="assisted")
+    run = create_agent_run(AgentRequest(message="confirm empty"), response, {"sub": "admin"})
+
+    assert run["status"] == "failed"
+    assert response.requires_confirmation is False
+    assert not response.confirmation_payload
+    assert any(item["type"] == "validation" and item["status"] == "failed" for item in response.items)
+
+
+def test_confirmation_validation_warning_enters_checklist(monkeypatch):
+    from app.services.ai.agent_runs import create_agent_run
+    from app.services.ai.schemas import AgentRequest, AgentResponse, SkillAction
+
+    monkeypatch.setattr(
+        "app.services.ai.agent_runs.settings_snapshot",
+        lambda: {
+            "safetyPolicy": {
+                "enabledHooks": ["validate_before_confirmation"],
+                "validationRules": [
+                    {
+                        "phase": "pre_confirmation",
+                        "tool": "forms.create_form_definition",
+                        "severity": "warning",
+                        "ruleType": "field_required",
+                        "field": "form.name",
+                        "message": "Form name should be reviewed",
+                    }
+                ],
+            }
+        },
+    )
+    response = AgentResponse(
+        answer="Need confirmation",
+        requires_confirmation=True,
+        risk_level="high",
+        mode="assisted",
+        actions=[
+            SkillAction(
+                skill="low_code.create_form_definition",
+                title="Create form",
+                risk_level="high",
+                payload={"form": {}, "fields": [], "_contract": {"tool": "forms.create_form_definition"}},
+            )
+        ],
+    )
+    run = create_agent_run(AgentRequest(message="create form"), response, {"sub": "admin"})
+    confirmation = next(item["payload"] for item in run["items"] if item["type"] == "confirmation")
+
+    assert run["status"] == "waiting_confirmation"
+    assert confirmation["confirmation_token"].startswith("confirm-")
+    assert confirmation["checklist"][0]["message"] == "Form name should be reviewed"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_action_post_validation_failure_marks_run_failed(monkeypatch):
+    from app.services.ai.tool_executor import AgentToolExecutor
+
+    executor = AgentToolExecutor()
+
+    async def fake_execute_action(**kwargs):
+        return {"status": "completed", "result": {"ok": True}}
+
+    async def noop_update(**kwargs):
+        return None
+
+    async def noop_persist(*args, **kwargs):
+        return {"draft_id": "draft-test"}
+
+    monkeypatch.setattr(executor, "_execute_action", fake_execute_action)
+    run = await executor.execute_confirmed_run(
+        {
+            "run_id": "run-post-validation",
+            "status": "confirmed",
+            "actions": [{"skill": "demo.dynamic", "payload": {"_contract": {"tool": "forms.create_dynamic_record_draft"}}}],
+            "items": [],
+        },
+        current_user={"sub": "admin", "is_admin": True},
+        persist_ai_draft=noop_persist,
+        update_ai_draft_status=noop_update,
+        audit_ai_event=None,
+        settings={"safetyPolicy": {"enabledHooks": ["validate_before_tool", "validate_after_tool"]}},
+    )
+
+    assert run["status"] == "failed"
+    assert run["tool_results"][0]["status"] == "failed"
+    assert any(item["type"] == "validation" and item["status"] == "failed" for item in run["items"])
 
 
 def test_form_record_analysis_summarizes_visible_records():
@@ -468,11 +612,12 @@ async def test_semantic_planner_cleans_form_name_particle(monkeypatch):
             '"formName":"物料主数据把","fields":[],"menu":{},"confidence":0.91,"reason":"rename requested"}'
         ),
     )
+    monkeypatch.setattr(semantic_planner, "_is_model_available", lambda config: True)
 
     plan = await semantic_planner.plan_agent_turn_semantic(
         "表单名称改成物料主数据把",
         {"pendingActionState": {"skill": "low_code.create_form_definition", "collected_slots": {"formName": "旧表单"}}},
-        provider_config=AIProviderConfig(provider="glm", api_key="semantic-key", chat_model="glm-5.1"),
+        provider_config=AIProviderConfig(provider="glm", chat_model="glm-5.1"),
     )
 
     assert plan.intent == "action"
@@ -495,6 +640,7 @@ async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
             '"field_type":"string","required":false}],"menu":{},"confidence":0.93,"reason":"add one field"}'
         ),
     )
+    monkeypatch.setattr(semantic_planner, "_is_model_available", lambda config: True)
 
     pending = {
         "status": "ready_for_confirmation",
@@ -516,8 +662,9 @@ async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
         AgentRequest(
             message="新增一个字段：供应商等级",
             context={"pendingActionState": pending},
-            provider_config=AIProviderConfig(provider="glm", api_key="semantic-key", chat_model="glm-5.1"),
-        )
+            provider_config=AIProviderConfig(provider="glm", chat_model="glm-5.1"),
+        ),
+        user=_tenant_user(),
     )
 
     assert result.requires_confirmation is True

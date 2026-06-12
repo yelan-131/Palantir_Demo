@@ -59,10 +59,6 @@ def decide_ai_permission(
     domain: str | None = None,
     risk_level: str = "low",
 ) -> AIPermissionDecision:
-    if user.get("_anonymous"):
-        if settings.get("guestAccess", "disabled") == "disabled":
-            return AIPermissionDecision(allowed=False, reason="Guest access to AI is disabled", capability=capability)
-
     if skill and (skill in FORBIDDEN_SKILLS or skill in set(settings.get("forbiddenActions", []))):
         return AIPermissionDecision(allowed=False, reason="Action is disabled by AI safety policy", capability=capability)
 

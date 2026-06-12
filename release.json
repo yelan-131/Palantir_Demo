@@ -1,25 +1,25 @@
 {
-  "version": "0.3.7",
-  "released_at": "2026-06-10",
-  "title": "对象关系中心、数据源元数据与运行态应用增强",
-  "summary": "0.3.7 聚焦对象与关系中心持久化、外部数据源元数据扫描、动态应用运行态渲染、流程待办聚合、账号头像和系统管理体验刷新。",
+  "version": "0.3.8",
+  "released_at": "2026-06-12",
+  "title": "Agent 工具协议、物理表单与本体映射增强",
+  "summary": "0.3.8 聚焦 AI Agent items/tool-use 协议、运行时配置、确认与预算治理、物理表单表、数据质量规则、Agent 注册表、编码序列和本体映射布局。",
   "highlights": [
-    "对象与关系中心支持持久化对象、字段、关系、映射、候选审核、版本发布和发布日志。",
-    "数据源支持元数据扫描、表字段画像、样例行、同步状态和从元数据生成本体候选。",
-    "语义资产中心整合外部数据资产、应用数据库表和制造业演示资产，形成统一数据资产目录。",
-    "动态应用页面支持从服务端运行态定义渲染业务表单和分析看板。",
-    "流程中心支持跨应用、表单、记录和状态的统一业务待办列表与源记录跳转。",
-    "账号中心和身份管理支持用户头像 URL，并刷新用户、角色、组织和管理页面交互。"
+    "AI Agent 增强 items 协议、tool-use loop、事件、hook、上下文层、压缩、预算和工具结果处理链路。",
+    "新增运行时配置、生产错误处理、权限解析、租户上下文和确认存储，让 Agent 写入路径更可审计。",
+    "低代码表单支持物理表、编码序列和配置种子，动态记录与表单引擎边界更清晰。",
+    "新增数据质量规则与本体映射布局迁移，语义资产中心可承载更完整的映射、候选和布局信息。",
+    "新增 AI Agent 注册表表结构和 data/agent_registry 配置，为技能、工具、hook 和租户策略提供可版本化来源。",
+    "前端补强 AI 工作区、表单设计器、语义资产中心、工作流、账号中心和淘宝原型页体验。"
   ],
   "details": [
-    "新增 0027_ontology_center 和 0028_user_avatar_url 迁移，扩展本体、元数据和用户头像相关数据表。",
-    "新增 metadata_scan_service、ontology_candidate_service 和 ontology_service，承接扫描、候选、审核、映射、发布和影响分析逻辑。",
-    "扩展 semantic-assets 与 data-sources API，支持数据资产扫描、候选生成、候选审批、对象/关系维护、版本发布和映射查询。",
-    "优化表单发布、版本预览、应用表单绑定、菜单节点、布局、动作、权限、流程绑定和动态记录运行态行为。",
-    "优化 App Programs 和 Workflow 前端，让配置化业务应用、分析看板和流程待办直接消费服务端运行态数据。",
-    "刷新 Semantic Asset Center、Form Settings、Account Center、User/Role/Organization/Admin 等页面的企业工作台体验。",
-    "更新知识资产示例和演示脚本，补充外部数据源、业务表单物化、配置修复和身份数据种子工具。",
-    "生产部署已同步 GitHub 与服务器，服务端数据库迁移到 0028_user_avatar_url。"
+    "新增 0029_form_physical_tables、0030_seed_platform_config、0031_role_is_active、0032_data_quality_rules、0033_ai_agent_items_protocol、0034_ai_agent_registry_tables、0035_form_code_sequences 和 0036_ontology_mapping_layouts 迁移。",
+    "新增 Agent items、tool envelope、tool loader、tool handlers、tool-use loop、tool result processor、events、hooks、budget、compactor、context layers、permission resolver 和 confirmation store 服务及测试。",
+    "新增 form_engine API 模块、runtime_config、production_errors、semantic mapping service 和 ontology AI candidate service，整理生产运行边界。",
+    "扩展 AI Assistant、知识库、语义资产、图谱、表单、工作流、应用、认证和管理 API，以支撑更稳定的多租户演示路径。",
+    "前端更新 App Programs、Dynamic Page、Form Settings、Semantic Asset Center、Workflow、Account Center、Login 和共享样式。",
+    "新增淘宝原型页面、统一日期时间工具和 Agent 注册表数据目录；清理根目录 OGSM 生成稿。",
+    "更新测试覆盖 AI 工具循环、上下文层、hook、预算、确认存储、权限解析、运行时配置、工具加载和结果处理。",
+    "版本信息同步到 release.json、backend/release.json、backend APP_VERSION、frontend package metadata、README 和文档索引。"
   ],
   "show_popup": true
 }

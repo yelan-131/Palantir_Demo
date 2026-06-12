@@ -15,6 +15,7 @@ from app.config import settings
 from app.core.audit import write_audit_log
 from app.core.logging import get_logger
 from app.core.security import create_access_token, hash_password, verify_password
+from app.core.production_errors import database_unavailable
 from app.services.iam import (
     add_password_history,
     build_oidc_login_url,
@@ -43,6 +44,7 @@ router = APIRouter()
 class LoginRequest(BaseModel):
     username: str
     password: str
+    tenant_id: Optional[int] = None
     mfa_code: Optional[str] = None
 
 
@@ -72,6 +74,9 @@ class MfaVerifyRequest(BaseModel):
 
 class OidcLoginRequest(BaseModel):
     redirect_uri: Optional[str] = None
+    tenant_id: Optional[int] = None
+    tenant_slug: Optional[str] = None
+    login_hint: Optional[str] = None
 
 
 class OidcCallbackRequest(BaseModel):
@@ -79,137 +84,6 @@ class OidcCallbackRequest(BaseModel):
     state: str
     redirect_uri: Optional[str] = None
 
-
-_MOCK_USERS_RAW = [
-    {
-        "id": 1,
-        "username": "admin",
-        "display_name": "系统管理员",
-        "email": "admin@manufoundry.local",
-        "is_active": True,
-        "is_admin": True,
-        "plain_password": "admin123",
-        "roles": [{"id": 1, "name": "admin", "label": "管理员"}],
-    },
-    {
-        "id": 1002,
-        "username": "zhangsan",
-        "display_name": "张三",
-        "email": "zhangsan@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 2, "name": "production_manager", "label": "生产主管"}],
-    },
-    {
-        "id": 1003,
-        "username": "lisi",
-        "display_name": "李四",
-        "email": "lisi@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 3, "name": "quality_inspector", "label": "质检员"}],
-    },
-    {
-        "id": 4,
-        "username": "pm_li",
-        "display_name": "李明 · 生产经理",
-        "email": "pm.li@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [
-            {"id": 2, "name": "production_manager", "label": "生产经理"},
-            {"id": 11, "name": "approval_lead", "label": "审批负责人"},
-        ],
-    },
-    {
-        "id": 5,
-        "username": "qe_wang",
-        "display_name": "王敏 · 质量工程师",
-        "email": "qe.wang@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 4, "name": "quality_engineer", "label": "质量工程师"}],
-    },
-    {
-        "id": 6,
-        "username": "mm_zhou",
-        "display_name": "周强 · 设备维护经理",
-        "email": "mm.zhou@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 5, "name": "maintenance_manager", "label": "设备维护经理"}],
-    },
-    {
-        "id": 7,
-        "username": "me_sun",
-        "display_name": "孙浩 · 维修工程师",
-        "email": "me.sun@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 6, "name": "maintenance_engineer", "label": "维修工程师"}],
-    },
-    {
-        "id": 8,
-        "username": "pe_huang",
-        "display_name": "黄婷 · 工艺工程师",
-        "email": "pe.huang@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 7, "name": "process_engineer", "label": "工艺工程师"}],
-    },
-    {
-        "id": 9,
-        "username": "scm_liu",
-        "display_name": "刘洋 · 供应链经理",
-        "email": "scm.liu@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 8, "name": "supply_chain_manager", "label": "供应链经理"}],
-    },
-    {
-        "id": 10,
-        "username": "wh_feng",
-        "display_name": "冯宇 · 仓储操作员",
-        "email": "wh.feng@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 9, "name": "warehouse_operator", "label": "仓储操作员"}],
-    },
-    {
-        "id": 11,
-        "username": "ds_he",
-        "display_name": "何静 · 数据专员",
-        "email": "ds.he@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 10, "name": "data_steward", "label": "数据专员"}],
-    },
-    {
-        "id": 12,
-        "username": "auditor_gu",
-        "display_name": "顾安 · 审计观察员",
-        "email": "auditor.gu@manufoundry.local",
-        "is_active": True,
-        "is_admin": False,
-        "plain_password": "123456",
-        "roles": [{"id": 12, "name": "viewer", "label": "只读观察员"}],
-    },
-]
-
-_MOCK_USERS = [
-    {**u, "hashed_password": hash_password(u.pop("plain_password"))}
-    for u in [dict(u) for u in _MOCK_USERS_RAW]
-]
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -230,7 +104,7 @@ def _build_token_and_user(
     is_admin: bool,
     user_payload: dict,
     *,
-    tenant_id: int = 1,
+    tenant_id: int,
     session_id: Optional[str] = None,
 ) -> dict:
     extra = {"uid": uid, "is_admin": is_admin, "tenant_id": tenant_id}
@@ -272,6 +146,41 @@ def _user_payload(user, roles: list[dict]) -> dict:
     }
 
 
+async def _ensure_active_tenant(db: AsyncSession, tenant_id: int):
+    if not isinstance(tenant_id, int) or tenant_id <= 0:
+        raise HTTPException(422, "Invalid tenant_id")
+
+    from app.models.relational import Tenant
+
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(404, "Tenant not found")
+    if tenant.status != "active":
+        raise HTTPException(403, "Tenant is not active")
+    return tenant
+
+
+async def _resolve_oidc_login_tenant(db: AsyncSession, body: OidcLoginRequest):
+    if body.tenant_id is not None:
+        return await _ensure_active_tenant(db, body.tenant_id)
+
+    if body.tenant_slug:
+        from app.models.relational import Tenant
+
+        slug = body.tenant_slug.strip().lower()
+        tenant = await db.scalar(select(Tenant).where(Tenant.slug == slug))
+        if not tenant:
+            raise HTTPException(404, "Tenant not found")
+        if tenant.status != "active":
+            raise HTTPException(403, "Tenant is not active")
+        return tenant
+
+    if body.login_hint:
+        return await resolve_tenant_by_email(db, body.login_hint)
+
+    raise HTTPException(400, "Tenant identity required for OIDC login")
+
+
 async def _db_login(db: AsyncSession, body: LoginRequest, request: Request) -> Optional[dict]:
     try:
         from app.models.relational import User
@@ -284,33 +193,39 @@ async def _db_login(db: AsyncSession, body: LoginRequest, request: Request) -> O
 
     try:
         login_name = body.username.strip().lower()
+        username = body.username.strip()
         tenant_id: int | None = None
-        if "@" in login_name:
+        if body.tenant_id is not None:
+            tenant = await _ensure_active_tenant(db, body.tenant_id)
+            tenant_id = tenant.id
+            user = await db.scalar(
+                select(User).where(
+                    User.tenant_id == tenant_id,
+                    (User.email == login_name) | (User.username == username),
+                )
+            )
+        elif "@" in login_name:
             tenant = await resolve_tenant_by_email(db, login_name)
             tenant_id = tenant.id
             user = await db.scalar(
                 select(User).where(User.tenant_id == tenant_id, (User.email == login_name) | (User.username == login_name))
             )
         else:
-            user = await db.scalar(select(User).where(User.username == body.username))
+            users = (await db.execute(select(User).where(User.username == username).limit(2))).scalars().all()
+            if len(users) > 1:
+                raise HTTPException(400, "Username login is ambiguous; use email address or tenant_id")
+            user = users[0] if users else None
     except Exception as exc:
         if isinstance(exc, HTTPException):
             raise
-        if settings.IS_PRODUCTION:
-            raise HTTPException(503, "Authentication database unavailable") from exc
-        logger.warning("Auth DB query failed (falling back to mock): %s", exc)
-        return None
+        raise database_unavailable("Authentication database unavailable") from exc
 
     if not user:
         return None
-    tenant_id = tenant_id or getattr(user, "tenant_id", None) or 1
-    try:
-        from app.models.relational import Tenant
-        tenant = await db.get(Tenant, tenant_id)
-        if tenant and tenant.status != "active":
-            raise HTTPException(403, "Tenant is not active")
-    except HTTPException:
-        raise
+    tenant_id = tenant_id or getattr(user, "tenant_id", None)
+    if not isinstance(tenant_id, int) or tenant_id <= 0:
+        raise HTTPException(403, "Tenant context required")
+    await _ensure_active_tenant(db, tenant_id)
     if not user.is_active:
         raise HTTPException(401, "Invalid credentials")
     if getattr(user, "locked_until", None) and user.locked_until > datetime.utcnow():
@@ -358,28 +273,6 @@ async def _db_login(db: AsyncSession, body: LoginRequest, request: Request) -> O
     )
 
 
-def _mock_login(body: LoginRequest) -> dict:
-    for u in _MOCK_USERS:
-        if u["username"] == body.username and verify_password(body.password, u["hashed_password"]):
-            return _build_token_and_user(
-                u["id"],
-                u["username"],
-                u["is_admin"],
-                {
-                    "id": u["id"],
-                    "username": u["username"],
-                    "display_name": u["display_name"],
-                    "email": u["email"],
-                    "is_admin": u["is_admin"],
-                    "roles": u["roles"],
-                    "mfa_enabled": False,
-                    "force_password_change": False,
-                },
-                tenant_id=1,
-            )
-    raise HTTPException(401, "Invalid credentials")
-
-
 @router.post("/login")
 async def login(
     body: LoginRequest,
@@ -399,23 +292,12 @@ async def login(
                 new_values={"username": body.username, "source": "database"},
             )
         return db_result
-    if settings.IS_PRODUCTION:
-        await write_audit_log(
-            action="login_failed",
-            resource_type="auth",
-            new_values={"username": body.username, "reason": "invalid_credentials"},
-        )
-        raise HTTPException(401, "Invalid credentials")
-    result = _mock_login(body)
-    _set_auth_cookie(response, result["token"])
     await write_audit_log(
-        action="login_success",
+        action="login_failed",
         resource_type="auth",
-        user_id=result["user"].get("id"),
-        tenant_id=result["user"].get("tenant_id"),
-        new_values={"username": body.username, "source": "mock"},
+        new_values={"username": body.username, "reason": "invalid_credentials"},
     )
-    return result
+    raise HTTPException(401, "Invalid credentials")
 
 
 @router.post("/logout")
@@ -440,17 +322,6 @@ async def logout(
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if user.get("_anonymous"):
-        return {
-            "id": 0,
-            "username": "guest",
-            "display_name": "访客",
-            "email": "",
-            "is_admin": False,
-            "roles": [],
-            "tenant_id": 1,
-        }
-
     username = user.get("sub")
     try:
         from app.models.relational import Tenant, User, UserOrgMembership
@@ -473,26 +344,8 @@ async def get_me(user: dict = Depends(get_current_user), db: AsyncSession = Depe
             payload["org_unit_ids"] = [int(item[0]) for item in org_rows.fetchall()]
             return payload
     except Exception as exc:
-        if settings.IS_PRODUCTION:
-            raise HTTPException(503, "Authentication database unavailable") from exc
-        logger.debug("/me DB lookup failed, using mock: %s", exc)
+        raise database_unavailable("Authentication database unavailable") from exc
 
-    if settings.IS_PRODUCTION:
-        raise HTTPException(401, "User not found")
-
-    for mock_user in _MOCK_USERS:
-        if mock_user["username"] == username:
-            return {
-                "id": mock_user["id"],
-                "username": mock_user["username"],
-                "display_name": mock_user["display_name"],
-                "email": mock_user["email"],
-                "is_admin": mock_user["is_admin"],
-                "roles": mock_user["roles"],
-                "tenant_id": user.get("tenant_id") or 1,
-                "mfa_enabled": False,
-                "force_password_change": False,
-            }
     raise HTTPException(401, "User not found")
 
 
@@ -690,7 +543,8 @@ async def oidc_config(db: AsyncSession = Depends(get_db)):
 
 @router.post("/oidc/login-url")
 async def oidc_login_url(body: OidcLoginRequest, db: AsyncSession = Depends(get_db)):
-    payload = await build_oidc_login_url(db, tenant_id=1, redirect_uri=body.redirect_uri)
+    tenant = await _resolve_oidc_login_tenant(db, body)
+    payload = await build_oidc_login_url(db, tenant_id=tenant.id, redirect_uri=body.redirect_uri)
     await db.commit()
     return payload
 
@@ -714,7 +568,9 @@ async def oidc_callback(
     subject = claim_value(claims, config["subject_claim"])
     if not subject:
         raise HTTPException(400, "OIDC subject missing")
-    tenant_id = state.tenant_id or 1
+    tenant_id = state.tenant_id
+    if not isinstance(tenant_id, int) or tenant_id <= 0:
+        raise HTTPException(400, "OIDC state is missing tenant context")
     user = await db.scalar(select(User).where(User.tenant_id == tenant_id, User.sso_subject == subject))
     username = claim_value(claims, config["username_claim"], subject)
     email = claim_value(claims, config["email_claim"])

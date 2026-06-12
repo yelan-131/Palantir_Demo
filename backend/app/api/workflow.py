@@ -532,7 +532,7 @@ def _add_approval_notifications(db, tenant_id: int, approver_ids: list[int], tit
             is_read=False,
             resource_type="workflow_instance",
             resource_id=instance_id,
-            link="/workflow/my-approvals",
+            link="/workflow?tab=pending",
         ))
 
 
@@ -558,7 +558,7 @@ def _get_mock_instance_by_id(inst_id: int) -> Optional[dict]:
     return None
 
 
-WORKFLOW_VIEW_STATUSES = {"draft", "pending", "running", "done", "returned"}
+WORKFLOW_VIEW_STATUSES = {"draft", "pending", "running", "done", "returned", "rejected"}
 RECORD_STATUS_TO_VIEW_TAB = {
     "draft": "draft",
     "pending": "pending",
@@ -572,7 +572,7 @@ RECORD_STATUS_TO_VIEW_TAB = {
     "completed": "done",
     "closed": "done",
     "returned": "returned",
-    "rejected": "returned",
+    "rejected": "rejected",
 }
 
 
@@ -593,6 +593,31 @@ def _workflow_view_status(raw_status: Optional[str]) -> Optional[str]:
     if not raw_status:
         return None
     return RECORD_STATUS_TO_VIEW_TAB.get(str(raw_status).lower())
+
+
+def _workflow_view_status_for_user(inst, approvals: list, user: dict) -> Optional[str]:
+    raw_view_status = _workflow_view_status(inst.status)
+    if raw_view_status is None:
+        return None
+    user_id = current_user_id(user)
+    if not user_id or user.get("is_admin"):
+        return raw_view_status
+    is_initiator = inst.initiator_id == user_id
+    user_approvals = [approval for approval in approvals if approval.approver_id == user_id]
+    has_pending_for_user = any(approval.action is None for approval in user_approvals)
+    has_acted_by_user = any(approval.action is not None for approval in user_approvals)
+
+    if raw_view_status == "pending":
+        if has_pending_for_user:
+            return "pending"
+        if has_acted_by_user or is_initiator:
+            return "running"
+        return None
+    if raw_view_status in {"done", "returned", "rejected"} and (user_approvals or is_initiator):
+        return raw_view_status
+    if raw_view_status == "running" and (user_approvals or is_initiator):
+        return "running"
+    return None
 
 
 def _is_business_form(form) -> bool:
@@ -621,6 +646,10 @@ def _field_summary(fields: list, data: dict, *, limit: int = 4) -> list[dict]:
             "label": getattr(field, "label", None) or field_name,
             "value": value,
             "field_type": getattr(field, "field_type", "string"),
+            "required": bool(getattr(field, "required", False)),
+            "control_type": (getattr(field, "ui_config", None) or {}).get("controlType"),
+            "enum_values": getattr(field, "enum_values", None),
+            "ui_config": getattr(field, "ui_config", None) or {},
         })
         if len(values) >= limit:
             break
@@ -648,6 +677,12 @@ def _record_summary(fields: list, data: dict) -> str:
     return "；".join(parts) if parts else "暂无已填写字段"
 
 
+def _source_record_route(form, app: Optional[dict], record_id: int) -> str:
+    if getattr(form, "code", None):
+        return f"/program/{form.code}?recordId={record_id}"
+    return f"/dynamic/{form.id}?recordId={record_id}"
+
+
 async def _workflow_business_dataset(db, user: dict) -> dict:
     from app.models.relational import (
         Application,
@@ -658,6 +693,7 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         WorkflowApproval,
         WorkflowDef,
         WorkflowInstance,
+        User,
     )
 
     tenant_id = current_tenant_id(user)
@@ -789,14 +825,29 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         approvals_by_instance[inst.id] = (await db.execute(
             select(WorkflowApproval).where(WorkflowApproval.instance_id == inst.id).order_by(WorkflowApproval.id)
         )).scalars().all()
+    user_ids: set[int] = set()
+    for inst in workflow_instances:
+        state = _safe_json(inst.workflow_state, {})
+        current_assignee_ids = state.get("current_assignee_ids") if isinstance(state, dict) else []
+        if isinstance(current_assignee_ids, list):
+            user_ids.update(user_id for user_id in current_assignee_ids if isinstance(user_id, int))
+        for approval in approvals_by_instance.get(inst.id, []):
+            if isinstance(approval.approver_id, int):
+                user_ids.add(approval.approver_id)
+    users_by_id: dict[int, Any] = {}
+    if user_ids:
+        users = (await db.execute(
+            select(User).where(User.tenant_id == tenant_id, User.id.in_(user_ids))
+        )).scalars().all()
+        users_by_id = {user.id: user for user in users}
 
     for inst in workflow_instances:
-        view_status = _workflow_view_status(inst.status)
-        if view_status is None:
-            continue
         state = _safe_json(inst.workflow_state, {})
         form_data = _safe_json(inst.form_data, {})
         resource_id = state.get("resource_id")
+        variables = state.get("variables") if isinstance(state.get("variables"), dict) else {}
+        variable_form_id = variables.get("form_id")
+        variable_record_id = variables.get("record_id") or resource_id
         linked_record = records_by_id.get(resource_id) if isinstance(resource_id, int) else None
         if linked_record and linked_record.form_id in forms_by_id:
             form = forms_by_id[linked_record.form_id]
@@ -805,6 +856,20 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             apps = applications_by_form.get(form.id, [])
             primary_app = apps[0] if apps else None
             key = f"record:{linked_record.id}"
+            linked_record_payload = {"id": linked_record.id, "status": linked_record.status}
+            route_path = _source_record_route(form, primary_app, linked_record.id)
+        elif isinstance(variable_form_id, int) and variable_form_id in forms_by_id:
+            form = forms_by_id[variable_form_id]
+            fields = visible_fields_by_form.get(form.id, [])
+            data = form_data if isinstance(form_data, dict) else {}
+            apps = applications_by_form.get(form.id, [])
+            primary_app = apps[0] if apps else None
+            key = f"workflow:{inst.id}"
+            linked_record_payload = {
+                "id": variable_record_id,
+                "status": data.get("status") if isinstance(data, dict) else inst.status,
+            } if isinstance(variable_record_id, int) else None
+            route_path = _source_record_route(form, primary_app, variable_record_id) if isinstance(variable_record_id, int) else None
         else:
             form = None
             fields = []
@@ -812,11 +877,27 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             apps = []
             primary_app = None
             key = f"workflow:{inst.id}"
+            linked_record_payload = None
+            route_path = None
+        view_status = _workflow_view_status_for_user(inst, approvals_by_instance.get(inst.id, []), user)
+        if view_status is None:
+            continue
         wf_def = workflow_defs.get(inst.workflow_id)
         config = _safe_json(wf_def.config, {}) if wf_def else {}
         steps = config.get("steps") if isinstance(config, dict) else []
         current_step = state.get("current_step", 0) if isinstance(state, dict) else 0
         current_node = state.get("current_node") if isinstance(state, dict) else None
+        current_assignee_ids = state.get("current_assignee_ids") if isinstance(state, dict) else []
+        if not isinstance(current_assignee_ids, list):
+            current_assignee_ids = []
+        current_assignees = []
+        for assignee_id in current_assignee_ids:
+            user_row = users_by_id.get(assignee_id)
+            current_assignees.append({
+                "id": assignee_id,
+                "name": (user_row.display_name or user_row.username) if user_row else f"用户 #{assignee_id}",
+                "username": user_row.username if user_row else None,
+            })
         if isinstance(steps, list) and isinstance(current_step, int) and 0 <= current_step < len(steps):
             current_node = steps[current_step].get("name") or current_node
         item = {
@@ -829,26 +910,31 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             "application": primary_app,
             "applications": apps,
             "form": {"id": form.id, "name": form.name, "code": form.code} if form else None,
-            "record": {"id": linked_record.id, "status": linked_record.status} if linked_record else None,
+            "record": linked_record_payload,
             "workflow": {
                 "id": inst.id,
                 "workflow_id": inst.workflow_id,
                 "initiator_id": inst.initiator_id,
                 "approvals": [
                     {"id": approval.id, "node_id": approval.node_id, "approver_id": approval.approver_id,
+                     "approver_name": (
+                         users_by_id[approval.approver_id].display_name or users_by_id[approval.approver_id].username
+                     ) if approval.approver_id in users_by_id else None,
                      "action": approval.action, "comment": approval.comment,
                      "acted_at": approval.acted_at.isoformat() if approval.acted_at else None}
                     for approval in approvals_by_instance.get(inst.id, [])
                 ],
+                "current_assignees": current_assignees,
             },
             "fields": _field_summary(fields, data, limit=12) if fields else [
                 {"field_name": key, "label": key, "value": value, "field_type": "string"}
                 for key, value in list(data.items())[:12]
             ],
             "current_node": current_node or ("已完成" if view_status == "done" else "流程中"),
+            "current_assignees": current_assignees,
             "updated_at": inst.updated_at.isoformat() if inst.updated_at else None,
             "created_at": inst.created_at.isoformat() if inst.created_at else None,
-            "route_path": f"/dynamic/{form.id}?recordId={linked_record.id}" if form and linked_record else None,
+            "route_path": route_path,
         }
         items_by_key[key] = item
 
@@ -1636,6 +1722,8 @@ async def list_notifications(user_id: int = Query(1)):
         return {"data": [
             {"id": n.id, "user_id": n.user_id, "title": n.title, "content": n.content,
              "type": n.type, "is_read": n.is_read, "link": n.link,
+             "target_path": n.link, "related_id": n.resource_id, "resource_type": n.resource_type,
+             "resource_id": n.resource_id,
              "created_at": n.created_at.isoformat() if n.created_at else None}
             for n in items
         ]}

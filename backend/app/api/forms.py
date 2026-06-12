@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import copy
+import logging
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -20,14 +21,80 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._model_driven_shared import assert_safe_identifier
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
 from app.config import settings
+from app.database import DB_TYPE
 from app.core.audit import write_audit_log
 from app.core.permissions import allowed_form_fields, evaluate_form_permission, get_user_role_ids, has_form_permission
+from app.core.production_errors import seed_data_required
 from app.services.tenant_onboarding import assert_tenant_quota
+
+# Storage-agnostic form engine (naming/validation/encoding/query/physical/
+# sequences) extracted from this module; names are re-imported so existing
+# call sites and tests (`from app.api.forms import ...`) keep working.
+from app.api.form_engine import (  # noqa: F401  (re-exported names)
+    ALLOWED_RECORD_STATUSES,
+    ANALYTICS_FORM_KINDS,
+    PHYSICAL_FORM_STORAGE_MODES,
+    _CODE_ALLOCATION_MAX_ATTEMPTS,
+    _allocate_code_sequence,
+    _apply_record_encoding_rules,
+    _apply_record_filters_query,
+    _apply_record_search_query,
+    _apply_record_sort_query,
+    _assert_unique_code_values,
+    _code_sequence_from_value,
+    _code_value_exists,
+    _coerce_physical_value,
+    _date_token_for_rule,
+    _dynamic_record_field_impact,
+    _encoding_rule_for_field,
+    _ensure_filter_fields_visible,
+    _ensure_physical_code_indexes,
+    _ensure_physical_form_table,
+    _ensure_production_record_query_supported,
+    _ensure_sort_field_allowed,
+    _field_allowed_values,
+    _field_value_is_compatible,
+    _get_physical_record,
+    _is_analysis_form_config,
+    _is_anonymous_reader,
+    _is_encoding_field,
+    _isoformat_value,
+    _json_text_expr,
+    _list_physical_records,
+    _max_dynamic_code_sequence,
+    _max_physical_code_sequence,
+    _merged_record_data,
+    _normalize_sql_type,
+    _parse_record_filters,
+    _physical_column_name,
+    _physical_column_type,
+    _physical_filter_clause,
+    _physical_record_field_impact,
+    _physical_record_payload,
+    _physical_table_column_types,
+    _physical_table_columns,
+    _physical_table_name_for_form,
+    _physical_write_payload,
+    _queryable_field_names,
+    _record_matches_filters,
+    _record_matches_search,
+    _render_code_template,
+    _rule_code_embeds_date,
+    _runtime_visible_field_names,
+    _sequence_period_key,
+    _sortable_field_names,
+    _sql_current_timestamp,
+    _uses_physical_form_table,
+    _validate_physical_table_name,
+    _validate_record_data,
+    _validate_record_status,
+    _visible_field_subset,
+)
 
 router = APIRouter()
 
-PHYSICAL_FORM_STORAGE_MODES = {"physical_table", "business_table"}
-ANALYTICS_FORM_KINDS = {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
+logger = logging.getLogger(__name__)
+
 INITIAL_FORM_VERSION = 1
 INITIAL_WORKFLOW_VERSION = "v1"
 
@@ -268,17 +335,13 @@ def _uid(user: dict) -> Optional[int]:
     return int(uid) if isinstance(uid, int) and uid > 0 else None
 
 
-def _is_demo_anonymous_reader(user: dict) -> bool:
-    return bool(user.get("_anonymous") and not settings.IS_PRODUCTION)
-
-
 async def _ensure_form_permission(
     db: AsyncSession,
     user: dict,
     form_id: int,
     action: str,
 ) -> None:
-    if action == "view" and _is_demo_anonymous_reader(user):
+    if action == "view" and _is_anonymous_reader(user):
         return
     if not await has_form_permission(user, form_id, action, db):
         raise HTTPException(403, "Form permission denied")
@@ -448,6 +511,82 @@ def _permission_design_from_config(config: Optional[dict]) -> dict:
     return permission_design if isinstance(permission_design, dict) else {}
 
 
+def _form_layout_field_names(config: Optional[dict]) -> list[str]:
+    if not isinstance(config, dict):
+        return []
+    layout = config.get("formLayout")
+    if not isinstance(layout, dict):
+        designer_layout = config.get("formDesignerLayout")
+        if isinstance(designer_layout, dict) and isinstance(designer_layout.get("runtime"), dict):
+            layout = designer_layout.get("runtime")
+    sections = layout.get("sections") if isinstance(layout, dict) else None
+    if not isinstance(sections, list):
+        return []
+    names: list[str] = []
+    for section in sections:
+        if not isinstance(section, dict) or not isinstance(section.get("fields"), list):
+            continue
+        for item in section["fields"]:
+            if isinstance(item, str):
+                field_name = item
+            elif isinstance(item, dict):
+                field_name = item.get("fieldName") or item.get("field_name")
+            else:
+                field_name = None
+            if field_name:
+                names.append(str(field_name))
+    return list(dict.fromkeys(names))
+
+
+def _scoped_form_payload(payload: dict, scope: str) -> dict:
+    scope = scope or "designer"
+    if scope == "designer":
+        return payload
+    scoped = copy.deepcopy(payload)
+    fields = [field for field in (scoped.get("fields") or []) if not field.get("archived")]
+    config = scoped.get("config") if isinstance(scoped.get("config"), dict) else {}
+    if scope == "list":
+        scoped["fields"] = [
+            field for field in fields
+            if field.get("visible_in_list") or field.get("searchable") or field.get("sortable")
+        ]
+        scoped["config"] = {
+            "viewConfig": config.get("viewConfig"),
+            "viewConfigMeta": config.get("viewConfigMeta"),
+            "publishedSchemaVersion": config.get("publishedSchemaVersion"),
+            "publishedAt": config.get("publishedAt"),
+        }
+        scoped.pop("permission_design", None)
+        scoped.pop("runtime_field_permissions", None)
+        return scoped
+    if scope in {"create", "edit"}:
+        layout_names = _form_layout_field_names(config)
+        field_by_name = {field.get("field_name"): field for field in fields}
+        if layout_names:
+            scoped["fields"] = [
+                field_by_name[name]
+                for name in layout_names
+                if name in field_by_name
+            ]
+        else:
+            scoped["fields"] = [field for field in fields if field.get("visible_in_form", True)]
+        scoped["config"] = {
+            "formLayout": config.get("formLayout"),
+            "formDesignerLayout": config.get("formDesignerLayout"),
+            "publishedSchemaVersion": config.get("publishedSchemaVersion"),
+            "publishedAt": config.get("publishedAt"),
+        }
+        allowed_names = {field.get("field_name") for field in scoped["fields"]}
+        field_permissions = scoped.get("runtime_field_permissions")
+        if isinstance(field_permissions, dict):
+            scoped["runtime_field_permissions"] = {
+                name: value for name, value in field_permissions.items() if name in allowed_names
+            }
+        scoped.pop("permission_design", None)
+        return scoped
+    return scoped
+
+
 def _form_version_payload(version) -> dict:
     return {
         "id": version.id,
@@ -501,577 +640,112 @@ def _record_payload(record, *, visible_fields: Optional[set[str]] = None) -> dic
     }
 
 
-def _is_analysis_form_config(config: Optional[dict]) -> bool:
-    config = config or {}
-    kind = str(config.get("assemblyKind") or config.get("kind") or config.get("type") or "").lower()
-    return kind in ANALYTICS_FORM_KINDS or bool(config.get("analyticsDesign") or config.get("analyticsDesignDraft"))
+def _workflow_instance_title(form, record_payload: dict, binding_config: Optional[dict]) -> str:
+    binding_config = binding_config or {}
+    data = record_payload.get("data") if isinstance(record_payload, dict) else {}
+    title_field = binding_config.get("title_field") or binding_config.get("titleField")
+    if title_field and isinstance(data, dict) and data.get(str(title_field)):
+        return str(data[str(title_field)])
+    for key in ("title", "name", "material_code", "material_no", "code", "alertId", "risk_no"):
+        if isinstance(data, dict) and data.get(key):
+            return f"{form.name} - {data[key]}"
+    return f"{form.name} #{record_payload.get('id')}"
 
 
-def _business_table_name_for_code(code: str) -> str:
-    normalized = re.sub(r"[^a-z0-9_]+", "_", code.lower()).strip("_")
-    if not normalized:
-        raise HTTPException(400, "Form code cannot produce a business table name")
-    table_name = f"business_{normalized}"
-    assert_safe_identifier(table_name)
-    return table_name
-
-
-def _physical_table_name_for_form(code: str, config: Optional[dict]) -> str:
-    normalized = re.sub(r"[^a-z0-9_]+", "_", str(code).lower()).strip("_")
-    if not normalized:
-        raise HTTPException(400, "Form code cannot produce a table name")
-    prefix = "analysis" if _is_analysis_form_config(config) else "business"
-    table_name = f"{prefix}_{normalized}"
-    assert_safe_identifier(table_name)
-    return table_name
-
-
-def _physical_column_name(field_name: str) -> str:
-    field_name = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(field_name))
-    normalized = re.sub(r"[^a-z0-9_]+", "_", field_name.lower()).strip("_")
-    if not normalized:
-        raise HTTPException(400, f"Invalid field name for physical storage: {field_name!r}")
-    assert_safe_identifier(normalized)
-    return normalized
-
-
-def _uses_physical_form_table(form) -> bool:
-    return bool(form.table_name and str(form.storage_mode or "").lower() in PHYSICAL_FORM_STORAGE_MODES)
-
-
-def _physical_column_type(field) -> str:
-    field_type = str(field.field_type or "string").lower()
-    if field_type in {"integer", "int"}:
-        return "INTEGER"
-    if field_type in {"number", "decimal", "float"}:
-        return "DOUBLE PRECISION"
-    if field_type == "boolean":
-        return "BOOLEAN"
-    if field_type == "date":
-        return "DATE"
-    if field_type == "datetime":
-        return "TIMESTAMP"
-    return "TEXT"
-
-
-def _physical_record_payload(row, form, fields: list, *, visible_fields: Optional[set[str]] = None) -> dict:
-    mapping = dict(row._mapping if hasattr(row, "_mapping") else row)
-    field_names = [
-        field.field_name
-        for field in fields
-        if not field.archived and (visible_fields is None or field.field_name in visible_fields)
-    ]
-    data = {name: mapping.get(_physical_column_name(name)) for name in field_names}
-    workflow = {
-        "id": mapping.get("id"),
-        "form_id": form.id,
-        "model_id": form.model_id,
-        "schema_version": 1,
-        "data": data,
-        "status": mapping.get("record_status", mapping.get("status")),
-        "created_by": mapping.get("created_by"),
-        "updated_by": mapping.get("updated_by"),
-        "deleted_at": mapping.get("deleted_at").isoformat() if mapping.get("deleted_at") else None,
-        "created_at": mapping.get("created_at").isoformat() if mapping.get("created_at") else None,
-        "updated_at": mapping.get("updated_at").isoformat() if mapping.get("updated_at") else None,
-    }
-
-
-async def _physical_table_columns(db: AsyncSession, table_name: str) -> set[str]:
-    assert_safe_identifier(table_name)
-    rows = await db.execute(
-        text(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = :table_name
-            """
-        ),
-        {"table_name": table_name},
-    )
-    return {str(row[0]) for row in rows.all()}
-
-
-async def _ensure_physical_form_table(db: AsyncSession, form, fields: Optional[list] = None) -> None:
-    if not _uses_physical_form_table(form):
-        return
-    table_name = str(form.table_name)
-    assert_safe_identifier(table_name)
-    await db.execute(text(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id SERIAL PRIMARY KEY,
-            tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
-            record_status VARCHAR(50) NOT NULL DEFAULT 'active',
-            created_by INTEGER NULL REFERENCES users(id),
-            updated_by INTEGER NULL REFERENCES users(id),
-            source_dynamic_record_id INTEGER NULL UNIQUE,
-            deleted_at TIMESTAMP NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
-        )
-    """))
-    await db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_tenant_deleted_id ON {table_name} (tenant_id, deleted_at, id)"))
-    existing_columns = await _physical_table_columns(db, table_name)
-    for field in fields or []:
-        if field.archived:
-            continue
-        column_name = _physical_column_name(field.field_name)
-        if column_name not in existing_columns:
-            await db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {_physical_column_type(field)} NULL"))
-            existing_columns.add(column_name)
-
-
-def _physical_filter_clause(fields: list, visible_fields: set[str], filters: list[dict]) -> tuple[list[str], dict]:
-    clauses: list[str] = []
-    params: dict = {}
-    allowed = _queryable_field_names(fields) & visible_fields
-    for index, filter_item in enumerate(filters):
-        field = str(filter_item.get("field") or "")
-        op = str(filter_item.get("op") or "equals")
-        expected = filter_item.get("value")
-        if expected in (None, ""):
-            continue
-        if field not in allowed:
-            raise HTTPException(400, f"Field is not indexed for filtering: {field}")
-        column_name = _physical_column_name(field)
-        key = f"filter_{index}"
-        if op == "contains":
-            clauses.append(f"LOWER(CAST({column_name} AS TEXT)) LIKE :{key}")
-            params[key] = f"%{str(expected).lower()}%"
-        elif op == "equals":
-            clauses.append(f"CAST({column_name} AS TEXT) = :{key}")
-            params[key] = str(expected)
-        elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
-            if start not in (None, ""):
-                clauses.append(f"CAST({column_name} AS TEXT) >= :{key}_start")
-                params[f"{key}_start"] = str(start)
-            if end not in (None, ""):
-                clauses.append(f"CAST({column_name} AS TEXT) <= :{key}_end")
-                params[f"{key}_end"] = str(end)
-        elif op == "gte":
-            clauses.append(f"CAST({column_name} AS TEXT) >= :{key}")
-            params[key] = str(expected)
-        elif op == "lte":
-            clauses.append(f"CAST({column_name} AS TEXT) <= :{key}")
-            params[key] = str(expected)
-        else:
-            raise HTTPException(400, f"Invalid filter operator: {op}")
-    return clauses, params
-
-
-async def _list_physical_records(
+async def _start_form_workflows(
     db: AsyncSession,
-    form,
-    fields: list,
-    visible_fields: set[str],
     *,
-    include_deleted: bool,
-    search: Optional[str],
-    filters_json: Optional[str],
-    sort_field: Optional[str],
-    sort_order: str,
-    include_total: bool,
-    page: int,
-    page_size: int,
-) -> dict:
-    table_name = str(form.table_name)
-    assert_safe_identifier(table_name)
-    query_fields = _visible_field_subset(fields, visible_fields)
-    await _ensure_physical_form_table(db, form, fields)
-    parsed_filters = _parse_record_filters(filters_json)
-    _ensure_filter_fields_visible(parsed_filters, visible_fields)
-    _ensure_sort_field_allowed(sort_field, fields, visible_fields)
+    tenant_id: int,
+    form,
+    record_payload: dict,
+    user: dict,
+    trigger_action: str = "submit",
+) -> list[dict]:
+    from app.api.workflow import (
+        _add_approval_notifications,
+        _find_first_approval_step,
+        _resolve_step_approver_ids,
+        _set_current_assignees,
+        _workflow_config_steps,
+    )
+    from app.models.relational import WorkflowApproval, WorkflowBinding, WorkflowDef, WorkflowInstance
 
-    columns = ["id", "tenant_id", "record_status", "created_by", "updated_by", "deleted_at", "created_at", "updated_at"]
-    for field in query_fields:
-        columns.append(_physical_column_name(field.field_name))
-
-    clauses = ["tenant_id = :tenant_id"]
-    params: dict = {"tenant_id": form.tenant_id, "limit": page_size, "offset": (page - 1) * page_size}
-    if not include_deleted:
-        clauses.append("deleted_at IS NULL")
-    if search:
-        searchable_names = [field.field_name for field in query_fields if field.searchable]
-        if not searchable_names:
-            searchable_names = [field.field_name for field in query_fields]
-        if searchable_names:
-            search_clauses = []
-            for index, field_name in enumerate(searchable_names):
-                column_name = _physical_column_name(field_name)
-                key = f"search_{index}"
-                search_clauses.append(f"LOWER(CAST({column_name} AS TEXT)) LIKE :{key}")
-                params[key] = f"%{search.lower()}%"
-            clauses.append(f"({' OR '.join(search_clauses)})")
-    filter_clauses, filter_params = _physical_filter_clause(fields, visible_fields, parsed_filters)
-    clauses.extend(filter_clauses)
-    params.update(filter_params)
-
-    where_sql = " AND ".join(clauses)
-    if sort_field:
-        sort_column = _physical_column_name(sort_field)
-        direction = "ASC" if sort_order.lower() == "asc" else "DESC"
-        order_sql = f"{sort_column} {direction}, id DESC"
-    else:
-        order_sql = "id DESC"
-    selected_columns = ", ".join(columns)
-    rows = (await db.execute(
-        text(f"SELECT {selected_columns} FROM {table_name} WHERE {where_sql} ORDER BY {order_sql} LIMIT :limit OFFSET :offset"),
-        params,
-    )).all()
-    total = None
-    if include_total:
-        count_params = {key: value for key, value in params.items() if key not in {"limit", "offset"}}
-        total = await db.scalar(text(f"SELECT count(*) FROM {table_name} WHERE {where_sql}"), count_params)
-    return {
-        "data": [_physical_record_payload(row, form, fields, visible_fields=visible_fields) for row in rows],
-        "total": int(total or 0) if total is not None else None,
-        "page": page,
-        "page_size": page_size,
-        "has_more": False,
-        "next_cursor": None,
-    }
-
-
-async def _get_physical_record(db: AsyncSession, form, fields: list, visible_fields: set[str], record_id: int, *, include_deleted: bool) -> dict:
-    table_name = str(form.table_name)
-    assert_safe_identifier(table_name)
-    await _ensure_physical_form_table(db, form, fields)
-    query_fields = _visible_field_subset(fields, visible_fields)
-    columns = ["id", "tenant_id", "record_status", "created_by", "updated_by", "deleted_at", "created_at", "updated_at"]
-    for field in query_fields:
-        columns.append(_physical_column_name(field.field_name))
-    clauses = ["id = :id", "tenant_id = :tenant_id"]
-    if not include_deleted:
-        clauses.append("deleted_at IS NULL")
-    row = (await db.execute(
-        text(f"SELECT {', '.join(columns)} FROM {table_name} WHERE {' AND '.join(clauses)}"),
-        {"id": record_id, "tenant_id": form.tenant_id},
-    )).first()
-    if not row:
-        raise HTTPException(404, "Record not found")
-    return {"data": _physical_record_payload(row, form, fields, visible_fields=visible_fields)}
-
-
-def _physical_write_payload(fields: list, data: dict, editable_fields: set[str]) -> dict:
-    field_by_name = {field.field_name: field for field in fields if not field.archived}
-    payload = {
-        key: _coerce_physical_value(field_by_name[key], value)
-        for key, value in data.items()
-        if key in field_by_name and key in editable_fields
-    }
-    denied_fields = sorted(set(data.keys()) - editable_fields)
-    if denied_fields:
-        raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
-    return payload
-
-
-def _coerce_physical_value(field, value):
-    if value in (None, ""):
-        return None
-    field_type = str(field.field_type or "string").lower()
-    if field_type == "date" and isinstance(value, str):
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
-    if field_type == "datetime" and isinstance(value, str):
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False)
-    return value
-
-
-def _field_allowed_values(field) -> Optional[set[str]]:
-    values = field.enum_values
-    if not values:
-        return None
-    if isinstance(values, list):
-        return {str(value) for value in values}
-    if isinstance(values, dict):
-        raw = values.get("values") if "values" in values else values
-        if isinstance(raw, list):
-            return {str(value.get("value", value)) if isinstance(value, dict) else str(value) for value in raw}
-        return {str(key) for key in raw.keys()} if isinstance(raw, dict) else None
-    return None
-
-
-def _validate_record_data(fields: list, data: dict, *, partial: bool = False) -> None:
-    if not fields:
-        return
-    active_fields = [field for field in fields if not field.archived]
-    by_name = {field.field_name: field for field in active_fields}
-    unknown = sorted(set(data.keys()) - set(by_name.keys()))
-    if unknown:
-        raise HTTPException(422, f"Unknown field(s): {', '.join(unknown)}")
-
-    if not partial:
-        missing = [
-            field.label or field.field_name
-            for field in active_fields
-            if field.required and data.get(field.field_name) in (None, "")
-        ]
-        if missing:
-            raise HTTPException(422, f"Missing required field(s): {', '.join(missing)}")
-
-    for name, value in data.items():
-        if value in (None, ""):
-            continue
-        field = by_name[name]
-        field_type = (field.field_type or "string").lower()
-        if field_type in {"number", "decimal", "float"} and not isinstance(value, (int, float)):
-            raise HTTPException(422, f"Field {name} must be a number")
-        if field_type in {"integer", "int"} and not isinstance(value, int):
-            raise HTTPException(422, f"Field {name} must be an integer")
-        if field_type == "boolean" and not isinstance(value, bool):
-            raise HTTPException(422, f"Field {name} must be a boolean")
-        if field_type in {"date", "datetime"} and not isinstance(value, str):
-            raise HTTPException(422, f"Field {name} must be an ISO date string")
-        if field_type == "code" and not isinstance(value, str):
-            raise HTTPException(422, f"Field {name} must be a code string")
-        if field_type == "enum":
-            allowed = _field_allowed_values(field)
-            if allowed and str(value) not in allowed:
-                raise HTTPException(422, f"Field {name} must be one of: {', '.join(sorted(allowed))}")
-
-
-def _record_matches_search(record, fields: list, search: Optional[str]) -> bool:
-    if not search:
-        return True
-    needle = search.lower()
-    searchable_names = [field.field_name for field in fields if field.searchable and not field.archived]
-    names = searchable_names or [field.field_name for field in fields if not field.archived]
-    values = record.data or {}
-    return any(needle in str(values.get(name, "")).lower() for name in names)
-
-
-def _visible_field_subset(fields: list, visible_fields: set[str]) -> list:
-    return [
-        field
-        for field in fields
-        if not field.archived and field.field_name in visible_fields
-    ]
-
-
-async def _runtime_visible_field_names(user: dict, form_id: int, fields: list, db: AsyncSession) -> set[str]:
-    if _is_demo_anonymous_reader(user):
-        return {field.field_name for field in fields if not field.archived}
-    return await allowed_form_fields(user, form_id, "view", fields, db)
-
-
-def _parse_record_filters(filters_json: Optional[str]) -> list[dict]:
-    if not filters_json:
-        return []
-    try:
-        parsed = json.loads(filters_json)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(400, f"Invalid filters JSON: {exc}") from exc
-    if not isinstance(parsed, list):
-        raise HTTPException(400, "filters must be a JSON array")
-    return [item for item in parsed if isinstance(item, dict)]
-
-
-def _record_matches_filters(record, fields: list, filters: list[dict]) -> bool:
-    if not filters:
-        return True
-    allowed_fields = {field.field_name for field in fields if not field.archived}
-    values = record.data or {}
-    for filter_item in filters:
-        field = str(filter_item.get("field") or "")
-        op = str(filter_item.get("op") or "equals")
-        expected = filter_item.get("value")
-        if field not in allowed_fields:
-            raise HTTPException(400, f"Invalid filter field: {field}")
-        actual = values.get(field)
-        if expected in (None, ""):
-            continue
-        if op == "contains":
-            if str(expected).lower() not in str(actual or "").lower():
-                return False
-        elif op == "equals":
-            if str(actual) != str(expected):
-                return False
-        elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
-            actual_text = str(actual or "")
-            if start and actual_text < str(start):
-                return False
-            if end and actual_text > str(end):
-                return False
-        elif op == "gte":
-            if str(actual or "") < str(expected):
-                return False
-        elif op == "lte":
-            if str(actual or "") > str(expected):
-                return False
-        else:
-            raise HTTPException(400, f"Invalid filter operator: {op}")
-    return True
-
-
-def _queryable_field_names(fields: list) -> set[str]:
-    return {
-        field.field_name
-        for field in fields
-        if not field.archived and (getattr(field, "searchable", False) or getattr(field, "sortable", False))
-    }
-
-
-def _sortable_field_names(fields: list) -> set[str]:
-    return {
-        field.field_name
-        for field in fields
-        if not field.archived and getattr(field, "sortable", False)
-    }
-
-
-def _ensure_filter_fields_visible(filters: list[dict], visible_fields: set[str]) -> None:
-    for filter_item in filters:
-        field = str(filter_item.get("field") or "")
-        expected = filter_item.get("value")
-        if expected in (None, ""):
-            continue
-        if field not in visible_fields:
-            raise HTTPException(403, f"Field permission denied for filtering: {field}")
-
-
-def _ensure_sort_field_allowed(sort_field: Optional[str], fields: list, visible_fields: set[str]) -> None:
-    if not sort_field:
-        return
-    known_fields = {field.field_name for field in fields if not field.archived}
-    if sort_field not in known_fields:
-        raise HTTPException(400, f"Invalid sort field: {sort_field}")
-    if sort_field not in visible_fields:
-        raise HTTPException(403, f"Field permission denied for sorting: {sort_field}")
-    if sort_field not in _sortable_field_names(fields):
-        raise HTTPException(400, f"Field is not indexed for sorting: {sort_field}")
-
-
-def _apply_record_sort_query(query, record_model, sort_field: Optional[str], sort_order: str):
-    if not sort_field:
-        return query.order_by(record_model.id.desc())
-    expr = _json_text_expr(record_model.data, sort_field)
-    if sort_order.lower() == "asc":
-        return query.order_by(expr.asc(), record_model.id.desc())
-    return query.order_by(expr.desc(), record_model.id.desc())
-
-
-def _json_text_expr(json_column, field_name: str):
-    return json_column[field_name].as_string()
-
-
-def _apply_record_search_query(query, record_model, fields: list, search: Optional[str]):
-    if not search:
-        return query, True
-    searchable_names = [field.field_name for field in fields if field.searchable and not field.archived]
-    if not searchable_names:
-        return query, False
-    pattern = f"%{search.lower()}%"
-    conditions = [
-        func.lower(_json_text_expr(record_model.data, field_name)).like(pattern)
-        for field_name in searchable_names
-    ]
-    return query.where(or_(*conditions)), True
-
-
-def _apply_record_filters_query(query, record_model, fields: list, filters: list[dict]):
-    if not filters:
-        return query, True
-    allowed_fields = _queryable_field_names(fields)
-    for filter_item in filters:
-        field = str(filter_item.get("field") or "")
-        op = str(filter_item.get("op") or "equals")
-        expected = filter_item.get("value")
-        if expected in (None, ""):
-            continue
-        if field not in allowed_fields:
-            raise HTTPException(400, f"Field is not indexed for filtering: {field}")
-        expr = _json_text_expr(record_model.data, field)
-        if op == "contains":
-            query = query.where(func.lower(expr).like(f"%{str(expected).lower()}%"))
-        elif op == "equals":
-            query = query.where(expr == str(expected))
-        elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
-            if start not in (None, ""):
-                query = query.where(expr >= str(start))
-            if end not in (None, ""):
-                query = query.where(expr <= str(end))
-        elif op == "gte":
-            query = query.where(expr >= str(expected))
-        elif op == "lte":
-            query = query.where(expr <= str(expected))
-        else:
-            raise HTTPException(400, f"Invalid filter operator: {op}")
-    return query, True
-
-
-def _ensure_production_record_query_supported(
-    search: Optional[str],
-    filters: list[dict],
-    search_pushed: bool,
-    filters_pushed: bool,
-) -> None:
-    if settings.IS_PRODUCTION and ((search and not search_pushed) or (filters and not filters_pushed)):
-        raise HTTPException(400, "Query is not indexed for production dynamic records")
-
-
-def _merged_record_data(existing: Optional[dict], patch: Optional[dict]) -> dict:
-    return {**(existing or {}), **(patch or {})}
-
-
-def _field_value_is_compatible(field, value) -> bool:
-    if value in (None, ""):
-        return True
-    field_type = (field.field_type or "string").lower()
-    if field_type in {"number", "decimal", "float"}:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    if field_type in {"integer", "int"}:
-        return isinstance(value, int) and not isinstance(value, bool)
-    if field_type == "boolean":
-        return isinstance(value, bool)
-    if field_type in {"date", "datetime"}:
-        return isinstance(value, str)
-    if field_type == "code":
-        return isinstance(value, str)
-    if field_type == "enum":
-        allowed = _field_allowed_values(field)
-        return not allowed or str(value) in allowed
-    return True
-
-
-async def _dynamic_record_field_impact(db: AsyncSession, tenant_id: int, form_id: int, field) -> dict:
-    from app.models.relational import DynamicRecord
-
-    rows = (await db.execute(
-        select(DynamicRecord.data).where(
-            DynamicRecord.form_id == form_id,
-            DynamicRecord.tenant_id == tenant_id,
-            DynamicRecord.deleted_at.is_(None),
+    bindings = (await db.execute(
+        select(WorkflowBinding)
+        .where(
+            WorkflowBinding.tenant_id == tenant_id,
+            WorkflowBinding.form_id == form.id,
+            WorkflowBinding.trigger_action == trigger_action,
+            WorkflowBinding.enabled == True,
         )
+        .order_by(WorkflowBinding.id)
     )).scalars().all()
-    total = len(rows)
-    filled = 0
-    missing_required = 0
-    incompatible = 0
-    for data in rows:
-        values = data or {}
-        value = values.get(field.field_name)
-        if value not in (None, ""):
-            filled += 1
-        if field.required and value in (None, ""):
-            missing_required += 1
-        if not _field_value_is_compatible(field, value):
-            incompatible += 1
-    return {
-        "record_count": total,
-        "filled_count": filled,
-        "missing_required_count": missing_required,
-        "incompatible_count": incompatible,
-    }
+    if not bindings:
+        return []
+
+    started: list[dict] = []
+    initiator_id = current_user_id(user)
+    form_data = record_payload.get("data") if isinstance(record_payload.get("data"), dict) else {}
+    for binding in bindings:
+        workflow_def = await db.get(WorkflowDef, binding.workflow_id)
+        if not workflow_def or workflow_def.tenant_id != tenant_id or workflow_def.status not in {"published", "active"}:
+            continue
+        config = json.loads(workflow_def.config) if isinstance(workflow_def.config, str) else workflow_def.config
+        steps = _workflow_config_steps(config if isinstance(config, dict) else {})
+        first_step_index = _find_first_approval_step(steps) if steps else 0
+        current_step = steps[first_step_index] if steps and first_step_index < len(steps) else None
+        variables = {
+            "form_id": form.id,
+            "form_code": form.code,
+            "record_id": record_payload.get("id"),
+            "trigger_action": trigger_action,
+        }
+        approver_ids = await _resolve_step_approver_ids(
+            db,
+            tenant_id,
+            current_step or {},
+            form_data,
+            variables,
+            initiator_id,
+            initiator_id,
+        ) if current_step and current_step.get("type") == "approval" else []
+        state = {
+            "current_node": current_step.get("node_id", current_step.get("name", "start")) if current_step else "end",
+            "current_step": first_step_index,
+            "resource_type": "dynamic_record",
+            "resource_id": record_payload.get("id"),
+            "variables": variables,
+        }
+        _set_current_assignees(state, approver_ids)
+        title = _workflow_instance_title(form, record_payload, binding.config)
+        instance = WorkflowInstance(
+            tenant_id=tenant_id,
+            workflow_id=workflow_def.id,
+            title=title,
+            initiator_id=initiator_id,
+            form_data=json.dumps(form_data, ensure_ascii=False, default=str),
+            workflow_state=json.dumps(state, ensure_ascii=False, default=str),
+            status="pending",
+        )
+        db.add(instance)
+        await db.flush()
+        if current_step and current_step.get("type") == "approval":
+            for approver_id in approver_ids:
+                db.add(WorkflowApproval(
+                    instance_id=instance.id,
+                    approver_id=approver_id,
+                    node_id=current_step.get("node_id", current_step.get("name", "")),
+                ))
+            _add_approval_notifications(db, tenant_id, approver_ids, title, instance.id)
+        started.append({
+            "instance_id": instance.id,
+            "workflow_id": workflow_def.id,
+            "status": instance.status,
+            "current_step": first_step_index,
+            "current_step_name": current_step.get("name") if current_step else None,
+            "approver_ids": approver_ids,
+        })
+    return started
 
 
 def _field_cfg_value(field, key: str, default=None):
@@ -1157,6 +831,9 @@ def _field_proxy_from_payload(payload: dict):
         "enum_values": None,
         "validation": None,
         "ui_config": None,
+        "business_type": None,
+        "control_type": None,
+        "encoding_rule": None,
         "sort_order": 0,
     }.items():
         setattr(proxy, key, payload.get(key, default))
@@ -1540,318 +1217,6 @@ def _workflow_binding_payload(binding) -> dict:
     }
 
 
-STANDARD_WORKFLOW_FIELDS = [
-    {"field_name": "processStatus", "label": "流程状态", "field_type": "enum", "visible_in_list": True, "visible_in_form": False, "searchable": True, "sortable": True, "enum_values": {"values": ["未启动", "处理中", "已完成", "已驳回", "已取消"]}},
-    {"field_name": "currentNode", "label": "当前节点", "field_type": "string", "visible_in_list": True, "visible_in_form": False, "searchable": True, "sortable": False},
-    {"field_name": "currentHandler", "label": "当前处理人", "field_type": "string", "visible_in_list": True, "visible_in_form": False, "searchable": True, "sortable": False},
-    {"field_name": "completedAt", "label": "完成时间", "field_type": "datetime", "visible_in_list": False, "visible_in_form": False, "searchable": False, "sortable": True},
-    {"field_name": "interactionLog", "label": "处理记录", "field_type": "json", "visible_in_list": False, "visible_in_form": False, "searchable": False, "sortable": False},
-]
-SNAKE_WORKFLOW_FIELDS = [
-    {**field, "field_name": _physical_column_name(field["field_name"])}
-    for field in STANDARD_WORKFLOW_FIELDS
-]
-
-
-def _workflow_fields_for_form(form_code: str) -> list[dict]:
-    if form_code in {"alert-center", "risk-review"}:
-        return SNAKE_WORKFLOW_FIELDS
-    return STANDARD_WORKFLOW_FIELDS
-
-
-def _default_fields_for_form(form_cfg: dict) -> list[dict]:
-    fields = copy.deepcopy(form_cfg["fields"])
-    if form_cfg["code"] == "alert-center":
-        for field in fields:
-            field["field_name"] = _physical_column_name(field["field_name"])
-    return fields
-
-DEFAULT_FORM_DESIGNER_META = {
-    "controlTypeOptions": [
-        {"value": "code", "label": "编码"},
-        {"value": "text", "label": "文本输入"},
-        {"value": "textarea", "label": "多行文本"},
-        {"value": "number", "label": "数值输入"},
-        {"value": "select", "label": "下拉选择"},
-        {"value": "relation", "label": "对象/人员选择"},
-        {"value": "datetime", "label": "日期时间"},
-        {"value": "upload", "label": "附件上传"},
-        {"value": "switch", "label": "开关切换"},
-        {"value": "readonly-text", "label": "只读展示"},
-    ],
-    "typeSettingOptions": {
-        "textFormats": [
-            {"value": "plain", "label": "普通文本"},
-            {"value": "email", "label": "邮箱"},
-            {"value": "phone", "label": "手机号"},
-            {"value": "url", "label": "链接"},
-            {"value": "idNo", "label": "证件号"},
-            {"value": "custom", "label": "自定义正则"},
-        ],
-        "textTrimModes": [
-            {"value": "none", "label": "不处理"},
-            {"value": "trim", "label": "去首尾空格"},
-            {"value": "trimAll", "label": "去全部空格"},
-        ],
-        "textCaseModes": [
-            {"value": "original", "label": "保持原样"},
-            {"value": "upper", "label": "自动大写"},
-            {"value": "lower", "label": "自动小写"},
-        ],
-        "selectionModes": [
-            {"value": "single", "label": "单选"},
-            {"value": "multiple", "label": "多选"},
-        ],
-        "selectionDisplays": [
-            {"value": "dropdown", "label": "下拉"},
-            {"value": "search", "label": "搜索选择"},
-            {"value": "radio", "label": "平铺单选"},
-            {"value": "tags", "label": "标签多选"},
-        ],
-        "dateModes": [
-            {"value": "date", "label": "日期"},
-            {"value": "datetime", "label": "日期时间"},
-            {"value": "range", "label": "日期范围"},
-        ],
-        "defaultDates": [
-            {"value": "none", "label": "无默认值"},
-            {"value": "today", "label": "当天"},
-            {"value": "now", "label": "当前时间"},
-        ],
-        "encodingResetCycles": [
-            {"value": "none", "label": "不重置"},
-            {"value": "day", "label": "按天重置"},
-            {"value": "month", "label": "按月重置"},
-            {"value": "year", "label": "按年重置"},
-            {"value": "dependency", "label": "按依赖字段重置"},
-        ],
-    },
-    "componentLibrary": [
-        {
-            "category": "基础输入",
-            "items": [
-                {"key": "text", "name": "文本控件", "desc": "单行文本输入", "iconKey": "text", "controlType": "text"},
-                {"key": "textarea", "name": "多行文本", "desc": "长文本、备注、说明录入", "iconKey": "textarea", "controlType": "textarea", "defaultWidth": "full"},
-                {"key": "number", "name": "数值控件", "desc": "数量、金额、百分比", "iconKey": "number", "controlType": "number"},
-                {"key": "code", "name": "编码控件", "desc": "自动编号、业务编号、流水号", "iconKey": "code", "controlType": "code"},
-            ],
-        },
-        {
-            "category": "选择控件",
-            "items": [
-                {"key": "select", "name": "下拉选择", "desc": "固定选项、枚举字典", "iconKey": "select", "controlType": "select"},
-                {"key": "relation", "name": "关联对象", "desc": "人员、设备、供应商、物料", "iconKey": "relation", "controlType": "relation"},
-                {"key": "datetime", "name": "日期选择", "desc": "日期、时间、时间范围", "iconKey": "datetime", "controlType": "datetime"},
-                {"key": "switch", "name": "布尔选择", "desc": "是/否、启用/停用", "iconKey": "switch", "controlType": "switch"},
-                {"key": "upload", "name": "附件上传", "desc": "图片、文件、凭证上传", "iconKey": "upload", "controlType": "upload", "defaultWidth": "full"},
-            ],
-        },
-        {
-            "category": "布局容器",
-            "items": [
-                {"key": "container", "name": "容器", "desc": "分组面板、基础信息区", "iconKey": "layout", "controlType": "container", "defaultWidth": "full"},
-                {"key": "two-columns", "name": "多列布局", "desc": "两列、三列、高密度字段排版", "iconKey": "layout", "controlType": "two-columns", "defaultWidth": "full"},
-                {"key": "tabs", "name": "Tab 页", "desc": "切换页签、次要信息收起", "iconKey": "layout", "controlType": "tabs", "defaultWidth": "full"},
-                {"key": "divider", "name": "分割符", "desc": "分割线、区块说明", "iconKey": "divider", "controlType": "divider", "defaultWidth": "full"},
-            ],
-        },
-        {
-            "category": "数据展示",
-            "items": [
-                {"key": "editable-table", "name": "表格", "desc": "可编辑子表、明细行", "iconKey": "table", "controlType": "editable-table", "defaultWidth": "full"},
-                {"key": "readonly-table", "name": "关联表格", "desc": "只读关联表、分页详情", "iconKey": "table", "controlType": "readonly-table", "defaultWidth": "full"},
-                {"key": "summary-card", "name": "数据摘要", "desc": "摘要卡、统计值、关联对象概览", "iconKey": "database", "controlType": "summary-card", "defaultWidth": "full"},
-                {"key": "status-tag", "name": "状态标签", "desc": "状态、等级、结果标识", "iconKey": "tag", "controlType": "status-tag"},
-                {"key": "file-preview", "name": "媒体预览", "desc": "图片、附件、凭证预览", "iconKey": "media", "controlType": "file-preview", "defaultWidth": "full"},
-            ],
-        },
-    ],
-    "commonControlKeys": ["text", "number", "code", "select", "relation", "datetime"],
-}
-
-ALERT_CENTER_DESIGNER_SECTIONS = [
-    {"key": "basic", "title": "基础信息", "desc": "识别告警、说明主题和来源", "fieldKeys": ["alertId", "title", "source", "occurredAt"]},
-    {"key": "device", "title": "设备信息", "desc": "定位设备、等级和影响范围", "fieldKeys": ["device", "level"]},
-    {"key": "handle", "title": "告警处理", "desc": "明确责任人、时限、状态和结论", "fieldKeys": ["owner", "dueAt", "status", "resolution"]},
-    {"key": "evidence", "title": "附件证据", "desc": "上传现场图片、日志和处理凭证", "fieldKeys": ["evidence"]},
-    {"key": "approval", "title": "审批/流转信息", "desc": "展示流程状态、操作记录和关闭轨迹", "fieldKeys": []},
-]
-
-
-def _designer_meta_for_form(form_cfg: dict) -> dict:
-    meta = copy.deepcopy(DEFAULT_FORM_DESIGNER_META)
-    if form_cfg["code"] == "alert-center":
-        meta["businessSections"] = copy.deepcopy(ALERT_CENTER_DESIGNER_SECTIONS)
-    else:
-        meta["businessSections"] = [
-            {
-                "key": "default",
-                "title": "基础信息",
-                "desc": "当前表单的主要录入字段",
-                "fieldKeys": [field["field_name"] for field in form_cfg["fields"]],
-            }
-        ]
-    return meta
-
-
-DEFAULT_BUSINESS_FORMS = [
-    {
-        "code": "alert-center",
-        "name": "告警中心",
-        "description": "设备告警登记、确认、派工、处理和关闭的业务表单。",
-        "table_name": "business_alert_center",
-        "app_codes": ["maintenance-analysis", "production-dashboard"],
-        "fields": [
-            {"field_name": "alertId", "label": "告警编号", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"businessType": "code", "controlType": "code", "encodingRule": {"enabled": True, "template": "AL-{yyyyMMdd}-{seq:3}", "prefix": "AL", "datePattern": "YYYYMMDD", "sequenceLength": 3, "fixedLength": 15, "dependencies": [], "resetCycle": "day", "regenerateOnDependencyChange": True, "allowManualOverride": False, "unique": True}}},
-            {"field_name": "title", "label": "告警标题", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True},
-            {"field_name": "device", "label": "关联设备", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "ui_config": {"relation": "equipment"}},
-            {"field_name": "level", "label": "告警等级", "field_type": "enum", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["严重", "一般", "提醒"]}},
-            {"field_name": "source", "label": "告警来源", "field_type": "enum", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["系统监测", "人工上报", "外部接口"]}},
-            {"field_name": "occurredAt", "label": "发生时间", "field_type": "datetime", "required": True, "visible_in_list": True, "visible_in_form": True, "sortable": True},
-            {"field_name": "owner", "label": "处理人", "field_type": "string", "visible_in_list": True, "visible_in_form": True, "searchable": True, "ui_config": {"relation": "users"}},
-            {"field_name": "dueAt", "label": "处理时限", "field_type": "datetime", "visible_in_list": True, "visible_in_form": True, "sortable": True},
-            {"field_name": "status", "label": "告警状态", "field_type": "enum", "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["待处理", "处理中", "已关闭", "已驳回"]}},
-            {"field_name": "resolution", "label": "处理结论", "field_type": "text", "visible_in_list": False, "visible_in_form": True},
-            {"field_name": "evidence", "label": "附件证据", "field_type": "json", "visible_in_list": False, "visible_in_form": True, "ui_config": {"widget": "upload"}},
-        ],
-        "actions": [
-            {"action_key": "acknowledge", "label": "确认告警", "action_type": "workflow", "config": {"trigger_action": "approve", "nextStatus": "处理中", "requiresComment": True}},
-            {"action_key": "dispatch", "label": "派工处理", "action_type": "workflow", "config": {"trigger_action": "dispatch", "requiresAssignee": True}},
-            {"action_key": "resolve", "label": "提交处理结果", "action_type": "workflow", "config": {"trigger_action": "resolve", "requiresFields": ["resolution", "evidence"]}},
-            {"action_key": "close", "label": "关闭归档", "action_type": "workflow", "config": {"trigger_action": "close", "nextStatus": "已关闭"}},
-            {"action_key": "export", "label": "导出告警", "action_type": "builtin", "config": {"format": "xlsx"}},
-        ],
-        "records": [
-            {"status": "active", "data": {"alertId": "AL-20260524-001", "title": "SMT-03 回流焊温区 5 持续偏高", "device": "SMT-03 回流焊", "level": "严重", "source": "系统监测", "occurredAt": "2026-05-24T09:18:00+08:00", "owner": "孙浩", "dueAt": "2026-05-24T11:18:00+08:00", "status": "处理中", "resolution": "", "evidence": [{"name": "温度曲线.png", "type": "image"}], "processStatus": "处理中", "currentNode": "维修处理", "currentHandler": "孙浩", "completedAt": "", "interactionLog": [{"time": "09:18", "actor": "系统", "action": "创建告警"}, {"time": "09:25", "actor": "李明", "action": "确认并派工"}]}},
-            {"status": "active", "data": {"alertId": "AL-20260524-002", "title": "A 线节拍偏慢超过阈值", "device": "Assembly-A 主线", "level": "一般", "source": "系统监测", "occurredAt": "2026-05-24T10:05:00+08:00", "owner": "李明", "dueAt": "2026-05-24T14:00:00+08:00", "status": "待处理", "resolution": "", "evidence": [], "processStatus": "处理中", "currentNode": "维护确认", "currentHandler": "李明", "completedAt": "", "interactionLog": [{"time": "10:05", "actor": "系统", "action": "创建告警"}]}},
-            {"status": "active", "data": {"alertId": "AL-20260523-014", "title": "空压站压力低告警", "device": "AIR-COMP-02", "level": "严重", "source": "外部接口", "occurredAt": "2026-05-23T16:42:00+08:00", "owner": "周强", "dueAt": "2026-05-23T18:42:00+08:00", "status": "已关闭", "resolution": "更换压力传感器并复位空压机，压力恢复稳定。", "evidence": [{"name": "维修记录.pdf", "type": "pdf"}], "processStatus": "已完成", "currentNode": "关闭归档", "currentHandler": "", "completedAt": "2026-05-23T18:10:00+08:00", "interactionLog": [{"time": "16:42", "actor": "系统", "action": "创建告警"}, {"time": "17:02", "actor": "周强", "action": "提交处理结果"}, {"time": "18:10", "actor": "李明", "action": "关闭归档"}]}},
-        ],
-    },
-    {
-        "code": "risk-review",
-        "name": "风险复核",
-        "description": "供应链风险复核、定级、责任分派和闭环跟踪表单。",
-        "table_name": "risk_reviews",
-        "app_codes": ["supply-risk"],
-        "fields": [
-            {"field_name": "risk_no", "label": "风险单号", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "sortable": True, "ui_config": {"businessType": "code", "controlType": "code", "encodingRule": {"enabled": True, "template": "SR-{yyyyMMdd}-{seq:3}", "prefix": "SR", "datePattern": "YYYYMMDD", "sequenceLength": 3, "fixedLength": 15, "dependencies": [], "resetCycle": "day", "regenerateOnDependencyChange": True, "allowManualOverride": False, "unique": True}}},
-            {"field_name": "subject", "label": "风险主题", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True},
-            {"field_name": "level", "label": "风险等级", "field_type": "enum", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["高", "中", "低"]}},
-            {"field_name": "owner", "label": "处理人", "field_type": "string", "required": True, "visible_in_list": True, "visible_in_form": True, "searchable": True, "ui_config": {"relation": "users"}},
-            {"field_name": "reason", "label": "风险原因", "field_type": "text", "visible_in_list": False, "visible_in_form": True},
-            {"field_name": "status", "label": "复核状态", "field_type": "enum", "visible_in_list": True, "visible_in_form": True, "searchable": True, "enum_values": {"values": ["待复核", "定级中", "处理中", "已关闭"]}},
-        ],
-        "actions": [
-            {"action_key": "submit", "label": "提交复核", "action_type": "workflow", "config": {"trigger_action": "submit"}},
-            {"action_key": "grade", "label": "风险定级", "action_type": "workflow", "config": {"trigger_action": "approve", "requiresFields": ["level"]}},
-            {"action_key": "assign", "label": "责任分派", "action_type": "workflow", "config": {"trigger_action": "assign", "requiresAssignee": True}},
-            {"action_key": "close", "label": "处理关闭", "action_type": "workflow", "config": {"trigger_action": "close"}},
-        ],
-        "records": [
-            {"status": "active", "data": {"risk_no": "SR-20260524-001", "subject": "供应商北辰材料批次波动", "level": "高", "owner": "刘洋", "reason": "过去 30 天同类物料已出现 2 次质量波动，影响 SMT 焊接稳定性。", "status": "处理中", "process_status": "处理中", "current_node": "责任分派", "current_handler": "刘洋", "completed_at": "", "interaction_log": [{"time": "09:30", "actor": "王敏", "action": "提交复核"}, {"time": "09:50", "actor": "李明", "action": "定级为高风险"}]}},
-            {"status": "active", "data": {"risk_no": "SR-20260523-006", "subject": "华东客户交付窗口压缩", "level": "中", "owner": "李明", "reason": "SO-8821 交付日期提前，需评估替代批次和排产调整。", "status": "已关闭", "process_status": "已完成", "current_node": "处理关闭", "current_handler": "", "completed_at": "2026-05-23T17:30:00+08:00", "interaction_log": [{"time": "13:10", "actor": "系统", "action": "创建风险"}, {"time": "17:30", "actor": "李明", "action": "关闭"}]}},
-        ],
-    },
-]
-
-BUSINESS_FORM_RECORD_TARGETS = {
-    "alert-center": 360,
-    "risk-review": 260,
-}
-
-
-def _iso_day(day: int, hour: int, minute: int = 0) -> str:
-    return f"2026-05-{day:02d}T{hour:02d}:{minute:02d}:00+08:00"
-
-
-def _generated_alert_record(index: int) -> dict:
-    devices = [
-        "\u603b\u88c5 A \u7ebf",
-        "\u603b\u88c5 B \u7ebf",
-        "SMT-01 \u8d34\u7247\u673a",
-        "SMT-03 \u56de\u6d41\u710a",
-        "\u7a7a\u538b\u7ad9 2#",
-        "\u7535\u63a7\u88c5\u914d\u7ebf",
-        "\u7ec8\u68c0 E \u7ebf",
-        "\u5305\u88c5 F \u7ebf",
-    ]
-    titles = [
-        "\u8282\u62cd\u4f4e\u4e8e\u76ee\u6807",
-        "\u6e29\u533a\u6ce2\u52a8\u8d85\u9608\u503c",
-        "\u8bbe\u5907\u5065\u5eb7\u5206\u4e0b\u964d",
-        "\u5b89\u5168\u5e93\u5b58\u4f4e\u4e8e\u9608\u503c",
-        "\u8d28\u68c0\u8fde\u7eed\u68c0\u51fa\u5f02\u5e38",
-        "\u5de5\u5355\u5b8c\u5de5\u8fdb\u5ea6\u6ede\u540e",
-    ]
-    owners = ["\u674e\u660e", "\u738b\u78ca", "\u5468\u5f3a", "\u9648\u6668", "\u5b59\u6d69", "\u8d75\u654f"]
-    statuses = ["\u5f85\u5904\u7406", "\u786e\u8ba4\u4e2d", "\u5904\u7406\u4e2d", "\u5df2\u5173\u95ed"]
-    device = devices[index % len(devices)]
-    level = "\u4e25\u91cd" if index % 11 == 0 else "\u4e00\u822c" if index % 3 else "\u63d0\u9192"
-    status = statuses[index % len(statuses)]
-    day = 1 + index % 27
-    hour = 7 + index % 12
-    return {
-        "status": "active",
-        "data": {
-            "alertId": f"AL-202605{day:02d}-{index + 1:04d}",
-            "title": f"{device} {titles[index % len(titles)]}",
-            "device": device,
-            "level": level,
-            "source": "\u7cfb\u7edf\u76d1\u6d4b" if index % 4 else "\u5916\u90e8\u63a5\u53e3",
-            "occurredAt": _iso_day(day, hour, index % 60),
-            "owner": owners[index % len(owners)],
-            "dueAt": _iso_day(day, min(hour + (2 if level == "\u4e25\u91cd" else 6), 23), index % 60),
-            "status": status,
-            "resolution": "\u5df2\u590d\u4f4d\u5e76\u9a8c\u8bc1\u8d8b\u52bf\u6062\u590d\u7a33\u5b9a\u3002" if status == "\u5df2\u5173\u95ed" else "",
-            "evidence": [],
-            "processStatus": "\u5df2\u5b8c\u6210" if status == "\u5df2\u5173\u95ed" else "\u5904\u7406\u4e2d",
-            "currentNode": "\u5173\u95ed\u5f52\u6863" if status == "\u5df2\u5173\u95ed" else "\u7ef4\u4fee\u5904\u7406",
-            "currentHandler": "" if status == "\u5df2\u5173\u95ed" else owners[index % len(owners)],
-            "completedAt": _iso_day(day, min(hour + 3, 23), index % 60) if status == "\u5df2\u5173\u95ed" else "",
-            "interactionLog": [
-                {"time": f"{hour:02d}:{index % 60:02d}", "actor": "\u7cfb\u7edf", "action": "\u521b\u5efa\u544a\u8b66"},
-            ],
-        },
-    }
-
-
-def _generated_risk_review_record(index: int) -> dict:
-    subjects = [
-        "\u5173\u952e\u7269\u6599\u5230\u6599\u5ef6\u8fdf",
-        "\u4f9b\u5e94\u5546\u8d28\u91cf\u6ce2\u52a8",
-        "\u5ba2\u6237\u4ea4\u4ed8\u7a97\u53e3\u538b\u7f29",
-        "\u66ff\u4ee3\u6599\u8ba4\u8bc1\u672a\u5b8c\u6210",
-        "\u8fd0\u8f93\u5e72\u7ebf\u65f6\u6548\u6ce2\u52a8",
-    ]
-    owners = ["\u5218\u6d0b", "\u674e\u660e", "\u8d75\u654f", "\u5468\u5f3a", "\u738b\u78ca"]
-    levels = ["\u9ad8", "\u4e2d", "\u4f4e"]
-    statuses = ["\u5f85\u590d\u6838", "\u5b9a\u7ea7\u4e2d", "\u5904\u7406\u4e2d", "\u5df2\u5173\u95ed"]
-    return {
-        "status": "active",
-        "data": {
-            "risk_no": f"SR-202605{1 + index % 27:02d}-{index + 1:04d}",
-            "subject": subjects[index % len(subjects)],
-            "level": levels[index % len(levels)],
-            "owner": owners[index % len(owners)],
-            "reason": "\u6839\u636e\u4ea4\u4ed8\u3001\u8d28\u91cf\u548c\u5e93\u5b58\u6eda\u52a8\u6570\u636e\u81ea\u52a8\u751f\u6210\u98ce\u9669\u590d\u6838\u4efb\u52a1\u3002",
-            "status": statuses[index % len(statuses)],
-            "process_status": "\u5df2\u5b8c\u6210" if index % len(statuses) == 3 else "\u5904\u7406\u4e2d",
-            "current_node": "\u5904\u7406\u5173\u95ed" if index % len(statuses) == 3 else "\u8d23\u4efb\u5206\u6d3e",
-            "current_handler": "" if index % len(statuses) == 3 else owners[index % len(owners)],
-            "completed_at": _iso_day(1 + index % 27, 18) if index % len(statuses) == 3 else "",
-            "interaction_log": [{"time": "09:00", "actor": "\u7cfb\u7edf", "action": "\u521b\u5efa\u98ce\u9669"}],
-        },
-    }
-
-
-def _generated_business_record(form_code: str, index: int) -> Optional[dict]:
-    if form_code == "alert-center":
-        return _generated_alert_record(index)
-    if form_code == "risk-review":
-        return _generated_risk_review_record(index)
-    return None
-
-
 def _default_view_config(fields: list[dict]) -> dict:
     visible_fields = [field for field in fields if field.get("visible_in_list", True)]
     searchable_fields = [field for field in fields if field.get("searchable")]
@@ -1917,11 +1282,6 @@ def _default_form_layout(fields: list[dict]) -> dict:
             }
         ],
     }
-
-
-def _is_analysis_form_config(config: Optional[dict]) -> bool:
-    kind = str((config or {}).get("assemblyKind") or (config or {}).get("kind") or (config or {}).get("type") or "").lower()
-    return kind in {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
 
 
 async def _ensure_agent_business_runtime_design(db: AsyncSession, tenant_id: int, form, fields: list) -> bool:
@@ -2010,277 +1370,6 @@ async def _ensure_agent_business_runtime_design(db: AsyncSession, tenant_id: int
     return changed
 
 
-def _legacy_default_workflow_config_unused(form_code: str, form_id: int, workflow_name: str, field_names: list[str]) -> dict:
-    process_status_field = "process_status" if "process_status" in field_names else "processStatus"
-    current_node_field = "current_node" if "current_node" in field_names else "currentNode"
-    current_handler_field = "current_handler" if "current_handler" in field_names else "currentHandler"
-    completed_at_field = "completed_at" if "completed_at" in field_names else "completedAt"
-    return {
-        "name": workflow_name,
-        "version": "v1",
-        "formCode": form_code,
-        "formId": form_id,
-        "nodes": [
-            {"id": "start-1", "type": "startEvent", "label": "开始事件", "x": 420, "y": 80},
-            {"id": "task-1", "type": "userTask", "label": "业务确认", "x": 420, "y": 200, "assigneeType": "role", "assigneeValue": "业务负责人", "approvalMode": "single"},
-            {"id": "task-2", "type": "manualTask", "label": "处理执行", "x": 420, "y": 320, "assigneeType": "role", "assigneeValue": "处理工程师"},
-            {"id": "end-1", "type": "endEvent", "label": "关闭归档", "x": 420, "y": 440},
-        ],
-        "edges": [
-            {"id": "edge-1", "source": "start-1", "target": "task-1", "label": "提交", "priority": 1},
-            {"id": "edge-2", "source": "task-1", "target": "task-2", "label": "通过", "priority": 1},
-            {"id": "edge-3", "source": "task-2", "target": "end-1", "label": "完成", "priority": 1},
-        ],
-        "triggerBindings": [
-            {"action": "submit", "label": "提交触发", "enabled": True},
-            {"action": "approve", "label": "按钮动作触发", "enabled": True},
-        ],
-        "stateMapping": {
-            "processStatus": process_status_field,
-            "currentNode": current_node_field,
-            "currentHandler": current_handler_field,
-            "completedAt": completed_at_field,
-        },
-        "fieldPermissions": {
-            "task-1": {name: {"visible": True, "editable": False, "required": False} for name in field_names},
-            "task-2": {name: {"visible": True, "editable": name not in {process_status_field, current_node_field, current_handler_field, completed_at_field}, "required": False} for name in field_names},
-        },
-        "advancedModeConfig": {"enabled": False},
-    }
-    default_positions = {
-        "start-1": 140,
-        "task-1": 260,
-        "task-2": 380,
-        "end-1": 500,
-    }
-    for node in workflow["nodes"]:
-        node_id = node.get("id")
-        if node_id in default_positions:
-            node["y"] = default_positions[node_id]
-        if node_id == "task-2":
-            node["type"] = "userTask"
-            node["bpmnType"] = "bpmn:UserTask"
-            node["approvalMode"] = node.get("approvalMode") or "single"
-    return workflow
-
-
-def _default_workflow_config(form_code: str, form_id: int, workflow_name: str, field_names: list[str]) -> dict:
-    process_status_field = "process_status" if "process_status" in field_names else "processStatus"
-    current_node_field = "current_node" if "current_node" in field_names else "currentNode"
-    current_handler_field = "current_handler" if "current_handler" in field_names else "currentHandler"
-    completed_at_field = "completed_at" if "completed_at" in field_names else "completedAt"
-    locked_state_fields = {process_status_field, current_node_field, current_handler_field, completed_at_field}
-    return {
-        "name": workflow_name,
-        "version": INITIAL_WORKFLOW_VERSION,
-        "formCode": form_code,
-        "formId": form_id,
-        "nodes": [
-            {"id": "start-1", "type": "startEvent", "label": "开始事件", "x": 420, "y": 140},
-            {
-                "id": "task-1",
-                "type": "userTask",
-                "label": "业务确认",
-                "title": "业务确认",
-                "x": 420,
-                "y": 260,
-                "assigneeType": "role",
-                "assigneeValue": "业务负责人",
-                "assigneeRules": [{"id": "rule-1", "type": "role", "label": "角色", "value": "业务负责人"}],
-                "approvalMode": "single",
-            },
-            {
-                "id": "task-2",
-                "type": "userTask",
-                "bpmnType": "bpmn:UserTask",
-                "label": "处理审批",
-                "title": "处理审批",
-                "x": 420,
-                "y": 380,
-                "assigneeType": "role",
-                "assigneeValue": "处理工程师",
-                "assigneeRules": [{"id": "rule-1", "type": "role", "label": "角色", "value": "处理工程师"}],
-                "approvalMode": "single",
-            },
-            {"id": "end-1", "type": "endEvent", "label": "关闭归档", "x": 420, "y": 500},
-        ],
-        "edges": [
-            {"id": "edge-1", "source": "start-1", "target": "task-1", "label": "提交", "priority": 1, "isDefault": True},
-            {"id": "edge-2", "source": "task-1", "target": "task-2", "label": "通过", "priority": 1, "isDefault": True},
-            {"id": "edge-3", "source": "task-2", "target": "end-1", "label": "完成", "priority": 1, "isDefault": True},
-        ],
-        "triggerBindings": [
-            {"action": "submit", "label": "提交触发", "enabled": True},
-            {"action": "approve", "label": "按钮动作触发", "enabled": True},
-        ],
-        "stateMapping": {
-            "processStatus": process_status_field,
-            "currentNode": current_node_field,
-            "currentHandler": current_handler_field,
-            "completedAt": completed_at_field,
-        },
-        "fieldPermissions": {
-            "task-1": {name: {"visible": True, "editable": False, "required": False} for name in field_names},
-            "task-2": {name: {"visible": True, "editable": name not in locked_state_fields, "required": False} for name in field_names},
-        },
-        "advancedModeConfig": {"enabled": False},
-    }
-
-
-async def _ensure_default_business_forms(db: AsyncSession, tenant_id: int) -> None:
-    from app.models.relational import (
-        Application,
-        ApplicationForm,
-        DynamicRecord,
-        Form,
-        FormAction,
-        FormField,
-        FormLayout,
-        FormPermission,
-        Role,
-        WorkflowBinding,
-        WorkflowDef,
-    )
-
-    for form_cfg in DEFAULT_BUSINESS_FORMS:
-        business_fields = _default_fields_for_form(form_cfg)
-        runtime_form_cfg = {**form_cfg, "fields": business_fields}
-        workflow_fields = _workflow_fields_for_form(form_cfg["code"])
-        fields = [*business_fields, *workflow_fields]
-        designer_meta = _designer_meta_for_form(runtime_form_cfg)
-        form = await db.scalar(select(Form).where(Form.code == form_cfg["code"], Form.tenant_id == tenant_id))
-        if form is None:
-            form = Form(
-                tenant_id=tenant_id,
-                name=form_cfg["name"],
-                code=form_cfg["code"],
-                description=form_cfg["description"],
-                table_name=form_cfg["table_name"],
-                storage_mode="dynamic",
-                status="published",
-                config={
-                    "source": "default-business-seed",
-                    "viewConfig": _default_view_config(fields),
-                    "workflowDesigner": {},
-                    "designerMeta": designer_meta,
-                },
-            )
-            db.add(form)
-            await db.flush()
-        else:
-            current_config = form.config or {}
-            form.name = form_cfg["name"]
-            form.description = form.description or form_cfg["description"]
-            form.table_name = form.table_name or form_cfg["table_name"]
-            if form.status in {"draft", "active"}:
-                form.status = "published"
-            form.config = {
-                **current_config,
-                "source": current_config.get("source", "default-business-seed"),
-                "viewConfig": current_config.get("viewConfig") or _default_view_config(fields),
-                "designerMeta": current_config.get("designerMeta") or designer_meta,
-            }
-
-        existing_fields = {
-            field.field_name
-            for field in (await db.execute(select(FormField).where(FormField.form_id == form.id, FormField.tenant_id == tenant_id))).scalars().all()
-        }
-        for index, field_cfg in enumerate(fields):
-            if field_cfg["field_name"] in existing_fields:
-                continue
-            db.add(FormField(tenant_id=tenant_id, form_id=form.id, sort_order=index, **field_cfg))
-
-        for layout_type, layout_config in {
-            "list": {"viewConfig": _default_view_config(fields)},
-            "form": {"sections": [{"title": "业务信息", "fields": [field["field_name"] for field in business_fields]}, {"title": "流程状态", "fields": [field["field_name"] for field in workflow_fields]}]},
-        }.items():
-            existing_layout = await db.scalar(select(FormLayout).where(FormLayout.form_id == form.id, FormLayout.tenant_id == tenant_id, FormLayout.layout_type == layout_type))
-            if existing_layout is None:
-                db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type=layout_type, config=layout_config))
-
-        existing_actions = {
-            action.action_key
-            for action in (await db.execute(select(FormAction).where(FormAction.form_id == form.id, FormAction.tenant_id == tenant_id))).scalars().all()
-        }
-        for index, action_cfg in enumerate(form_cfg["actions"]):
-            if action_cfg["action_key"] not in existing_actions:
-                db.add(FormAction(tenant_id=tenant_id, form_id=form.id, sort_order=index, **action_cfg))
-
-        record_count = await db.scalar(select(func.count(DynamicRecord.id)).where(DynamicRecord.form_id == form.id, DynamicRecord.tenant_id == tenant_id)) or 0
-        if record_count == 0:
-            for record_cfg in form_cfg["records"]:
-                db.add(DynamicRecord(tenant_id=tenant_id, form_id=form.id, model_id=form.model_id, created_by=None, updated_by=None, **record_cfg))
-            record_count = len(form_cfg["records"])
-
-        target_count = BUSINESS_FORM_RECORD_TARGETS.get(form_cfg["code"], 0)
-        if record_count < target_count:
-            for seed_index in range(record_count, target_count):
-                generated = _generated_business_record(form_cfg["code"], seed_index)
-                if generated is not None:
-                    db.add(DynamicRecord(tenant_id=tenant_id, form_id=form.id, model_id=form.model_id, created_by=None, updated_by=None, **generated))
-
-        roles = (await db.execute(select(Role).where(Role.tenant_id == tenant_id))).scalars().all()
-        for role in roles:
-            for action in ["view", "create", "edit", "delete", "export"]:
-                exists = await db.scalar(select(FormPermission.id).where(
-                    FormPermission.form_id == form.id,
-                    FormPermission.tenant_id == tenant_id,
-                    FormPermission.role_id == role.id,
-                    FormPermission.action == action,
-                    FormPermission.field_name.is_(None),
-                ).limit(1))
-                if exists is None:
-                    db.add(FormPermission(tenant_id=tenant_id, form_id=form.id, role_id=role.id, action=action, effect="allow"))
-
-        workflow = await db.scalar(select(WorkflowDef).where(WorkflowDef.tenant_id == tenant_id, WorkflowDef.name == f"{form_cfg['name']}默认流程"))
-        workflow_config = _default_workflow_config(form_cfg["code"], form.id, f"{form_cfg['name']}默认流程", [field["field_name"] for field in fields])
-        if workflow is None:
-            workflow = WorkflowDef(
-                tenant_id=tenant_id,
-                name=f"{form_cfg['name']}默认流程",
-                description=f"{form_cfg['name']}表单默认业务闭环流程",
-                config=json.dumps(workflow_config, ensure_ascii=False),
-                form_config=json.dumps({"fields": fields}, ensure_ascii=False),
-                status="published",
-                version=1,
-            )
-            db.add(workflow)
-            await db.flush()
-        workflow_meta = {
-            **((form.config or {}).get("workflowDesigner") or {}),
-            "publishedWorkflowId": workflow.id,
-            "publishedVersion": workflow.version,
-        }
-        form.config = {**(form.config or {}), "workflowDesigner": workflow_meta}
-
-        for binding in workflow_config["triggerBindings"]:
-            exists = await db.scalar(select(WorkflowBinding.id).where(
-                WorkflowBinding.form_id == form.id,
-                WorkflowBinding.workflow_id == workflow.id,
-                WorkflowBinding.trigger_action == binding["action"],
-                WorkflowBinding.tenant_id == tenant_id,
-            ).limit(1))
-            if exists is None:
-                db.add(WorkflowBinding(
-                    tenant_id=tenant_id,
-                    form_id=form.id,
-                    workflow_id=workflow.id,
-                    trigger_action=binding["action"],
-                    enabled=binding["enabled"],
-                    config={"label": binding["label"], "stateMapping": workflow_config["stateMapping"], "source": "default-business-seed"},
-                ))
-
-        for app_code in form_cfg["app_codes"]:
-            app = await db.scalar(select(Application).where(Application.code == app_code, Application.tenant_id == tenant_id))
-            if app is None:
-                continue
-            exists = await db.scalar(select(ApplicationForm.id).where(ApplicationForm.application_id == app.id, ApplicationForm.form_id == form.id, ApplicationForm.tenant_id == tenant_id).limit(1))
-            if exists is None:
-                db.add(ApplicationForm(tenant_id=tenant_id, application_id=app.id, form_id=form.id, alias=form_cfg["name"], default_view="list", allow_export=True))
-
-    await db.commit()
-
-
 @router.get("")
 async def list_forms(
     application_id: Optional[int] = Query(default=None),
@@ -2290,7 +1379,6 @@ async def list_forms(
     from app.models.relational import ApplicationForm, Form, FormField
 
     tenant_id = current_tenant_id(user)
-    await _ensure_default_business_forms(db, tenant_id)
     query = select(Form).where(Form.tenant_id == tenant_id).order_by(Form.created_at.desc(), Form.id.desc())
     if application_id is not None:
         query = query.join(ApplicationForm, ApplicationForm.form_id == Form.id).where(
@@ -2299,7 +1387,7 @@ async def list_forms(
             ApplicationForm.enabled.is_(True),
         )
     forms = (await db.execute(query)).scalars().all()
-    if not user.get("is_admin") and not _is_demo_anonymous_reader(user):
+    if not user.get("is_admin") and not _is_anonymous_reader(user):
         visible_forms = []
         for form in forms:
             if await has_form_permission(user, form.id, "view", db):
@@ -2315,6 +1403,8 @@ async def list_forms(
         )).scalars().all()
         for field in field_rows:
             fields_by_form.setdefault(field.form_id, []).append(field)
+    if not forms:
+        raise seed_data_required("No forms found. Run the business form seed before opening forms.")
     return {"data": [_form_payload(form, fields=fields_by_form.get(form.id, [])) for form in forms]}
 
 
@@ -2332,9 +1422,9 @@ async def create_form(
     table_name = body.table_name
     if storage_mode == "dynamic" and not table_name:
         storage_mode = "physical_table"
-        table_name = _physical_table_name_for_form(body.code, body.config)
+        table_name = _physical_table_name_for_form(tenant_id, body.code, body.config)
     if table_name:
-        assert_safe_identifier(table_name)
+        _validate_physical_table_name(tenant_id, table_name)
 
     existing = await db.scalar(select(Form).where(Form.code == body.code, Form.tenant_id == tenant_id))
     if existing:
@@ -2695,23 +1785,24 @@ async def get_form_version(
 async def get_form_by_code(
     form_code: str,
     schema: str = Query(default="draft", pattern="^(draft|published)$"),
+    scope: str = Query(default="designer", pattern="^(list|create|edit|designer)$"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     from app.models.relational import Form
 
     tenant_id = current_tenant_id(user)
-    await _ensure_default_business_forms(db, tenant_id)
     form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == form_code))
     if not form:
         raise HTTPException(404, "Form not found")
-    return await get_form(form.id, schema=schema, db=db, user=user)
+    return await get_form(form.id, schema=schema, scope=scope, db=db, user=user)
 
 
 @router.get("/{form_id}")
 async def get_form(
     form_id: int,
     schema: str = Query(default="draft", pattern="^(draft|published)$"),
+    scope: str = Query(default="designer", pattern="^(list|create|edit|designer)$"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -2729,7 +1820,7 @@ async def get_form(
         await db.commit()
         await db.refresh(form)
     fields = await _runtime_form_fields(db, tenant_id, form_id) if schema == "published" else draft_fields
-    if not user.get("is_admin") and not _is_demo_anonymous_reader(user):
+    if not user.get("is_admin") and not _is_anonymous_reader(user):
         visible_names = await allowed_form_fields(user, form_id, "view", fields, db)
         fields = [field for field in fields if field.field_name in visible_names]
     app_rows = await db.execute(
@@ -2753,16 +1844,16 @@ async def get_form(
         version = await _latest_form_version(db, tenant_id, form_id)
         if version:
             payload = _published_form_payload(form, version, applications=applications)
-            if not user.get("is_admin") and not _is_demo_anonymous_reader(user):
+            if not user.get("is_admin") and not _is_anonymous_reader(user):
                 visible_names = await allowed_form_fields(user, form_id, "view", fields, db)
                 payload["fields"] = [field for field in payload["fields"] if field.get("field_name") in visible_names]
             payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
             payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, payload.get("fields") or [], db)
-            return {"data": payload}
+            return {"data": _scoped_form_payload(payload, scope)}
     payload = _form_payload(form, fields=fields, applications=applications)
     payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
     payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, fields, db)
-    return {"data": payload}
+    return {"data": _scoped_form_payload(payload, scope)}
 
 
 @router.put("/{form_id}")
@@ -2781,7 +1872,7 @@ async def update_form(
     old_values = _form_payload(form)
     updates = body.dict(exclude_unset=True)
     if updates.get("table_name"):
-        assert_safe_identifier(updates["table_name"])
+        _validate_physical_table_name(tenant_id, updates["table_name"])
     for key, value in updates.items():
         setattr(form, key, value)
     await db.commit()
@@ -3441,14 +2532,27 @@ async def create_dynamic_record(
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "create")
+    _validate_record_status(body.status)
     fields = await _runtime_form_fields(db, tenant_id, form_id)
     editable_fields = await allowed_form_fields(user, form_id, "create", fields, db)
-    _validate_record_data(fields, body.data)
+    input_data = dict(body.data or {})
     if _uses_physical_form_table(form):
         await _ensure_physical_form_table(db, form, fields)
-        payload = _physical_write_payload(fields, body.data, editable_fields)
+    record_data = await _apply_record_encoding_rules(db, tenant_id, form, fields, input_data)
+    generated_fields: set[str] = set()
+    generated_fields = {key for key, value in record_data.items() if input_data.get(key) != value}
+    _validate_record_data(fields, record_data)
+    if _uses_physical_form_table(form):
+        payload = _physical_write_payload(fields, record_data, editable_fields | generated_fields)
         table_name = str(form.table_name)
         assert_safe_identifier(table_name)
+        # Physical records share the dynamicRecords quota; count this form's
+        # live rows so the physical path cannot bypass tenant limits.
+        physical_count = int(await db.scalar(
+            text(f"SELECT COUNT(*) FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL"),
+            {"tenant_id": tenant_id},
+        ) or 0)
+        await assert_tenant_quota(db, tenant_id, "dynamicRecords", extra_count=physical_count)
         physical_values = {_physical_column_name(key): value for key, value in payload.items()}
         columns = ["tenant_id", "record_status", "created_by", "updated_by", *physical_values.keys()]
         for column in columns:
@@ -3466,20 +2570,28 @@ async def create_dynamic_record(
             text(f"INSERT INTO {table_name} ({column_sql}) VALUES ({value_sql}) RETURNING *"),
             params,
         )).first()
-        await db.commit()
         result = _physical_record_payload(row, form, fields)
+        workflow_instances = await _start_form_workflows(
+            db,
+            tenant_id=tenant_id,
+            form=form,
+            record_payload=result,
+            user=user,
+            trigger_action="submit",
+        )
+        await db.commit()
         await write_audit_log(
             tenant_id=tenant_id,
             user_id=current_user_id(user),
             action="create",
             resource_type="physical_record",
             resource_id=result["id"],
-            new_values=result,
+            new_values={**result, "workflow_instances": workflow_instances},
         )
-        return {"data": result}
+        return {"data": {**result, "workflow_instances": workflow_instances}}
 
     await assert_tenant_quota(db, tenant_id, "dynamicRecords")
-    denied_fields = sorted(set(body.data.keys()) - editable_fields)
+    denied_fields = sorted(set(record_data.keys()) - editable_fields - generated_fields)
     if denied_fields:
         raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
     latest_version = await _latest_form_version(db, tenant_id, form_id)
@@ -3487,24 +2599,36 @@ async def create_dynamic_record(
         tenant_id=tenant_id,
         form_id=form_id,
         model_id=form.model_id,
-        data=body.data,
+        data=record_data,
         schema_version=latest_version.version if latest_version else 1,
         status=body.status,
         created_by=_uid(user),
         updated_by=_uid(user),
     )
     db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    record_result = _record_payload(record)
+    workflow_instances = await _start_form_workflows(
+        db,
+        tenant_id=tenant_id,
+        form=form,
+        record_payload=record_result,
+        user=user,
+        trigger_action="submit",
+    )
     await db.commit()
     await db.refresh(record)
+    record_result = _record_payload(record)
     await write_audit_log(
         tenant_id=tenant_id,
         user_id=current_user_id(user),
         action="create",
         resource_type="dynamic_record",
         resource_id=record.id,
-        new_values=_record_payload(record),
+        new_values={**record_result, "workflow_instances": workflow_instances},
     )
-    return {"data": _record_payload(record)}
+    return {"data": {**record_result, "workflow_instances": workflow_instances}}
 
 
 @router.put("/{form_id}/records/{record_id}")
@@ -3522,6 +2646,7 @@ async def update_dynamic_record(
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "edit")
+    _validate_record_status(body.status)
     if _uses_physical_form_table(form):
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         await _ensure_physical_form_table(db, form, fields)
@@ -3532,6 +2657,7 @@ async def update_dynamic_record(
         existing = await _get_physical_record(db, form, fields, all_field_names, record_id, include_deleted=False)
         merged = _merged_record_data(existing["data"]["data"], data_updates)
         _validate_record_data(fields, merged)
+        await _assert_unique_code_values(db, tenant_id, form, fields, data_updates, exclude_record_id=record_id)
         payload = _physical_write_payload(fields, data_updates, editable_fields)
         table_name = str(form.table_name)
         assert_safe_identifier(table_name)
@@ -3545,7 +2671,7 @@ async def update_dynamic_record(
             param_name = f"field_{column_name}"
             assignments.append(f"{column_name} = :{param_name}")
             params[param_name] = value
-        assignments.extend(["updated_by = :updated_by", "updated_at = now()"])
+        assignments.extend(["updated_by = :updated_by", f"updated_at = {_sql_current_timestamp()}"])
         row = (await db.execute(
             text(f"UPDATE {table_name} SET {', '.join(assignments)} WHERE id = :id AND tenant_id = :tenant_id AND deleted_at IS NULL RETURNING *"),
             params,
@@ -3576,6 +2702,7 @@ async def update_dynamic_record(
             raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
         merged = _merged_record_data(record.data, updates["data"])
         _validate_record_data(fields, merged)
+        await _assert_unique_code_values(db, tenant_id, form, fields, updates["data"], exclude_record_id=record_id)
         updates["data"] = merged
     for key, value in updates.items():
         setattr(record, key, value)
@@ -3613,7 +2740,7 @@ async def delete_dynamic_record(
         table_name = str(form.table_name)
         assert_safe_identifier(table_name)
         row = (await db.execute(
-            text(f"UPDATE {table_name} SET deleted_at = now(), updated_by = :updated_by, updated_at = now() WHERE id = :id AND tenant_id = :tenant_id AND deleted_at IS NULL RETURNING id"),
+            text(f"UPDATE {table_name} SET deleted_at = {_sql_current_timestamp()}, updated_by = :updated_by, updated_at = {_sql_current_timestamp()} WHERE id = :id AND tenant_id = :tenant_id AND deleted_at IS NULL RETURNING id"),
             {"id": record_id, "tenant_id": tenant_id, "updated_by": _uid(user)},
         )).first()
         if not row:

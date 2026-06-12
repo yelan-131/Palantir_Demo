@@ -1,17 +1,16 @@
 """Database engine + session factory.
 
 Strategy:
-- Try PostgreSQL (asyncpg) first; if the driver is missing or the URL is
-  unreachable at first use, fall back to local SQLite (aiosqlite).
-- `init_db()` is the only place schema is auto-created (SQLite mode only,
-  for demo bootstrap). Production / PG flows must use Alembic migrations.
+- Use SQLite only when DATABASE_BACKEND=sqlite is explicitly configured.
+- Otherwise create the PostgreSQL engine and let runtime connection failures
+  surface as DATABASE_UNAVAILABLE through the request/session boundary.
+- `init_db()` is the only place schema is auto-created (SQLite mode only).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import socket
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -28,25 +27,21 @@ def _json_serializer(value):
 _sqlite_path = settings.SQLITE_DB_PATH or os.path.join(os.path.dirname(__file__), "..", "manufoundry.db")
 _sqlite_url = f"sqlite+aiosqlite:///{os.path.abspath(_sqlite_path)}"
 
-DB_TYPE = "sqlite"
+DB_TYPE = "postgresql"
 _engine = None
 
 if settings.DATABASE_BACKEND.lower() == "sqlite":
-    logger.info("DATABASE_BACKEND=sqlite; using SQLite fallback")
+    if settings.IS_PRODUCTION:
+        raise RuntimeError("SQLite fallback is disabled when APP_MODE=production")
+    logger.info("DATABASE_BACKEND=sqlite; using explicitly configured SQLite")
+    try:
+        _engine = create_async_engine(_sqlite_url, echo=False, json_serializer=_json_serializer)
+        DB_TYPE = "sqlite"
+    except Exception as exc:
+        raise RuntimeError(f"SQLite engine init failed: {exc}") from exc
 else:
-    # Prefer PostgreSQL if asyncpg is installed and reachable. In demo mode, fall
-    # back to SQLite quickly when the local PostgreSQL service is not running so
-    # login and mock-backed flows remain usable without Docker.
     try:
         import asyncpg  # noqa: F401
-        try:
-            with socket.create_connection((settings.POSTGRES_HOST, settings.POSTGRES_PORT), timeout=0.5):
-                pass
-        except OSError as exc:
-            if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
-                raise RuntimeError(f"PostgreSQL is unreachable: {exc}") from exc
-            logger.warning("PostgreSQL unreachable (%s); using SQLite fallback", exc)
-            raise ImportError("postgresql unreachable in demo mode") from exc
         _engine = create_async_engine(
             settings.DATABASE_URL,
             echo=settings.DEBUG,
@@ -56,25 +51,10 @@ else:
             pool_pre_ping=True,
         )
         DB_TYPE = "postgresql"
-    except ImportError:
-        if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
-            raise RuntimeError("asyncpg and reachable PostgreSQL are required")
-        logger.info("asyncpg unavailable or PostgreSQL unreachable; using SQLite fallback")
+    except ImportError as exc:
+        raise RuntimeError("asyncpg is required for PostgreSQL database access") from exc
     except Exception as exc:
-        if settings.IS_PRODUCTION or settings.DATABASE_BACKEND.lower() == "postgresql":
-            raise RuntimeError(f"PostgreSQL engine init failed: {exc}") from exc
-        logger.warning("PG engine init failed (%s); using SQLite fallback", exc)
-
-if _engine is None:
-    if settings.IS_PRODUCTION:
-        raise RuntimeError("SQLite fallback is disabled when APP_MODE=production")
-    try:
-        _engine = create_async_engine(_sqlite_url, echo=False, json_serializer=_json_serializer)
-        DB_TYPE = "sqlite"
-    except Exception as exc:
-        logger.warning("SQLite file engine failed (%s); using in-memory SQLite", exc)
-        _engine = create_async_engine("sqlite+aiosqlite://", echo=False, json_serializer=_json_serializer)
-        DB_TYPE = "sqlite"
+        raise RuntimeError(f"PostgreSQL engine init failed: {exc}") from exc
 
 logger.info("Database backend: %s", DB_TYPE)
 

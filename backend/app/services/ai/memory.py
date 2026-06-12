@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.relational import AIAgentRun, AIConversation, AIMemoryEntry, AIMessage
 
+from .tenant_context import require_tenant_id
+
 
 def conversation_memory_key(user_id: str | None, session_id: str | None, tenant_id: int | None = None) -> str:
     tenant = tenant_id if tenant_id is not None else "default"
@@ -41,10 +43,11 @@ class MemoryService:
         user_message: AIMessage,
         assistant_message: AIMessage,
         evidence: list[dict[str, Any]],
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str | None = None,
         status: str = "candidate",
     ) -> AIMemoryEntry:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
         summary = assistant_message.content[:500]
         value = {
             "last_user_message": user_message.content,
@@ -86,10 +89,11 @@ class MemoryService:
         session: AsyncSession,
         *,
         conversation: AIConversation,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str | None = None,
         settings: dict[str, Any] | None = None,
     ) -> AIMemoryEntry | None:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
         compaction_policy = (settings or {}).get("compactionPolicy") or {}
         memory_policy = (settings or {}).get("memoryPolicy") or {}
         safety_policy = (settings or {}).get("safetyPolicy") or {}
@@ -158,11 +162,12 @@ class MemoryService:
         session: AsyncSession,
         *,
         conversation: AIConversation,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str | None = None,
         settings: dict[str, Any] | None = None,
         force: bool = False,
     ) -> AIMemoryEntry | None:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
         policy = (settings or {}).get("compactionPolicy") or {}
         if not policy.get("enabled", True):
             return None
@@ -190,14 +195,15 @@ class MemoryService:
         self,
         session: AsyncSession,
         *,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str,
         include_candidates: bool = True,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id})
         stmt = select(AIMemoryEntry)
         if hasattr(AIMemoryEntry, "tenant_id"):
-            stmt = stmt.where(or_(AIMemoryEntry.tenant_id == tenant_id, AIMemoryEntry.tenant_id.is_(None)))
+            stmt = stmt.where(AIMemoryEntry.tenant_id == tenant_id)
         if hasattr(AIMemoryEntry, "user_key"):
             stmt = stmt.where(AIMemoryEntry.user_key == user_key)
         if not include_candidates:
@@ -211,12 +217,13 @@ class MemoryService:
         session: AsyncSession,
         *,
         memory_id: str,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str,
     ) -> dict[str, Any] | None:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id})
         stmt = select(AIMemoryEntry).where(AIMemoryEntry.memory_id == memory_id)
         if hasattr(AIMemoryEntry, "tenant_id"):
-            stmt = stmt.where(or_(AIMemoryEntry.tenant_id == tenant_id, AIMemoryEntry.tenant_id.is_(None)))
+            stmt = stmt.where(AIMemoryEntry.tenant_id == tenant_id)
         if hasattr(AIMemoryEntry, "user_key"):
             stmt = stmt.where(AIMemoryEntry.user_key == user_key)
         memory = await session.scalar(stmt)
@@ -243,7 +250,7 @@ class MemoryService:
         self,
         session: AsyncSession,
         *,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str | None = None,
         conversation_id: str | None = None,
         page: str | None = None,
@@ -251,11 +258,12 @@ class MemoryService:
         query: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id})
         stmt = select(AIMemoryEntry).where(AIMemoryEntry.status == "active")
         if conversation_id:
             stmt = stmt.where(AIMemoryEntry.conversation_id == conversation_id)
         if hasattr(AIMemoryEntry, "tenant_id"):
-            stmt = stmt.where(or_(AIMemoryEntry.tenant_id == tenant_id, AIMemoryEntry.tenant_id.is_(None)))
+            stmt = stmt.where(AIMemoryEntry.tenant_id == tenant_id)
         if user_key and hasattr(AIMemoryEntry, "user_key"):
             stmt = stmt.where(or_(AIMemoryEntry.user_key == user_key, AIMemoryEntry.user_key.is_(None)))
         if page and hasattr(AIMemoryEntry, "page"):

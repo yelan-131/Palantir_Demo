@@ -106,7 +106,13 @@ async def ensure_tenant_active(db, tenant_id: int):
     return tenant
 
 
-async def assert_tenant_quota(db, tenant_id: int, quota_key: str) -> None:
+async def assert_tenant_quota(db, tenant_id: int, quota_key: str, *, extra_count: int = 0) -> None:
+    """Enforce a tenant resource quota.
+
+    ``extra_count`` lets callers add usage that lives outside the counted ORM
+    model — e.g. physical-table form records, which share the
+    ``dynamicRecords`` quota but are stored in per-form tables.
+    """
     from app.models.relational import Application, DynamicRecord, Tenant, User
 
     tenant = await ensure_tenant_active(db, tenant_id)
@@ -123,7 +129,7 @@ async def assert_tenant_quota(db, tenant_id: int, quota_key: str) -> None:
     if model is None:
         return
     count = await db.scalar(select(func.count(model.id)).where(model.tenant_id == tenant_id))
-    if (count or 0) >= limit:
+    if (count or 0) + max(0, int(extra_count)) >= limit:
         raise HTTPException(403, f"Tenant quota exceeded: {quota_key}")
 
 

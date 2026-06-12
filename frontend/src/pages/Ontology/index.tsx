@@ -445,7 +445,7 @@ export default function OntologyPage() {
               initialValues={{
                 domain: 'manufacturing',
                 prompt_name: 'manufacturing_ontology_v1',
-                model_name: 'mock-chat',
+                model_name: 'rules-ontology-extractor',
                 permission_scope: 'enterprise',
                 owner_user_id: 'demo-user',
               }}
@@ -478,7 +478,7 @@ export default function OntologyPage() {
                   <Form.Item label="模型" name="model_name" rules={[{ required: true }]}>
                     <Select
                       options={[
-                        { value: 'mock-chat', label: '本地 mock-chat' },
+                        { value: 'rules-ontology-extractor', label: 'Rules extractor' },
                         { value: 'glm-4-flash', label: 'GLM-4-Flash' },
                         { value: 'qwen-plus', label: 'Qwen Plus' },
                         { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },

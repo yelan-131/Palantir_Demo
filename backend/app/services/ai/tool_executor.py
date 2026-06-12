@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable
 
+from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.db import db_session
@@ -13,6 +14,8 @@ from .dynamic_record_drafts import create_dynamic_record_draft_from_agent
 from .form_analysis import analyze_form_records
 from .form_record_tools import get_form_record
 from .low_code_tools import execute_add_form_field, execute_create_form_definition
+from .skills import get_skill
+from .tool_envelope import tool_execution_envelope
 
 
 PersistDraft = Callable[..., Awaitable[dict[str, Any]]]
@@ -42,24 +45,20 @@ class AgentToolExecutor:
             skill = action.get("skill")
             payload = action.get("payload") if isinstance(action.get("payload"), dict) else {}
             source_draft_id = str(payload.get("_source_draft_id") or payload.get("_resume_draft_id") or "")
-            step_id = f"confirm-{run.get('run_id') or 'run'}-{index + 1}"
-            if event_sink:
-                await event_sink(
-                    "tool.started",
-                    {
-                        "step_id": step_id,
-                        "tool": self._tool_for_skill(str(skill or ""), payload),
-                        "skill": skill,
-                        "action_index": index + 1,
-                        "summary": action.get("title") or skill,
-                    },
-                )
             try:
-                result_item = await asyncio.wait_for(
-                    self._execute_action(
+                result_item = await tool_execution_envelope.execute_callable(
+                    tool_name=self._tool_for_skill(str(skill or ""), payload),
+                    skill_name=str(skill or ""),
+                    payload=payload,
+                    current_user=current_user,
+                    settings=settings,
+                    event_sink=event_sink,
+                    audit_ai_event=audit_ai_event,
+                    run_id=str(run.get("run_id") or ""),
+                    callback=lambda payload_override=None, skill=str(skill or ""), payload=payload, evidence=action.get("evidence") or [], source_draft_id=source_draft_id: self._execute_action(
                         skill=str(skill or ""),
-                        payload=payload,
-                        evidence=action.get("evidence") or [],
+                        payload=payload_override if isinstance(payload_override, dict) else payload,
+                        evidence=evidence,
                         run=run,
                         current_user=current_user,
                         persist_ai_draft=persist_ai_draft,
@@ -67,7 +66,6 @@ class AgentToolExecutor:
                         audit_ai_event=audit_ai_event,
                         source_draft_id=source_draft_id,
                     ),
-                    timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 result_item = {
@@ -83,18 +81,11 @@ class AgentToolExecutor:
                         {"skill": skill, "tool": result_item["tool"], "timeout_seconds": timeout_seconds},
                     )
             results.append(result_item)
-            if event_sink:
-                await event_sink(
-                    "tool.completed",
-                    {
-                        "step_id": step_id,
-                        "tool": result_item.get("tool"),
-                        "skill": result_item.get("skill"),
-                        "status": result_item.get("status"),
-                        "summary": self._summarize_result(result_item.get("result")),
-                        "result": result_item.get("result"),
-                    },
-                )
+            run.setdefault("items", []).extend(
+                item for item in (result_item.get("items") or [result_item.get("item")]) if isinstance(item, dict) and item
+            )
+            if result_item.get("status") == "failed":
+                break
 
         run["tool_results"] = results
         if any(item.get("status") == "failed" for item in results):
@@ -105,16 +96,13 @@ class AgentToolExecutor:
 
     @staticmethod
     def _tool_for_skill(skill: str, payload: dict[str, Any]) -> str:
-        if skill == "low_code.create_form_definition":
-            return "forms.create_form_definition"
-        if skill == "low_code.add_form_field":
-            return "forms.add_form_field"
-        if skill == "analysis.analyze_form_records":
-            return "forms.query_records"
-        if skill == "forms.get_record":
-            return "forms.get_record"
         contract = payload.get("_contract") if isinstance(payload.get("_contract"), dict) else {}
-        return str(contract.get("tool") or "ai.drafts.save")
+        if contract.get("tool"):
+            return str(contract["tool"])
+        skill_def = get_skill(skill)
+        if skill_def and skill_def.default_tool:
+            return skill_def.default_tool
+        return "ai.drafts.save"
 
     @staticmethod
     def _summarize_result(result: Any) -> str:
@@ -192,7 +180,7 @@ class AgentToolExecutor:
                     payload=payload,
                     evidence=evidence,
                 )
-        except SQLAlchemyError:
+        except (HTTPException, SQLAlchemyError):
             dynamic_result = None
         if dynamic_result:
             await self._mark_executed(update_ai_draft_status, source_draft_id, current_user, run, dynamic_result)

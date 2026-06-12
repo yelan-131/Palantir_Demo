@@ -12,6 +12,7 @@ from app.models.relational import AIMessage
 from .memory import memory_service
 from .schemas import AgentRequest
 from .settings import maybe_mask_sensitive_payload, safety_policy_snapshot
+from .tenant_context import require_tenant_id
 
 
 def estimate_tokens(value: Any) -> int:
@@ -36,10 +37,11 @@ class ContextBuilder:
         conversation_id: str | None = None,
         page: str | None = None,
         document_id: str | None = None,
-        tenant_id: int = 1,
+        tenant_id: int | None = None,
         user_key: str | None = None,
         evidence: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        tenant_id = require_tenant_id({"tenant_id": tenant_id or user.get("tenant_id") or (request.context or {}).get("_tenant_id")})
         context_policy = settings.get("contextPolicy") or {}
         memory_policy = settings.get("memoryPolicy") or {}
         rag_policy = settings.get("ragPolicy") or {}

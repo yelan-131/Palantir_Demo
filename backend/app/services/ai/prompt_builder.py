@@ -121,3 +121,152 @@ class PromptBuilder:
 
     def _output_contract_block(self, output_contract: str | None) -> str:
         return f"输出要求：{output_contract}" if output_contract else ""
+
+    def build_agent_prompt(
+        self,
+        *,
+        user: dict[str, Any],
+        tenant_profile: Any,
+        page_context: dict[str, Any],
+        knowledge_evidence: list[dict[str, Any]] | None = None,
+        memory: list[dict[str, Any]] | None = None,
+        history: list[ChatMessage] | None = None,
+        user_message: str = "",
+    ) -> list[ChatMessage]:
+        """Build messages for the LLM-driven tool_use agent loop.
+
+        Returns a list starting with a system message and ending with the user message.
+        The system prompt includes role definition, tenant context, safety rules,
+        and tool usage guidelines.
+        """
+        system_parts = [
+            self._agent_system_block(),
+            self._tenant_block(tenant_profile),
+            self._agent_user_block(user),
+            self._agent_safety_block(),
+        ]
+
+        system_content = "\n\n".join(part for part in system_parts if part)
+
+        # Build user context from page, evidence, memory, history
+        context_parts = []
+        page_block = self._page_block(page_context)
+        if page_block:
+            context_parts.append(page_block)
+
+        if knowledge_evidence:
+            context_parts.append(self._evidence_block(knowledge_evidence))
+
+        if memory:
+            context_parts.append(self._memory_block(memory))
+
+        if history:
+            context_parts.append(self._history_block(history))
+
+        if context_parts:
+            user_content = "\n\n".join(context_parts) + f"\n\n用户问题：{user_message}"
+        else:
+            user_content = user_message
+
+        return [
+            ChatMessage(role="system", content=system_content),
+            ChatMessage(role="user", content=user_content),
+        ]
+
+    def _agent_system_block(self) -> str:
+        return (
+            "你是 ManuFoundry 企业平台的 AI Agent。\n\n"
+            "你可以使用工具来查询和分析制造数据、管理表单、创建草稿、查询知识库等。\n"
+            "你的核心原则：\n"
+            "- 普通对话自然回答\n"
+            "- 涉及企业数据时，优先使用工具获取实时数据，而不是猜测\n"
+            "- 缺少必要参数时，直接向用户询问，不要假设值\n"
+            "- 写入、删除、流程启动等操作必须等待用户确认\n"
+            "- 不要声称已经执行了未经确认的写入操作\n"
+            "- 不要泄露 API 密钥、密码、连接串或内部审计细节\n"
+            "- 使用知识证据时标注 [S1]、[S2]，使用记忆时标注 [M1]\n"
+            "- 用中文回答"
+        )
+
+    def _agent_user_block(self, user: dict[str, Any]) -> str:
+        parts = [f"当前用户：{user.get('sub') or user.get('username') or '未知'}"]
+        roles = user.get("roles", [])
+        if roles:
+            role_names = [
+                r.get("label") or r.get("name") or str(r)
+                for r in roles
+                if isinstance(r, dict)
+            ]
+            if not role_names:
+                role_names = [str(r) for r in roles if isinstance(r, str)]
+            if role_names:
+                parts.append(f"用户角色：{', '.join(role_names)}")
+        if user.get("is_admin"):
+            parts.append("权限：管理员")
+        return "\n".join(parts)
+
+    def _agent_safety_block(self) -> str:
+        return (
+            "安全规则：\n"
+            "- 涉及写入、删除、发布、流程启动的工具，系统会在执行前要求用户确认\n"
+            "- 你无法绕过确认机制，也不应该告诉用户可以绕过\n"
+            "- 如果工具返回错误，向用户如实说明错误原因\n"
+            "- 如果工具返回权限不足，告诉用户需要什么角色才能执行"
+        )
+
+    def build_agent_prompt_layered(
+        self,
+        *,
+        user: dict[str, Any],
+        tenant_profile: Any,
+        page_context: dict[str, Any],
+        knowledge_evidence: list[dict[str, Any]] | None = None,
+        memory: list[dict[str, Any]] | None = None,
+        history: list[ChatMessage] | None = None,
+        user_message: str = "",
+    ) -> "LayeredContext":
+        """Build a LayeredContext for the agent loop.
+
+        Each context block is placed in its own named layer with a trim priority.
+        """
+        from .context_layers import ContextLayer, LayeredContext
+
+        ctx = LayeredContext()
+
+        # SYSTEM layer (priority 100, never trimmed)
+        system_content = "\n\n".join(part for part in [
+            self._agent_system_block(),
+            self._tenant_block(tenant_profile),
+            self._agent_user_block(user),
+            self._agent_safety_block(),
+        ] if part)
+        ctx.add_layer(ContextLayer.SYSTEM, [ChatMessage(role="system", content=system_content)])
+
+        # EVIDENCE layer (priority 40)
+        if knowledge_evidence:
+            ctx.add_layer(ContextLayer.EVIDENCE, [ChatMessage(
+                role="user",
+                content=self._evidence_block(knowledge_evidence),
+            )])
+
+        # MEMORY layer (priority 50)
+        if memory:
+            ctx.add_layer(ContextLayer.MEMORY, [ChatMessage(
+                role="user",
+                content=self._memory_block(memory),
+            )])
+
+        # HISTORY layer (priority 30, trimmed first)
+        if history:
+            history_messages = [ChatMessage(role=h.role, content=h.content[:500]) for h in history[-8:]]
+            ctx.add_layer(ContextLayer.HISTORY, history_messages)
+
+        # CURRENT_TURN layer (priority 70)
+        context_parts = []
+        page_block = self._page_block(page_context)
+        if page_block:
+            context_parts.append(page_block)
+        user_content = "\n\n".join(context_parts) + f"\n\n用户问题：{user_message}" if context_parts else user_message
+        ctx.add_layer(ContextLayer.CURRENT_TURN, [ChatMessage(role="user", content=user_content)])
+
+        return ctx

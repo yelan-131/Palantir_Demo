@@ -11,6 +11,24 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _admin_token() -> str:
+    from app.core.security import create_access_token
+
+    return create_access_token(
+        "admin",
+        extra={
+            "uid": 1,
+            "tenant_id": 1,
+            "is_admin": True,
+            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
+        },
+    )
+
+
+def _admin_headers() -> dict[str, str]:
+    return _headers(_admin_token())
+
+
 def _ok(response, context: str) -> dict:
     assert response.status_code < 400, f"{context}: {response.status_code} {response.text}"
     return response.json()
@@ -25,8 +43,7 @@ def test_readiness_metrics_and_tenant_export_redaction():
         assert readiness["status"] in {"ready", "degraded"}
         assert "database" in readiness["checks"]
 
-        token = _ok(client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}), "login")["token"]
-        headers = _headers(token)
+        headers = _admin_headers()
         tenant = _ok(
             client.post(
                 "/api/v1/platform/tenants",
@@ -73,8 +90,7 @@ def test_ai_notifications_scheduler_are_tenant_scoped():
             return row.id
 
     with TestClient(app) as client:
-        platform_token = _ok(client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}), "platform login")["token"]
-        platform_headers = _headers(platform_token)
+        platform_headers = _admin_headers()
         tenant_a = _ok(client.post("/api/v1/platform/tenants", headers=platform_headers, json={"name": f"SaaS A {suffix}", "slug": f"saas-a-{suffix}", "domains": [f"saas-a-{suffix}.example.com"], "admin_email": f"owner@saas-a-{suffix}.example.com"}), "create a")["data"]
         tenant_b = _ok(client.post("/api/v1/platform/tenants", headers=platform_headers, json={"name": f"SaaS B {suffix}", "slug": f"saas-b-{suffix}", "domains": [f"saas-b-{suffix}.example.com"], "admin_email": f"owner@saas-b-{suffix}.example.com"}), "create b")["data"]
         token_a = _ok(client.post("/api/v1/auth/invite/accept", json={"token": tenant_a["adminInvite"]["inviteUrl"].split("token=", 1)[1], "password": "TenantA123!"}), "accept a")["token"]

@@ -5,7 +5,6 @@ import {
   BranchesOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   DeploymentUnitOutlined,
@@ -23,12 +22,11 @@ import {
   ShareAltOutlined,
   StopOutlined,
   ThunderboltOutlined,
-  UndoOutlined,
   UserOutlined,
   UserSwitchOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { Button, Input, InputNumber, Modal, Select, Space, Switch, Tag, Typography } from 'antd';
+import { Button, Input, InputNumber, Modal, Select, Switch, Tag, Typography } from 'antd';
 
 type FlowPortSide = 'top' | 'right' | 'bottom' | 'left';
 type Selection = { type: 'canvas' } | { type: 'node'; id: string } | { type: 'nodes'; ids: string[] } | { type: 'edge'; id: string };
@@ -1541,11 +1539,6 @@ export default function ProfessionalFlowDesigner({
   const renderCanvasProperties = () => (
     <div className="professional-flow-props">
       <section>
-        <div className="professional-flow-section-title">流程发布</div>
-        <label><span>流程名称</span><Input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
-        <label><span>版本</span><Input value={config.version} onChange={(event) => patchConfig({ version: event.target.value })} /></label>
-      </section>
-      <section>
         <div className="professional-flow-section-title">表单触发</div>
         {config.triggerBindings.map((binding, index) => (
           <div className="professional-flow-trigger" key={binding.action}>
@@ -1563,20 +1556,6 @@ export default function ProfessionalFlowDesigner({
             />
             <Tag>{binding.action}</Tag>
           </div>
-        ))}
-      </section>
-      <section>
-        <div className="professional-flow-section-title">状态回写字段</div>
-        {([
-          ['statusField', '流程状态'],
-          ['currentNodeField', '当前节点'],
-          ['currentAssigneeField', '当前处理人'],
-          ['completedAtField', '完成时间'],
-        ] as const).map(([key, label]) => (
-          <label key={key}>
-            <span>{label}</span>
-            <Input value={config.stateMapping[key]} onChange={(event) => patchConfig({ stateMapping: { ...config.stateMapping, [key]: event.target.value } })} />
-          </label>
         ))}
       </section>
     </div>
@@ -1729,20 +1708,10 @@ export default function ProfessionalFlowDesigner({
         ref={canvasRef}
       >
         <div className="professional-flow-canvas-toolbar" onClick={(event) => event.stopPropagation()}>
-          <div>
+          <div className="professional-flow-canvas-title">
             <Typography.Text strong>{config.name}</Typography.Text>
-            <span>{config.nodes.length} 节点 / {config.edges.length} 连线</span>
           </div>
-          <Space size={6}>
-            <Button size="small" icon={<UndoOutlined />} disabled={!history.length} onClick={undo}>撤回</Button>
-            <Button size="small" disabled={!future.length} onClick={redo}>重做</Button>
-            <Button size="small" icon={<CopyOutlined />} disabled={!selectedNode} onClick={copySelected}>复制</Button>
-            <Button size="small" disabled={!clipboardNode} onClick={pasteNode}>粘贴</Button>
-            <Tag color={validation.some((item) => item.level === 'error') ? 'red' : 'success'}>
-              {validation.filter((item) => item.level === 'error').length} 阻断
-            </Tag>
-            <Button size="small" icon={<DeleteOutlined />} disabled={selection.type === 'canvas'} onClick={deleteSelected}>删除</Button>
-          </Space>
+          <span className="professional-flow-canvas-meta">{config.nodes.length} 节点 / {config.edges.length} 连线</span>
         </div>
         <svg className="professional-flow-edge-layer">
           <defs>

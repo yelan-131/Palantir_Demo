@@ -21,6 +21,7 @@ from .schemas import AIProviderConfig
 logger = get_logger(__name__)
 AI_SETTINGS_KEY = "ai.system"
 _SYSTEM_SETTINGS_TABLE_ENSURED = False
+SUPPORTED_PROVIDER_NAMES = {"openai-compatible", "openai", "azure-openai", "deepseek", "qwen", "glm"}
 
 DEFAULT_ROLE_POLICIES: list[dict[str, Any]] = [
     {
@@ -100,8 +101,26 @@ DEFAULT_SAFETY_POLICY: dict[str, Any] = {
     "sensitiveMasking": True,
     "blockSecretMemory": True,
     "highRiskConfirm": True,
+    # "pipeline" keeps the deterministic operation state machine;
+    # "model" / "tool_use" routes requests to the LLM-driven tool_use loop
+    # (requires a configured external provider; falls back to pipeline).
+    "agentLoopMode": "pipeline",
     "maxToolSteps": 5,
     "toolTimeoutSeconds": 30,
+    "persistConfirmations": False,
+    "agentMaxInputTokens": 100000,
+    "agentMaxOutputTokens": 20000,
+    "maxToolResultChars": 8000,
+    "deferredToolLoading": False,
+    "permissionRules": [],
+    "validationRules": [],
+    "enabledHooks": [
+        "enforce_permissions",
+        "validate_before_confirmation",
+        "validate_before_tool",
+        "validate_after_tool",
+        "audit_tool_use",
+    ],
 }
 
 SENSITIVE_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -257,6 +276,9 @@ def _merge_nested(defaults: dict[str, Any], value: Any) -> dict[str, Any]:
 
 def _normalize_provider_defaults(settings_data: dict[str, Any]) -> dict[str, Any]:
     provider = settings_data.get("provider")
+    if provider not in SUPPORTED_PROVIDER_NAMES:
+        settings_data["provider"] = "glm"
+        provider = "glm"
     if provider == "deepseek":
         base_url = str(settings_data.get("baseUrl") or settings_data.get("base_url") or "")
         if not base_url or "bigmodel.cn" in base_url or "api.openai.com" in base_url:

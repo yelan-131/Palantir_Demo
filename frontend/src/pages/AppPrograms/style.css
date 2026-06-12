@@ -465,6 +465,12 @@
   padding-top: 8px;
 }
 
+.app-business-create-form .app-business-upload-field,
+.app-business-create-form .app-business-upload-field .ant-upload,
+.app-business-create-form .app-business-upload-field .ant-btn {
+  width: 100%;
+}
+
 .app-business-detail-drawer {
   width: 100%;
 }

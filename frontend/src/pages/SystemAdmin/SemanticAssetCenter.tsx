@@ -4,10 +4,13 @@ import {
   BranchesOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   DownloadOutlined,
+  EditOutlined,
   FileSearchOutlined,
   InboxOutlined,
   NodeIndexOutlined,
+  PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
   SendOutlined,
@@ -30,6 +33,7 @@ import {
   Row,
   Segmented,
   Select,
+  Slider,
   Space,
   Steps,
   Switch,
@@ -44,15 +48,33 @@ import {
 import type { DataNode } from 'antd/es/tree';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  Handle,
+  Position,
+  addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
+  type Connection,
+  type Edge,
+  type EdgeChange,
+  type Node,
+  type NodeChange,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
 import {
   approveKnowledgeExtractionJob,
   commitKnowledgeExtractionJobToGraph,
   createDataSource as createBackendDataSource,
+  createSemanticDataQualityRule,
   createKnowledgeAgentConversation,
   createKnowledgeDocumentExtractionJob,
   createKnowledgeExtractionJob,
   createKnowledgeOntologyIntake,
   deleteDataSource as deleteBackendDataSource,
+  deleteSemanticDataQualityRule,
   enhanceKnowledgeDocumentOcr,
   exportKnowledgeExtractionJob,
   getGraphAssetQuality,
@@ -61,6 +83,7 @@ import {
   getKnowledgeOcrPipeline,
   KnowledgeOcrBlock,
   getDataSource as getBackendDataSource,
+  DataQualityRuleInfo,
   generateSemanticOntologyCandidates,
   getRelatedKnowledgeCards,
   getSemanticOntologyImpact,
@@ -93,20 +116,27 @@ import {
   saveKnowledgeDocumentOcrCorrections,
   testDataSourceConfig,
   updateDataSource as updateBackendDataSource,
+  updateSemanticDataQualityRule,
   uploadKnowledgeAsset,
+  getSemanticMappingWorkbench,
+  createSemanticMappingCandidate,
+  saveSemanticMappingLayout,
+  approveSemanticMappingCandidate,
+  rejectSemanticMappingCandidate,
+  type SemanticMappingWorkbenchResponse,
 } from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
 
 cytoscape.use(dagre);
 
-type DataQualityRule = {
+type DataQualityRule = Partial<DataQualityRuleInfo> & {
   key: string;
   name: string;
   description: string;
-  status: string;
-  color: string;
+  status?: string;
+  color?: string;
   enabled: boolean;
-  passRate: number | null;
+  passRate?: number | null;
 };
 
 type DataAsset = {
@@ -611,7 +641,7 @@ function getTableQualityRules(table?: DataAsset['tables'][number]): DataQualityR
   return rules;
 }
 
-type SemanticAssetCenterView = 'data' | 'ontology';
+type SemanticAssetCenterView = 'data' | 'mapping' | 'ontology';
 type DiscoveredSourceTable = { name: string; rows?: number };
 type GovernanceUserOption = { id: number; label: string; value: string; email?: string };
 type SourceConnectionDraft = {
@@ -646,6 +676,35 @@ const DATA_SENSITIVITY_OPTIONS = [
   { value: 'restricted', label: '受限', description: '默认禁止 AI 使用和图谱实例，避免高敏数据扩散。' },
 ];
 
+const SEMANTIC_MAPPING_STATUS_OPTIONS = [
+  { value: '', label: '全部' },
+  { value: 'pending_review', label: '待审核' },
+  { value: 'approved', label: '已批准' },
+  { value: 'rejected', label: '已驳回' },
+];
+
+const semanticNodeTypeLabels: Record<string, string> = {
+  source_table: '来源表',
+  source_field: '来源字段',
+  object: '业务对象',
+  object_field: '对象字段',
+};
+
+function SemanticMappingFlowNode({ data }: { data: any }) {
+  const nodeType = String(data?.nodeType ?? '');
+  const canReceive = nodeType === 'object' || nodeType === 'object_field';
+  const canSource = nodeType === 'source_table' || nodeType === 'source_field' || nodeType === 'object';
+  return (
+    <div className={`semantic-flow-node semantic-flow-node-${nodeType}`}>
+      {canReceive ? <Handle type="target" position={Position.Left} /> : null}
+      <div className="semantic-flow-node-kicker">{semanticNodeTypeLabels[nodeType] ?? nodeType}</div>
+      <strong>{data?.label}</strong>
+      {data?.subtitle ? <small>{data.subtitle}</small> : null}
+      {canSource ? <Handle type="source" position={Position.Right} /> : null}
+    </div>
+  );
+}
+
 const cleanSourceText = (value: unknown) => String(value ?? '').trim();
 
 const hasInvalidSourceText = (value: unknown) => {
@@ -673,6 +732,8 @@ const normalizeWizardSourceType = (value: unknown) => {
 
 export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCenterView } = {}) {
   const [dataSourceForm] = Form.useForm();
+  const [qualityRuleForm] = Form.useForm();
+  const [qualityScoreForm] = Form.useForm();
   const currentUser = useAuthStore((state) => state.user);
   const [ontologyObjectForm] = Form.useForm();
   const [ontologyRelationForm] = Form.useForm();
@@ -714,7 +775,21 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
   const [candidateCountByTable, setCandidateCountByTable] = useState<Record<string, number>>({});
   const [publishedTables, setPublishedTables] = useState<string[]>([]);
   const [qualityRuleState, setQualityRuleState] = useState<Record<string, string>>({});
+  const [qualityRuleModalOpen, setQualityRuleModalOpen] = useState(false);
+  const [qualityScoreStandardOpen, setQualityScoreStandardOpen] = useState(false);
+  const [editingQualityRule, setEditingQualityRule] = useState<DataQualityRule | undefined>();
+  const [savingQualityRule, setSavingQualityRule] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [semanticCenterTab, setSemanticCenterTab] = useState<SemanticAssetCenterView>(view ?? 'data');
+  const [mappingWorkbench, setMappingWorkbench] = useState<SemanticMappingWorkbenchResponse | undefined>();
+  const [mappingNodes, setMappingNodes] = useState<Node[]>([]);
+  const [mappingEdges, setMappingEdges] = useState<Edge[]>([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingObjectCode, setMappingObjectCode] = useState<string | undefined>();
+  const [mappingSourceId, setMappingSourceId] = useState<number | undefined>();
+  const [mappingStatus, setMappingStatus] = useState<string>('');
+  const [selectedMappingElement, setSelectedMappingElement] = useState<Node | Edge | undefined>();
+  const [savingMappingLayout, setSavingMappingLayout] = useState(false);
 
   const selectedAsset = useMemo(() => assets.find((item) => item.id === selectedAssetId) ?? assets[0], [assets, selectedAssetId]);
   const selectedAssetTables = useMemo(
@@ -740,6 +815,13 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
         && (!selectedAsset || !sourceId || sourceId === selectedAsset.id);
     });
   }, [ontologyCandidates, selectedAsset, selectedTable]);
+  const selectedQualityRules = useMemo(() => getTableQualityRules(selectedTable), [selectedTable]);
+  const selectedQualityRuleStats = useMemo(() => ({
+    total: selectedQualityRules.length,
+    enabled: selectedQualityRules.filter((rule) => rule.enabled !== false).length,
+    custom: selectedQualityRules.filter((rule) => rule.id || rule.custom).length,
+    scoring: selectedQualityRules.filter((rule) => rule.include_in_score !== false && rule.passRate !== null && rule.passRate !== undefined).length,
+  }), [selectedQualityRules]);
   const selectedObject = useMemo(() => objects.find((item) => item.id === selectedObjectId) ?? objects[0], [objects, selectedObjectId]);
   const objectRelations = relations.filter((item) => item.source === selectedObject?.id || item.target === selectedObject?.id);
   const selectedObjectMappings = useMemo(
@@ -885,6 +967,7 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
       setSelectedAssetId((prev) => prev ?? nextAssets[0]?.id);
       setSelectedTableId((prev) => nextAssets.flatMap((asset: DataAsset) => asset.tables).some((table: DataAsset['tables'][number]) => table.id === prev) ? prev : nextAssets[0]?.tables[0]?.id);
       setSelectedObjectId((prev) => prev ?? nextObjects[0]?.id);
+      setMappingObjectCode((prev) => prev ?? nextObjects[0]?.code);
       setSelectedCandidateId((prev) => prev ?? nextCandidates[0]?.id);
     } catch {
       setAssets([]);
@@ -896,6 +979,7 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
       setSelectedAssetId(undefined);
       setSelectedTableId(undefined);
       setSelectedObjectId(undefined);
+      setMappingObjectCode(undefined);
       setSelectedCandidateId(undefined);
       message.warning('后端语义资产接口暂不可用，未展示本地兜底数据');
     } finally {
@@ -907,6 +991,10 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
     load();
     loadGovernanceOptions();
   }, []);
+
+  useEffect(() => {
+    setSemanticCenterTab(view ?? 'data');
+  }, [view]);
 
   useEffect(() => {
     applySensitivityPolicy(watchedSensitivity);
@@ -1309,6 +1397,169 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
     }
   };
 
+  const runSemanticMappingRecognition = async () => {
+    const sourceId = mappingSourceId ?? selectedAsset?.id;
+    if (!sourceId) {
+      message.warning('请先选择数据源');
+      return;
+    }
+    const asset = assets.find((item) => item.id === sourceId);
+    if (asset?.allow_ai === false) {
+      message.warning('当前数据源未授权 AI 使用，请在治理使用中开启后再识别');
+      return;
+    }
+    setRecognizing(true);
+    try {
+      const res = await generateSemanticOntologyCandidates({ source_id: sourceId });
+      const candidates = res.data?.data ?? [];
+      setOntologyCandidates((prev) => {
+        const nextById = new Map(prev.map((candidate) => [candidate.id, candidate]));
+        candidates.forEach((candidate) => nextById.set(candidate.id, candidate));
+        return Array.from(nextById.values());
+      });
+      message.success(`AI 已生成 ${candidates.length} 条语义映射候选`);
+      await loadSemanticMappingWorkbench();
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? 'AI 语义识别失败，请检查 AI 配置和元数据扫描结果');
+    } finally {
+      setRecognizing(false);
+    }
+  };
+
+  const semanticFlowNodeTypes = useMemo(() => ({ semantic: SemanticMappingFlowNode }), []);
+
+  const toFlowNodes = (nodes: SemanticMappingWorkbenchResponse['nodes']): Node[] => nodes.map((node) => ({
+    id: node.id,
+    type: 'semantic',
+    position: node.position,
+    data: {
+      ...node.data,
+      id: node.id,
+      nodeType: node.type,
+      label: node.label,
+      subtitle: node.type === 'source_table'
+        ? `${node.data.source_name ?? '-'} · ${node.data.row_count ?? 0} 行`
+        : node.type === 'source_field'
+          ? `${node.data.entity_name ?? '-'} · ${(node.data.field as any)?.type ?? '-'}`
+          : node.type === 'object_field'
+            ? `${node.data.object_code ?? '-'}`
+            : (node.data.object as any)?.code,
+    },
+  }));
+
+  const toFlowEdges = (edges: SemanticMappingWorkbenchResponse['edges']): Edge[] => edges
+    .filter((edge) => edge.source && edge.target)
+    .map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: 'smoothstep',
+      animated: edge.type === 'semantic_candidate' && edge.status === 'pending_review',
+      label: edge.label,
+      data: edge.data,
+      style: {
+        stroke: edge.type === 'semantic_candidate' ? '#d48806' : edge.type === 'semantic_mapping' ? '#2f7d5b' : '#9aa8b3',
+        strokeWidth: edge.type.includes('semantic') ? 2 : 1,
+      },
+      labelStyle: { fill: '#172026', fontSize: 11 },
+    }));
+
+  const loadSemanticMappingWorkbench = async () => {
+    setMappingLoading(true);
+    try {
+      const res = await getSemanticMappingWorkbench({
+        object_code: mappingObjectCode,
+        source_id: mappingSourceId,
+        status: mappingStatus || undefined,
+      });
+      const data = res.data?.data;
+      setMappingWorkbench(data);
+      setMappingObjectCode((prev) => prev ?? data?.object_code ?? undefined);
+      setMappingNodes(toFlowNodes(data?.nodes ?? []));
+      setMappingEdges(toFlowEdges(data?.edges ?? []));
+      setSelectedMappingElement(undefined);
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '语义映射工作台加载失败');
+      setMappingWorkbench(undefined);
+      setMappingNodes([]);
+      setMappingEdges([]);
+    } finally {
+      setMappingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (semanticCenterTab === 'mapping') {
+      loadSemanticMappingWorkbench();
+    }
+  }, [semanticCenterTab, mappingObjectCode, mappingSourceId, mappingStatus]);
+
+  const saveCurrentMappingLayout = async (nodes = mappingNodes) => {
+    if (!mappingWorkbench?.object_code && !mappingObjectCode) return;
+    setSavingMappingLayout(true);
+    try {
+      const positions = Object.fromEntries(nodes.map((node) => [node.id, node.position]));
+      await saveSemanticMappingLayout({
+        object_code: mappingWorkbench?.object_code ?? mappingObjectCode,
+        source_id: mappingSourceId ?? null,
+        layout: { positions },
+      });
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '画布布局保存失败');
+    } finally {
+      setSavingMappingLayout(false);
+    }
+  };
+
+  const connectSemanticMapping = async (connection: Connection) => {
+    const sourceNode = mappingNodes.find((node) => node.id === connection.source);
+    const targetNode = mappingNodes.find((node) => node.id === connection.target);
+    if (!sourceNode || !targetNode) return;
+    const sourceType = String(sourceNode.data?.nodeType ?? '');
+    const targetType = String(targetNode.data?.nodeType ?? '');
+    if (sourceType !== 'source_field' || !['object', 'object_field'].includes(targetType)) {
+      message.warning('请从来源字段连接到对象或对象字段');
+      return;
+    }
+    setMappingEdges((current) => addEdge({ ...connection, type: 'smoothstep', animated: true, label: '候选' }, current));
+    try {
+      await createSemanticMappingCandidate({
+        source_node: { id: sourceNode.id, type: sourceType, label: String(sourceNode.data?.label ?? ''), data: sourceNode.data as Record<string, unknown>, position: sourceNode.position },
+        target_node: { id: targetNode.id, type: targetType, label: String(targetNode.data?.label ?? ''), data: targetNode.data as Record<string, unknown>, position: targetNode.position },
+        confidence: 0.72,
+        note: '人工在语义映射画布中创建候选连线',
+      });
+      message.success('已创建映射候选，批准后才会进入正式对象模型');
+      await loadSemanticMappingWorkbench();
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '创建映射候选失败');
+      await loadSemanticMappingWorkbench();
+    }
+  };
+
+  const reviewSelectedMappingCandidate = async (action: 'approve' | 'reject') => {
+    const candidate = (selectedMappingElement?.data as any)?.candidate;
+    if (!candidate?.id) {
+      message.info('请选择一条候选连线');
+      return;
+    }
+    setReviewingCandidateId(candidate.id);
+    try {
+      if (action === 'approve') {
+        await approveSemanticMappingCandidate(candidate.id);
+        message.success('映射候选已批准');
+      } else {
+        await rejectSemanticMappingCandidate(candidate.id);
+        message.success('映射候选已驳回');
+      }
+      await Promise.all([loadSemanticMappingWorkbench(), refreshOntologyGovernance()]);
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '候选审核失败');
+    } finally {
+      setReviewingCandidateId(undefined);
+    }
+  };
+
   const openObjectModal = (object?: OntologyObject) => {
     ontologyObjectForm.setFieldsValue(object ? {
       name: object.name,
@@ -1444,9 +1695,175 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
     }
   };
 
-  const updateQualityRule = (rule: string, checked: boolean) => {
+  const buildQualityRulePayload = (values: any, baseRule?: DataQualityRule) => ({
+    source_id: selectedAsset?.persisted ? selectedAsset.id : undefined,
+    entity_name: selectedTable?.name ?? '',
+    field_name: values.field_name || null,
+    key: values.key || baseRule?.key,
+    name: values.name || baseRule?.name || '质量指标',
+    rule_type: values.rule_type || baseRule?.rule_type || 'custom',
+    dimension: values.dimension || baseRule?.dimension || 'custom',
+    description: values.description ?? baseRule?.description ?? '',
+    severity: values.severity || baseRule?.severity || 'warning',
+    threshold: Number(values.threshold ?? baseRule?.threshold ?? 95),
+    weight: Number(values.weight ?? baseRule?.weight ?? 1),
+    enabled: values.enabled ?? baseRule?.enabled ?? true,
+    include_in_score: values.include_in_score ?? baseRule?.include_in_score ?? true,
+    config: values.config ?? baseRule?.config ?? {},
+  });
+
+  const openQualityRuleModal = (rule?: DataQualityRule) => {
     if (!selectedTable) return;
-    setQualityRuleState((prev) => ({ ...prev, [`${selectedTable.id}:${rule}`]: checked ? 'enabled' : 'disabled' }));
+    setEditingQualityRule(rule);
+    qualityRuleForm.setFieldsValue({
+      key: rule?.key,
+      name: rule?.name ?? '',
+      rule_type: rule?.rule_type ?? 'custom',
+      dimension: rule?.dimension ?? 'custom',
+      field_name: rule?.field_name ?? undefined,
+      severity: rule?.severity ?? 'warning',
+      threshold: rule?.threshold ?? 95,
+      weight: rule?.weight ?? 1,
+      enabled: rule?.enabled ?? true,
+      include_in_score: rule?.include_in_score ?? true,
+      description: rule?.description ?? '',
+      configText: JSON.stringify(rule?.config ?? {}, null, 2),
+    });
+    setQualityRuleModalOpen(true);
+  };
+
+  const openQualityScoreStandard = () => {
+    const formulaSource = selectedQualityRules.find((rule) => {
+      const config = rule.config as Record<string, any> | undefined;
+      return config?.score_formula;
+    });
+    const formulaConfig = ((formulaSource?.config as Record<string, any> | undefined)?.score_formula ?? {}) as Record<string, any>;
+    qualityScoreForm.setFieldsValue({
+      formula_mode: formulaConfig.mode ?? 'weighted_average',
+      formula_expression: formulaConfig.expression ?? 'sum(passRate * weight) / sum(weight)',
+      rules: selectedQualityRules.map((rule) => ({
+        key: rule.key,
+        weight: rule.weight ?? 1,
+        threshold: rule.threshold ?? 95,
+        enabled: rule.enabled !== false,
+        include_in_score: rule.include_in_score !== false,
+      })),
+    });
+    setQualityScoreStandardOpen(true);
+  };
+
+  const saveQualityRule = async () => {
+    if (!selectedTable) return;
+    const values = await qualityRuleForm.validateFields();
+    let config: Record<string, unknown> = {};
+    const configText = String(values.configText || '').trim();
+    if (configText) {
+      try {
+        config = JSON.parse(configText);
+      } catch {
+        message.error('规则参数必须是合法 JSON');
+        return;
+      }
+    }
+    setSavingQualityRule(true);
+    try {
+      const payload = buildQualityRulePayload({ ...values, config }, editingQualityRule);
+      if (editingQualityRule?.id) {
+        await updateSemanticDataQualityRule(Number(editingQualityRule.id), payload);
+      } else {
+        await createSemanticDataQualityRule(payload);
+      }
+      setQualityRuleModalOpen(false);
+      setEditingQualityRule(undefined);
+      qualityRuleForm.resetFields();
+      await load();
+      message.success('质量指标已保存');
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '质量指标保存失败');
+    } finally {
+      setSavingQualityRule(false);
+    }
+  };
+
+  const saveQualityScoreStandard = async () => {
+    if (!selectedTable) return;
+    const values = await qualityScoreForm.validateFields();
+    const rows = Array.isArray(values.rules) ? values.rules : [];
+    const formulaConfig = {
+      mode: values.formula_mode ?? 'weighted_average',
+      expression: String(values.formula_expression ?? 'sum(passRate * weight) / sum(weight)').trim(),
+    };
+    if (!formulaConfig.expression) {
+      message.error('请输入评分公式');
+      return;
+    }
+    setSavingQualityRule(true);
+    try {
+      for (const row of rows) {
+        const rule = selectedQualityRules.find((item) => item.key === row.key);
+        if (!rule) continue;
+        const ruleConfig = rule.config && typeof rule.config === 'object' ? rule.config : {};
+        const payload = buildQualityRulePayload({
+          ...rule,
+          weight: row.weight,
+          threshold: row.threshold,
+          enabled: row.enabled,
+          include_in_score: row.include_in_score,
+          config: {
+            ...ruleConfig,
+            score_formula: formulaConfig,
+          },
+        }, rule);
+        if (rule.id) {
+          await updateSemanticDataQualityRule(Number(rule.id), payload);
+        } else {
+          await createSemanticDataQualityRule(payload);
+        }
+      }
+      setQualityScoreStandardOpen(false);
+      await load();
+      message.success('评分公式已保存');
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail ?? '评分公式保存失败');
+    } finally {
+      setSavingQualityRule(false);
+    }
+  };
+
+  const updateQualityRule = async (rule: DataQualityRule, checked: boolean) => {
+    if (!selectedTable) return;
+    setQualityRuleState((prev) => ({ ...prev, [`${selectedTable.id}:${rule.key}`]: checked ? 'enabled' : 'disabled' }));
+    try {
+      const payload = buildQualityRulePayload({ ...rule, enabled: checked, config: rule.config ?? {} }, rule);
+      if (rule.id) {
+        await updateSemanticDataQualityRule(Number(rule.id), payload);
+      } else {
+        await createSemanticDataQualityRule(payload);
+      }
+      await load();
+    } catch (error: any) {
+      setQualityRuleState((prev) => ({ ...prev, [`${selectedTable.id}:${rule.key}`]: rule.enabled ? 'enabled' : 'disabled' }));
+      message.error(error?.response?.data?.detail ?? '质量指标状态保存失败');
+    }
+  };
+
+  const removeQualityRule = (rule: DataQualityRule) => {
+    if (!rule.id) {
+      message.info('自动指标不能删除，可以关闭或编辑后保存为配置');
+      return;
+    }
+    Modal.confirm({
+      title: '删除质量指标',
+      content: `确定删除「${rule.name}」吗？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteSemanticDataQualityRule(Number(rule.id));
+        await load();
+        message.success('质量指标已删除');
+      },
+    });
   };
 
   const dataAssetView = (
@@ -1652,22 +2069,51 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
                   key: 'quality',
                   label: '质量规则',
                   children: (
-                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                      {getTableQualityRules(selectedTable).map((rule) => (
+                    <Space className="data-quality-panel" direction="vertical" size={10} style={{ width: '100%' }}>
+                      <div className="data-quality-definition-summary">
+                        <div>
+                          <strong>评分指标</strong>
+                          <span>新增规则就是新增质量指标；分数评判标准用于设置各指标如何合成总分。</span>
+                        </div>
+                        <Tag color={selectedTable.quality_score >= 95 ? 'success' : 'warning'}>{selectedTable.quality_score} 分</Tag>
+                      </div>
+                      <div className="data-quality-mini-stats">
+                        <span>指标 {selectedQualityRuleStats.total}</span>
+                        <span>启用 {selectedQualityRuleStats.enabled}</span>
+                        <span>自定义 {selectedQualityRuleStats.custom}</span>
+                        <span>计分 {selectedQualityRuleStats.scoring}</span>
+                      </div>
+                      {selectedQualityRules.map((rule) => (
                         <div className="data-quality-row" key={rule.key}>
                           <Checkbox
                             checked={(qualityRuleState[`${selectedTable.id}:${rule.key}`] ?? (rule.enabled ? 'enabled' : 'disabled')) === 'enabled'}
-                            onChange={(event) => updateQualityRule(rule.key, event.target.checked)}
+                            onChange={(event) => updateQualityRule(rule, event.target.checked)}
                           >
                             <span className="data-quality-rule-title">{rule.name}</span>
                             <span className="data-quality-rule-desc">{rule.description}</span>
+                            <span className="data-quality-rule-meta">
+                              <Tag>{String(rule.dimension ?? 'custom')}</Tag>
+                              {rule.id || rule.custom ? <Tag color="processing">自定义</Tag> : <Tag>自动</Tag>}
+                              <Tag>权重 {Number(rule.weight ?? 1)}</Tag>
+                              <Tag>阈值 {Number(rule.threshold ?? 95)}%</Tag>
+                            </span>
                           </Checkbox>
-                          <Space size={6}>
-                            {rule.passRate === null ? <Tag>待算</Tag> : <Tag>{rule.passRate}%</Tag>}
-                            <Tag color={rule.color}>{rule.status}</Tag>
+                          <Space className="data-quality-result" direction="vertical" size={4} align="end">
+                            <Space size={6}>
+                              {rule.passRate === null || rule.passRate === undefined ? <Tag>待算</Tag> : <Tag>{rule.passRate}%</Tag>}
+                              <Tag color={rule.color}>{rule.status ?? '已配置'}</Tag>
+                            </Space>
+                            <Space size={2}>
+                              <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openQualityRuleModal(rule)} />
+                              <Button size="small" type="text" danger icon={<DeleteOutlined />} disabled={!rule.id} onClick={() => removeQualityRule(rule)} />
+                            </Space>
                           </Space>
                         </div>
                       ))}
+                      <div className="data-quality-bottom-actions">
+                        <Button onClick={openQualityScoreStandard}>分数评判标准</Button>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => openQualityRuleModal()}>新增规则</Button>
+                      </div>
                     </Space>
                   ),
                 },
@@ -1742,6 +2188,187 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
         </Card>
       </aside>
     </div>
+    <Modal
+      title="评分公式设置"
+      open={qualityScoreStandardOpen}
+      onCancel={() => setQualityScoreStandardOpen(false)}
+      onOk={saveQualityScoreStandard}
+      confirmLoading={savingQualityRule}
+      okText="保存公式"
+      cancelText="取消"
+      width={860}
+      destroyOnHidden
+    >
+      <Space className="quality-score-standard" direction="vertical" size={14}>
+        <Form form={qualityScoreForm} className="quality-score-rule-form">
+          <div className="quality-score-editor-head">
+            <div className="quality-score-current">
+              <span>当前质量分</span>
+              <strong>{selectedTable?.quality_score ?? '-'}</strong>
+              <small>按当前公式预估</small>
+            </div>
+            <div className="quality-formula-builder">
+              <div className="quality-formula-topline">
+                <Typography.Text strong>自定义评分公式</Typography.Text>
+                <Form.Item name="formula_mode" noStyle>
+                  <Select
+                    className="quality-formula-mode"
+                    options={[
+                      { value: 'weighted_average', label: '加权平均' },
+                      { value: 'minimum_gate', label: '门槛优先' },
+                      { value: 'custom_expression', label: '自定义表达式' },
+                    ]}
+                  />
+                </Form.Item>
+              </div>
+              <Form.Item
+                name="formula_expression"
+                rules={[{ required: true, message: '请输入评分公式' }]}
+                className="quality-formula-expression"
+              >
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="例如：sum(passRate * weight) / sum(weight)"
+                />
+              </Form.Item>
+              <div className="quality-formula-token-row">
+                <span>可用变量</span>
+                {['passRate', 'weight', 'threshold', 'enabled', 'includeInScore'].map((token) => (
+                  <Tag className="quality-formula-token" key={token}>{token}</Tag>
+                ))}
+              </div>
+              <Typography.Text type="secondary">
+                下面每一行是参与公式计算的质量指标；新增规则会新增指标，是否计分由右侧开关控制。
+              </Typography.Text>
+            </div>
+          </div>
+          <Form.List name="rules">
+            {(fields) => (
+              <div className="quality-score-rule-list">
+                {fields.map((field, index) => {
+                  const rule = selectedQualityRules[index];
+                  const passRate = rule?.passRate === null || rule?.passRate === undefined ? null : Number(rule.passRate);
+                  return (
+                    <div className="quality-score-rule-row" key={field.key}>
+                      <div className="quality-score-rule-name">
+                        <strong>{rule?.name ?? '-'}</strong>
+                        <span>{rule?.field_name ? `字段：${rule.field_name}` : '整表指标'} · {String(rule?.dimension ?? 'custom')}</span>
+                        <Form.Item name={[field.name, 'key']} hidden><Input /></Form.Item>
+                      </div>
+                      <div className="quality-score-pass">
+                        <Tag color={passRate === null ? 'default' : passRate >= Number(rule?.threshold ?? 95) ? 'success' : 'warning'}>
+                          {passRate === null ? '待执行' : `${passRate}%`}
+                        </Tag>
+                        <span>通过率</span>
+                      </div>
+                      <div className="quality-score-weight">
+                        <Form.Item name={[field.name, 'weight']} rules={[{ required: true }]} noStyle>
+                          <Slider min={0} max={5} step={0.5} tooltip={{ formatter: (value) => `权重 ${value}` }} />
+                        </Form.Item>
+                      </div>
+                      <Form.Item name={[field.name, 'threshold']} rules={[{ required: true }]} noStyle>
+                        <InputNumber className="quality-score-threshold" min={0} max={100} addonAfter="%" />
+                      </Form.Item>
+                      <div className="quality-score-switches">
+                        <label>
+                          <span>启用</span>
+                          <Form.Item name={[field.name, 'enabled']} valuePropName="checked" noStyle>
+                            <Switch size="small" />
+                          </Form.Item>
+                        </label>
+                        <label>
+                          <span>计分</span>
+                          <Form.Item name={[field.name, 'include_in_score']} valuePropName="checked" noStyle>
+                            <Switch size="small" />
+                          </Form.Item>
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Form.List>
+        </Form>
+        <div className="quality-score-band-strip">
+          <span><Tag color="success">98-100</Tag>优秀</span>
+          <span><Tag color="processing">95-97</Tag>良好</span>
+          <span><Tag color="warning">90-94</Tag>需复核</span>
+          <span><Tag color="error">0-89</Tag>异常</span>
+        </div>
+      </Space>
+    </Modal>
+    <Modal
+      title={editingQualityRule?.id || editingQualityRule?.custom ? '编辑质量指标' : editingQualityRule ? '配置自动指标' : '新增质量指标'}
+      open={qualityRuleModalOpen}
+      onCancel={() => {
+        setQualityRuleModalOpen(false);
+        setEditingQualityRule(undefined);
+        qualityRuleForm.resetFields();
+      }}
+      onOk={saveQualityRule}
+      confirmLoading={savingQualityRule}
+      okText="保存"
+      cancelText="取消"
+      width={720}
+      destroyOnHidden
+    >
+      <Form form={qualityRuleForm} className="quality-rule-form" layout="horizontal" labelCol={{ flex: '112px' }} wrapperCol={{ flex: 1 }} colon={false}>
+        <div className="quality-rule-context">
+          <span>当前数据源</span><strong>{selectedAsset?.name ?? '-'}</strong>
+          <span>当前表</span><strong>{selectedTable?.name ?? '-'}</strong>
+        </div>
+        <Form.Item label="指标名称" name="name" rules={[{ required: true, message: '请输入指标名称' }]}>
+          <Input placeholder="例如：设备健康分范围检查" />
+        </Form.Item>
+        <Form.Item label="指标 Key" name="key" tooltip="同一张表内唯一；留空时后台会按指标名称生成。">
+          <Input placeholder="例如：health-score-range" disabled={Boolean(editingQualityRule?.id)} />
+        </Form.Item>
+        <Form.Item label="指标类型" name="rule_type" rules={[{ required: true }]}>
+          <Select options={[
+            { value: 'not_null', label: '非空检查' },
+            { value: 'unique', label: '唯一性检查' },
+            { value: 'enum', label: '枚举合法值' },
+            { value: 'range', label: '数值范围' },
+            { value: 'regex', label: '格式正则' },
+            { value: 'foreign_key', label: '引用一致性' },
+            { value: 'freshness', label: '同步新鲜度' },
+            { value: 'custom', label: '自定义表达式' },
+          ]} />
+        </Form.Item>
+        <Form.Item label="检查字段" name="field_name">
+          <Select allowClear placeholder="不选则表示整表指标" options={(selectedTable?.fields ?? []).map((field) => ({ value: field.name, label: `${field.name} · ${field.label}` }))} />
+        </Form.Item>
+        <Form.Item label="质量维度" name="dimension" rules={[{ required: true }]}>
+          <Select options={[
+            { value: 'completeness', label: '完整性' },
+            { value: 'uniqueness', label: '唯一性' },
+            { value: 'validity', label: '有效性' },
+            { value: 'consistency', label: '一致性' },
+            { value: 'freshness', label: '时效性' },
+            { value: 'reasonableness', label: '合理性' },
+            { value: 'custom', label: '自定义' },
+          ]} />
+        </Form.Item>
+        <Row gutter={12}>
+          <Col span={8}><Form.Item label="达标阈值" name="threshold" rules={[{ required: true }]} labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}><InputNumber min={0} max={100} addonAfter="%" style={{ width: '100%' }} /></Form.Item></Col>
+          <Col span={8}><Form.Item label="评分权重" name="weight" rules={[{ required: true }]} labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}><InputNumber min={0} step={0.5} style={{ width: '100%' }} /></Form.Item></Col>
+          <Col span={8}><Form.Item label="严重级别" name="severity" rules={[{ required: true }]} labelCol={{ span: 24 }} wrapperCol={{ span: 24 }}><Select options={[{ value: 'info', label: '提示' }, { value: 'warning', label: '警告' }, { value: 'blocking', label: '阻断' }]} /></Form.Item></Col>
+        </Row>
+        <Form.Item label="启用设置">
+          <Space size={20}>
+            <Form.Item name="enabled" valuePropName="checked" noStyle><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+            <Form.Item name="include_in_score" valuePropName="checked" noStyle><Checkbox>参与质量分</Checkbox></Form.Item>
+          </Space>
+        </Form.Item>
+        <Form.Item label="指标说明" name="description">
+          <Input.TextArea rows={3} placeholder="说明业务口径，例如 health_score 必须在 0 到 100 之间。" />
+        </Form.Item>
+        <Form.Item label="指标参数" name="configText" tooltip="用于保存枚举值、范围、正则或表达式参数。">
+          <Input.TextArea rows={4} placeholder='例如 {"min":0,"max":100} 或 {"values":["running","stopped"]}' />
+        </Form.Item>
+      </Form>
+    </Modal>
     <Modal
       title={sourceEditingId ? '编辑数据源' : '接入数据源'}
       open={sourceModalOpen}
@@ -2044,6 +2671,178 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
       </div>
     </Modal>
     </>
+  );
+
+  const selectedMappingCandidate = (selectedMappingElement?.data as any)?.candidate as OntologyCandidateInfo | undefined;
+  const selectedMappingNodeData = selectedMappingElement && !('source' in selectedMappingElement)
+    ? selectedMappingElement.data as Record<string, any>
+    : undefined;
+
+  const semanticMappingView = (
+    <div className="semantic-mapping-workbench">
+      <aside className="semantic-mapping-sidebar">
+        <Card
+          className="semantic-side-card"
+          title="映射范围"
+          extra={<Button size="small" icon={<ReloadOutlined />} loading={mappingLoading} onClick={loadSemanticMappingWorkbench}>刷新</Button>}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Select
+              value={mappingObjectCode}
+              placeholder="选择业务对象"
+              style={{ width: '100%' }}
+              options={objects.map((item) => ({ value: item.code, label: `${item.name} / ${item.code}` }))}
+              onChange={setMappingObjectCode}
+            />
+            <Select
+              allowClear
+              value={mappingSourceId}
+              placeholder="全部数据源"
+              style={{ width: '100%' }}
+              options={assets.map((item) => ({ value: item.id, label: `${item.name} · ${item.tables.length}表` }))}
+              onChange={setMappingSourceId}
+            />
+            <Segmented
+              size="small"
+              value={mappingStatus}
+              options={SEMANTIC_MAPPING_STATUS_OPTIONS}
+              onChange={(value) => setMappingStatus(String(value))}
+              block
+            />
+            <div className="semantic-mapping-metrics">
+              <div><strong>{mappingWorkbench?.nodes.length ?? 0}</strong><span>节点</span></div>
+              <div><strong>{mappingWorkbench?.edges.filter((edge) => edge.type.includes('semantic')).length ?? 0}</strong><span>语义线</span></div>
+              <div><strong>{mappingWorkbench?.candidates.length ?? 0}</strong><span>候选</span></div>
+            </div>
+            <Divider style={{ margin: '4px 0' }} />
+            <Typography.Text type="secondary">来源表</Typography.Text>
+            <List
+              size="small"
+              dataSource={mappingWorkbench?.metadata ?? []}
+              locale={{ emptyText: '暂无扫描元数据' }}
+              renderItem={(item) => (
+                <List.Item className="semantic-mapping-source-item">
+                  <List.Item.Meta
+                    title={<Space><strong>{item.entity_label || item.entity_name}</strong><Tag>{item.fields.length}字段</Tag></Space>}
+                    description={`${item.source_type} / ${item.row_count ?? 0} 行`}
+                  />
+                </List.Item>
+              )}
+            />
+          </Space>
+        </Card>
+      </aside>
+
+      <main className="semantic-mapping-canvas-panel">
+        <Card
+          className="semantic-mapping-canvas-card"
+          title={
+            <Space direction="vertical" size={2}>
+              <Typography.Text strong>语义映射画布</Typography.Text>
+              <Typography.Text type="secondary">自由连接来源字段与对象字段；所有新连线先进入候选审核。</Typography.Text>
+            </Space>
+          }
+          extra={(
+            <Space>
+              <Button loading={savingMappingLayout} onClick={() => saveCurrentMappingLayout()}>保存布局</Button>
+              <Button onClick={() => {
+                const arranged = mappingNodes.map((node, index) => ({
+                  ...node,
+                  position: {
+                    x: String(node.data?.nodeType).startsWith('source') ? (String(node.data?.nodeType) === 'source_table' ? 40 : 300) : (String(node.data?.nodeType) === 'object' ? 720 : 980),
+                    y: 80 + index * 54,
+                  },
+                }));
+                setMappingNodes(arranged);
+                saveCurrentMappingLayout(arranged);
+              }}>重新布局</Button>
+              <Button type="primary" icon={<RobotOutlined />} loading={recognizing} disabled={!assets.length} onClick={runSemanticMappingRecognition}>AI 生成候选</Button>
+            </Space>
+          )}
+        >
+          <div className="semantic-mapping-canvas">
+            {mappingNodes.length ? (
+              <ReactFlow
+                nodes={mappingNodes}
+                edges={mappingEdges}
+                nodeTypes={semanticFlowNodeTypes}
+                fitView
+                onNodesChange={(changes: NodeChange[]) => setMappingNodes((current) => applyNodeChanges(changes, current))}
+                onEdgesChange={(changes: EdgeChange[]) => setMappingEdges((current) => applyEdgeChanges(changes, current))}
+                onConnect={connectSemanticMapping}
+                onNodeClick={(_, node) => setSelectedMappingElement(node)}
+                onEdgeClick={(_, edge) => setSelectedMappingElement(edge)}
+                onNodeDragStop={(_, __, nodes) => saveCurrentMappingLayout(nodes)}
+              >
+                <Background gap={18} size={1} />
+                <MiniMap pannable zoomable />
+                <Controls />
+              </ReactFlow>
+            ) : (
+              <Empty description={mappingLoading ? '正在加载语义映射' : '暂无画布数据，请先扫描元数据并选择对象'} />
+            )}
+          </div>
+        </Card>
+      </main>
+
+      <aside className="semantic-mapping-detail">
+        <Card
+          className="semantic-side-card"
+          title={selectedMappingCandidate ? '候选连线详情' : selectedMappingNodeData ? '节点详情' : '映射详情'}
+          extra={selectedMappingCandidate ? <Tag color={selectedMappingCandidate.status === 'pending_review' ? 'warning' : 'processing'}>{selectedMappingCandidate.status}</Tag> : null}
+        >
+          {selectedMappingCandidate ? (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Typography.Title level={5}>{selectedMappingCandidate.title}</Typography.Title>
+              <Progress percent={Math.round((selectedMappingCandidate.confidence ?? 0) * 100)} size="small" />
+              <div className="semantic-mapping-kv">
+                <span>类型</span><strong>{selectedMappingCandidate.candidate_type}</strong>
+                <span>来源</span><strong>{selectedMappingCandidate.source_ref ?? '-'}</strong>
+              </div>
+              <pre className="ontology-payload-preview">{JSON.stringify(selectedMappingCandidate.payload, null, 2)}</pre>
+              <Space>
+                <Button
+                  type="primary"
+                  loading={reviewingCandidateId === selectedMappingCandidate.id}
+                  disabled={selectedMappingCandidate.status !== 'pending_review'}
+                  onClick={() => reviewSelectedMappingCandidate('approve')}
+                >
+                  批准
+                </Button>
+                <Button
+                  danger
+                  loading={reviewingCandidateId === selectedMappingCandidate.id}
+                  disabled={selectedMappingCandidate.status !== 'pending_review'}
+                  onClick={() => reviewSelectedMappingCandidate('reject')}
+                >
+                  驳回
+                </Button>
+              </Space>
+            </Space>
+          ) : selectedMappingNodeData ? (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap><Tag>{semanticNodeTypeLabels[String(selectedMappingNodeData.nodeType)] ?? selectedMappingNodeData.nodeType}</Tag><Typography.Text strong>{selectedMappingNodeData.label}</Typography.Text></Space>
+              <div className="semantic-mapping-kv">
+                <span>来源</span><strong>{selectedMappingNodeData.source_name ?? selectedMappingNodeData.object?.code ?? selectedMappingNodeData.object_code ?? '-'}</strong>
+                <span>表</span><strong>{selectedMappingNodeData.entity_name ?? '-'}</strong>
+                <span>字段</span><strong>{selectedMappingNodeData.field_name ?? selectedMappingNodeData.field?.code ?? '-'}</strong>
+              </div>
+              {Array.isArray(selectedMappingNodeData.sample_values) && selectedMappingNodeData.sample_values.length ? (
+                <div>
+                  <Typography.Text type="secondary">样例值</Typography.Text>
+                  <Space wrap style={{ marginTop: 8 }}>
+                    {selectedMappingNodeData.sample_values.slice(0, 6).map((item: unknown, index: number) => <Tag key={index}>{String(item)}</Tag>)}
+                  </Space>
+                </div>
+              ) : null}
+              <pre className="ontology-payload-preview">{JSON.stringify(selectedMappingNodeData, null, 2)}</pre>
+            </Space>
+          ) : (
+            <Empty description="点击节点或连线查看详情；从来源字段拖线到对象字段可创建候选" />
+          )}
+        </Card>
+      </aside>
+    </div>
   );
 
   const ontologyView = (
@@ -2377,35 +3176,25 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
     </>
   );
 
-  const viewContent = {
-    data: dataAssetView,
-    ontology: ontologyView,
-  }[view ?? 'data'];
-
-  if (view) {
-    return (
-      <div className="semantic-center semantic-asset-center semantic-asset-center-single">
-        {viewContent}
-      </div>
-    );
-  }
-
   return (
-    <div className="semantic-center semantic-asset-center">
+    <div className={view ? 'semantic-center semantic-asset-center semantic-asset-center-single' : 'semantic-center semantic-asset-center'}>
       <section className="semantic-center-header">
         <div>
-          <Typography.Title level={4}>语义资产中心</Typography.Title>
-          <Typography.Text type="secondary">统一管理数据资产、对象关系建模和文档知识抽取，图谱视图已融入知识库中心。</Typography.Text>
+          <Typography.Title level={4}>数据语义中心</Typography.Title>
+          <Typography.Text type="secondary">从数据资产进入语义映射，再审核发布为对象与关系模型。</Typography.Text>
         </div>
         <Space>
-          <Tag icon={<FileSearchOutlined />}>Graph Governance</Tag>
+          <Tag icon={<FileSearchOutlined />}>Data Semantic Governance</Tag>
           <Button icon={<ReloadOutlined />} onClick={load}>重新读取</Button>
         </Space>
       </section>
       <Tabs
+        activeKey={semanticCenterTab}
+        onChange={(key) => setSemanticCenterTab(key as SemanticAssetCenterView)}
         items={[
-          { key: 'data', label: '数据资产中心', children: dataAssetView },
-          { key: 'ontology', label: '对象与关系中心', children: ontologyView },
+          { key: 'data', label: '数据资产', children: dataAssetView },
+          { key: 'mapping', label: '语义映射', children: semanticMappingView },
+          { key: 'ontology', label: '对象与关系', children: ontologyView },
         ]}
       />
     </div>
@@ -2974,7 +3763,7 @@ function KnowledgeExtractionWorkbench() {
             </Space>
           </Col>
           <Col xs={24} lg={14}>
-            <Form form={form} layout="vertical" initialValues={{ domain: 'manufacturing', prompt_name: 'manufacturing_ontology_v1', model_name: 'deterministic-extractor', permission_scope: 'enterprise', owner_user_id: 'knowledge-admin' }}>
+            <Form form={form} layout="vertical" initialValues={{ domain: 'manufacturing', prompt_name: 'manufacturing_ontology_v1', model_name: 'rules-ontology-extractor', permission_scope: 'enterprise', owner_user_id: 'knowledge-admin' }}>
               <Row gutter={12}>
                 <Col xs={24} md={12}>
                   <Form.Item label="业务领域" name="domain" rules={[{ required: true }]}>
@@ -2998,7 +3787,7 @@ function KnowledgeExtractionWorkbench() {
                 <Col xs={24} md={12}>
                   <Form.Item label="模型" name="model_name" rules={[{ required: true }]}>
                     <Select options={[
-                      { value: 'deterministic-extractor', label: 'Deterministic extractor' },
+                      { value: 'rules-ontology-extractor', label: 'Rules extractor' },
                       { value: 'glm-4-flash', label: 'GLM-4-Flash' },
                       { value: 'qwen-plus', label: 'Qwen Plus' },
                       { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
@@ -3588,7 +4377,7 @@ export function KnowledgeCenter() {
       const response = await createKnowledgeDocumentExtractionJob(selectedDocumentId, {
         domain: intakeRecommendation?.document_profile?.likely_domain ?? 'general',
         prompt_name: 'manufacturing_ontology_v1',
-        model_name: 'deterministic-extractor',
+        model_name: 'rules-ontology-extractor',
       });
       const nextJob = response.data?.data?.job;
       setOntologyJob(nextJob ?? null);

@@ -66,7 +66,8 @@ def test_code_field_options_are_stored_as_field_metadata():
 
     payload = _normalize_form_field_data(body.dict())
 
-    assert payload["field_type"] == "code"
+    assert payload["field_type"] == "string"
+    assert payload["ui_config"]["businessType"] == "code"
     assert payload["ui_config"]["controlType"] == "readonly-text"
     assert payload["ui_config"]["encodingRule"]["fixedLength"] == 15
     assert "ddl" not in payload

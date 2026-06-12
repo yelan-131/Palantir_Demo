@@ -103,6 +103,15 @@ def _metric(label: str, value: int | float | str, tone: str, suffix: str | None 
 
 async def _table_exists(db: AsyncSession, table_name: str) -> bool:
     assert_safe_identifier(table_name)
+    bind = db.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "sqlite":
+        return bool(
+            await db.scalar(
+                text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
+                {"table_name": table_name},
+            )
+        )
     return bool(await db.scalar(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": f"public.{table_name}"}))
 
 

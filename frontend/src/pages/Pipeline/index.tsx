@@ -36,6 +36,7 @@ import {
   runPipeline,
   listPipelineRuns,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -201,7 +202,7 @@ export default function PipelinePage() {
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
-      render: (text: string) => text ?? '-',
+      render: (text: string) => formatServerDateTime(text),
     },
     {
       title: '调度',

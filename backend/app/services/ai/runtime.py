@@ -19,6 +19,7 @@ from .prompt_builder import PromptBuildInput, PromptBuilder
 from .schemas import AgentRequest, AgentResponse, ChatMessage, ChatOptions
 from .settings import safety_policy_snapshot, settings_snapshot, settings_to_provider_config
 from .tenant_profile import TenantProfile, default_tenant_profile
+from .tenant_context import TenantContextError, require_tenant_id
 from .intent_router import route_intent, route_intent_async
 from .tools import choose_draft_actions, create_contract_draft_action, create_low_code_form_definition_action
 from .action_guidance import (
@@ -29,11 +30,26 @@ from .action_guidance import (
 from .action_state import create_or_update_action_state
 from .client import get_provider
 from .preflight import preflight_agent_request
+from .budget import BudgetTracker
+from .compactor import ContextCompactor
+from .events import AgentEvent, CompositeEventSink, EventBus
+from .hooks import register_builtin_hooks
+from .agent_items import from_legacy_step
+from .tool_envelope import tool_execution_envelope
 
 
 EXTERNAL_PROVIDER_NAMES = {"openai-compatible", "openai", "azure-openai", "deepseek", "qwen", "glm"}
 RISK_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 AgentEventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+
+def _tenant_context_required_response(steps: list[dict[str, Any]]) -> AgentResponse:
+    return AgentResponse(
+        answer="Tenant context is required before querying tenant-scoped platform data.",
+        evidence=[],
+        steps=steps,
+        mode="qa",
+    )
 
 
 def _agent_note_for_step(step: dict[str, Any]) -> str | None:
@@ -264,20 +280,24 @@ def _looks_like_pending_action_followup(message: str, pending_action: dict[str, 
 
 async def _emit_step(event_sink: AgentEventSink | None, step: dict[str, Any]) -> None:
     if event_sink:
+        item = step if "item_id" in step and "payload" in step else from_legacy_step(step)
         note = _agent_note_for_step(step)
         if note:
-            await event_sink("assistant.note", {"message": note, "step_id": step.get("id")})
+            await event_sink("assistant.note", {"message": note, "item_id": item.get("item_id")})
         tool_payload = _tool_event_payload(step)
         if tool_payload:
-            await event_sink("tool.started", tool_payload)
-        await event_sink("step.completed", {"step": step})
+            await event_sink("item.created", {**item, "status": "running"})
+        await event_sink("item.updated", item)
         if tool_payload:
-            await event_sink("tool.completed", tool_payload)
+            await event_sink("item.updated", item)
 
 
 class AgentRuntime:
-    def __init__(self, prompt_builder: PromptBuilder | None = None):
+    def __init__(self, prompt_builder: PromptBuilder | None = None, *, bus: EventBus | None = None):
         self.prompt_builder = prompt_builder or PromptBuilder()
+        self._bus = bus
+        if bus:
+            register_builtin_hooks(bus, settings_snapshot())
 
     def classify_knowledge_intent(self, query: str) -> str:
         """Backward-compatible wrapper around structured intent routing."""
@@ -293,11 +313,58 @@ class AgentRuntime:
         user: dict[str, Any] | None = None,
         event_sink: AgentEventSink | None = None,
     ) -> AgentResponse:
+        settings_data = settings_snapshot()
+        loop_mode = str(safety_policy_snapshot(settings_data).get("agentLoopMode") or "pipeline").lower()
+        if loop_mode in {"model", "tool_use"}:
+            from .tool_use_loop import is_model_configured, tool_use_loop_runner
+
+            config = request.provider_config or settings_to_provider_config(settings_data)
+            if is_model_configured(config):
+                return await tool_use_loop_runner.run(
+                    request,
+                    tenant_profile=tenant_profile,
+                    user=user,
+                    settings=settings_data,
+                    config=config,
+                    event_sink=event_sink,
+                    bus=self._bus,
+                )
+            # Model loop requested but no provider configured: fall back to
+            # the deterministic pipeline so the assistant stays usable.
         return await self._run_agent_loop(
             request,
             tenant_profile=tenant_profile,
             user=user,
             event_sink=event_sink,
+        )
+
+    async def resume_tool_use(
+        self,
+        frozen_context: Any,
+        *,
+        confirmation_token: str,
+        user: dict[str, Any] | None = None,
+        event_sink: AgentEventSink | None = None,
+    ) -> AgentResponse:
+        """Resume a frozen tool_use conversation after user confirmation."""
+        from .schemas import FrozenContext
+        from .tool_use_loop import tool_use_loop_runner
+
+        settings_data = settings_snapshot()
+        config = settings_to_provider_config(settings_data)
+        frozen = (
+            frozen_context
+            if isinstance(frozen_context, FrozenContext)
+            else FrozenContext.model_validate(frozen_context)
+        )
+        return await tool_use_loop_runner.resume(
+            frozen,
+            confirmation_token=confirmation_token,
+            user=user,
+            settings=settings_data,
+            config=config,
+            event_sink=event_sink,
+            bus=self._bus,
         )
 
     async def _run_legacy_linear(
@@ -315,7 +382,7 @@ class AgentRuntime:
         path is introduced for knowledge conversations first.
         """
 
-        profile = tenant_profile or default_tenant_profile()
+        profile = tenant_profile or default_tenant_profile(require_tenant_id(user or request.context))
         steps = [
             {
                 "id": "step-intent",
@@ -415,7 +482,14 @@ class AgentRuntime:
         steps.append(permission_context_step)
         await _emit_step(event_sink, permission_context_step)
         context_need = intent_route.context_need
-        evidence = search_ingested_knowledge(request.message, limit=3) if context_need in {"knowledge_rag", "business_query", "semantic_graph", "draft_action"} else []
+        if context_need in {"knowledge_rag", "business_query", "semantic_graph", "draft_action"}:
+            try:
+                tenant_id = require_tenant_id(user or request.context)
+            except TenantContextError:
+                return _tenant_context_required_response(steps)
+            evidence = search_ingested_knowledge(request.message, tenant_id=tenant_id, limit=3)
+        else:
+            evidence = []
         if context_need in {"knowledge_rag", "business_query", "semantic_graph", "draft_action"}:
             knowledge_step = {
                 "id": "step-knowledge-search",
@@ -724,11 +798,22 @@ class AgentRuntime:
         user: dict[str, Any] | None = None,
         event_sink: AgentEventSink | None = None,
     ) -> AgentResponse:
-        profile = tenant_profile or default_tenant_profile()
+        profile = tenant_profile or default_tenant_profile(require_tenant_id(user or request.context))
         settings_data = settings_snapshot()
         safety_policy = safety_policy_snapshot(settings_data)
+        budget = BudgetTracker(
+            max_input_tokens=int(safety_policy.get("agentMaxInputTokens") or 100_000),
+            max_output_tokens=int(safety_policy.get("agentMaxOutputTokens") or 20_000),
+        )
         max_iterations = max(3, min(int(safety_policy.get("maxToolSteps") or 5) + 4, 12))
         steps: list[dict[str, Any]] = []
+        # One bus per run: builtin hooks (audit / budget / compaction /
+        # permission interception) are registered once and every envelope
+        # call below reuses this bus instead of rebuilding its own.
+        loop_bus = self._bus
+        if loop_bus is None:
+            loop_bus = EventBus()
+            register_builtin_hooks(loop_bus, settings_data)
         state: dict[str, Any] = {
             "profile": profile,
             "settings": settings_data,
@@ -742,6 +827,8 @@ class AgentRuntime:
             "checked_form_query": False,
             "checked_platform_settings_query": False,
             "response": None,
+            "budget": budget,
+            "event_bus": loop_bus,
         }
 
         await self._record_loop_step(
@@ -760,6 +847,17 @@ class AgentRuntime:
             await self._record_loop_step(steps, event_sink, state["resume_step"])
 
         for iteration in range(1, max_iterations + 1):
+            if budget.is_exceeded():
+                await loop_bus.emit(AgentEvent.BUDGET_EXCEEDED, {"budget": budget.summary()})
+                return AgentResponse(
+                    answer="Token 预算已用尽，请缩小查询范围或开启新对话。",
+                    evidence=state.get("evidence") or [],
+                    steps=steps,
+                    action_state=state.get("action_state"),
+                    mode="qa",
+                    token_budget=budget.summary(),
+                )
+
             operation = self._next_loop_operation(state, request)
             await self._record_loop_step(
                 steps,
@@ -777,12 +875,14 @@ class AgentRuntime:
                 response = state.get("response")
                 if isinstance(response, AgentResponse):
                     response.steps = steps
+                    response.token_budget = budget.summary()
                     return response
                 break
             await self._execute_loop_operation(operation, request, state, steps, event_sink, user=user)
             if isinstance(state.get("response"), AgentResponse):
                 response = state["response"]
                 response.steps = steps
+                response.token_budget = budget.summary()
                 return response
 
         blocked_step = {
@@ -798,6 +898,7 @@ class AgentRuntime:
             steps=steps,
             action_state=state.get("action_state"),
             mode="qa",
+            token_budget=budget.summary(),
         )
 
     async def _record_loop_step(
@@ -806,8 +907,9 @@ class AgentRuntime:
         event_sink: AgentEventSink | None,
         step: dict[str, Any],
     ) -> None:
-        steps.append(step)
-        await _emit_step(event_sink, step)
+        item = step if "item_id" in step and "payload" in step else from_legacy_step(step)
+        steps.append(item)
+        await _emit_step(event_sink, item)
 
     def _hydrate_resume_state(self, state: dict[str, Any], request: AgentRequest) -> None:
         resume_draft = state.get("resume_draft")
@@ -927,7 +1029,7 @@ class AgentRuntime:
             state["permission_context_checked"] = True
             return
         if operation == "knowledge_search":
-            await self._loop_knowledge_search(request, state, steps, event_sink)
+            await self._loop_knowledge_search(request, state, steps, event_sink, user=user)
             return
         if operation == "forms_query_records":
             await self._loop_forms_query(request, state, steps, event_sink, user=user)
@@ -973,7 +1075,13 @@ class AgentRuntime:
         steps: list[dict[str, Any]],
         event_sink: AgentEventSink | None,
     ) -> None:
-        route = await route_intent_async(request.message, request.context, provider_config=state["config"])
+        budget = state.get("budget")
+        route = await route_intent_async(
+            request.message,
+            request.context,
+            provider_config=state["config"],
+            usage_sink=budget.accumulate if budget else None,
+        )
         pending_action = state.get("pending_action")
         resume_draft = state.get("resume_draft")
         if (
@@ -1022,9 +1130,27 @@ class AgentRuntime:
         state: dict[str, Any],
         steps: list[dict[str, Any]],
         event_sink: AgentEventSink | None,
+        *,
+        user: dict[str, Any] | None,
     ) -> None:
         route = state["intent_route"]
-        evidence = search_ingested_knowledge(request.message, limit=3)
+        current_user = (request.context or {}).get("_current_user") or user or request.context
+        try:
+            tenant_id = require_tenant_id(current_user)
+        except TenantContextError:
+            state["response"] = _tenant_context_required_response(steps)
+            return
+        envelope_result = await tool_execution_envelope.execute_tool(
+            tool_name="knowledge.search",
+            payload={"query": request.message, "limit": 3, "tenant_id": tenant_id},
+            current_user=current_user,
+            settings=state.get("settings"),
+            confirmed=False,
+            event_sink=event_sink,
+            event_bus=state.get("event_bus"),
+        )
+        steps.extend(item for item in (envelope_result.get("items") or []) if isinstance(item, dict))
+        evidence = (envelope_result.get("result") or {}).get("results") or []
         state["evidence"] = evidence
         await self._record_loop_step(
             steps,
@@ -1054,8 +1180,25 @@ class AgentRuntime:
         payload = _form_query_payload(request.context or {})
         if not payload:
             return
-        async with db_session() as session:
-            query_result = await query_form_records(session, user=user, payload=payload)
+        envelope_result = await tool_execution_envelope.execute_tool(
+            tool_name="forms.query_records",
+            payload=payload,
+            current_user=user or {},
+            settings=state.get("settings"),
+            confirmed=False,
+            event_sink=event_sink,
+            event_bus=state.get("event_bus"),
+        )
+        steps.extend(item for item in (envelope_result.get("items") or []) if isinstance(item, dict))
+        query_result = envelope_result.get("result") or {}
+        if envelope_result.get("status") == "failed":
+            state["response"] = AgentResponse(
+                answer=f"读取表单数据失败：{envelope_result.get('error') or 'unknown error'}",
+                evidence=[],
+                steps=steps,
+                mode="qa",
+            )
+            return
         await self._record_loop_step(
             steps,
             event_sink,
@@ -1111,7 +1254,11 @@ class AgentRuntime:
             )
             return
 
-        tenant_id = int(user.get("tenant_id") or user.get("tenantId") or 1)
+        try:
+            tenant_id = require_tenant_id(user)
+        except TenantContextError:
+            state["response"] = _tenant_context_required_response(steps)
+            return
         subject = str(match.get("subject") or "")
         tool = str(match.get("tool") or "platform.settings.query")
         if subject == "applications":
@@ -1266,7 +1413,11 @@ class AgentRuntime:
             )
             return
 
-        tenant_id = int(user.get("tenant_id") or user.get("tenantId") or 1)
+        try:
+            tenant_id = require_tenant_id(user)
+        except TenantContextError:
+            state["response"] = _tenant_context_required_response(steps)
+            return
         async with db_session() as session:
             applications = (
                 await session.execute(
@@ -1342,7 +1493,11 @@ class AgentRuntime:
             )
             return
 
-        tenant_id = int(user.get("tenant_id") or user.get("tenantId") or 1)
+        try:
+            tenant_id = require_tenant_id(user)
+        except TenantContextError:
+            state["response"] = _tenant_context_required_response(steps)
+            return
         async with db_session() as session:
             users = (
                 await session.execute(
@@ -1653,24 +1808,36 @@ class AgentRuntime:
             return
         try:
             provider = get_provider(config)
+            built_messages = self.prompt_builder.build(
+                PromptBuildInput(
+                    mode="agent",
+                    tenant_profile=state["profile"],
+                    user_context=user or {},
+                    page_context={"page": request.page, **(request.context or {})},
+                    evidence=evidence,
+                    tool_policy={"write_policy": "risk_based_confirmation"},
+                    output_contract=(
+                        "用中文自然回答用户当前问题。你已经通过 Agent loop 完成了上下文判断、必要工具调用和权限检查；"
+                        "请基于可见证据回答，不要声称已经执行未经确认的写入动作。"
+                    ),
+                    user_message=request.message,
+                )
+            )
+            messages_dicts = [m.to_api_dict() for m in built_messages]
+            compactor = ContextCompactor()
+            messages_dicts, _summary = compactor.compact_messages(messages_dicts)
+            if _summary:
+                bus = state.get("event_bus")
+                if bus:
+                    await bus.emit(AgentEvent.POST_COMPACT, {"summary": _summary.__dict__})
+            compacted_messages = [ChatMessage(**{k: v for k, v in d.items() if v is not None}) for d in messages_dicts]
             result = await provider.chat(
-                self.prompt_builder.build(
-                    PromptBuildInput(
-                        mode="agent",
-                        tenant_profile=state["profile"],
-                        user_context=user or {},
-                        page_context={"page": request.page, **(request.context or {})},
-                        evidence=evidence,
-                        tool_policy={"write_policy": "risk_based_confirmation"},
-                        output_contract=(
-                            "用中文自然回答用户当前问题。你已经通过 Agent loop 完成了上下文判断、必要工具调用和权限检查；"
-                            "请基于可见证据回答，不要声称已经执行未经确认的写入动作。"
-                        ),
-                        user_message=request.message,
-                    )
-                ),
+                compacted_messages,
                 ChatOptions(model=config.chat_model, max_tokens=1200, temperature=0.3),
             )
+            budget = state.get("budget")
+            if budget:
+                budget.accumulate(result.usage)
             await self._record_loop_step(
                 steps,
                 event_sink,
@@ -1709,8 +1876,9 @@ class AgentRuntime:
         provider_config=None,
         memory: list[dict[str, Any]] | None = None,
         intent: str | None = None,
+        tenant_id: int | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
-        profile = tenant_profile or default_tenant_profile()
+        profile = tenant_profile or default_tenant_profile(tenant_id)
         config = provider_config or settings_to_provider_config(settings_snapshot())
         resolved_intent = intent or self.classify_knowledge_intent(query)
         scoped_evidence = evidence if resolved_intent == "knowledge" else []

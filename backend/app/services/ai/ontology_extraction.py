@@ -30,6 +30,7 @@ from app.models.relational import (
     KnowledgeIngestionJob,
     KnowledgeObjectLink,
 )
+from app.services.ai.tenant_context import require_tenant_id
 from app.services.ai.knowledge_ingestion import (
     CHUNKS,
     DOCUMENTS,
@@ -43,6 +44,14 @@ from app.services.ontology_candidate_service import upsert_candidate
 logger = get_logger(__name__)
 
 EXTRACTION_JOBS: dict[str, dict[str, Any]] = {}
+
+
+def _record_belongs_to_tenant(record: dict[str, Any], tenant_id: int) -> bool:
+    try:
+        return require_tenant_id(record) == tenant_id
+    except ValueError:
+        return False
+
 
 GENERIC_TYPE_MAP: dict[str, str] = {
     "Supplier": "Organization",
@@ -202,19 +211,6 @@ def deterministic_extract(markdown: str, *, domain: str = "manufacturing") -> di
             "source_location": f"line:{line_no}",
             "status": "candidate",
         })
-
-    if not entities:
-        title = next((line.strip("# ").strip() for line in markdown.splitlines() if line.strip().startswith("#")), "")
-        if title:
-            entities.append({
-                "candidate_id": _id("ent"),
-                "name": title[:120],
-                "entity_type": "QualityEvent" if domain == "manufacturing" else "Document",
-                "description": "Fallback candidate from document title.",
-                "confidence": 0.52,
-                "source_location": "line:1",
-                "status": "candidate",
-            })
 
     relations = []
     if len(entities) >= 2:
@@ -482,13 +478,14 @@ def build_quality_report(result: dict[str, Any], *, parse_error: str | None = No
     return report
 
 
-async def persist_ingestion_result(result: dict[str, Any], tenant_id: int = 1) -> None:
+async def persist_ingestion_result(result: dict[str, Any], tenant_id: int | None = None) -> None:
     """Best-effort persistence for uploaded source material."""
+    job = result.get("job") or {}
+    document = result.get("document") or {}
+    tenant_id = require_tenant_id({"tenant_id": tenant_id or document.get("tenant_id") or job.get("tenant_id")})
     try:
         async with db_session() as session:
-            job = result.get("job") or {}
             asset = result.get("asset") or {}
-            document = result.get("document") or {}
             if document:
                 existing_doc = await session.scalar(
                     select(KnowledgeDocument).where(
@@ -561,11 +558,12 @@ async def create_extraction_job(
     content: bytes,
     domain: str = "manufacturing",
     prompt_name: str = "manufacturing_ontology_v1",
-    model_name: str = "deterministic-extractor",
+    model_name: str = "rules-ontology-extractor",
     owner_user_id: str = "knowledge-admin",
     permission_scope: str = "enterprise",
-    tenant_id: int = 1,
+    tenant_id: int | None = None,
 ) -> dict[str, Any]:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     source_path = save_original_asset(file_name, content)
     source_type, markdown, metadata = parse_to_markdown_with_metadata(file_name, content)
     if source_type not in SUPPORTED_SOURCE_TYPES:
@@ -590,8 +588,9 @@ async def create_extraction_job(
         "status": "indexed",
         "created_at": _now(),
         "updated_at": _now(),
+        "tenant_id": tenant_id,
     }
-    chunks = markdown_to_chunks(markdown, document_id, permission_scope)
+    chunks = markdown_to_chunks(markdown, document_id, permission_scope, tenant_id=tenant_id)
     DOCUMENTS[document_id] = document
     for chunk in chunks:
         CHUNKS[chunk["chunk_id"]] = chunk
@@ -599,6 +598,7 @@ async def create_extraction_job(
         "job_id": ingestion_job_id,
         "asset_id": asset_id,
         "document_id": document_id,
+        "tenant_id": tenant_id,
         "status": "completed",
         "error": None,
         "created_at": _now(),
@@ -645,11 +645,14 @@ async def create_extraction_job_from_document(
     *,
     domain: str = "manufacturing",
     prompt_name: str = "manufacturing_ontology_v1",
-    model_name: str = "deterministic-extractor",
-    tenant_id: int = 1,
+    model_name: str = "rules-ontology-extractor",
+    tenant_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Create ontology candidates from a document that has already been ingested."""
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     document = DOCUMENTS.get(document_id)
+    if document and not _record_belongs_to_tenant(document, tenant_id):
+        document = None
     if not document:
         try:
             async with db_session() as session:
@@ -674,6 +677,7 @@ async def create_extraction_job_from_document(
                         "status": row.status,
                         "created_at": row.created_at.isoformat() if row.created_at else _now(),
                         "updated_at": row.updated_at.isoformat() if row.updated_at else _now(),
+                        "tenant_id": tenant_id,
                     }
         except Exception as exc:  # noqa: BLE001
             logger.warning("Document lookup for ontology extraction skipped: %s", exc)
@@ -685,9 +689,18 @@ async def create_extraction_job_from_document(
         return None
 
     DOCUMENTS[document_id] = document
-    chunks = [chunk for chunk in CHUNKS.values() if chunk.get("document_id") == document_id]
+    chunks = [
+        chunk
+        for chunk in CHUNKS.values()
+        if chunk.get("document_id") == document_id and _record_belongs_to_tenant(chunk, tenant_id)
+    ]
     if not chunks:
-        chunks = markdown_to_chunks(markdown, document_id, str(document.get("permission_scope") or "enterprise"))
+        chunks = markdown_to_chunks(
+            markdown,
+            document_id,
+            str(document.get("permission_scope") or "enterprise"),
+            tenant_id=tenant_id,
+        )
         for chunk in chunks:
             CHUNKS[chunk["chunk_id"]] = chunk
 
@@ -716,7 +729,7 @@ async def create_extraction_job_from_document(
 
 
 async def persist_extraction_job(job: dict[str, Any], tenant_id: int | None = None) -> None:
-    tenant_id = int(tenant_id or job.get("tenant_id") or 1)
+    tenant_id = require_tenant_id({"tenant_id": tenant_id or job.get("tenant_id")})
     try:
         async with db_session() as session:
             existing = await session.scalar(
@@ -750,7 +763,8 @@ async def persist_extraction_job(job: dict[str, Any], tenant_id: int | None = No
         logger.warning("Knowledge extraction persistence skipped: %s", exc)
 
 
-async def get_extraction_job(job_id: str, tenant_id: int = 1) -> dict[str, Any] | None:
+async def get_extraction_job(job_id: str, tenant_id: int | None = None) -> dict[str, Any] | None:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     if job_id in EXTRACTION_JOBS and int(EXTRACTION_JOBS[job_id].get("tenant_id") or tenant_id) == tenant_id:
         return EXTRACTION_JOBS[job_id]
     try:
@@ -785,7 +799,8 @@ async def get_extraction_job(job_id: str, tenant_id: int = 1) -> dict[str, Any] 
         return None
 
 
-async def approve_extraction_job(job_id: str, approved_result: dict[str, Any] | None = None, tenant_id: int = 1) -> dict[str, Any] | None:
+async def approve_extraction_job(job_id: str, approved_result: dict[str, Any] | None = None, tenant_id: int | None = None) -> dict[str, Any] | None:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     job = await get_extraction_job(job_id, tenant_id=tenant_id)
     if not job:
         return None
@@ -802,7 +817,8 @@ async def approve_extraction_job(job_id: str, approved_result: dict[str, Any] | 
     return job
 
 
-async def commit_extraction_to_graph(job_id: str, tenant_id: int = 1) -> dict[str, Any] | None:
+async def commit_extraction_to_graph(job_id: str, tenant_id: int | None = None) -> dict[str, Any] | None:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     job = await get_extraction_job(job_id, tenant_id=tenant_id)
     if not job:
         return None

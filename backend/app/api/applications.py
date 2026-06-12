@@ -1,8 +1,8 @@
 """Application workspace APIs.
 
 An application is a business workspace that owns a default route, a set of
-menu entries, and role visibility. The API keeps a mock fallback so the demo
-still works when the relational DB is not available.
+menu entries, and role visibility. Demo data must be imported with explicit
+seed scripts; request handlers do not silently create or return mock data.
 """
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
-from app.config import settings
 from app.core.audit import write_audit_log
 from app.core.db import safe_db_call
 from app.core.permissions import has_permission
+from app.core.production_errors import database_unavailable, seed_data_required
 from app.services.tenant_onboarding import assert_tenant_quota
 
 router = APIRouter()
@@ -98,7 +98,7 @@ async def _role_names_for_user(db: AsyncSession, user: dict) -> list[str]:
         return ["admin"]
     uid = user.get("uid")
     if not uid:
-        return _mock_role_names(user)
+        return []
     try:
         from app.models.relational import Role, UserRole
         tenant_id = current_tenant_id(user)
@@ -108,9 +108,9 @@ async def _role_names_for_user(db: AsyncSession, user: dict) -> list[str]:
             .where(UserRole.user_id == uid, UserRole.tenant_id == tenant_id, Role.tenant_id == tenant_id)
         )
         names = [r[0] for r in result.fetchall()]
-        return names or _mock_role_names(user)
-    except Exception:
-        return _mock_role_names(user)
+        return names
+    except Exception as exc:
+        raise database_unavailable("Role database unavailable") from exc
 
 
 async def _role_ids_for_user(db: AsyncSession, user: dict) -> list[int]:
@@ -429,7 +429,6 @@ async def list_applications(
         from app.models.relational import Application, ApplicationRole, Role
 
         tenant_id = current_tenant_id(user)
-        await _ensure_default_seed(session, tenant_id)
         role_names = await _role_names_for_user(session, user)
         query = select(Application).where(Application.status == "published", Application.tenant_id == tenant_id).order_by(Application.sort_order, Application.id)
         if not user.get("is_admin"):
@@ -447,9 +446,11 @@ async def list_applications(
         return {"data": [await _application_to_dict(session, app) for app in apps]}
 
     result = await safe_db_call(_query)
-    if result is None and settings.IS_PRODUCTION:
-        raise HTTPException(503, "Applications database unavailable")
-    return result or {"data": _mock_visible_apps(user)}
+    if result is None:
+        raise database_unavailable("Applications database unavailable")
+    if not result.get("data"):
+        raise seed_data_required("No published applications found. Run the application seed before opening the workspace.")
+    return result
 
 
 @router.get("/{app_id}/menus")
@@ -458,7 +459,6 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
         from app.models.relational import Application, ApplicationForm, ApplicationMenu, ApplicationMenuNode, Form, MenuItem
 
         tenant_id = current_tenant_id(user)
-        await _ensure_default_seed(session, tenant_id)
         app = await session.get(Application, app_id)
         if not app or app.tenant_id != tenant_id or app.status != "published":
             raise HTTPException(404, "Application not found")
@@ -533,15 +533,7 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
     result = await safe_db_call(_query)
     if result is not None:
         return result
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application menu database unavailable")
-    app = next((a for a in DEFAULT_APPLICATIONS if a["id"] == app_id), None)
-    if not app:
-        raise HTTPException(404, "Application not found")
-    if not _mock_can_access_application(user, app):
-        raise HTTPException(403, "Application access denied")
-    menus = [_mock_menu_by_route(route) for route in app["menu_routes"]]
-    return {"data": _menu_tree([m for m in menus if m])}
+    raise database_unavailable("Application menu database unavailable")
 
 
 @router.get("/{app_id}")
@@ -550,7 +542,6 @@ async def get_application(app_id: int, user: dict = Depends(get_current_user), d
         from app.models.relational import Application
 
         tenant_id = current_tenant_id(user)
-        await _ensure_default_seed(session, tenant_id)
         app = await session.get(Application, app_id)
         if not app or app.tenant_id != tenant_id:
             raise HTTPException(404, "Application not found")
@@ -563,14 +554,7 @@ async def get_application(app_id: int, user: dict = Depends(get_current_user), d
     result = await safe_db_call(_query)
     if result is not None:
         return result
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application database unavailable")
-    app = next((a for a in DEFAULT_APPLICATIONS if a["id"] == app_id), None)
-    if not app:
-        raise HTTPException(404, "Application not found")
-    if not _mock_can_access_application(user, app):
-        raise HTTPException(403, "Application access denied")
-    return {"data": _mock_application_payload(app, include_bindings=True)}
+    raise database_unavailable("Application database unavailable")
 
 
 @admin_router.get("/applications")
@@ -579,14 +563,15 @@ async def admin_list_applications(user: dict = Depends(require_admin), db: Async
         from app.models.relational import Application
 
         tenant_id = current_tenant_id(user)
-        await _ensure_default_seed(session, tenant_id)
         apps = (await session.execute(select(Application).where(Application.tenant_id == tenant_id).order_by(Application.sort_order, Application.id))).scalars().all()
         return {"data": [await _application_to_dict(session, app, include_bindings=True) for app in apps]}
 
     result = await safe_db_call(_query)
-    if result is None and settings.IS_PRODUCTION:
-        raise HTTPException(503, "Applications database unavailable")
-    return result or {"data": [_mock_application_payload(app, include_bindings=True) for app in DEFAULT_APPLICATIONS]}
+    if result is None:
+        raise database_unavailable("Applications database unavailable")
+    if not result.get("data"):
+        raise seed_data_required("No applications found. Run the application seed before using application administration.")
+    return result
 
 
 @admin_router.post("/applications")
@@ -616,9 +601,7 @@ async def admin_create_application(body: ApplicationCreate, user: dict = Depends
     result = await safe_db_call(_query)
     if result is not None:
         return result
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application database unavailable")
-    return {"data": {**body.dict(), "id": max(a["id"] for a in DEFAULT_APPLICATIONS) + 1, "menus": [], "roles": []}}
+    raise database_unavailable("Application database unavailable")
 
 
 @admin_router.put("/applications/{app_id}")
@@ -649,9 +632,7 @@ async def admin_update_application(app_id: int, body: ApplicationUpdate, user: d
     result = await safe_db_call(_query)
     if result is not None:
         return result
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application database unavailable")
-    raise HTTPException(404, "Application not found")
+    raise database_unavailable("Application database unavailable")
 
 
 @admin_router.delete("/applications/{app_id}")
@@ -675,9 +656,9 @@ async def admin_delete_application(app_id: int, user: dict = Depends(require_adm
         return {"ok": True}
 
     result = await safe_db_call(_query)
-    if result is None and settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application database unavailable")
-    return result or {"ok": True}
+    if result is None:
+        raise database_unavailable("Application database unavailable")
+    return result
 
 
 @admin_router.put("/applications/{app_id}/bindings")
@@ -712,6 +693,4 @@ async def admin_update_application_bindings(app_id: int, body: BindingUpdate, us
     result = await safe_db_call(_query)
     if result is not None:
         return result
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Application database unavailable")
-    raise HTTPException(404, "Application not found")
+    raise database_unavailable("Application database unavailable")

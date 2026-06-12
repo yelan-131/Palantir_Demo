@@ -1,14 +1,14 @@
 import React from 'react';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
 import { useNavigate, useParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
 import {
   createPlatformDynamicRecord,
   getAppProgramData,
-  getPlatformForm,
-  listPlatformForms,
+  getPlatformFormByCode,
+  listPlatformFormLayouts,
   type PlatformForm,
   type PlatformFormField,
 } from '@/services/api';
@@ -18,6 +18,7 @@ import {
   type ViewConfig,
   type ViewFilterConfig,
 } from '@/utils/viewConfig';
+import { formatServerShortDateTime, parseServerDate } from '@/utils/dateTime';
 import './style.css';
 
 const { RangePicker } = DatePicker;
@@ -25,6 +26,18 @@ const { RangePicker } = DatePicker;
 type ProgramKind = 'business' | 'analysis';
 
 type ProgramRow = Record<string, unknown>;
+
+interface RuntimeFormLayoutField {
+  fieldName: string;
+  label?: string;
+  width?: 'quarter' | 'half' | 'threeQuarter' | 'full';
+  colSpan?: number;
+  controlType?: string;
+  required?: boolean;
+  readonly?: boolean;
+  placeholder?: string;
+  helpText?: string;
+}
 
 function isDataColumn(column: ColumnsType<ProgramRow>[number]): column is ColumnType<ProgramRow> {
   return 'dataIndex' in column;
@@ -165,6 +178,8 @@ const toneClassMap: Record<ProgramDefinition['metrics'][number]['tone'], string>
 };
 const routedProgramIds = new Set<string>();
 const configuredFormProgramIds = new Set([
+  'alert-center',
+  'risk-review',
   'production-plan-entry',
   'maintenance-order',
   'equipment-inspection',
@@ -552,20 +567,12 @@ function readProgramField(row: ProgramRow | null, key: string, fallback = '-') {
 }
 
 function parseAlertTime(value: unknown) {
-  if (!value) return null;
-  const timestamp = Date.parse(String(value));
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return parseServerDate(typeof value === 'string' ? value : value == null ? null : String(value))?.getTime() ?? null;
 }
 
 function formatAlertTime(value: unknown) {
-  const timestamp = parseAlertTime(value);
-  if (!timestamp) return formatDetailValue(value);
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(timestamp);
+  const formatted = formatServerShortDateTime(typeof value === 'string' ? value : value == null ? null : String(value), '');
+  return formatted || formatDetailValue(value);
 }
 
 function getAlertTone(row: ProgramRow | null) {
@@ -686,21 +693,7 @@ function AlertBusinessProgram({
           render: source?.render || renderCell,
         };
       });
-    return [
-      ...columns,
-      {
-        title: '操作',
-        key: 'action',
-        fixed: 'right' as const,
-        width: 132,
-        render: (_: unknown, record: ProgramRow) => (
-          <Space onClick={(event) => event.stopPropagation()}>
-            <Button type="link" size="small" onClick={() => setSelectedRow(record)}>查看</Button>
-            <Button type="link" size="small">处理</Button>
-          </Space>
-        ),
-      },
-    ];
+    return columns;
   }, [program.columns, viewColumns]);
 
   const renderFilterControl = (filter: ViewFilterConfig) => {
@@ -854,7 +847,7 @@ function AlertBusinessProgram({
 
 type BusinessCreateField = Pick<
   PlatformFormField,
-  'field_name' | 'label' | 'field_type' | 'required' | 'visible_in_form' | 'enum_values' | 'default_value' | 'ui_config' | 'sort_order'
+  'field_name' | 'label' | 'field_type' | 'control_type' | 'required' | 'visible_in_form' | 'enum_values' | 'default_value' | 'ui_config' | 'sort_order'
 > & {
   editable?: boolean;
 };
@@ -867,20 +860,6 @@ function isCodeCreateField(field: BusinessCreateField) {
     || uiConfig.controlType === 'code'
     || Boolean(uiConfig.encodingRule)
   );
-}
-
-function makeAutoCodeValue(field: BusinessCreateField) {
-  const rule = (field.ui_config?.encodingRule || {}) as Record<string, unknown>;
-  const prefix = String(rule.prefix || field.field_name.slice(0, 2).toUpperCase());
-  const now = new Date();
-  const date = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-  ].join('');
-  const seqLength = Number(rule.sequenceLength || 3);
-  const seq = String(Math.floor(Math.random() * (10 ** Math.min(seqLength, 6)))).padStart(seqLength, '0');
-  return `${prefix}-${date}-${seq}`;
 }
 
 function enumOptionsForCreateField(field: BusinessCreateField) {
@@ -904,6 +883,20 @@ function normalizeBusinessCreateValue(value: unknown) {
   if (value && typeof value === 'object' && 'format' in value && typeof (value as { format?: unknown }).format === 'function') {
     return (value as { format: (pattern?: string) => string }).format('YYYY-MM-DDTHH:mm:ss');
   }
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const file = item as Record<string, any>;
+      return {
+        uid: file.uid,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        status: file.status,
+        url: file.url,
+      };
+    });
+  }
   return value;
 }
 
@@ -911,11 +904,85 @@ function businessCreateInitialValues(fields: BusinessCreateField[]) {
   return fields.reduce<Record<string, unknown>>((values, field) => {
     if (field.default_value !== undefined && field.default_value !== null && field.default_value !== '') {
       values[field.field_name] = field.default_value;
-    } else if (isCodeCreateField(field)) {
-      values[field.field_name] = makeAutoCodeValue(field);
     }
     return values;
   }, {});
+}
+
+function getLayoutFieldList(source: unknown): RuntimeFormLayoutField[] {
+  if (!source || typeof source !== 'object') return [];
+  const sections = (source as { sections?: unknown }).sections;
+  if (!Array.isArray(sections)) return [];
+  return sections.flatMap((section) => {
+    const fields = (section as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return [];
+    return fields
+      .filter((field): field is RuntimeFormLayoutField => Boolean(field && typeof field === 'object' && (field as RuntimeFormLayoutField).fieldName))
+      .map((field) => ({ ...field }));
+  });
+}
+
+function getRuntimeLayoutFields(form: PlatformForm | null, layouts: Array<{ layout_type?: string; config?: unknown }>) {
+  const formLayout = layouts.find((layout) => layout.layout_type === 'form')?.config;
+  const candidates = [
+    formLayout,
+    form?.config?.formLayout,
+    (form?.config?.formDesignerLayout as { runtime?: unknown } | undefined)?.runtime,
+  ];
+  for (const candidate of candidates) {
+    const fields = getLayoutFieldList(candidate);
+    if (fields.length) return fields;
+  }
+  return [];
+}
+
+function mergeCreateFieldsWithLayout(fields: BusinessCreateField[], layoutFields: RuntimeFormLayoutField[]): BusinessCreateField[] {
+  if (!layoutFields.length) return fields;
+  const fieldByName = new Map(fields.map((field) => [field.field_name, field]));
+  const used = new Set<string>();
+  const ordered: BusinessCreateField[] = [];
+  layoutFields.forEach((layout) => {
+    const field = fieldByName.get(layout.fieldName);
+    if (!field) return;
+    used.add(field.field_name);
+    ordered.push({
+      ...field,
+      label: layout.label || field.label,
+      required: Boolean(layout.required ?? field.required),
+      editable: layout.readonly ? false : field.editable,
+      ui_config: {
+        ...(field.ui_config || {}),
+        placeholder: layout.placeholder || field.ui_config?.placeholder,
+        controlType: layout.controlType || field.control_type || field.ui_config?.controlType,
+        helpText: layout.helpText,
+        width: layout.width,
+        colSpan: layout.colSpan,
+      },
+    });
+  });
+  return [...ordered, ...fields.filter((field) => !used.has(field.field_name))];
+}
+
+function getCreateFieldColSpan(field: BusinessCreateField) {
+  const colSpan = Number(field.ui_config?.colSpan || 0);
+  if (colSpan >= 1.5 && colSpan < 2) return 18;
+  if (colSpan >= 2) return 24;
+  if (colSpan === 1) return 12;
+  if (colSpan > 0 && colSpan < 1) return 6;
+  const width = String(field.ui_config?.width || '').toLowerCase();
+  if (width === 'quarter') return 6;
+  if (width === 'threequarter' || width === 'three-quarter') return 18;
+  if (width === 'half') return 12;
+  if (width === 'full') return 24;
+  const controlType = String(field.ui_config?.controlType || field.control_type || field.field_type || '').toLowerCase();
+  if (controlType === 'textarea' || field.field_type === 'text') return 24;
+  return 12;
+}
+
+function getCreateFieldPlaceholder(field: BusinessCreateField, action: 'input' | 'select' = 'input') {
+  const placeholder = field.ui_config?.placeholder;
+  if (typeof placeholder === 'string' && placeholder) return placeholder;
+  return action === 'select' ? `请选择${field.label}` : `请输入${field.label}`;
 }
 
 function renderBusinessCreateField(field: BusinessCreateField) {
@@ -927,6 +994,20 @@ function renderBusinessCreateField(field: BusinessCreateField) {
     label: field.label,
     rules,
   };
+  const controlType = String(field.ui_config?.controlType || field.control_type || field.field_type || '').toLowerCase();
+  if (controlType === 'upload' || controlType === 'attachment') {
+    return (
+      <Form.Item
+        {...commonProps}
+        valuePropName="fileList"
+        getValueFromEvent={(event) => Array.isArray(event) ? event : event?.fileList || []}
+      >
+        <Upload className="app-business-upload-field" beforeUpload={() => false} multiple disabled={disabled}>
+          <Button block icon={<UploadOutlined />} disabled={disabled}>上传{field.label}</Button>
+        </Upload>
+      </Form.Item>
+    );
+  }
   if (field.field_type === 'number' || field.field_type === 'integer' || field.field_type === 'decimal') {
     return (
       <Form.Item {...commonProps}>
@@ -990,6 +1071,7 @@ function BusinessProgram({
   const [createForm] = Form.useForm();
   const [filterForm] = Form.useForm();
   const [runtimeForm, setRuntimeForm] = React.useState<PlatformForm | null>(null);
+  const [runtimeLayoutFields, setRuntimeLayoutFields] = React.useState<RuntimeFormLayoutField[]>([]);
   const [runtimeFormLoading, setRuntimeFormLoading] = React.useState(false);
   const [createSubmitting, setCreateSubmitting] = React.useState(false);
   const viewConfig = React.useMemo(() => normalizeViewConfig(program.viewConfig, programFieldsForView(program)), [program]);
@@ -999,7 +1081,7 @@ function BusinessProgram({
     if (!runtimeForm?.fields?.length) return [];
     const fieldPermissions = runtimeForm.runtime_field_permissions || {};
     return [...runtimeForm.fields]
-      .filter((field) => !field.archived && field.visible_in_form && fieldPermissions[field.field_name]?.visible !== false)
+      .filter((field) => !field.archived && fieldPermissions[field.field_name]?.visible !== false)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map((field) => ({
         ...field,
@@ -1007,6 +1089,10 @@ function BusinessProgram({
         editable: fieldPermissions[field.field_name]?.editable !== false,
       }));
   }, [program, runtimeForm]);
+  const runtimeCreateLayoutFields = React.useMemo(
+    () => mergeCreateFieldsWithLayout(runtimeCreateFields, runtimeLayoutFields),
+    [runtimeCreateFields, runtimeLayoutFields],
+  );
   const filteredRows = React.useMemo(() => program.rows.filter((row) => activeFilters.every((filter) => (
     programValueMatchesFilter(row, filter, filterValues[filter.id] ?? filter.defaultValue)
   ))), [activeFilters, filterValues, program.rows]);
@@ -1016,6 +1102,13 @@ function BusinessProgram({
   const detailItems = React.useMemo(() => {
     if (!selectedRow) return [];
     const formData = getRowFormData(selectedRow);
+    if (runtimeCreateLayoutFields.length) {
+      return runtimeCreateLayoutFields.map((field) => ({
+        key: field.field_name,
+        label: field.label || field.field_name,
+        value: selectedRow[field.field_name] ?? formData[field.field_name],
+      }));
+    }
     const visibleFields = viewColumns
       .map((viewColumn) => ({
         key: viewColumn.fieldName,
@@ -1028,7 +1121,7 @@ function BusinessProgram({
       .filter(([key, value]) => !key.startsWith('_') && key !== 'key' && !visibleKeys.has(key) && value !== undefined && value !== null && value !== '')
       .map(([key, value]) => ({ key, label: fieldLabelMap[key] || key, value }));
     return [...visibleFields, ...extraFields];
-  }, [selectedRow, viewColumns]);
+  }, [runtimeCreateLayoutFields, selectedRow, viewColumns]);
   const interactionEntries = React.useMemo(() => getInteractionEntries(selectedRow), [selectedRow]);
   const progressStatus = selectedRow
     ? String(selectedRow.processStatus || selectedRow.status || '未启动')
@@ -1061,7 +1154,7 @@ function BusinessProgram({
           render: source?.render || renderCell,
         };
       });
-    return [...baseColumns, { title: '操作', key: 'action', fixed: 'right' as const, width: 160, render: (_: unknown, record: ProgramRow) => <Space onClick={(event) => event.stopPropagation()}><Button type="link" size="small" onClick={() => setSelectedRow(record)}>详情</Button><Button type="link" size="small">处理</Button></Space> }];
+    return baseColumns;
   }, [program.columns, viewColumns]);
 
   const closeCreateModal = () => {
@@ -1074,21 +1167,30 @@ function BusinessProgram({
     const loadRuntimeForm = async () => {
       setRuntimeFormLoading(true);
       try {
-        const formsResponse = await listPlatformForms();
-        const forms = (formsResponse.data?.data || []) as PlatformForm[];
-        const matchedForm = forms.find((form) => form.code === program.id);
-        if (!matchedForm) {
-          if (!cancelled) setRuntimeForm(null);
-          return;
-        }
-        const detailResponse = await getPlatformForm(matchedForm.id, { schema: 'published' });
+        const detailResponse = await getPlatformFormByCode(program.id, { schema: 'published', scope: 'create' });
         if (!cancelled) {
-          const detail = (detailResponse.data?.data || matchedForm) as PlatformForm;
-          setRuntimeForm(detail.fields?.length ? detail : null);
+          const detail = detailResponse.data?.data as PlatformForm | undefined;
+          const nextRuntimeForm = detail?.fields?.length ? detail : null;
+          setRuntimeForm(nextRuntimeForm);
+          if (nextRuntimeForm?.id) {
+            try {
+              const layoutsResponse = await listPlatformFormLayouts(nextRuntimeForm.id);
+              const layouts = (layoutsResponse.data?.data || []) as Array<{ layout_type?: string; config?: unknown }>;
+              if (!cancelled) setRuntimeLayoutFields(getRuntimeLayoutFields(nextRuntimeForm, layouts));
+            } catch (layoutError) {
+              if (!cancelled) {
+                setRuntimeLayoutFields(getRuntimeLayoutFields(nextRuntimeForm, []));
+                console.warn('business form layout load failed', layoutError);
+              }
+            }
+          } else {
+            setRuntimeLayoutFields([]);
+          }
         }
       } catch (error) {
         if (!cancelled) {
           setRuntimeForm(null);
+          setRuntimeLayoutFields([]);
           console.warn('business form load failed', error);
         }
       } finally {
@@ -1101,13 +1203,47 @@ function BusinessProgram({
     };
   }, [program.id]);
 
-  const openCreateModal = () => {
-    if (!runtimeForm) {
+  const refreshRuntimeForm = async () => {
+    setRuntimeFormLoading(true);
+    try {
+      const detailResponse = await getPlatformFormByCode(program.id, { schema: 'published', scope: 'create' });
+      const detail = detailResponse.data?.data as PlatformForm | undefined;
+      const nextRuntimeForm = detail?.fields?.length ? detail : null;
+      setRuntimeForm(nextRuntimeForm);
+      if (nextRuntimeForm?.id) {
+        try {
+          const layoutsResponse = await listPlatformFormLayouts(nextRuntimeForm.id);
+          const layouts = (layoutsResponse.data?.data || []) as Array<{ layout_type?: string; config?: unknown }>;
+          setRuntimeLayoutFields(getRuntimeLayoutFields(nextRuntimeForm, layouts));
+        } catch (layoutError) {
+          setRuntimeLayoutFields(getRuntimeLayoutFields(nextRuntimeForm, []));
+          console.warn('business form layout load failed', layoutError);
+        }
+      } else {
+        setRuntimeLayoutFields([]);
+      }
+      return nextRuntimeForm;
+    } catch (error) {
+      setRuntimeForm(null);
+      setRuntimeLayoutFields([]);
+      console.warn('business form load failed', error);
+      return null;
+    } finally {
+      setRuntimeFormLoading(false);
+    }
+  };
+
+  const openCreateModal = async () => {
+    const latestRuntimeForm = await refreshRuntimeForm();
+    if (!latestRuntimeForm && runtimeForm) {
+      setRuntimeForm(runtimeForm);
+    }
+    if (!latestRuntimeForm && !runtimeForm) {
       message.warning('当前页面没有绑定后台表单设计，不能新增业务记录');
       return;
     }
     createForm.resetFields();
-    createForm.setFieldsValue(businessCreateInitialValues(runtimeCreateFields));
+    createForm.setFieldsValue(businessCreateInitialValues(runtimeCreateLayoutFields));
     setCreateOpen(true);
   };
 
@@ -1200,7 +1336,7 @@ function BusinessProgram({
         title={`新增${runtimeForm?.name || program.title}`}
         open={createOpen}
         width={820}
-        okText={runtimeForm ? '保存' : '确认'}
+        okText={runtimeForm ? '提交' : '确认'}
         cancelText="取消"
         confirmLoading={createSubmitting}
         onCancel={closeCreateModal}
@@ -1208,8 +1344,8 @@ function BusinessProgram({
       >
         <Form form={createForm} layout="vertical" className="app-business-create-form">
           <Row gutter={12}>
-            {runtimeCreateFields.map((field) => (
-              <Col key={field.field_name} xs={24} md={field.field_type === 'text' || field.field_type === 'json' ? 24 : 12}>
+            {runtimeCreateLayoutFields.map((field) => (
+              <Col key={field.field_name} xs={24} md={getCreateFieldColSpan(field)}>
                 {renderBusinessCreateField(field)}
               </Col>
             ))}

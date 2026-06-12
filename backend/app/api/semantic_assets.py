@@ -45,6 +45,7 @@ from app.services.ontology_candidate_service import (
     infer_object_code,
     upsert_candidate,
 )
+from app.services.ontology_ai_candidate_service import OntologyAICandidateError, generate_ai_candidates_from_metadata
 from app.services.metadata_scan_service import parse_connection_config, scan_data_source_metadata
 from app.services.ontology_service import (
     approve_candidate,
@@ -59,6 +60,11 @@ from app.services.ontology_service import (
     publish_version,
     reject_candidate,
     relation_payload,
+)
+from app.services.semantic_mapping_service import (
+    create_manual_mapping_candidate,
+    get_semantic_mapping_workbench,
+    save_semantic_mapping_layout,
 )
 
 router = APIRouter()
@@ -90,6 +96,26 @@ class OntologyRelationBody(BaseModel):
 class CandidateGenerateBody(BaseModel):
     source_id: int | None = None
     document_job_id: str | None = None
+
+
+class SemanticMappingCandidateBody(BaseModel):
+    source_node: dict[str, Any]
+    target_node: dict[str, Any]
+    confidence: float = 0.72
+    note: str | None = None
+
+
+class SemanticMappingCandidateUpdateBody(BaseModel):
+    target_object_code: str | None = None
+    target_field_code: str | None = None
+    confidence: float | None = None
+    note: str | None = None
+
+
+class SemanticMappingLayoutBody(BaseModel):
+    object_code: str | None = None
+    source_id: int | None = None
+    layout: dict[str, Any]
 
 
 def _connection_config_flag(config: dict[str, Any], key: str, default: bool = True) -> bool:
@@ -1335,21 +1361,155 @@ async def generate_ontology_candidates(
                 raise HTTPException(status_code=403, detail="当前数据源未授权 AI 使用")
             if not _connection_config_flag(config, "allow_ontology", True):
                 raise HTTPException(status_code=403, detail="当前数据源未授权对象建模")
-    rows = await generate_candidates_from_metadata(db, tenant_id=tenant_id, source_id=body.source_id)
-    if body.source_id is not None and not rows:
-        persisted_assets = await _persisted_data_source_assets(db, tenant_id)
-        asset = next((item for item in persisted_assets if int(item["id"]) == body.source_id), None)
-        if asset:
-            rows = await _generate_candidates_from_data_asset(db, tenant_id=tenant_id, asset=asset)
-    if body.source_id is not None and not rows:
-        tables = await _data_asset_tables(db, tenant_id)
-        system_tables = await _data_asset_tables(db, tenant_id, SYSTEM_DATABASE_MODELS)
-        assets = _logical_data_assets_from_tables(tables, system_tables)
-        asset = next((item for item in assets if int(item["id"]) == body.source_id), None)
-        if asset:
-            rows = await _generate_candidates_from_data_asset(db, tenant_id=tenant_id, asset=asset)
+    try:
+        rows = await generate_ai_candidates_from_metadata(db, tenant_id=tenant_id, source_id=body.source_id)
+    except OntologyAICandidateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
     return {"data": [candidate_payload(row) for row in rows], "count": len(rows)}
+
+
+@router.get("/semantic-mapping/workbench")
+async def semantic_mapping_workbench(
+    object_code: str | None = None,
+    source_id: int | None = None,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    return {
+        "data": await get_semantic_mapping_workbench(
+            db,
+            tenant_id=tenant_id,
+            object_code=object_code,
+            source_id=source_id,
+            status=status,
+        )
+    }
+
+
+@router.post("/semantic-mapping/candidates")
+async def create_semantic_mapping_candidate(
+    body: SemanticMappingCandidateBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    try:
+        candidate = await create_manual_mapping_candidate(
+            db,
+            tenant_id=tenant_id,
+            source_node=body.source_node,
+            target_node=body.target_node,
+            confidence=body.confidence,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(candidate)
+    return {"data": candidate_payload(candidate)}
+
+
+@router.put("/semantic-mapping/candidates/{candidate_id}")
+async def update_semantic_mapping_candidate(
+    candidate_id: int,
+    body: SemanticMappingCandidateUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    candidate = await db.get(OntologyCandidate, candidate_id)
+    if not candidate or candidate.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Semantic mapping candidate not found")
+    payload = candidate.payload or {}
+    mapping = payload.get("mapping") if isinstance(payload.get("mapping"), dict) else {}
+    field = payload.get("field") if isinstance(payload.get("field"), dict) else {}
+    if body.target_object_code is not None:
+        mapping["target_object_code"] = body.target_object_code
+        if field:
+            field["object_code"] = body.target_object_code
+    if body.target_field_code is not None:
+        mapping["target_field_code"] = body.target_field_code or None
+        if field:
+            field["code"] = body.target_field_code
+    if body.note is not None:
+        mapping["evidence"] = body.note
+        payload["evidence"] = [body.note]
+    payload["mapping"] = mapping
+    if field:
+        payload["field"] = field
+    candidate.payload = payload
+    if body.confidence is not None:
+        candidate.confidence = max(0, min(float(body.confidence), 1))
+    candidate.title = f"{mapping.get('source_entity')}.{mapping.get('source_field')} -> {mapping.get('target_object_code')}{'.' + str(mapping.get('target_field_code')) if mapping.get('target_field_code') else ''}"
+    await db.commit()
+    await db.refresh(candidate)
+    return {"data": candidate_payload(candidate)}
+
+
+@router.post("/semantic-mapping/candidates/{candidate_id}/approve")
+async def approve_semantic_mapping_candidate(
+    candidate_id: int,
+    body: CandidateReviewBody | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    try:
+        result = await approve_candidate(
+            db,
+            tenant_id=tenant_id,
+            candidate_id=candidate_id,
+            actor_id=current_user_id(user),
+            note=(body.note if body else None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await db.commit()
+    return {"data": result}
+
+
+@router.post("/semantic-mapping/candidates/{candidate_id}/reject")
+async def reject_semantic_mapping_candidate(
+    candidate_id: int,
+    body: CandidateReviewBody | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    try:
+        result = await reject_candidate(
+            db,
+            tenant_id=tenant_id,
+            candidate_id=candidate_id,
+            actor_id=current_user_id(user),
+            note=(body.note if body else None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await db.commit()
+    return {"data": result}
+
+
+@router.put("/semantic-mapping/layout")
+async def put_semantic_mapping_layout(
+    body: SemanticMappingLayoutBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = current_tenant_id(user)
+    row = await save_semantic_mapping_layout(
+        db,
+        tenant_id=tenant_id,
+        object_code=body.object_code,
+        source_id=body.source_id,
+        layout=body.layout,
+        actor_id=current_user_id(user),
+    )
+    await db.commit()
+    return {"data": {"id": row.id, "layout": row.layout}}
 
 
 @router.get("/ontology-candidates")

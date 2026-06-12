@@ -6,6 +6,8 @@ Create Date: 2026-05-24
 """
 from __future__ import annotations
 
+import os
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -16,7 +18,35 @@ depends_on = None
 
 
 ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD_HASH = "sha256$240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
+ADMIN_PASSWORD_ENV = "PALANTIR_SEED_ADMIN_PASSWORD"
+
+
+def _hash_seed_password(password: str) -> str:
+    try:
+        from passlib.hash import bcrypt as _bcrypt
+    except Exception as exc:
+        raise RuntimeError(
+            f"Migration {revision} requires passlib with bcrypt support to hash the seeded admin password. "
+            "Install the backend password-hashing dependencies before running deployable account migrations."
+        ) from exc
+
+    try:
+        return _bcrypt.hash(password)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Migration {revision} could not hash the seeded admin password with bcrypt. "
+            "Refusing to create a deploy-reachable account with an insecure fallback hash."
+        ) from exc
+
+
+def _required_seed_password_hash(env_name: str, username: str) -> str:
+    password = os.getenv(env_name)
+    if not password:
+        raise RuntimeError(
+            f"{env_name} must be set before migration {revision} can create user '{username}'. "
+            "Refusing to seed a deploy-reachable admin account with a known default password."
+        )
+    return _hash_seed_password(password)
 
 
 def _has_table(table_name: str) -> bool:
@@ -68,11 +98,12 @@ def upgrade() -> None:
         "SELECT id FROM users WHERE username = :username LIMIT 1"
     ), {"username": ADMIN_USERNAME}).scalar()
     if user_id is None:
+        password_hash = _required_seed_password_hash(ADMIN_PASSWORD_ENV, ADMIN_USERNAME)
         bind.execute(sa.text(
             f"INSERT INTO users ({_tenant_columns('users')}username, display_name, email, hashed_password, is_active, is_admin) "
             f"VALUES ({_tenant_values() if _has_column('users', 'tenant_id') else ''}"
             ":username, '系统超级管理员', 'admin@manufoundry.local', :password_hash, TRUE, TRUE)"
-        ), {"username": ADMIN_USERNAME, "password_hash": ADMIN_PASSWORD_HASH})
+        ), {"username": ADMIN_USERNAME, "password_hash": password_hash})
         user_id = bind.execute(sa.text(
             "SELECT id FROM users WHERE username = :username LIMIT 1"
         ), {"username": ADMIN_USERNAME}).scalar()

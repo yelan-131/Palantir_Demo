@@ -18,6 +18,7 @@ class ToolDefinition(BaseModel):
     name: str
     title: str
     description: str
+    handler_key: str | None = None
     side_effect: SideEffect = "read"
     risk_level: RiskLevel = "low"
     input_schema: dict[str, Any] = Field(default_factory=dict)
@@ -56,3 +57,86 @@ def validate_tool_call(skill_name: str, tool_name: str) -> tuple[bool, str]:
     if tool_name not in skill.allowed_tools:
         return False, "Tool is outside the skill allowlist"
     return True, "Allowed"
+
+
+def to_openai_function(tool: ToolDefinition) -> dict[str, Any]:
+    """Convert internal tool definition to OpenAI function calling format."""
+    description = f"{tool.title or tool.name}: {tool.description}"
+    if tool.side_effect != "read":
+        description += f" (副作用类型: {tool.side_effect}, 风险等级: {tool.risk_level})"
+
+    parameters = _normalize_input_schema(tool.input_schema)
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": description,
+            "parameters": parameters,
+        }
+    }
+
+
+def to_openai_function_brief(tool: ToolDefinition) -> dict[str, Any]:
+    """Return a minimal tool definition with only name and short description.
+
+    Used for Tier 1 (deferred) tool loading — gives the LLM enough info
+    to decide whether to call a tool without consuming full schema tokens.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.title or tool.name,
+            "parameters": {"type": "object", "properties": {}},
+        }
+    }
+
+
+def _normalize_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize tool input_schema to JSON Schema format for OpenAI."""
+    if not schema:
+        return {"type": "object", "properties": {}}
+    if schema.get("type") == "object":
+        return schema
+    return {"type": "object", "properties": schema, "required": []}
+
+
+def openai_tools_for_user(
+    user: dict[str, Any],
+    settings: dict[str, Any],
+    surface: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return OpenAI-format tool definitions filtered by user permissions."""
+    from .policies import decide_ai_permission
+    tools = tool_registry()
+    result = []
+    for tool_def in tools.values():
+        capability = tool_def.permission_check or "qa"
+        decision = decide_ai_permission(
+            user, settings, capability,
+            domain=None,
+            risk_level=tool_def.risk_level,
+        )
+        if decision.allowed:
+            result.append(to_openai_function(tool_def))
+    return result
+
+
+def openai_tools_brief_for_user(
+    user: dict[str, Any],
+    settings: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return brief (Tier 1) tool definitions filtered by user permissions."""
+    from .policies import decide_ai_permission
+    tools = tool_registry()
+    result = []
+    for tool_def in tools.values():
+        capability = tool_def.permission_check or "qa"
+        decision = decide_ai_permission(
+            user, settings, capability,
+            domain=None,
+            risk_level=tool_def.risk_level,
+        )
+        if decision.allowed:
+            result.append(to_openai_function_brief(tool_def))
+    return result

@@ -35,10 +35,16 @@ SUPPORTED_FIELD_TYPES = {
 }
 
 
-def _physical_table_name(code: str, assembly_kind: str) -> str:
+def _physical_table_name(code: str, assembly_kind: str, tenant_id: int | None = None) -> str:
+    """Physical table name; pass tenant_id to scope it into the tenant namespace.
+
+    Draft payload previews omit the tenant (no user context yet); execution
+    always supplies it so materialized tables never collide across tenants.
+    """
     normalized = _slugify(code)
     prefix = "analysis" if assembly_kind == "analysis" else "business"
-    table_name = f"{prefix}_{normalized}"
+    scope = f"t{int(tenant_id)}_" if tenant_id is not None else ""
+    table_name = f"{scope}{prefix}_{normalized}"
     assert_safe_identifier(table_name)
     return table_name
 
@@ -60,31 +66,51 @@ def _physical_column_type(field_type: str) -> str:
 
 async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fields: list[FormField]) -> None:
     assert_safe_identifier(table_name)
-    await session.execute(text(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id SERIAL PRIMARY KEY,
-            tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
-            record_status VARCHAR(50) NOT NULL DEFAULT 'active',
-            created_by INTEGER NULL REFERENCES users(id),
-            updated_by INTEGER NULL REFERENCES users(id),
-            source_dynamic_record_id INTEGER NULL UNIQUE,
-            deleted_at TIMESTAMP NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
-        )
-    """))
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "sqlite":
+        await session.execute(text(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
+                record_status VARCHAR(50) NOT NULL DEFAULT 'active',
+                created_by INTEGER NULL REFERENCES users(id),
+                updated_by INTEGER NULL REFERENCES users(id),
+                source_dynamic_record_id INTEGER NULL UNIQUE,
+                deleted_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+    else:
+        await session.execute(text(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
+                record_status VARCHAR(50) NOT NULL DEFAULT 'active',
+                created_by INTEGER NULL REFERENCES users(id),
+                updated_by INTEGER NULL REFERENCES users(id),
+                source_dynamic_record_id INTEGER NULL UNIQUE,
+                deleted_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT now(),
+                updated_at TIMESTAMP NOT NULL DEFAULT now()
+            )
+        """))
     await session.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_tenant_deleted_id ON {table_name} (tenant_id, deleted_at, id)"))
-    rows = await session.execute(
-        text(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = :table_name
-            """
-        ),
-        {"table_name": table_name},
-    )
-    existing_columns = {str(row[0]) for row in rows.all()}
+    if dialect_name == "sqlite":
+        rows = await session.execute(text(f"PRAGMA table_info({table_name})"))
+        existing_columns = {str(row[1]) for row in rows.all()}
+    else:
+        rows = await session.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        )
+        existing_columns = {str(row[0]) for row in rows.all()}
     for field in fields:
         field_name = _slugify(str(field.field_name), "field")
         assert_safe_identifier(field_name)
@@ -565,8 +591,10 @@ async def execute_create_form_definition(
     initial_status = "draft" if assembly_kind == "analysis" else "published"
     if requested_status and requested_status != "draft":
         initial_status = requested_status
-    table_name = str(form_data.get("table_name") or _physical_table_name(code, assembly_kind))
-    assert_safe_identifier(table_name)
+    # Derived server-side from the final (possibly deduped) code and the
+    # caller's tenant. Payload-supplied names are ignored so an AI plan can
+    # neither point a form at another tenant's namespace nor at a core table.
+    table_name = _physical_table_name(code, assembly_kind, tenant_id=tenant_id)
     storage_mode = str(form_data.get("storage_mode") or "physical_table")
     if storage_mode == "dynamic":
         storage_mode = "physical_table"

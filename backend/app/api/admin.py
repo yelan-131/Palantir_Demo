@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_tenant_id, current_user_id, get_db, require_admin
 from app.config import settings
 from app.core.audit import write_audit_log
+from app.core.production_errors import database_unavailable
 from app.core.permissions import evaluate_form_permission, has_permission
 from app.core.security import hash_password
 from app.services.iam import ROLE_TEMPLATES, get_oidc_config, load_iam_settings, revoke_session, save_iam_settings, validate_password_policy
@@ -197,14 +198,8 @@ from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 
 def _admin_db_fallback(default):
-    """Return demo fallback only outside production.
-
-    In production, an admin/IAM database error must be visible to operators
-    instead of being converted into mock data or a fake success response.
-    """
-    if settings.IS_PRODUCTION:
-        raise HTTPException(503, "Admin database unavailable")
-    return default
+    """Legacy fallback hook retained only as a single explicit failure point."""
+    raise database_unavailable("Admin database is unavailable")
 
 
 REFERENCE_DATA_SETTINGS_KEY = "reference_data_admin"

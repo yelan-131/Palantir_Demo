@@ -15,6 +15,24 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _admin_token() -> str:
+    from app.core.security import create_access_token
+
+    return create_access_token(
+        "admin",
+        extra={
+            "uid": 1,
+            "tenant_id": 1,
+            "is_admin": True,
+            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
+        },
+    )
+
+
+def _admin_headers() -> dict[str, str]:
+    return _headers(_admin_token())
+
+
 def _assert_ok(response, *, context: str) -> dict:
     assert response.status_code < 400, f"{context}: {response.status_code} {response.text}"
     return response.json()
@@ -25,11 +43,7 @@ def test_ready_path_api_smoke_and_audit_contract():
 
     suffix = uuid.uuid4().hex[:10]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
 
         app_payload = _assert_ok(
             client.post(
@@ -121,7 +135,7 @@ def test_ready_path_api_smoke_and_audit_contract():
             ),
             context="create application menu node",
         )["data"]
-        assert menu_node["route_path"] == f"/dynamic/{form_id}"
+        assert menu_node["route_path"] == f"/dynamic/{form_payload['code']}"
 
         permission = _assert_ok(
             client.post(
@@ -244,13 +258,117 @@ def test_ready_path_api_smoke_and_audit_contract():
         ]
 
 
+def test_dynamic_record_submit_generates_code_and_starts_bound_workflow():
+    from app.main import app
+
+    suffix = uuid.uuid4().hex[:10]
+    with TestClient(app) as client:
+        headers = _admin_headers()
+
+        form = _assert_ok(
+            client.post(
+                "/api/v1/forms",
+                headers=headers,
+                json={
+                    "name": f"Auto Submit Form {suffix}",
+                    "code": f"auto_submit_{suffix}",
+                    "status": "published",
+                },
+            ),
+            context="create auto submit form",
+        )["data"]
+        form_id = form["id"]
+
+        _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/fields",
+                headers=headers,
+                json={
+                    "field_name": "material_code",
+                    "label": "物料编码",
+                    "field_type": "string",
+                    "required": True,
+                    "ui_config": {
+                        "businessType": "code",
+                        "controlType": "code",
+                        "encodingRule": {
+                            "enabled": True,
+                            "template": "MAT-{yyyyMMdd}-{seq:3}",
+                            "prefix": "MAT",
+                            "datePattern": "YYYYMMDD",
+                            "sequenceLength": 3,
+                            "allowManualOverride": False,
+                        },
+                    },
+                },
+            ),
+            context="create material code field",
+        )
+        _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/fields",
+                headers=headers,
+                json={"field_name": "material_name", "label": "物料名称", "field_type": "string", "required": True},
+            ),
+            context="create material name field",
+        )
+        _assert_ok(client.post(f"/api/v1/forms/{form_id}/publish", headers=headers), context="publish auto submit form")
+
+        workflow = _assert_ok(
+            client.post(
+                "/api/v1/workflow/definitions",
+                headers=headers,
+                json={
+                    "name": f"Auto Submit Workflow {suffix}",
+                    "status": "published",
+                    "steps": [
+                        {"name": "提交", "type": "start"},
+                        {"name": "审批", "type": "approval", "assignee_role": "missing_role_falls_back_to_initiator"},
+                        {"name": "归档", "type": "end"},
+                    ],
+                },
+            ),
+            context="create auto submit workflow",
+        )
+        _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/workflow-bindings",
+                headers=headers,
+                json={"workflow_id": workflow["id"], "trigger_action": "submit", "enabled": True},
+            ),
+            context="bind submit workflow",
+        )
+
+        first = _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/records",
+                headers=headers,
+                json={"data": {"material_name": "轴承"}},
+            ),
+            context="create first submitted record",
+        )["data"]
+        second = _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/records",
+                headers=headers,
+                json={"data": {"material_name": "密封件"}},
+            ),
+            context="create second submitted record",
+        )["data"]
+
+        assert first["data"]["material_code"].endswith("-001")
+        assert second["data"]["material_code"].endswith("-002")
+        assert first["workflow_instances"][0]["workflow_id"] == workflow["id"]
+        assert first["workflow_instances"][0]["approver_ids"]
+
+
 @pytest.mark.asyncio
 async def test_production_mode_rejects_missing_auth(monkeypatch):
     from app.api import deps
 
     monkeypatch.setattr(deps, "DEMO_AUTH_OPTIONAL", False)
     with pytest.raises(HTTPException) as exc_info:
-        await deps.get_current_user(authorization=None, access_token=None, token=None)
+        await deps.get_current_user(authorization=None, access_token=None)
     assert exc_info.value.status_code == 401
 
 
@@ -298,11 +416,7 @@ def test_production_mode_rejects_unindexed_dynamic_record_search(monkeypatch):
 
     suffix = uuid.uuid4().hex[:10]
     with TestClient(app) as client:
-        token = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )["token"]
-        headers = _headers(token)
+        headers = _admin_headers()
         form = _assert_ok(
             client.post(
                 "/api/v1/forms",

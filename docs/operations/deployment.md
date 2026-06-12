@@ -1,6 +1,6 @@
 # Deployment
 
-Last updated: 2026-06-05
+Last updated: 2026-06-12
 
 This document reflects the current repository files and the project deployment convention.
 
@@ -187,10 +187,17 @@ Run migrations:
 docker exec manufoundry-backend alembic upgrade head
 ```
 
-Current migration head includes SaaS hardening, application assembly, AI draft
-persistence, and menu-node config up through `0026_menu_node_config.py`. Run
-migrations before verifying tenant management, form publishing, Knowledge
-Center chat, Agent drafts, and application menus.
+For a clean install where migrations must create the initial `admin` account,
+set `PALANTIR_SEED_ADMIN_PASSWORD` only in the deployment environment before
+running Alembic. Do not commit or document the value; seed password variables
+are create-only and do not rotate existing user password hashes.
+
+Current migration head includes SaaS hardening, ontology center persistence,
+physical form tables, data quality rules, AI Agent items/registry tables, form
+code sequences, and ontology mapping layouts up through
+`0036_ontology_mapping_layouts.py`. Run migrations before verifying tenant
+management, form publishing, Knowledge Center chat, Agent drafts, dynamic form
+records, semantic mappings, and application menus.
 
 Seed data when needed:
 

@@ -7,7 +7,6 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.semantic_assets import ONTOLOGY_OBJECTS, ONTOLOGY_RELATIONS, PAGE_CONTRACTS
 from app.models.relational import DynamicRecord, Form, FormField
 
 
@@ -21,6 +20,7 @@ ContextNeed = Literal[
     "semantic_graph",
     "draft_action",
 ]
+SEMANTIC_CONTEXT_NEEDS = {"business_query", "visible_dataset", "current_object", "semantic_graph", "draft_action"}
 
 DATA_TERMS = [
     "数据",
@@ -87,65 +87,24 @@ class AgentContextRouter:
         limit: int = 8,
     ) -> dict[str, Any]:
         need = self.classify(message, context)
-        if need not in {"business_query", "visible_dataset", "current_object", "semantic_graph", "draft_action"}:
+        if need not in SEMANTIC_CONTEXT_NEEDS:
             return {"intent": need, "objects": [], "records": [], "relations": []}
 
-        objects = self._match_ontology_objects(message, context)
-        records = await self._query_matching_forms(session, objects, tenant_id=tenant_id, limit=limit)
-        relations = self._relations_for_objects([item["id"] for item in objects])
+        return self._semantic_context_unavailable(
+            need,
+            "No persisted semantic/page-contract context source is available for AI context routing.",
+        )
+
+    def _semantic_context_unavailable(self, intent: ContextNeed, reason: str) -> dict[str, Any]:
         return {
-            "intent": need,
-            "objects": objects,
-            "records": records,
-            "relations": relations,
-            "record_count": sum(len(item.get("records") or []) for item in records),
+            "intent": intent,
+            "status": "semantic_context_unavailable",
+            "objects": [],
+            "records": [],
+            "relations": [],
+            "record_count": 0,
+            "reason": reason,
         }
-
-    def _match_ontology_objects(self, message: str, context: dict[str, Any]) -> list[dict[str, Any]]:
-        route = context.get("route") or context.get("page")
-        route_contract = PAGE_CONTRACTS.get(str(route)) if route else None
-        candidates: list[dict[str, Any]] = []
-        if route_contract:
-            entity = route_contract.get("entity")
-            candidates.extend(item for item in ONTOLOGY_OBJECTS if item.get("id") == entity)
-
-        text = message.lower()
-        for item in ONTOLOGY_OBJECTS:
-            haystack = " ".join(
-                str(part)
-                for part in [
-                    item.get("id"),
-                    item.get("name"),
-                    item.get("code"),
-                    item.get("source"),
-                    item.get("description"),
-                ]
-            ).lower()
-            if any(token and token.lower() in text for token in [item.get("id"), item.get("code"), item.get("name")]):
-                candidates.append(item)
-            elif any(word in haystack and word in text for word in ["supplier", "material", "device", "workorder", "qualityevent"]):
-                candidates.append(item)
-
-        unique: dict[str, dict[str, Any]] = {}
-        for item in candidates:
-            unique[str(item.get("id"))] = {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "code": item.get("code"),
-                "source": item.get("source"),
-                "description": item.get("description"),
-                "fields": item.get("fields", [])[:8],
-            }
-        return list(unique.values())[:5]
-
-    def _relations_for_objects(self, object_ids: list[str]) -> list[dict[str, Any]]:
-        if not object_ids:
-            return []
-        return [
-            relation
-            for relation in ONTOLOGY_RELATIONS
-            if relation.get("source") in object_ids or relation.get("target") in object_ids
-        ][:12]
 
     async def _query_matching_forms(
         self,

@@ -41,6 +41,7 @@ import {
   adminUpdateOrgUnit,
   listAuditLogs,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 interface OrgUnitItem {
   id: number;
@@ -850,8 +851,7 @@ function AuditBlock({ records, users }: { records: AuditLogItem[]; users: UserIt
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return '未记录';
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+  return formatServerDateTime(value, '未记录');
 }
 
 function auditActionText(action?: string) {

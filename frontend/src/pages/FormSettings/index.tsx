@@ -36,7 +36,7 @@ import {
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Button, Checkbox, Input, InputNumber, Modal, Popover, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   adminListOrgUnits,
@@ -53,6 +53,7 @@ import {
   previewPlatformFormPublish,
   publishPlatformForm,
   updatePlatformForm,
+  updatePlatformFormField,
   updateWorkflowBinding,
   upsertPlatformFormPermission,
   upsertPlatformFormLayout,
@@ -204,6 +205,8 @@ interface ControlRuleCondition {
 interface ControlRule {
   enabled: boolean;
   conditions?: ControlRuleCondition;
+  conditionGroups?: ControlRuleCondition[][];
+  conditionGroupTitles?: string[];
 }
 
 type ControlRules = Record<ControlRuleKey, ControlRule>;
@@ -271,6 +274,12 @@ interface ControlTypeSettings {
   uncheckedText?: string;
 }
 
+interface AssignmentRule {
+  id: string;
+  sourceAttribute?: string;
+  targetField?: string;
+}
+
 interface DesignerField {
   key: string;
   name: string;
@@ -327,6 +336,7 @@ interface LayoutControl {
   optionSource?: string;
   dataSourceKind?: ReferenceSourceKind;
   encodingRule?: EncodingRule;
+  assignmentRules?: AssignmentRule[];
   typeSettings?: ControlTypeSettings;
   width: ControlWidth;
   rules: ControlRules;
@@ -2014,6 +2024,12 @@ function getWorkflowDesignerMeta(form?: PlatformForm | null): WorkflowDesignerMe
 
 function makeRuntimeFormLayout(controls: LayoutControl[], fields: DesignerField[]) {
   const fieldByKey = new Map(fields.map((field) => [field.key, field]));
+  const widthToColSpan = (width: ControlWidth) => {
+    if (width === 'quarter') return 0.5;
+    if (width === 'threeQuarter') return 1.5;
+    if (width === 'full') return 2;
+    return 1;
+  };
   return {
     sections: [
       {
@@ -2026,7 +2042,8 @@ function makeRuntimeFormLayout(controls: LayoutControl[], fields: DesignerField[
             return {
               fieldName: String(control.fieldKey),
               label: control.name || field?.name || String(control.fieldKey),
-              colSpan: control.width === 'full' ? 2 : 1,
+              width: control.width,
+              colSpan: widthToColSpan(control.width),
               controlType: getEffectiveControlTypeForControl(control, field),
               required: Boolean(control.rules.required.enabled || field?.required),
               readonly: Boolean(control.rules.readonly.enabled),
@@ -2190,20 +2207,22 @@ function RuleToggleControl({
 
   return (
     <div className="designer-rule-toggle" data-rule-title={title} onClick={(event) => event.stopPropagation()}>
-      <Button
-        className="designer-rule-config-button"
-        data-rule-action="config"
-        size="small"
-        type="text"
-        icon={<SettingOutlined />}
-        onMouseDownCapture={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => runButtonAction(event, onConfig)}
-        title={`${title} config`}
-      />
+      {enabled ? (
+        <Button
+          className="designer-rule-config-button"
+          data-rule-action="config"
+          size="small"
+          type="text"
+          icon={<SettingOutlined />}
+          onMouseDownCapture={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => runButtonAction(event, onConfig)}
+          title={`${title} config`}
+        />
+      ) : null}
       <button
         type="button"
         className={`designer-rule-check ${enabled ? 'designer-rule-check-on' : ''}`}
@@ -2390,8 +2409,11 @@ export default function FormSettingsPage() {
   const [draggedControlId, setDraggedControlId] = useState('');
   const [dropHint, setDropHint] = useState<{ controlId: string; position: DropPosition } | null>(null);
   const [isCanvasDragActive, setCanvasDragActive] = useState(false);
+  const [fieldDefaultValueDrafts, setFieldDefaultValueDrafts] = useState<Record<string, string>>({});
   const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
   const [ruleModal, setRuleModal] = useState<{ controlId: string; ruleKey: ControlRuleKey } | null>(null);
+  const [editingRuleGroupTitle, setEditingRuleGroupTitle] = useState<{ ruleKey: ControlRuleKey; groupIndex: number; value: string } | null>(null);
+  const [ruleWindowMode, setRuleWindowMode] = useState<'common' | 'custom'>('common');
   const [encodingSegmentEditor, setEncodingSegmentEditor] = useState<{
     open: boolean;
     index?: number;
@@ -2483,6 +2505,15 @@ export default function FormSettingsPage() {
         [field.key]: { ...currentPermission, ...patch },
       },
     }));
+  };
+  const getFieldDefaultValue = (field?: DesignerField) => {
+    if (!field) return '';
+    return fieldDefaultValueDrafts[field.key] ?? field.defaultValue ?? '';
+  };
+  const updateFieldDefaultValue = (field: DesignerField | undefined, value: string) => {
+    if (!field) return;
+    setFieldDefaultValueDrafts((current) => ({ ...current, [field.key]: value }));
+    setHasUnsavedChanges(true);
   };
   const previewFlowNodes = useMemo(
     () => professionalFlowConfig.nodes.filter((node) => node.executable || node.type === 'startEvent' || node.type === 'endEvent'),
@@ -2594,6 +2625,7 @@ export default function FormSettingsPage() {
     setDraggedControlId('');
     setDropHint(null);
     setCanvasDragActive(false);
+    setFieldDefaultValueDrafts({});
     setRuleOverrides({});
     setRuleModal(null);
     setProfessionalFlowConfig(makeProfessionalFlowConfig(baseConfig));
@@ -2746,6 +2778,33 @@ export default function FormSettingsPage() {
   const selectedControlUsesEncoding = Boolean(
     selectedControl && (selectedEffectiveControlType === 'code' || isEncodingField(selectedField)),
   );
+  const assignmentSourceAttributeOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [
+      { value: 'self.value', label: '本字段值' },
+    ];
+    const businessType = getFieldBusinessType(selectedField);
+    const canReadOptionParts = selectedControlUsesDataSource || businessType === 'enum';
+    if (canReadOptionParts) {
+      options.push(
+        { value: 'self.option_value', label: '选项值' },
+        { value: 'self.option_label', label: '选项文本' },
+      );
+    }
+    if (selectedControlUsesDataSource && selectedReferenceSourceKind !== 'static') {
+      [...selectedReferenceConfig.valueFields, ...selectedReferenceConfig.labelFields].forEach((field) => {
+        const value = `record.${field.value}`;
+        if (!options.some((item) => item.value === value)) {
+          options.push({ value, label: `关联记录.${field.label}` });
+        }
+      });
+    }
+    return options;
+  }, [selectedControlUsesDataSource, selectedField, selectedReferenceConfig, selectedReferenceSourceKind]);
+  const assignmentTargetFieldOptions = useMemo(() => (
+    baseConfig.fields
+      .filter((field) => field.key !== selectedField?.key)
+      .map((field) => ({ value: field.key, label: field.name }))
+  ), [baseConfig.fields, selectedField]);
   const selectedEncodingRule = selectedControlUsesEncoding
     ? selectedControl?.encodingRule || makeEncodingRule(selectedField)
     : undefined;
@@ -2931,6 +2990,87 @@ export default function FormSettingsPage() {
         ...patch,
       },
     });
+  };
+
+  const getRuleConditionGroups = (rule: ControlRule): ControlRuleCondition[][] => {
+    if (Array.isArray(rule.conditionGroups) && rule.conditionGroups.length) {
+      return rule.conditionGroups.map((group) => (Array.isArray(group) && group.length ? group : [{}]));
+    }
+    return rule.conditions ? [[rule.conditions]] : [];
+  };
+
+  const getRuleGroupTitle = (rule: ControlRule, groupIndex: number) => {
+    const title = rule.conditionGroupTitles?.[groupIndex]?.trim();
+    return title || `条件组 ${groupIndex + 1}`;
+  };
+
+  const updateSelectedRuleConditionGroups = (
+    ruleKey: ControlRuleKey,
+    groups: ControlRuleCondition[][],
+    titles = activeRule?.conditionGroupTitles || [],
+  ) => {
+    const normalizedGroups = groups
+      .map((group) => group.filter(Boolean))
+      .filter((group) => group.length);
+    updateSelectedControlRule(ruleKey, {
+      conditionGroups: normalizedGroups,
+      conditionGroupTitles: titles.slice(0, normalizedGroups.length),
+      conditions: normalizedGroups[0]?.[0],
+    });
+  };
+
+  const addSelectedRuleConditionGroup = (ruleKey: ControlRuleKey) => {
+    if (!activeRule) return;
+    updateSelectedRuleConditionGroups(ruleKey, [...getRuleConditionGroups(activeRule), [{}]], activeRule.conditionGroupTitles || []);
+  };
+
+  const addSelectedRuleConditionRow = (ruleKey: ControlRuleKey, groupIndex: number) => {
+    if (!activeRule) return;
+    const groups = getRuleConditionGroups(activeRule);
+    groups[groupIndex] = [...(groups[groupIndex] || []), {}];
+    updateSelectedRuleConditionGroups(ruleKey, groups);
+  };
+
+  const updateSelectedRuleConditionRow = (
+    ruleKey: ControlRuleKey,
+    groupIndex: number,
+    rowIndex: number,
+    patch: Partial<ControlRuleCondition>,
+  ) => {
+    if (!activeRule) return;
+    const groups = getRuleConditionGroups(activeRule);
+    const group = groups[groupIndex] || [{}];
+    group[rowIndex] = { ...(group[rowIndex] || {}), ...patch };
+    groups[groupIndex] = group;
+    updateSelectedRuleConditionGroups(ruleKey, groups);
+  };
+
+  const removeSelectedRuleConditionRow = (ruleKey: ControlRuleKey, groupIndex: number, rowIndex: number) => {
+    if (!activeRule) return;
+    const groups = getRuleConditionGroups(activeRule);
+    const titles = [...(activeRule.conditionGroupTitles || [])];
+    const group = (groups[groupIndex] || []).filter((_condition, index) => index !== rowIndex);
+    if (group.length) {
+      groups[groupIndex] = group;
+    } else {
+      groups.splice(groupIndex, 1);
+      titles.splice(groupIndex, 1);
+    }
+    updateSelectedRuleConditionGroups(ruleKey, groups, titles);
+  };
+
+  const removeSelectedRuleConditionGroup = (ruleKey: ControlRuleKey, groupIndex: number) => {
+    if (!activeRule) return;
+    const groups = getRuleConditionGroups(activeRule).filter((_group, index) => index !== groupIndex);
+    const titles = (activeRule.conditionGroupTitles || []).filter((_title, index) => index !== groupIndex);
+    updateSelectedRuleConditionGroups(ruleKey, groups, titles);
+  };
+
+  const updateSelectedRuleGroupTitle = (ruleKey: ControlRuleKey, groupIndex: number, title: string) => {
+    if (!activeRule) return;
+    const titles = [...(activeRule.conditionGroupTitles || [])];
+    titles[groupIndex] = title.trim();
+    updateSelectedControlRule(ruleKey, { conditionGroupTitles: titles });
   };
 
   const genericRuleToggle = (defaultEnabled: boolean, title: string, key = title) => {
@@ -3291,6 +3431,49 @@ export default function FormSettingsPage() {
       <label><span>默认脱敏</span>{controlRuleToggle('masked')}</label>
       <label><span>允许复制</span>{controlRuleToggle('copyable')}</label>
       {selectedControlUsesOptionSort && <label><span>选项排序</span>{controlRuleToggle('optionSort')}</label>}
+      <label>
+        <span>默认值</span>
+        <Input
+          allowClear
+          disabled={!selectedField}
+          placeholder="请输入默认值"
+          value={getFieldDefaultValue(selectedField)}
+          onChange={(event) => updateFieldDefaultValue(selectedField, event.target.value)}
+        />
+      </label>
+      <div className="designer-assignment-rules">
+        <div className="designer-assignment-head">
+          <span>赋值规则</span>
+          <Button size="small" type="text" icon={<PlusOutlined />} onClick={addAssignmentRule}>添加</Button>
+        </div>
+        {(selectedControl?.assignmentRules || []).map((rule) => (
+          <div className="designer-assignment-row" key={rule.id}>
+            <Select
+              allowClear
+              placeholder="本字段属性"
+              value={rule.sourceAttribute}
+              options={assignmentSourceAttributeOptions}
+              onChange={(sourceAttribute) => updateAssignmentRule(rule.id, { sourceAttribute })}
+            />
+            <span>赋值给</span>
+            <Select
+              allowClear
+              placeholder="目标字段"
+              value={rule.targetField}
+              options={assignmentTargetFieldOptions}
+              onChange={(targetField) => updateAssignmentRule(rule.id, { targetField })}
+            />
+            <Button
+              aria-label="删除赋值规则"
+              danger
+              size="small"
+              type="text"
+              icon={<DeleteOutlined />}
+              onClick={() => removeAssignmentRule(rule.id)}
+            />
+          </div>
+        ))}
+      </div>
       {hiddenRequiredControls.length > 0 && <Tag color="red">存在隐藏且必填冲突</Tag>}
     </section>
   );
@@ -3507,7 +3690,7 @@ export default function FormSettingsPage() {
       visible_in_form: true,
       searchable: Boolean(field.searchable),
       sortable: Boolean(field.sortable),
-      default_value: field.defaultValue,
+      default_value: getDesignerFieldDefaultValue(field),
       enum_values: field.optionSource ? { source: field.optionSource } : undefined,
       validation: field.validation ? { message: field.validation } : undefined,
       ui_config: {
@@ -3522,6 +3705,23 @@ export default function FormSettingsPage() {
     setPlatformForm(createdForm);
     setWorkflowMeta({});
     return createdForm;
+  };
+
+  const getDesignerFieldDefaultValue = (field: DesignerField) => (
+    fieldDefaultValueDrafts[field.key] ?? field.defaultValue
+  );
+
+  const syncFieldDefaultValues = async (form: PlatformForm) => {
+    const changedKeys = Object.keys(fieldDefaultValueDrafts);
+    if (!changedKeys.length) return form;
+    const fieldByName = new Map((form.fields || []).map((field) => [field.field_name, field]));
+    await Promise.all(changedKeys.map(async (fieldKey) => {
+      const platformField = fieldByName.get(fieldKey);
+      if (!platformField) return;
+      await updatePlatformFormField(form.id, platformField.id, {
+        default_value: fieldDefaultValueDrafts[fieldKey],
+      });
+    }));
   };
 
   const savePermissionDesign = async () => {
@@ -3748,6 +3948,7 @@ export default function FormSettingsPage() {
     setPersistingFlow(true);
     try {
       const form = await ensurePlatformForm();
+      await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
         await updateFormViewConfig(form, viewConfig, 'draft');
         const updatedForm = await updateFormAnalyticsDesign(form, analyticsDesign, 'draft');
@@ -3777,6 +3978,7 @@ export default function FormSettingsPage() {
     setPersistingFlow(true);
     try {
       const form = await ensurePlatformForm();
+      await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
         const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
         await updateFormAnalyticsDesign(formWithView, analyticsDesign, 'draft');
@@ -3805,6 +4007,7 @@ export default function FormSettingsPage() {
     setPersistingFlow(true);
     try {
       const form = await ensurePlatformForm();
+      await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
         const formWithViewDraft = await updateFormViewConfig(form, viewConfig, 'draft');
         const formWithAnalyticsDraft = await updateFormAnalyticsDesign(formWithViewDraft, analyticsDesign, 'draft');
@@ -4074,6 +4277,32 @@ export default function FormSettingsPage() {
     commitLayoutChange((current) => current.map((control) => (
       control.id === selectedControlId ? { ...control, ...patch } : control
     )));
+  };
+
+  const addAssignmentRule = () => {
+    if (!selectedControl) return;
+    updateSelectedControl({
+      assignmentRules: [
+        ...(selectedControl.assignmentRules || []),
+        { id: `assign-${Date.now()}`, sourceAttribute: assignmentSourceAttributeOptions[0]?.value || 'self.value' },
+      ],
+    });
+  };
+
+  const updateAssignmentRule = (ruleId: string, patch: Partial<AssignmentRule>) => {
+    if (!selectedControl) return;
+    updateSelectedControl({
+      assignmentRules: (selectedControl.assignmentRules || []).map((rule) => (
+        rule.id === ruleId ? { ...rule, ...patch } : rule
+      )),
+    });
+  };
+
+  const removeAssignmentRule = (ruleId: string) => {
+    if (!selectedControl) return;
+    updateSelectedControl({
+      assignmentRules: (selectedControl.assignmentRules || []).filter((rule) => rule.id !== ruleId),
+    });
   };
 
   const updateSelectedEncodingRule = (patch: Partial<EncodingRule>) => {
@@ -4509,7 +4738,60 @@ export default function FormSettingsPage() {
     : null;
   const activeRuleLabel = ruleModal ? ruleLabels[ruleModal.ruleKey] : '';
   const activeRuleStrategyOptions = ruleModal ? ruleStrategyOptions[ruleModal.ruleKey] || [] : [];
+  const activeRuleConditionGroups = activeRule ? getRuleConditionGroups(activeRule) : [];
   const conditionFieldOptions = baseConfig.fields.map((field) => ({ value: field.key, label: field.name }));
+  const conditionFieldByKey = new Map(baseConfig.fields.map((field) => [field.key, field]));
+  const renderRuleConditionValueControl = (
+    condition: ControlRuleCondition,
+    groupIndex: number,
+    rowIndex: number,
+  ) => {
+    if (!ruleModal) return null;
+    const sourceField = conditionFieldByKey.get(condition.sourceField || '');
+    const businessType = getFieldBusinessType(sourceField);
+    const updateValue = (value: unknown) => updateSelectedRuleConditionRow(ruleModal.ruleKey, groupIndex, rowIndex, {
+      value: value === undefined || value === null ? '' : String(value),
+    });
+    if (businessType === 'number') {
+      const numericValue = condition.value === undefined || condition.value === '' ? undefined : Number(condition.value);
+      return (
+        <InputNumber
+          placeholder="条件值"
+          value={Number.isFinite(numericValue) ? numericValue : undefined}
+          onChange={updateValue}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+    if (businessType === 'enum' || businessType === 'person' || businessType === 'relation') {
+      return (
+        <Select
+          allowClear
+          placeholder="条件值"
+          value={condition.value || undefined}
+          onChange={updateValue}
+          options={optionSourceToOptions(sourceField?.optionSource, sourceField?.placeholder)}
+        />
+      );
+    }
+    if (businessType === 'date' || businessType === 'datetime') {
+      return (
+        <Input
+          placeholder={businessType === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'}
+          prefix={<CalendarOutlined />}
+          value={condition.value || ''}
+          onChange={(event) => updateValue(event.target.value)}
+        />
+      );
+    }
+    return (
+      <Input
+        placeholder={sourceField ? '条件值' : '请先选择目标字段'}
+        value={condition.value || ''}
+        onChange={(event) => updateValue(event.target.value)}
+      />
+    );
+  };
   const getPreviewFieldPermission = (fieldKey?: string) => (
     fieldKey ? selectedPreviewFlowNode?.fieldPermissions?.[fieldKey] : undefined
   );
@@ -5271,42 +5553,6 @@ export default function FormSettingsPage() {
     </div>
   );
 
-  const toolbarToolPanel = (
-    <div className="designer-top-tool-panel">
-      <section>
-        <strong>配置引导</strong>
-        <span>拖入字段/控件，选中后在右侧配置属性，发布时会同步做业务校验。</span>
-        <div className="designer-top-tool-tags">
-          <Tag color="blue">字段 {baseConfig.fields.length}</Tag>
-          <Tag color="green">控件 {layoutControls.length}</Tag>
-          <Tag color={publishErrorCount ? 'red' : 'success'}>阻断 {publishErrorCount}</Tag>
-        </div>
-      </section>
-      <section>
-        <strong>快捷排版</strong>
-        <div className="designer-top-tool-grid">
-          <Button size="small" icon={<LayoutOutlined />} onClick={applyTwoColumnLayout}>两列</Button>
-          <Button size="small" icon={<TableOutlined />} onClick={applyCompactLayout}>紧凑</Button>
-          <Button size="small" icon={<ApartmentOutlined />} onClick={applyBusinessSectionLayout}>业务分组</Button>
-          <Button size="small" icon={<CheckSquareOutlined />} onClick={batchSetRequired}>批量必填</Button>
-          <Button size="small" onClick={() => batchUpdateVisibleControls({ width: 'full' })}>全宽</Button>
-          <Button size="small" icon={<UndoOutlined />} disabled={!history.length} onClick={undoLayoutChange}>撤销</Button>
-        </div>
-      </section>
-      <section>
-        <strong>业务区块</strong>
-        <div className="designer-top-tool-sections">
-          {alertSections.map((section) => (
-            <button key={section.key} type="button" onClick={applyBusinessSectionLayout}>
-              <span>{section.title}</span>
-              <small>{section.desc}</small>
-            </button>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-
   const activeTabKey: string = activeTab;
   const permissionActionRows = permissionActionDefinitions.map((item) => ({
     ...item,
@@ -5389,9 +5635,6 @@ export default function FormSettingsPage() {
             {version} 当前草稿
           </Button>
           <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />
-          <Popover content={toolbarToolPanel} placement="bottomRight" trigger="click">
-            <Button size="small" type="text" title="工具" aria-label="工具" icon={<SettingOutlined />} />
-          </Popover>
           <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>
         </Space>
       </header>
@@ -5414,7 +5657,6 @@ export default function FormSettingsPage() {
                   value={librarySearch}
                   onChange={(event) => setLibrarySearch(event.target.value)}
                 />
-                <small>字段库来自当前表单数据表，控件库负责展示和布局。</small>
               </div>
             )}
 
@@ -5426,8 +5668,14 @@ export default function FormSettingsPage() {
                 value={componentPanel}
                 onChange={(value) => setComponentPanel(value as ComponentPanel)}
                 options={[
-                  { label: '控件库', value: 'components' },
-                  { label: '字段库', value: 'fieldTypes' },
+                  {
+                    label: <Tooltip title="控件库负责展示和布局，可拖入画布组成表单界面。"><span>控件库</span></Tooltip>,
+                    value: 'components',
+                  },
+                  {
+                    label: <Tooltip title="字段库来自当前表单数据表，可复用已有字段和业务字段。"><span>字段库</span></Tooltip>,
+                    value: 'fieldTypes',
+                  },
                 ]}
               />
               <div className="designer-quick-panel">
@@ -5513,10 +5761,10 @@ export default function FormSettingsPage() {
                   ))}
                 </div>
               ) : (
-                <>
-                  <div className="designer-panel-head designer-panel-head-gap">
-                    <strong>{activeTab === 'filter' ? '筛选字段' : '字段库'}</strong>
-                    <span>{filteredLibraryFields.length} / {libraryFields.length} 个</span>
+                <section className="designer-component-group designer-field-library-group">
+                  <div className="designer-group-title">
+                    <span>{activeTab === 'filter' ? '筛选字段' : '字段库'}</span>
+                    <small>{filteredLibraryFields.length} / {libraryFields.length} 个</small>
                   </div>
                   <div className="designer-field-list">
                     {filteredLibraryFields.map((field) => {
@@ -5539,7 +5787,7 @@ export default function FormSettingsPage() {
                       );
                     })}
                   </div>
-                </>
+                </section>
               )}
             </>
           ) : (
@@ -6279,7 +6527,7 @@ export default function FormSettingsPage() {
         onCancel={() => setVersionPanelOpen(false)}
         open={versionPanelOpen}
         title="草稿与已发布版本"
-        width={820}
+        width={900}
       >
         <div className="designer-version-layout">
           <aside className="designer-version-list">
@@ -6375,28 +6623,177 @@ export default function FormSettingsPage() {
         className="designer-rule-modal"
         destroyOnClose
         okText="保存规则"
-        onCancel={() => setRuleModal(null)}
+        onCancel={() => {
+          setEditingRuleGroupTitle(null);
+          setRuleModal(null);
+        }}
         onOk={() => {
           message.success(`${activeRuleLabel}规则已保存`);
+          setEditingRuleGroupTitle(null);
           setRuleModal(null);
         }}
         open={Boolean(activeRule)}
+        width={980}
         title={`${activeRuleLabel}规则`}
       >
         {ruleModal && activeRule && (
           <div className="designer-rule-form">
+            <div className="designer-rule-window-layout">
+              <aside className="designer-rule-window-sidebar">
+                <button
+                  className={`designer-rule-window-tab ${ruleWindowMode === 'common' ? 'designer-rule-window-tab-active' : ''}`}
+                  type="button"
+                  onClick={() => setRuleWindowMode('common')}
+                >
+                  通用窗口
+                </button>
+                <button
+                  className={`designer-rule-window-tab ${ruleWindowMode === 'custom' ? 'designer-rule-window-tab-active' : ''}`}
+                  type="button"
+                  onClick={() => setRuleWindowMode('custom')}
+                >
+                  自定义窗口
+                </button>
+              </aside>
+            <div className="designer-rule-group-editor">
+              <div className="designer-rule-group-editor-head">
+                <Button size="small" icon={<PlusOutlined />} onClick={() => addSelectedRuleConditionGroup(ruleModal.ruleKey)}>
+                  新增
+                </Button>
+              </div>
+              <div className="designer-rule-group-list">
+                {activeRuleConditionGroups.length ? (
+                  <>
+                    {activeRuleConditionGroups.map((group, groupIndex) => (
+                      <React.Fragment key={`rule-group-${groupIndex}`}>
+                        {groupIndex > 0 && <div className="designer-rule-or-divider">OR</div>}
+                        <div className="designer-rule-condition-group">
+                          <div className="designer-rule-condition-group-head">
+                            {editingRuleGroupTitle?.ruleKey === ruleModal.ruleKey && editingRuleGroupTitle.groupIndex === groupIndex ? (
+                              <Input
+                                autoFocus
+                                className="designer-rule-group-title-input"
+                                size="small"
+                                value={editingRuleGroupTitle.value}
+                                onBlur={() => {
+                                  updateSelectedRuleGroupTitle(ruleModal.ruleKey, groupIndex, editingRuleGroupTitle.value);
+                                  setEditingRuleGroupTitle(null);
+                                }}
+                                onChange={(event) => setEditingRuleGroupTitle({
+                                  ruleKey: ruleModal.ruleKey,
+                                  groupIndex,
+                                  value: event.target.value,
+                                })}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Escape') {
+                                    setEditingRuleGroupTitle(null);
+                                  }
+                                }}
+                                onPressEnter={() => {
+                                  updateSelectedRuleGroupTitle(ruleModal.ruleKey, groupIndex, editingRuleGroupTitle.value);
+                                  setEditingRuleGroupTitle(null);
+                                }}
+                              />
+                            ) : (
+                              <button
+                                className="designer-rule-group-title"
+                                type="button"
+                                onDoubleClick={() => setEditingRuleGroupTitle({
+                                  ruleKey: ruleModal.ruleKey,
+                                  groupIndex,
+                                  value: getRuleGroupTitle(activeRule, groupIndex),
+                                })}
+                                title="双击编辑"
+                              >
+                                {getRuleGroupTitle(activeRule, groupIndex)}
+                              </button>
+                            )}
+                            <Button
+                              className="designer-rule-add-condition"
+                              size="small"
+                              type="text"
+                              icon={<PlusOutlined />}
+                              onClick={() => addSelectedRuleConditionRow(ruleModal.ruleKey, groupIndex)}
+                            >
+                              新增条件
+                            </Button>
+                          </div>
+                          {group.map((condition, rowIndex) => (
+                            <div className="designer-rule-condition-row" key={`rule-condition-${groupIndex}-${rowIndex}`}>
+                              <Select
+                                allowClear
+                                placeholder="目标字段"
+                                value={condition.sourceField}
+                                onChange={(value) => updateSelectedRuleConditionRow(ruleModal.ruleKey, groupIndex, rowIndex, { sourceField: value, value: '' })}
+                                options={conditionFieldOptions}
+                              />
+                              <Select
+                                value={condition.operator || 'equals'}
+                                onChange={(value) => updateSelectedRuleConditionRow(ruleModal.ruleKey, groupIndex, rowIndex, { operator: value })}
+                                options={ruleOperatorOptions}
+                              />
+                              {renderRuleConditionValueControl(condition, groupIndex, rowIndex)}
+                              <Button
+                                aria-label="删除条件"
+                                danger
+                                size="small"
+                                type="text"
+                                icon={<DeleteOutlined />}
+                                onClick={() => removeSelectedRuleConditionRow(ruleModal.ruleKey, groupIndex, rowIndex)}
+                              />
+                            </div>
+                          ))}
+                          <Button
+                            className="designer-rule-delete-group"
+                            danger
+                            icon={<DeleteOutlined />}
+                            size="small"
+                            type="text"
+                            onClick={() => removeSelectedRuleConditionGroup(ruleModal.ruleKey, groupIndex)}
+                          >
+                            删除条件组
+                          </Button>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                    <Button
+                      className="designer-rule-add-or"
+                      icon={<PlusOutlined />}
+                      size="small"
+                      type="text"
+                      onClick={() => addSelectedRuleConditionGroup(ruleModal.ruleKey)}
+                    >
+                      添加或条件规则
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    className="designer-rule-empty-add"
+                    icon={<PlusOutlined />}
+                    size="small"
+                    type="text"
+                    onClick={() => addSelectedRuleConditionGroup(ruleModal.ruleKey)}
+                  >
+                    添加条件规则
+                  </Button>
+                )}
+              </div>
+            </div>
+            </div>
+            {activeRule && ruleModal && false && (
             <label>
               <span>规则启用</span>
               <Segmented
                 block
-                value={activeRule.enabled ? 'enabled' : 'disabled'}
-                onChange={(value) => updateSelectedControlRule(ruleModal.ruleKey, { enabled: value === 'enabled' })}
+                value={activeRule?.enabled ? 'enabled' : 'disabled'}
+                onChange={(value) => ruleModal && updateSelectedControlRule(ruleModal.ruleKey, { enabled: value === 'enabled' })}
                 options={[
                   { value: 'enabled', label: '启用' },
                   { value: 'disabled', label: '关闭' },
                 ]}
               />
             </label>
+            )}
             {activeRuleStrategyOptions.length > 0 && (
               <label>
                 <span>规则策略</span>

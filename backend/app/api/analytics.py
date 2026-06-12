@@ -7,7 +7,6 @@ power dynamic dashboard widgets with data-driven queries.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +19,7 @@ from app.api._model_driven_shared import (
 )
 from app.api.deps import current_tenant_id, get_current_user
 from app.core.logging import get_logger
+from app.core.production_errors import seed_data_required
 
 logger = get_logger(__name__)
 
@@ -164,8 +164,7 @@ async def analytics_overview(user: dict = Depends(get_current_user)):
     if result is not None:
         return result
 
-    # Mock fallback
-    return {**MOCK_OVERVIEW, "source": "fallback"}
+    raise seed_data_required("Analytics overview seed data is required")
 
 
 # ── Chart-binding aggregation endpoints ───────────────────
@@ -233,22 +232,7 @@ async def aggregate(
     if result is not None:
         return result
 
-    # Mock fallback
-    model_key = model_name.lower()
-    if model_key in MOCK_AGGREGATE:
-        mock = MOCK_AGGREGATE[model_key]
-        if metric == "count":
-            return {"data": {"value": mock.get("count", 0)}}
-        if field and f"{metric}_{field}" in mock:
-            return {"data": {"value": mock[f"{metric}_{field}"]}}
-        if group_by and group_by in mock:
-            return {"data": [{"label": k, "value": v} for k, v in mock.items() if k != "count"]}
-        # Return first numeric value as a generic fallback
-        for k, v in mock.items():
-            if isinstance(v, (int, float)):
-                return {"data": {"value": v}}
-
-    return {"data": {"value": 0}}
+    raise seed_data_required("Analytics aggregate seed data is required")
 
 
 @router.get("/timeseries")
@@ -337,13 +321,7 @@ async def timeseries(
     if result is not None:
         return result
 
-    # Mock fallback — generate 7 data points ending today
-    mock_data = []
-    today = datetime(2026, 5, 13)
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        mock_data.append({"time": d.strftime("%Y-%m-%d"), "value": 80 + (i * 3) % 15})
-    return {"data": mock_data}
+    raise seed_data_required("Analytics time-series seed data is required")
 
 
 @router.get("/distribution")
@@ -390,9 +368,4 @@ async def distribution(
     if result is not None:
         return result
 
-    # Mock fallback
-    if field in MOCK_DISTRIBUTION:
-        return {"data": MOCK_DISTRIBUTION[field][:limit]}
-
-    # Generic mock: return a single bucket
-    return {"data": [{"label": "all", "value": 5, "count": 5}]}
+    raise seed_data_required("Analytics distribution seed data is required")

@@ -44,6 +44,7 @@ import {
   platformRevokeTenantInvite,
   platformUpdateTenant,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 const statusColor: Record<TenantStatus, string> = {
   active: 'green',
@@ -79,7 +80,7 @@ const splitDomains = (value?: string): string[] =>
     .map((item) => item.trim().replace(/^@/, '').toLowerCase())
     .filter(Boolean);
 
-const formatTime = (value?: string | null) => (value ? value.replace('T', ' ').slice(0, 19) : '-');
+const formatTime = (value?: string | null) => formatServerDateTime(value);
 
 const getApiError = (error: unknown, fallback: string) => {
   const detail = (error as any)?.response?.data?.detail;
@@ -393,7 +394,7 @@ export default function TenantManagement() {
               </Space>
             ),
           },
-          { title: '最近登录', dataIndex: 'lastLoginAt', width: 170, render: formatTime },
+          { title: '最近登录', dataIndex: 'lastLoginAt', width: 170, render: (value: string | null) => formatTime(value) },
           {
             title: '操作',
             width: 210,
@@ -549,8 +550,8 @@ function InvitesTab({
           { title: '邮箱', dataIndex: 'email', ellipsis: true },
           { title: '角色', dataIndex: 'role', width: 110 },
           { title: '状态', dataIndex: 'status', width: 110, render: (value) => <Tag color={inviteStatusColor[value]}>{inviteStatusLabel[value] || value}</Tag> },
-          { title: '过期时间', dataIndex: 'expiresAt', width: 170, render: formatTime },
-          { title: '创建时间', dataIndex: 'createdAt', width: 170, render: formatTime },
+          { title: '过期时间', dataIndex: 'expiresAt', width: 170, render: (value: string | null) => formatTime(value) },
+          { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (value: string | null) => formatTime(value) },
           {
             title: '操作',
             width: 150,
@@ -583,7 +584,7 @@ function UsersTab({ tenant, onReset }: { tenant: PlatformTenantDetail; onReset: 
           { title: '邮箱', dataIndex: 'email', ellipsis: true },
           { title: '角色', render: (_value, record: PlatformTenantUserSummary) => <Space wrap>{record.isAdmin && <Tag color="gold">管理员</Tag>}{record.roles?.map((role) => <Tag key={role.id}>{role.label}</Tag>)}</Space> },
           { title: '状态', width: 110, render: (_value, record: PlatformTenantUserSummary) => record.isActive ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
-          { title: '最近登录', dataIndex: 'lastLoginAt', width: 170, render: formatTime },
+          { title: '最近登录', dataIndex: 'lastLoginAt', width: 170, render: (value: string | null) => formatTime(value) },
           {
             title: '操作',
             width: 130,
@@ -604,7 +605,7 @@ function AuditTab({ tenant }: { tenant: PlatformTenantDetail }) {
       size="small"
       dataSource={tenant.recentAuditLogs || []}
       columns={[
-        { title: '时间', dataIndex: 'timestamp', width: 170, render: formatTime },
+        { title: '时间', dataIndex: 'timestamp', width: 170, render: (value: string | null) => formatTime(value) },
         { title: '动作', dataIndex: 'action', width: 180 },
         { title: '资源', dataIndex: 'resourceType', width: 160 },
         { title: '摘要', dataIndex: 'newValues', ellipsis: true },

@@ -34,6 +34,7 @@ import {
   getWorkOrders,
   wfStartInstance,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 import { exportCSV } from '@/utils/csvExport';
 
 const { Title, Text } = Typography;
@@ -395,7 +396,7 @@ export default function MaintenancePage() {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 170,
-      render: (v: string) => (v ? new Date(v).toLocaleString('zh-CN') : '-'),
+      render: (v: string) => formatServerDateTime(v),
     },
   ];
 

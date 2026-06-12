@@ -15,8 +15,41 @@ branch_labels = None
 depends_on = None
 
 
+INDEX_DEFINITIONS = [
+    ("ix_knowledge_documents_document_id", "knowledge_documents", ["document_id"]),
+    ("ix_knowledge_chunks_chunk_id", "knowledge_chunks", ["chunk_id"]),
+    ("ix_knowledge_chunks_document_id", "knowledge_chunks", ["document_id"]),
+    ("ix_knowledge_ingestion_jobs_job_id", "knowledge_ingestion_jobs", ["job_id"]),
+    ("ix_knowledge_ingestion_jobs_asset_id", "knowledge_ingestion_jobs", ["asset_id"]),
+    ("ix_knowledge_ingestion_jobs_document_id", "knowledge_ingestion_jobs", ["document_id"]),
+    ("ix_knowledge_extraction_results_job_id", "knowledge_extraction_results", ["job_id"]),
+    ("ix_knowledge_extraction_results_document_id", "knowledge_extraction_results", ["document_id"]),
+    ("ix_knowledge_object_links_document_id", "knowledge_object_links", ["document_id"]),
+    ("ix_knowledge_object_links_job_id", "knowledge_object_links", ["job_id"]),
+]
+
+
 def _has_table(table_name: str) -> bool:
     return table_name in sa.inspect(op.get_bind()).get_table_names()
+
+
+def _indexes(table_name: str) -> dict[str, dict]:
+    if not _has_table(table_name):
+        return {}
+    return {
+        index["name"]: index
+        for index in sa.inspect(op.get_bind()).get_indexes(table_name)
+        if index.get("name")
+    }
+
+
+def _ensure_lookup_index(index_name: str, table_name: str, columns: list[str]) -> None:
+    indexes = _indexes(table_name)
+    if index_name in indexes:
+        if not indexes[index_name].get("unique"):
+            return
+        op.drop_index(index_name, table_name=table_name)
+    op.create_index(index_name, table_name, columns)
 
 
 def upgrade() -> None:
@@ -36,7 +69,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         )
-        op.create_index("ix_knowledge_documents_document_id", "knowledge_documents", ["document_id"], unique=True)
 
     if not _has_table("knowledge_chunks"):
         op.create_table(
@@ -53,8 +85,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         )
-        op.create_index("ix_knowledge_chunks_chunk_id", "knowledge_chunks", ["chunk_id"], unique=True)
-        op.create_index("ix_knowledge_chunks_document_id", "knowledge_chunks", ["document_id"])
 
     if not _has_table("knowledge_ingestion_jobs"):
         op.create_table(
@@ -68,9 +98,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         )
-        op.create_index("ix_knowledge_ingestion_jobs_job_id", "knowledge_ingestion_jobs", ["job_id"], unique=True)
-        op.create_index("ix_knowledge_ingestion_jobs_asset_id", "knowledge_ingestion_jobs", ["asset_id"])
-        op.create_index("ix_knowledge_ingestion_jobs_document_id", "knowledge_ingestion_jobs", ["document_id"])
 
     if not _has_table("knowledge_extraction_results"):
         op.create_table(
@@ -80,7 +107,7 @@ def upgrade() -> None:
             sa.Column("document_id", sa.String(length=100), nullable=False),
             sa.Column("domain", sa.String(length=100), nullable=False, server_default="manufacturing"),
             sa.Column("prompt_name", sa.String(length=200), nullable=False, server_default="manufacturing_ontology_v1"),
-            sa.Column("model_name", sa.String(length=200), nullable=False, server_default="mock-chat"),
+            sa.Column("model_name", sa.String(length=200), nullable=False, server_default="rules-ontology-extractor"),
             sa.Column("status", sa.String(length=50), nullable=False, server_default="completed"),
             sa.Column("result", sa.JSON(), nullable=False, server_default="{}"),
             sa.Column("approved_result", sa.JSON(), nullable=True),
@@ -89,8 +116,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         )
-        op.create_index("ix_knowledge_extraction_results_job_id", "knowledge_extraction_results", ["job_id"], unique=True)
-        op.create_index("ix_knowledge_extraction_results_document_id", "knowledge_extraction_results", ["document_id"])
 
     if not _has_table("knowledge_object_links"):
         op.create_table(
@@ -107,24 +132,16 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         )
-        op.create_index("ix_knowledge_object_links_document_id", "knowledge_object_links", ["document_id"])
-        op.create_index("ix_knowledge_object_links_job_id", "knowledge_object_links", ["job_id"])
+
+    # Tenant-scoped uniqueness is added later in 0023; keep these as lookup indexes only.
+    for index_name, table_name, columns in INDEX_DEFINITIONS:
+        if _has_table(table_name):
+            _ensure_lookup_index(index_name, table_name, columns)
 
 
 def downgrade() -> None:
-    for index_name, table_name in [
-        ("ix_knowledge_object_links_job_id", "knowledge_object_links"),
-        ("ix_knowledge_object_links_document_id", "knowledge_object_links"),
-        ("ix_knowledge_extraction_results_document_id", "knowledge_extraction_results"),
-        ("ix_knowledge_extraction_results_job_id", "knowledge_extraction_results"),
-        ("ix_knowledge_ingestion_jobs_document_id", "knowledge_ingestion_jobs"),
-        ("ix_knowledge_ingestion_jobs_asset_id", "knowledge_ingestion_jobs"),
-        ("ix_knowledge_ingestion_jobs_job_id", "knowledge_ingestion_jobs"),
-        ("ix_knowledge_chunks_document_id", "knowledge_chunks"),
-        ("ix_knowledge_chunks_chunk_id", "knowledge_chunks"),
-        ("ix_knowledge_documents_document_id", "knowledge_documents"),
-    ]:
-        if _has_table(table_name):
+    for index_name, table_name, _columns in reversed(INDEX_DEFINITIONS):
+        if _has_table(table_name) and index_name in _indexes(table_name):
             op.drop_index(index_name, table_name=table_name)
 
     for table_name in [

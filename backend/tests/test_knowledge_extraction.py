@@ -7,6 +7,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
+TEST_TENANT_ID = 11
+TEST_USER = {"uid": 101, "tenant_id": TEST_TENANT_ID, "role": "admin", "is_admin": True}
+DETERMINISTIC_MODEL = "rules-ontology-extractor"
+
+
 @pytest.fixture(autouse=True)
 def clear_extraction_stores():
     from app.services.ai import knowledge_ingestion, ontology_extraction
@@ -32,10 +37,12 @@ def clear_extraction_stores():
 
 @pytest.fixture()
 def client():
+    from app.api.deps import get_current_user
     from app.api.graph import router as graph_router
     from app.api.knowledge import router as knowledge_router
 
     app = FastAPI()
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
     app.include_router(graph_router, prefix="/api/v1/graph")
     app.include_router(knowledge_router, prefix="/api/v1/knowledge")
     return TestClient(app)
@@ -47,7 +54,7 @@ def test_extraction_job_lifecycle_and_exports(client):
         data={
             "domain": "quality",
             "prompt_name": "quality_event_v1",
-            "model_name": "mock-chat",
+            "model_name": DETERMINISTIC_MODEL,
         },
         files={
             "file": (
@@ -69,6 +76,8 @@ def test_extraction_job_lifecycle_and_exports(client):
     payload = response.json()["data"]
     job = payload["job"]
     assert job["status"] == "completed"
+    assert job["model_name"] == DETERMINISTIC_MODEL
+    assert job["tenant_id"] == TEST_TENANT_ID
     assert job["result"]["entities"]
     assert job["result"]["generic_entities"]
     assert job["result"]["domain_mappings"]
@@ -147,6 +156,7 @@ def test_uploaded_document_returns_intake_and_extracts_without_reupload(client):
     assert upload.status_code == 200
     payload = upload.json()["data"]
     document_id = payload["document"]["document_id"]
+    assert payload["document"]["tenant_id"] == TEST_TENANT_ID
     assert payload["intake_recommendation"]["document_id"] == document_id
     assert "extract_ontology_candidates" in payload["intake_recommendation"]["capabilities"]
 
@@ -162,12 +172,14 @@ def test_uploaded_document_returns_intake_and_extracts_without_reupload(client):
         json={
             "domain": "manufacturing",
             "prompt_name": "manufacturing_ontology_v1",
-            "model_name": "mock-chat",
+            "model_name": DETERMINISTIC_MODEL,
         },
     )
     assert extraction.status_code == 200
     job = extraction.json()["data"]["job"]
     assert job["document_id"] == document_id
+    assert job["model_name"] == DETERMINISTIC_MODEL
+    assert job["tenant_id"] == TEST_TENANT_ID
     assert job["result"]["generic_entities"]
     assert job["result"]["domain_mappings"]
     assert job["status"] == "completed"

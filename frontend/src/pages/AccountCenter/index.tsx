@@ -23,6 +23,7 @@ import {
   Empty,
   Form,
   Input,
+  Modal,
   Progress,
   Radio,
   Row,
@@ -48,14 +49,18 @@ import {
   adminListUsers,
   closeAgentConversation,
   deleteAIMemory,
+  getAIAgentRegistry,
   getClosedLoopConfig,
   getAISettings,
   listAgentConversations,
   listAIMemories,
   listAuditLogs,
+  seedAIAgentRegistry,
   testSavedAISettings,
+  updateAIAgentRegistry,
   updateAISettings,
 } from '../../services/api';
+import { formatServerDateTime } from '../../utils/dateTime';
 
 cytoscape.use(dagre);
 
@@ -105,18 +110,19 @@ interface AuditLogRecord {
 function normalizeAISettings(settings: Record<string, any>) {
   const normalized = { ...settings };
   const provider = String(normalized.provider || '');
-  if (!provider || provider === 'mock') {
+  const supportedProviders = new Set(['glm', 'openai-compatible', 'openai', 'azure-openai', 'deepseek', 'qwen']);
+  if (!provider || !supportedProviders.has(provider)) {
     Object.assign(normalized, GLM_AI_DEFAULTS);
   }
   if (normalized.provider === 'glm') {
     if (!normalized.baseUrl || String(normalized.baseUrl).includes('api.openai.com')) normalized.baseUrl = GLM_AI_DEFAULTS.baseUrl;
-    if (!normalized.chatModel || String(normalized.chatModel).startsWith('mock') || String(normalized.chatModel).startsWith('gpt-')) {
+    if (!normalized.chatModel || String(normalized.chatModel).startsWith('gpt-')) {
       normalized.chatModel = GLM_AI_DEFAULTS.chatModel;
     }
-    if (!normalized.reasoningModel || String(normalized.reasoningModel).startsWith('mock') || String(normalized.reasoningModel).startsWith('gpt-')) {
+    if (!normalized.reasoningModel || String(normalized.reasoningModel).startsWith('gpt-')) {
       normalized.reasoningModel = GLM_AI_DEFAULTS.reasoningModel;
     }
-    if (!normalized.embeddingModel || String(normalized.embeddingModel).startsWith('mock') || String(normalized.embeddingModel).startsWith('text-embedding')) {
+    if (!normalized.embeddingModel || String(normalized.embeddingModel).startsWith('text-embedding')) {
       normalized.embeddingModel = GLM_AI_DEFAULTS.embeddingModel;
     }
     if (!normalized.visionModel || normalized.visionModel === 'disabled' || String(normalized.visionModel).startsWith('gpt-')) {
@@ -137,6 +143,35 @@ function normalizeAISettings(settings: Record<string, any>) {
   return normalized;
 }
 
+function normalizeLocalAISettings(settings: Record<string, any>) {
+  const localSettings = normalizeAISettings(settings);
+  delete localSettings.apiKey;
+  return localSettings;
+}
+
+function readLocalAISettings() {
+  const rawSettings = localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
+  if (!rawSettings) return {};
+
+  try {
+    const parsedSettings = JSON.parse(rawSettings);
+    const settings = parsedSettings && typeof parsedSettings === 'object' && !Array.isArray(parsedSettings)
+      ? parsedSettings
+      : {};
+    const localSettings = normalizeLocalAISettings(settings);
+    if (Object.prototype.hasOwnProperty.call(settings, 'apiKey')) {
+      localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(localSettings));
+    }
+    return localSettings;
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalAISettings(settings: Record<string, unknown>) {
+  localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalizeLocalAISettings(settings)));
+}
+
 export default function AccountCenter({ currentApplication }: AccountCenterProps) {
   const user = useAuthStore((s) => s.user);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -146,7 +181,7 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
     ? 'identity-access'
     : activeSection === 'ai-personal' || activeSection === 'preferences'
       ? 'account'
-    : activeSection === 'palantir-config' || activeSection === 'data-ontology'
+    : activeSection === 'palantir-config' || activeSection === 'data-ontology' || activeSection === 'semantic-mapping' || activeSection === 'ontology-modeling'
       ? 'data-assets'
       : activeSection === 'knowledge-graph'
         ? 'knowledge'
@@ -154,6 +189,11 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
   const roles = user?.roles?.length ? user.roles.map((role: any) => role.label || role.name).join(' / ') : '-';
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
   const accountDefaultSubTab = activeSection === 'preferences' ? 'preferences' : 'profile';
+  const semanticDefaultView = activeSection === 'semantic-mapping'
+    ? 'mapping'
+    : activeSection === 'ontology-modeling'
+      ? 'ontology'
+      : 'data';
 
   const items = useMemo(() => {
     const baseItems = [
@@ -193,19 +233,13 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         key: 'data-assets',
         label: '数据资产中心',
         icon: <DatabaseOutlined />,
-        children: <SemanticAssetCenter view="data" />,
+        children: <SemanticAssetCenter view={semanticDefaultView} />,
       },
       {
         key: 'reference-data',
         label: '数据字典与基础档案',
         icon: <DatabaseOutlined />,
         children: <ReferenceDataManagement />,
-      },
-      {
-        key: 'ontology-modeling',
-        label: '对象与关系中心',
-        icon: <NodeIndexOutlined />,
-        children: <SemanticAssetCenter view="ontology" />,
       },
       {
         key: 'knowledge',
@@ -617,7 +651,7 @@ function AIPlatformPanel() {
             type="primary"
             icon={<RobotOutlined />}
             onClick={() => {
-              localStorage.setItem('mf_ai_assistant_settings', JSON.stringify(form.getFieldsValue()));
+              saveLocalAISettings(form.getFieldsValue());
               message.success('AI 与平台设置已保存');
             }}
           >
@@ -631,9 +665,18 @@ function AIPlatformPanel() {
 
 function AIPlatformPanelV2() {
   const [form] = Form.useForm();
+  const [permissionRuleForm] = Form.useForm();
+  const [validationRuleForm] = Form.useForm();
+  const [skillForm] = Form.useForm();
+  const [toolForm] = Form.useForm();
+  const [permissionRuleEditor, setPermissionRuleEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
+  const [validationRuleEditor, setValidationRuleEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
+  const [skillEditor, setSkillEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
+  const [toolEditor, setToolEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
+  const [registrySaving, setRegistrySaving] = useState(false);
   const savedSettings = useMemo(() => {
     try {
-      return normalizeAISettings(JSON.parse(localStorage.getItem(AI_SETTINGS_STORAGE_KEY) || '{}'));
+      return readLocalAISettings();
     } catch {
       return {};
     }
@@ -700,6 +743,15 @@ function AIPlatformPanelV2() {
       highRiskConfirm: true,
       maxToolSteps: 5,
       toolTimeoutSeconds: 30,
+      enabledHooks: ['enforce_permissions', 'validate_before_confirmation', 'validate_before_tool', 'validate_after_tool', 'audit_tool_use'],
+      permissionRules: [],
+      validationRules: [],
+    },
+    agentRegistry: {
+      skills: [],
+      tools: [],
+      handlerKeys: [],
+      source: undefined,
     },
   }), []);
 
@@ -708,12 +760,24 @@ function AIPlatformPanelV2() {
 
     const loadBackendSettings = async () => {
       try {
-        const response = await getAISettings();
+        const [response, registryResponse] = await Promise.all([
+          getAISettings(),
+          getAIAgentRegistry().catch(() => null),
+        ]);
         const backendSettings = response.data?.settings || response.data?.data?.settings || response.data?.data;
         if (!cancelled && backendSettings && typeof backendSettings === 'object' && !Array.isArray(backendSettings)) {
-          const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings });
+          const registryData = registryResponse?.data?.data;
+          const agentRegistry = registryData
+            ? {
+                skills: Object.values(registryData.skills || {}),
+                tools: Object.values(registryData.tools || {}),
+                handlerKeys: registryData.handlerKeys || [],
+                source: registryData.source,
+              }
+            : (savedSettings as any).agentRegistry || defaultSettings.agentRegistry;
+          const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings, agentRegistry });
           form.setFieldsValue(mergedSettings);
-          localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(mergedSettings));
+          saveLocalAISettings(mergedSettings);
         }
       } catch {
         if (!cancelled) {
@@ -730,7 +794,7 @@ function AIPlatformPanelV2() {
   }, [defaultSettings, form, savedSettings]);
 
   const saveLocalSettings = (values: Record<string, unknown>) => {
-    localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(normalizeAISettings(values)));
+    saveLocalAISettings(values);
   };
 
   const aiRoleOptions = [
@@ -762,6 +826,27 @@ function AIPlatformPanelV2() {
     { label: 'Workflow', value: 'workflow' },
     { label: 'Low-code', value: 'low-code' },
   ];
+  const hookOptions = [
+    { label: 'Permission gate', value: 'enforce_permissions' },
+    { label: 'Validate before confirmation', value: 'validate_before_confirmation' },
+    { label: 'Validate before tool', value: 'validate_before_tool' },
+    { label: 'Validate after tool', value: 'validate_after_tool' },
+    { label: 'Audit tool use', value: 'audit_tool_use' },
+    { label: 'Budget exceeded log', value: 'log_budget_exceeded' },
+    { label: 'Context compaction log', value: 'log_compaction' },
+  ];
+  const validationPhaseOptions = [
+    { label: 'Before confirmation', value: 'pre_confirmation' },
+    { label: 'Before tool', value: 'pre_tool' },
+    { label: 'After tool', value: 'post_tool' },
+  ];
+  const validationRuleTypeOptions = [
+    { label: 'Field required', value: 'field_required' },
+    { label: 'Field equals', value: 'field_equals' },
+    { label: 'Minimum number', value: 'min_number' },
+    { label: 'Maximum number', value: 'max_number' },
+    { label: 'Non-empty result', value: 'non_empty_result' },
+  ];
   const watchedSettings = Form.useWatch([], form) || {};
   const currentProvider = watchedSettings.provider || defaultSettings.provider;
   const currentChatModel = watchedSettings.chatModel || defaultSettings.chatModel;
@@ -770,6 +855,154 @@ function AIPlatformPanelV2() {
   const activeDomains = watchedSettings.domains || defaultSettings.domains;
   const activeTools = watchedSettings.tools || defaultSettings.tools;
   const rolePolicies = watchedSettings.rolePolicies || defaultSettings.rolePolicies;
+  const safetyPolicy = watchedSettings.safetyPolicy || defaultSettings.safetyPolicy;
+  const permissionRules = Array.isArray(safetyPolicy.permissionRules) ? safetyPolicy.permissionRules : [];
+  const validationRules = Array.isArray(safetyPolicy.validationRules) ? safetyPolicy.validationRules : [];
+  const agentRegistry = watchedSettings.agentRegistry || defaultSettings.agentRegistry;
+  const registrySkills = Array.isArray(agentRegistry.skills) ? agentRegistry.skills : [];
+  const registryTools = Array.isArray(agentRegistry.tools) ? agentRegistry.tools : [];
+  const registryHandlerKeys = Array.isArray(agentRegistry.handlerKeys) ? agentRegistry.handlerKeys : [];
+  const registryToolOptions = registryTools.map((tool: any) => ({ label: tool.name, value: tool.name }));
+  const registryHandlerOptions = (registryHandlerKeys.length ? registryHandlerKeys : ['not_implemented'])
+    .map((handler: string) => ({ label: handler, value: handler }));
+
+  const updateSafetyRules = (key: 'permissionRules' | 'validationRules', rules: any[]) => {
+    form.setFieldsValue({ safetyPolicy: { ...(form.getFieldValue('safetyPolicy') || {}), [key]: rules } });
+  };
+
+  const parseJsonField = (value: string | undefined, fallback: Record<string, unknown> = {}) => {
+    if (!value || !value.trim()) return fallback;
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new Error('Invalid JSON');
+    }
+  };
+
+  const persistAgentRegistry = async (nextRegistry: Record<string, any>) => {
+    const nextSettings = { ...form.getFieldsValue(), agentRegistry: nextRegistry };
+    form.setFieldsValue({ agentRegistry: nextRegistry });
+    saveLocalSettings(nextSettings);
+    setRegistrySaving(true);
+    try {
+      const response = await updateAIAgentRegistry({ skills: nextRegistry.skills, tools: nextRegistry.tools });
+      const data = response.data?.data;
+      const activated = {
+        skills: Object.values(data?.skills || {}),
+        tools: Object.values(data?.tools || {}),
+        handlerKeys: data?.handlerKeys || nextRegistry.handlerKeys || [],
+        source: data?.source || 'database',
+      };
+      form.setFieldsValue({ agentRegistry: activated });
+      saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
+      message.success('Agent registry activated');
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry save failed');
+    } finally {
+      setRegistrySaving(false);
+    }
+  };
+
+  const seedAgentRegistry = async () => {
+    setRegistrySaving(true);
+    try {
+      const response = await seedAIAgentRegistry();
+      const data = response.data?.data;
+      const activated = {
+        skills: Object.values(data?.skills || {}),
+        tools: Object.values(data?.tools || {}),
+        handlerKeys: data?.handlerKeys || [],
+        source: data?.source || 'database',
+      };
+      form.setFieldsValue({ agentRegistry: activated });
+      saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
+      message.success('Agent registry seed imported');
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry seed failed');
+    } finally {
+      setRegistrySaving(false);
+    }
+  };
+
+  const openSkillEditor = (index: number | null) => {
+    const source = index === null
+      ? { enabled: true, capability_level: 'assisted', risk_level: 'medium', confirmation_policy: 'confirm_token', allowed_tools: [], required_permissions: [] }
+      : registrySkills[index];
+    skillForm.setFieldsValue(source);
+    setSkillEditor({ open: true, index });
+  };
+
+  const saveSkill = async () => {
+    const values = await skillForm.validateFields();
+    const next = [...registrySkills];
+    const item = { ...values, enabled: values.enabled !== false };
+    if (skillEditor.index === null) next.push(item);
+    else next[skillEditor.index] = item;
+    setSkillEditor({ open: false, index: null });
+    await persistAgentRegistry({ ...agentRegistry, skills: next, tools: registryTools });
+  };
+
+  const openToolEditor = (index: number | null) => {
+    const source = index === null
+      ? { enabled: true, handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low', permission_check: 'qa', dry_run_supported: true, audit_required: false, input_schema_json: '{}', output_schema_json: '{}' }
+      : {
+          ...registryTools[index],
+          input_schema_json: JSON.stringify(registryTools[index]?.input_schema || {}, null, 2),
+          output_schema_json: JSON.stringify(registryTools[index]?.output_schema || {}, null, 2),
+        };
+    toolForm.setFieldsValue(source);
+    setToolEditor({ open: true, index });
+  };
+
+  const saveTool = async () => {
+    const values = await toolForm.validateFields();
+    let inputSchema: Record<string, unknown>;
+    let outputSchema: Record<string, unknown>;
+    try {
+      inputSchema = parseJsonField(values.input_schema_json);
+      outputSchema = parseJsonField(values.output_schema_json);
+    } catch {
+      message.error('Input/output schema must be valid JSON');
+      return;
+    }
+    const { input_schema_json, output_schema_json, ...rest } = values;
+    void input_schema_json;
+    void output_schema_json;
+    const next = [...registryTools];
+    const item = { ...rest, enabled: rest.enabled !== false, input_schema: inputSchema, output_schema: outputSchema };
+    if (toolEditor.index === null) next.push(item);
+    else next[toolEditor.index] = item;
+    setToolEditor({ open: false, index: null });
+    await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: next });
+  };
+
+  const openPermissionRuleEditor = (index: number | null) => {
+    permissionRuleForm.setFieldsValue(index === null ? { action: 'ask', tool: '*', riskThreshold: 'high' } : permissionRules[index]);
+    setPermissionRuleEditor({ open: true, index });
+  };
+
+  const savePermissionRule = async () => {
+    const values = await permissionRuleForm.validateFields();
+    const next = [...permissionRules];
+    if (permissionRuleEditor.index === null) next.push(values);
+    else next[permissionRuleEditor.index] = values;
+    updateSafetyRules('permissionRules', next);
+    setPermissionRuleEditor({ open: false, index: null });
+  };
+
+  const openValidationRuleEditor = (index: number | null) => {
+    validationRuleForm.setFieldsValue(index === null ? { phase: 'pre_tool', tool: '*', severity: 'warning', ruleType: 'field_required' } : validationRules[index]);
+    setValidationRuleEditor({ open: true, index });
+  };
+
+  const saveValidationRule = async () => {
+    const values = await validationRuleForm.validateFields();
+    const next = [...validationRules];
+    if (validationRuleEditor.index === null) next.push(values);
+    else next[validationRuleEditor.index] = values;
+    updateSafetyRules('validationRules', next);
+    setValidationRuleEditor({ open: false, index: null });
+  };
 
   const handleSave = () => {
     saveLocalSettings(form.getFieldsValue());
@@ -851,7 +1084,6 @@ function AIPlatformPanelV2() {
                       { label: 'Azure OpenAI', value: 'azure-openai' },
                       { label: 'DeepSeek', value: 'deepseek' },
                       { label: 'Qwen', value: 'qwen' },
-                      { label: 'Local Model', value: 'local' },
                     ]} onChange={applyProviderPreset} />
                   </Form.Item>
                 </div>
@@ -1046,6 +1278,93 @@ function AIPlatformPanelV2() {
                       ),
                     },
                     {
+                      key: 'agent-registry',
+                      label: 'Agent Registry',
+                      children: (
+                        <div className="ai-tab-grid">
+                          <div className="ai-policy-rule-head">
+                            <div>
+                              <Text strong>Skills</Text>
+                              <Text type="secondary"> DB-backed runtime skills, activated after validation.</Text>
+                            </div>
+                            <Space size={6}>
+                              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>Seed registry</Button>
+                              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>Add skill</Button>
+                            </Space>
+                          </div>
+                          <Table
+                            size="small"
+                            pagination={false}
+                            rowKey={(record: any) => record.name || record.title}
+                            dataSource={registrySkills}
+                            columns={[
+                              { title: 'Enabled', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? 'off' : 'on'}</Tag> },
+                              { title: 'Name', dataIndex: 'name', ellipsis: true },
+                              { title: 'Default tool', dataIndex: 'default_tool', ellipsis: true },
+                              { title: 'Risk', dataIndex: 'risk_level', width: 90 },
+                              {
+                                title: '',
+                                width: 130,
+                                render: (_, __, index) => (
+                                  <Space size={4}>
+                                    <Button size="small" onClick={() => openSkillEditor(index)}>Edit</Button>
+                                    <Button
+                                      size="small"
+                                      danger
+                                      loading={registrySaving}
+                                      onClick={() => persistAgentRegistry({ ...agentRegistry, skills: registrySkills.filter((_: any, itemIndex: number) => itemIndex !== index), tools: registryTools })}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </Space>
+                                ),
+                              },
+                            ]}
+                            locale={{ emptyText: 'No skills registered' }}
+                          />
+                          <div className="ai-policy-rule-head">
+                            <div>
+                              <Text strong>Tools</Text>
+                              <Text type="secondary"> Tool names bind only to whitelisted handler keys.</Text>
+                            </div>
+                            <Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>Add tool</Button>
+                          </div>
+                          <Table
+                            size="small"
+                            pagination={false}
+                            rowKey={(record: any) => record.name || record.title}
+                            dataSource={registryTools}
+                            columns={[
+                              { title: 'Enabled', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? 'off' : 'on'}</Tag> },
+                              { title: 'Name', dataIndex: 'name', ellipsis: true },
+                              { title: 'Handler', dataIndex: 'handler_key', ellipsis: true },
+                              { title: 'Side effect', dataIndex: 'side_effect', width: 130 },
+                              { title: 'Risk', dataIndex: 'risk_level', width: 90 },
+                              {
+                                title: '',
+                                width: 130,
+                                render: (_, __, index) => (
+                                  <Space size={4}>
+                                    <Button size="small" onClick={() => openToolEditor(index)}>Edit</Button>
+                                    <Button
+                                      size="small"
+                                      danger
+                                      loading={registrySaving}
+                                      onClick={() => persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: registryTools.filter((_: any, itemIndex: number) => itemIndex !== index) })}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </Space>
+                                ),
+                              },
+                            ]}
+                            locale={{ emptyText: 'No tools registered' }}
+                          />
+                          <Text type="secondary">Source: {agentRegistry.source || 'database / seed'} / Handlers: {registryHandlerKeys.length}</Text>
+                        </div>
+                      ),
+                    },
+                    {
                       key: 'knowledge',
                       label: '知识 / RAG',
                       children: (
@@ -1139,6 +1458,9 @@ function AIPlatformPanelV2() {
                     <Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item>
                     <Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时秒数"><Input type="number" min={5} max={180} /></Form.Item>
                   </div>
+                  <Form.Item name={['safetyPolicy', 'enabledHooks']} label="Agent lifecycle hooks" className="ai-policy-compact-item">
+                    <Select mode="multiple" options={hookOptions} />
+                  </Form.Item>
                   <Form.Item name="forbiddenActions" label="禁止动作清单" className="ai-policy-compact-item">
                     <Select mode="multiple" options={[
                       { label: '自动下单', value: 'auto_order' },
@@ -1147,6 +1469,60 @@ function AIPlatformPanelV2() {
                       { label: '发布配置', value: 'publish_config' },
                     ]} />
                   </Form.Item>
+                  <div className="ai-policy-rule-head">
+                    <Text strong>Permission rules</Text>
+                    <Button size="small" onClick={() => openPermissionRuleEditor(null)}>Add rule</Button>
+                  </div>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    rowKey={(_, index) => `permission-${index}`}
+                    dataSource={permissionRules}
+                    columns={[
+                      { title: 'Action', dataIndex: 'action', width: 90, render: (value) => <Tag color={value === 'deny' ? 'red' : value === 'ask' ? 'gold' : 'green'}>{String(value || 'ask')}</Tag> },
+                      { title: 'Tool', dataIndex: 'tool', ellipsis: true },
+                      { title: 'Role', dataIndex: 'role', ellipsis: true },
+                      { title: 'Risk', dataIndex: 'riskThreshold', width: 90 },
+                      {
+                        title: '',
+                        width: 120,
+                        render: (_, __, index) => (
+                          <Space size={4}>
+                            <Button size="small" onClick={() => openPermissionRuleEditor(index)}>Edit</Button>
+                            <Button size="small" danger onClick={() => updateSafetyRules('permissionRules', permissionRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>Delete</Button>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                    locale={{ emptyText: 'No custom permission rules' }}
+                  />
+                  <div className="ai-policy-rule-head">
+                    <Text strong>Validation rules</Text>
+                    <Button size="small" onClick={() => openValidationRuleEditor(null)}>Add rule</Button>
+                  </div>
+                  <Table
+                    size="small"
+                    pagination={false}
+                    rowKey={(_, index) => `validation-${index}`}
+                    dataSource={validationRules}
+                    columns={[
+                      { title: 'Phase', dataIndex: 'phase', width: 130 },
+                      { title: 'Tool', dataIndex: 'tool', ellipsis: true },
+                      { title: 'Severity', dataIndex: 'severity', width: 90, render: (value) => <Tag color={value === 'error' ? 'red' : 'gold'}>{String(value || 'warning')}</Tag> },
+                      { title: 'Rule', dataIndex: 'ruleType', width: 140 },
+                      {
+                        title: '',
+                        width: 120,
+                        render: (_, __, index) => (
+                          <Space size={4}>
+                            <Button size="small" onClick={() => openValidationRuleEditor(index)}>Edit</Button>
+                            <Button size="small" danger onClick={() => updateSafetyRules('validationRules', validationRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>Delete</Button>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                    locale={{ emptyText: 'No custom validation rules' }}
+                  />
                 </div>
 
                 <div className="ai-policy-section">
@@ -1194,6 +1570,211 @@ function AIPlatformPanelV2() {
           </div>
         </div>
       </Form>
+      <Modal
+        title={permissionRuleEditor.index === null ? 'Add permission rule' : 'Edit permission rule'}
+        open={permissionRuleEditor.open}
+        onOk={savePermissionRule}
+        onCancel={() => setPermissionRuleEditor({ open: false, index: null })}
+        destroyOnHidden
+      >
+        <Form form={permissionRuleForm} layout="vertical">
+          <Form.Item name="action" label="Action" rules={[{ required: true }]}>
+            <Select options={[{ label: 'Allow', value: 'allow' }, { label: 'Ask confirmation', value: 'ask' }, { label: 'Deny', value: 'deny' }]} />
+          </Form.Item>
+          <Form.Item name="tool" label="Tool pattern" rules={[{ required: true }]}>
+            <Input placeholder="forms.*" />
+          </Form.Item>
+          <Form.Item name="role" label="Role pattern">
+            <Input placeholder="admin / viewer / *" />
+          </Form.Item>
+          <Form.Item name="riskThreshold" label="Risk threshold">
+            <Select allowClear options={[{ label: 'Low', value: 'low' }, { label: 'Medium', value: 'medium' }, { label: 'High', value: 'high' }, { label: 'Critical', value: 'critical' }]} />
+          </Form.Item>
+          <Form.Item name="reason" label="Reason">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={validationRuleEditor.index === null ? 'Add validation rule' : 'Edit validation rule'}
+        open={validationRuleEditor.open}
+        onOk={saveValidationRule}
+        onCancel={() => setValidationRuleEditor({ open: false, index: null })}
+        destroyOnHidden
+      >
+        <Form form={validationRuleForm} layout="vertical">
+          <Form.Item name="phase" label="Phase" rules={[{ required: true }]}>
+            <Select options={validationPhaseOptions} />
+          </Form.Item>
+          <Form.Item name="tool" label="Tool pattern" rules={[{ required: true }]}>
+            <Input placeholder="forms.create_form_definition" />
+          </Form.Item>
+          <Form.Item name="severity" label="Severity" rules={[{ required: true }]}>
+            <Select options={[{ label: 'Warning', value: 'warning' }, { label: 'Error', value: 'error' }]} />
+          </Form.Item>
+          <Form.Item name="ruleType" label="Rule type" rules={[{ required: true }]}>
+            <Select options={validationRuleTypeOptions} />
+          </Form.Item>
+          <Form.Item name="field" label="Field path">
+            <Input placeholder="form.name" />
+          </Form.Item>
+          <Form.Item name="value" label="Value / threshold">
+            <Input />
+          </Form.Item>
+          <Form.Item name="message" label="Message">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={skillEditor.index === null ? 'Add agent skill' : 'Edit agent skill'}
+        open={skillEditor.open}
+        onOk={saveSkill}
+        onCancel={() => setSkillEditor({ open: false, index: null })}
+        destroyOnHidden
+      >
+        <Form form={skillForm} layout="vertical">
+          <Form.Item name="enabled" label="Enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item name="name" label="Skill name" rules={[{ required: true }]}>
+            <Input placeholder="low_code_form_builder" />
+          </Form.Item>
+          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="capability_level" label="Capability level">
+                <Select options={[
+                  { label: 'Readonly', value: 'readonly' },
+                  { label: 'Assisted', value: 'assisted' },
+                  { label: 'Autonomous', value: 'autonomous' },
+                ]} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="risk_level" label="Risk level">
+                <Select options={[
+                  { label: 'Low', value: 'low' },
+                  { label: 'Medium', value: 'medium' },
+                  { label: 'High', value: 'high' },
+                  { label: 'Critical', value: 'critical' },
+                ]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="default_tool" label="Default tool">
+            <Select allowClear showSearch options={registryToolOptions} />
+          </Form.Item>
+          <Form.Item name="allowed_tools" label="Allowed tools">
+            <Select mode="multiple" showSearch options={registryToolOptions} />
+          </Form.Item>
+          <Form.Item name="required_permissions" label="Required permissions">
+            <Select mode="tags" />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="confirmation_policy" label="Confirmation policy">
+                <Select options={[
+                  { label: 'None', value: 'none' },
+                  { label: 'Confirm token', value: 'confirm_token' },
+                  { label: 'Always confirm', value: 'always_confirm' },
+                  { label: 'Blocked', value: 'blocked' },
+                ]} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="permission_capability" label="Permission capability">
+                <Select allowClear options={aiCapabilityOptions} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="domain" label="Domain">
+            <Select allowClear options={aiDomainOptions} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={toolEditor.index === null ? 'Add agent tool' : 'Edit agent tool'}
+        open={toolEditor.open}
+        onOk={saveTool}
+        onCancel={() => setToolEditor({ open: false, index: null })}
+        destroyOnHidden
+        width={720}
+      >
+        <Form form={toolForm} layout="vertical">
+          <Form.Item name="enabled" label="Enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item name="name" label="Tool name" rules={[{ required: true }]}>
+            <Input placeholder="forms.query_records" />
+          </Form.Item>
+          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="handler_key" label="Handler key" rules={[{ required: true }]}>
+                <Select showSearch options={registryHandlerOptions} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="side_effect" label="Side effect">
+                <Select options={[
+                  { label: 'Read', value: 'read' },
+                  { label: 'Analyze', value: 'analyze' },
+                  { label: 'Draft write', value: 'draft_write' },
+                  { label: 'Configuration write', value: 'configuration_write' },
+                  { label: 'Workflow action', value: 'workflow_action' },
+                  { label: 'External write', value: 'external_write' },
+                ]} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="risk_level" label="Risk level">
+                <Select options={[
+                  { label: 'Low', value: 'low' },
+                  { label: 'Medium', value: 'medium' },
+                  { label: 'High', value: 'high' },
+                  { label: 'Critical', value: 'critical' },
+                ]} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="permission_check" label="Permission capability">
+                <Select allowClear options={aiCapabilityOptions} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="dry_run_supported" label="Dry run supported" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="audit_required" label="Audit required" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="input_schema_json" label="Input schema JSON">
+            <Input.TextArea rows={6} />
+          </Form.Item>
+          <Form.Item name="output_schema_json" label="Output schema JSON">
+            <Input.TextArea rows={6} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }
@@ -1902,8 +2483,7 @@ function auditSummaryText(record: AuditLogRecord) {
 }
 
 function formatAuditTime(value?: string | null) {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+  return formatServerDateTime(value);
 }
 
 function auditActionLabel(action?: string) {
@@ -1970,4 +2550,5 @@ function auditResourceLabel(resource?: string) {
   };
   return labels[resource ?? ''] || resource || '-';
 }
+
 

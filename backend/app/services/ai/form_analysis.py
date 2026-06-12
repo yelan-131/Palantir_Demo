@@ -17,8 +17,6 @@ from .schemas import AIProviderConfig, ChatMessage, ChatOptions
 def _model_is_available(config: AIProviderConfig | None) -> bool:
     if not config:
         return False
-    if config.provider in {"local", "mock"}:
-        return False
     return config.provider in EXTERNAL_PROVIDERS and bool(config.api_key)
 
 

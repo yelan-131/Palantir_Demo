@@ -11,10 +11,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.services.ai.tenant_context import require_tenant_id
 
 
 class TenantProfile(BaseModel):
-    tenant_id: int = 1
+    tenant_id: int
     slug: str = "default"
     display_name: str = Field(default_factory=lambda: getattr(settings, "APP_NAME", "Manufacturing Platform"))
     product_name: str = Field(default_factory=lambda: getattr(settings, "APP_NAME", "Manufacturing Platform"))
@@ -27,7 +28,8 @@ class TenantProfile(BaseModel):
     forbidden_claims: list[str] = Field(default_factory=list)
 
 
-def default_tenant_profile(tenant_id: int = 1, tenant_name: str | None = None) -> TenantProfile:
+def default_tenant_profile(tenant_id: int | None = None, tenant_name: str | None = None) -> TenantProfile:
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     app_name = tenant_name or getattr(settings, "APP_NAME", "Manufacturing Platform")
     return TenantProfile(
         tenant_id=tenant_id,
@@ -37,13 +39,14 @@ def default_tenant_profile(tenant_id: int = 1, tenant_name: str | None = None) -
     )
 
 
-async def load_tenant_profile(tenant_id: int = 1, *, session: Any | None = None) -> TenantProfile:
+async def load_tenant_profile(tenant_id: int | None = None, *, session: Any | None = None) -> TenantProfile:
     """Load a safe public tenant profile.
 
     The current schema only has a minimal Tenant table. This helper centralizes
     the fallback now and leaves a single seam for a future tenant_profiles table.
     """
 
+    tenant_id = require_tenant_id({"tenant_id": tenant_id})
     tenant_name: str | None = None
     tenant_slug = "default"
     if session is not None:

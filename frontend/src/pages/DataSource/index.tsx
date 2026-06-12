@@ -38,6 +38,7 @@ import {
   getSyncStatus,
   previewData,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -259,7 +260,7 @@ export default function DataSourcePage() {
       dataIndex: 'last_sync',
       key: 'last_sync',
       width: 180,
-      render: (text: string | null) => text ?? '-',
+      render: (text: string | null) => formatServerDateTime(text),
     },
     {
       title: '操作',

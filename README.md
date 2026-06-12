@@ -1,6 +1,6 @@
 # ManuFoundry / Palantir Demo
 
-Current version: 0.3.6
+Current version: 0.3.8
 
 ManuFoundry is a manufacturing low-code data workspace prototype. It combines configurable applications, forms, menus, identity access, knowledge assets, graph exploration, quality impact analysis, and an evolving AI Agent layer for assisted business configuration.
 
@@ -18,16 +18,16 @@ This repository is still in active development and is intended for demo and prod
 - AI assistant APIs, provider abstraction, prompt/tool scaffolding, knowledge context, and low-code action guidance.
 - AI Agent work in progress, inspired by OpenClaw and Harness Agent style architecture: model invocation boundaries, task planning drafts, tool calls, knowledge context, action review, and safety policies.
 
-## 0.3.6 Focus
+## 0.3.8 Focus
 
-- AI workspace conversations now support history, archive, restore, delete, and inline rename flows.
-- Dynamic forms now expose permission design and runtime field permissions for lists, details, filters, sorting, and published views.
-- Knowledge Center can run ontology intake and extraction from already-indexed documents, with governed approval before graph publishing.
-- System administration improves organization auditing, organization code validation, user CSV import, and role or organization binding.
-- Application access and authentication boundaries are tighter: invalid tokens no longer become anonymous users, and hidden apps are blocked by backend APIs.
-- Production deployment notes cover checks, server updates, release metadata, and public health verification.
+- AI Agent items, tool-use loop, events, hooks, context layers, compaction, budget, and tool result processing.
+- Runtime configuration, production error handling, permission resolving, tenant context, and confirmation storage for auditable Agent writes.
+- Physical low-code form tables, form code sequences, platform configuration seeds, and clearer form engine boundaries.
+- Data quality rules and ontology mapping layouts for richer semantic asset governance.
+- AI Agent registry tables plus `data/agent_registry` configuration for versioned skills, tools, hooks, and tenant policies.
+- Frontend updates across AI workspace, form designer, semantic asset center, workflow, account center, and Taobao prototype pages.
 
-See [docs/operations/release-0.3.6.md](docs/operations/release-0.3.6.md) for the detailed release notes.
+See [docs/operations/release-0.3.8.md](docs/operations/release-0.3.8.md) for the detailed release notes.
 
 ## Tech Stack
 

@@ -47,6 +47,7 @@ import {
   wfMarkAllRead,
   wfMarkNotificationRead,
 } from './services/api';
+import { formatServerDateTime } from './utils/dateTime';
 
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
@@ -506,7 +507,7 @@ function AppContent() {
     <div className="notification-menu-item" style={{ opacity: n.is_read ? 0.58 : 1 }}>
       <div style={{ fontWeight: n.is_read ? 500 : 700 }}>{n.title}</div>
       {n.content && <div style={{ fontSize: 12, color: '#5d6972', marginTop: 2 }}>{n.content}</div>}
-      <div style={{ fontSize: 11, color: '#8a97a1', marginTop: 2 }}>{n.created_at?.slice(0, 16)}</div>
+      <div style={{ fontSize: 11, color: '#8a97a1', marginTop: 2 }}>{formatServerDateTime(n.created_at)}</div>
       {n.type === 'approval' && !n.is_read && (
         <div style={{ marginTop: 8 }}>
           <Button
@@ -575,7 +576,7 @@ function AppContent() {
       if (typeof matched.id === 'number') wfMarkNotificationRead(matched.id).catch(() => {});
       setNotifications((prev) => prev.map((n) => (String(n.id) === keyText ? { ...n, is_read: true } : n)));
       if (!matched.is_read) setUnread((prev) => Math.max(0, prev - 1));
-      navigate(matched.target_path || (matched.category === 'ai' ? '/ai-assistant' : matched.category === 'system' ? '/account-center?section=app-menu' : '/workflow'));
+      navigate(matched.target_path || matched.link || (matched.category === 'ai' ? '/ai-assistant' : matched.category === 'system' ? '/account-center?section=app-menu' : '/workflow'));
     },
   };
 

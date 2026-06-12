@@ -12,6 +12,7 @@ import {
 import dayjs from 'dayjs';
 import {
   getPlatformForm,
+  getPlatformFormByCode,
   listPlatformForms,
   listPlatformDynamicRecords,
   createPlatformDynamicRecord,
@@ -354,6 +355,7 @@ export default function DynamicPage() {
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const [fields, setFields] = useState<FieldDef[]>([]);
+  const [mutationFields, setMutationFields] = useState<FieldDef[]>([]);
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -368,6 +370,7 @@ export default function DynamicPage() {
   const [form] = Form.useForm();
   const [filterForm] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [schemaLoading, setSchemaLoading] = useState(false);
 
   const viewConfig = useMemo(
     () => normalizeRuntimeViewConfig(pageConfig?.config?.viewConfig, fields),
@@ -411,12 +414,16 @@ export default function DynamicPage() {
         const numericFormId = Number(slug);
         let dbForm: PlatformForm | null = null;
         if (!Number.isNaN(numericFormId)) {
-          dbForm = unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published' }));
+          dbForm = unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope: 'list' }));
         } else {
-          const matchedForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
-          dbForm = matchedForm
-            ? unwrapApiData<PlatformForm>(await getPlatformForm(matchedForm.id, { schema: 'published' }))
-            : null;
+          try {
+            dbForm = unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope: 'list' }));
+          } catch {
+            const matchedForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
+            dbForm = matchedForm
+              ? unwrapApiData<PlatformForm>(await getPlatformForm(matchedForm.id, { schema: 'published', scope: 'list' }))
+              : null;
+          }
         }
         if (dbForm) {
           if (isAnalysisAssembly(dbForm.config, dbForm.code)) {
@@ -468,9 +475,11 @@ export default function DynamicPage() {
 
   const formFieldNames = pageConfig?.config?.formFieldNames || [];
 
-  const formFields = formFieldNames
-    .map(fn => fields.find(f => f.field_name === fn))
-    .filter((f): f is FieldDef => !!f);
+  const formFields = mutationFields.length
+    ? mutationFields
+    : formFieldNames
+      .map(fn => fields.find(f => f.field_name === fn))
+      .filter((f): f is FieldDef => !!f);
   const runtimePermissions = platformForm?.runtime_permissions || {};
   const canRunAction = (action: string) => Boolean(platformForm) && runtimePermissions[action] !== false;
 
@@ -519,17 +528,47 @@ export default function DynamicPage() {
     });
   }
 
-  const openCreateModal = () => {
-    setEditingRecord(null);
-    form.resetFields();
-    setModalOpen(true);
+  const loadMutationSchema = async (scope: 'create' | 'edit') => {
+    if (!slug || !platformForm) return [];
+    setSchemaLoading(true);
+    try {
+      const numericFormId = Number(slug);
+      const detail = !Number.isNaN(numericFormId)
+        ? unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope }))
+        : unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope }));
+      return (detail?.fields ?? []).filter((field) => !field.archived).map(mapPlatformField);
+    } finally {
+      setSchemaLoading(false);
+    }
   };
 
-  const openEditModal = (record: Record<string, any>) => {
+  const openCreateModal = async () => {
+    if (!platformForm) return;
+    setEditingRecord(null);
+    try {
+      const nextFields = await loadMutationSchema('create');
+      setMutationFields(nextFields);
+      form.resetFields();
+      setModalOpen(true);
+    } catch {
+      message.error('新增表单配置加载失败');
+    }
+  };
+
+  const openEditModal = async (record: Record<string, any>) => {
+    if (!platformForm) return;
     setEditingRecord(record);
+    let nextFields: FieldDef[] = [];
+    try {
+      nextFields = await loadMutationSchema('edit');
+      setMutationFields(nextFields);
+    } catch {
+      message.error('编辑表单配置加载失败');
+      return;
+    }
     const formValues: Record<string, any> = {};
-    for (const fn of formFieldNames) {
-      const f = fields.find(x => x.field_name === fn);
+    for (const f of nextFields) {
+      const fn = f.field_name;
       if (f?.field_type === 'date' && record[fn]) {
         formValues[fn] = dayjs(record[fn]);
       } else {
@@ -543,7 +582,7 @@ export default function DynamicPage() {
   const handleModalOk = async () => {
     try {
       const values = await form.validateFields();
-      const payload = formFieldsToPayload(values, fields);
+      const payload = formFieldsToPayload(values, formFields);
       setConfirmLoading(true);
       if (platformForm && editingRecord) {
         await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload);
@@ -654,7 +693,7 @@ export default function DynamicPage() {
         <Space size={8} wrap>
           {canRunAction('create') && (
             <Tooltip title="新增">
-              <Button aria-label="新增" type="primary" icon={<PlusOutlined />} onClick={openCreateModal} />
+              <Button aria-label="新增" type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
             </Tooltip>
           )}
           <Tooltip title="刷新">

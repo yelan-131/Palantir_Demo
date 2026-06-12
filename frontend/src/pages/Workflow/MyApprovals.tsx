@@ -4,6 +4,7 @@ import {
 } from 'antd';
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { wfListInstances, wfApproveOrReject } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 interface ApprovalItem {
   id: number;
@@ -75,7 +76,7 @@ export default function MyApprovals() {
       title: '状态', dataIndex: 'status', width: 80,
       render: (v: string) => { const s = STATUS_MAP[v] || { label: v, color: 'default' }; return <Tag color={s.color}>{s.label}</Tag>; },
     },
-    { title: '提交时间', dataIndex: 'created_at', width: 160 },
+    { title: '提交时间', dataIndex: 'created_at', width: 160, render: (value: string) => formatServerDateTime(value) },
     {
       title: '操作', width: 160,
       render: (_: any, r: ApprovalItem) => r.status === 'pending' ? (

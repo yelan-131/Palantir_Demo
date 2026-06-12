@@ -24,6 +24,7 @@ import {
   streamConfirmAgentRun,
   updateAgentConversation,
 } from '@/services/api';
+import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
 import { useAiWorkbench } from './context';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
@@ -83,6 +84,7 @@ interface ChatMessage {
   typing?: boolean;
   createdAt: string;
   actions?: MockSkillAction[];
+  items?: Array<Record<string, unknown>>;
   steps?: AgentProcessStep[];
   trace?: AgentTraceItem[];
   source?: string;
@@ -129,11 +131,9 @@ interface AgentMessagePayload {
   usage?: Record<string, unknown> | null;
   run_id?: string;
   mode?: string;
-  steps?: Array<Record<string, unknown>>;
-  actions?: AgentSkillAction[];
+  items?: Array<Record<string, unknown>>;
   risk_level?: string;
   requires_confirmation?: boolean;
-  confirmation_payload?: Record<string, unknown>;
 }
 
 interface PageContext {
@@ -163,14 +163,12 @@ interface AgentSkillAction {
 
 interface AgentChatResponse {
   answer?: string;
-  actions?: AgentSkillAction[];
   evidence?: Array<Record<string, unknown>>;
   mode?: string;
   run_id?: string;
   requires_confirmation?: boolean;
-  confirmation_payload?: Record<string, unknown>;
   action_state?: AgentActionState;
-  steps?: Array<Record<string, unknown>>;
+  items?: Array<Record<string, unknown>>;
   conversation?: AgentConversationPayload;
   user_message?: AgentMessagePayload;
   assistant_message?: AgentMessagePayload;
@@ -326,16 +324,14 @@ function createAgentSession(contextKey: string, intro: string, title = '当前�
 
 function formatServerTime(value?: string | null): string {
   if (!value) return nowText();
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return nowText();
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return formatServerClockTime(value, nowText());
 }
 
 function getSessionGroupLabel(session: AgentSession): string {
   const rawTime = session.updatedAtRaw || session.createdAtRaw;
   if (!rawTime) return 'Older';
-  const date = new Date(rawTime);
-  if (Number.isNaN(date.getTime())) return 'Older';
+  const date = parseServerDate(rawTime);
+  if (!date) return 'Older';
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const sessionDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -356,20 +352,39 @@ function groupSessionsForHistory(sessions: AgentSession[]) {
 
 function mapServerMessage(message: AgentMessagePayload): ChatMessage {
   const isAssistant = message.role !== 'user';
+  const items = normalizeAgentItems(message.items);
+  const confirmationPayload = getConfirmationItemPayload(items);
+  const actions = getConfirmationActions(items);
   return {
     id: message.message_id || message.id || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role: isAssistant ? 'assistant' : 'user',
     content: message.content || '',
-    actions: isAssistant ? mapAgentActions(message.actions) : undefined,
-    steps: isAssistant ? mapAgentSteps(message.steps) : undefined,
-    trace: isAssistant ? mapTraceFromSteps(message.steps) : undefined,
+    actions: isAssistant ? mapAgentActions(actions) : undefined,
+    items: isAssistant ? items : undefined,
+    steps: isAssistant ? mapAgentSteps(items) : undefined,
+    trace: isAssistant ? mapTraceFromItems(items) : undefined,
     createdAt: formatServerTime(message.created_at),
     source: isAssistant && message.model_name ? `model: ${message.model_name}` : undefined,
-    contextSources: isAssistant ? getContextSources({ steps: message.steps }) : undefined,
+    contextSources: isAssistant ? getContextSources({ items }) : undefined,
     runId: isAssistant ? message.run_id : undefined,
-    requiresConfirmation: isAssistant ? Boolean(message.requires_confirmation) : undefined,
-    confirmationPayload: isAssistant ? message.confirmation_payload : undefined,
+    requiresConfirmation: isAssistant ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : undefined,
+    confirmationPayload: isAssistant ? confirmationPayload : undefined,
   };
+}
+
+function normalizeAgentItems(items?: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return Array.isArray(items) ? items.filter((item) => item && typeof item === 'object') : [];
+}
+
+function getConfirmationItemPayload(items?: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
+  const item = [...(items || [])].reverse().find((entry) => entry.type === 'confirmation');
+  return item?.payload && typeof item.payload === 'object' ? item.payload as Record<string, unknown> : undefined;
+}
+
+function getConfirmationActions(items?: Array<Record<string, unknown>>): AgentSkillAction[] | undefined {
+  const payload = getConfirmationItemPayload(items);
+  const actions = payload?.actions;
+  return Array.isArray(actions) ? actions as AgentSkillAction[] : undefined;
 }
 
 function stringifyStepValue(value: unknown): string {
@@ -396,6 +411,14 @@ function getAgentStepLabel(step: Record<string, unknown>): string {
   if (id === 'step-confirmation') return '等待人工确认';
   if (id.startsWith('step-skill-policy')) return '复核工具权限';
   if (id === 'step-answer') return '生成回答';
+  if (type === 'intent') return '识别意图';
+  if (type === 'context') return '组装上下文';
+  if (type === 'tool_call') return `调用工具 ${stringifyStepValue(step.tool) || ''}`.trim();
+  if (type === 'tool_result') return `工具结果 ${stringifyStepValue(step.tool) || ''}`.trim();
+  if (type === 'confirmation') return '等待人工确认';
+  if (type === 'validation') return '执行校验';
+  if (type === 'answer') return '生成回答';
+  if (type === 'error') return '处理失败';
   if (type === 'tool') return `调用工具 ${stringifyStepValue(step.tool) || ''}`.trim();
   if (type === 'policy') return '执行策略检查';
   if (type === 'plan') return '规划下一步';
@@ -404,16 +427,17 @@ function getAgentStepLabel(step: Record<string, unknown>): string {
 }
 
 function getAgentStepDetail(step: Record<string, unknown>): string | undefined {
+  const payload = step.payload && typeof step.payload === 'object' ? step.payload as Record<string, unknown> : {};
   const parts = [
-    stringifyStepValue(step.intent),
-    stringifyStepValue(step.skill),
-    stringifyStepValue(step.capability),
-    stringifyStepValue(step.matched_role),
+    stringifyStepValue(step.intent || payload.intent),
+    stringifyStepValue(step.skill || payload.skill),
+    stringifyStepValue(step.capability || payload.capability),
+    stringifyStepValue(step.matched_role || payload.matched_role),
     stringifyStepValue(step.tool),
     step.result_count !== undefined ? `结果 ${step.result_count}` : '',
     step.semantic_objects !== undefined ? `对象 ${step.semantic_objects}` : '',
     step.semantic_records !== undefined ? `记录 ${step.semantic_records}` : '',
-    stringifyStepValue(step.model),
+    stringifyStepValue(step.model || payload.model),
     stringifyStepValue(step.summary),
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : undefined;
@@ -448,15 +472,16 @@ function traceNoteFromStep(step: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function mapTraceFromSteps(steps?: Array<Record<string, unknown>>): AgentTraceItem[] | undefined {
-  const trace = (steps || [])
+function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceItem[] | undefined {
+  const trace = (items || [])
     .map((step, index) => {
       const tool = stringifyStepValue(step.tool);
-      if (String(step.type || '') === 'tool' && tool) {
+      if (['tool_call', 'tool_result'].includes(String(step.type || '')) && tool) {
+        const completed = String(step.type || '') === 'tool_result';
         return {
           id: `history-trace-tool-${String(step.id || index)}`,
-          kind: 'result' as const,
-          content: getTraceToolText(step, true),
+          kind: completed ? 'result' as const : 'tool' as const,
+          content: getTraceToolText(step, completed),
           status: String(step.status || 'completed'),
           tool,
           resultCount: typeof step.result_count === 'number' ? step.result_count : undefined,
@@ -502,6 +527,22 @@ function appendAgentTraceItem(
 function createTraceItem(event: string, data: Record<string, unknown>): AgentTraceItem | undefined {
   if (event === 'assistant.note') {
     return undefined;
+  }
+  if (event === 'item.created' || event === 'item.updated') {
+    const type = String(data.type || '');
+    if (!['tool_call', 'tool_result', 'confirmation', 'validation', 'error'].includes(type)) return undefined;
+    const tool = stringifyStepValue(data.tool);
+    const completed = type !== 'tool_call';
+    const stepId = String(data.item_id || data.id || data.tool || Date.now());
+    return {
+      id: `trace-item-${stepId}`,
+      kind: type === 'tool_call' ? 'tool' : type === 'tool_result' ? 'result' : 'note',
+      content: tool ? getTraceToolText(data, completed) : stringifyStepValue(data.summary || data.title),
+      status: String(data.status || (completed ? 'completed' : 'active')),
+      tool,
+      stepId,
+      resultCount: typeof data.result_count === 'number' ? data.result_count : undefined,
+    };
   }
   if (event === 'tool.started' || event === 'tool.completed') {
     const completed = event === 'tool.completed';
@@ -684,13 +725,15 @@ function mapAgentActions(actions?: AgentSkillAction[]): MockSkillAction[] | unde
 }
 
 function getAgentResponseSource(payload: AgentChatResponse): string {
-  const answerStep = [...(payload.steps || [])].reverse().find((step) => step.type === 'respond');
-  const modelConfigStep = [...(payload.steps || [])].reverse().find((step) => step.id === 'step-model-config');
-  const provider = typeof answerStep?.provider === 'string' ? answerStep.provider : '';
-  const model = typeof answerStep?.model === 'string' ? answerStep.model : '';
-  const fallbackReason = typeof answerStep?.fallback_reason === 'string' ? answerStep.fallback_reason : '';
+  const items = normalizeAgentItems(payload.items);
+  const answerItem = [...items].reverse().find((item) => item.type === 'answer');
+  const modelConfigItem = [...items].reverse().find((item) => item.id === 'step-model-config');
+  const answerPayload = answerItem?.payload && typeof answerItem.payload === 'object' ? answerItem.payload as Record<string, unknown> : {};
+  const provider = typeof answerItem?.provider === 'string' ? answerItem.provider : typeof answerPayload.provider === 'string' ? answerPayload.provider : '';
+  const model = typeof answerItem?.model === 'string' ? answerItem.model : typeof answerPayload.model === 'string' ? answerPayload.model : '';
+  const fallbackReason = typeof answerPayload.fallback_reason === 'string' ? answerPayload.fallback_reason : '';
 
-  if (modelConfigStep?.status === 'blocked') {
+  if (modelConfigItem?.status === 'blocked') {
     return '未配置大模型';
   }
   if (provider || (model && model !== 'local-agent-runtime')) {
@@ -699,15 +742,16 @@ function getAgentResponseSource(payload: AgentChatResponse): string {
   if (fallbackReason) {
     return fallbackReason.includes('not configured') ? '未配置大模型' : '大模型连接失败';
   }
-  if (payload.actions?.length) {
+  if (getConfirmationActions(items)?.length) {
     return 'backend Agent: draft action generated';
   }
   return 'backend Agent';
 }
 
 function getContextSources(payload: AgentChatResponse): Record<string, number | boolean | string> | undefined {
-  const contextStep = [...(payload.steps || [])].reverse().find((step) => step.id === 'step-context-builder');
-  const sources = contextStep?.sources;
+  const contextItem = [...normalizeAgentItems(payload.items)].reverse().find((item) => item.id === 'step-context-builder');
+  const contextPayload = contextItem?.payload && typeof contextItem.payload === 'object' ? contextItem.payload as Record<string, unknown> : {};
+  const sources = contextItem?.sources || contextPayload.sources;
   return sources && typeof sources === 'object' && !Array.isArray(sources)
     ? sources as Record<string, number | boolean | string>
     : undefined;
@@ -1140,18 +1184,32 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
           }));
           return;
         }
-        if (event === 'step.completed') {
-          const rawStep = data.step && typeof data.step === 'object'
-            ? data.step as Record<string, unknown>
+        if (event === 'item.created' || event === 'item.updated') {
+          const rawItem = data.item && typeof data.item === 'object'
+            ? data.item as Record<string, unknown>
             : data;
-          const nextStep = mapAgentStep(rawStep);
+          const nextStep = mapAgentStep(rawItem);
           updateSessionMessage(sessionId, assistantMessageId, (message) => {
+            const items = message.items || [];
+            const itemId = String(rawItem.item_id || rawItem.id || nextStep.id);
+            const itemExisting = items.findIndex((item) => String(item.item_id || item.id) === itemId);
+            const nextItems = itemExisting >= 0
+              ? items.map((item, index) => (index === itemExisting ? rawItem : item))
+              : [...items, rawItem];
             const steps = message.steps || [];
             const existing = steps.findIndex((step) => step.id === nextStep.id);
             const nextSteps = existing >= 0
               ? steps.map((step, index) => (index === existing ? nextStep : step))
               : [...steps, nextStep];
-            return { ...message, steps: nextSteps };
+            const confirmationPayload = getConfirmationItemPayload(nextItems);
+            return {
+              ...message,
+              items: nextItems,
+              steps: nextSteps,
+              actions: mapAgentActions(getConfirmationActions(nextItems)) || message.actions,
+              requiresConfirmation: Boolean(confirmationPayload?.confirmation_token || message.requiresConfirmation),
+              confirmationPayload: confirmationPayload || message.confirmationPayload,
+            };
           });
           return;
         }
@@ -1163,13 +1221,14 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
             content: '',
             fullContent: answerContent,
             typing: true,
-            actions: mapAgentActions(payload.actions),
-            steps: mapAgentSteps(payload.steps) || message.steps,
+            actions: mapAgentActions(getConfirmationActions(payload.items)) || message.actions,
+            items: normalizeAgentItems(payload.items) || message.items,
+            steps: mapAgentSteps(payload.items) || message.steps,
             source: getAgentResponseSource(payload),
             contextSources: getContextSources(payload),
             runId: payload.run_id,
-            requiresConfirmation: Boolean(payload.requires_confirmation),
-            confirmationPayload: payload.confirmation_payload,
+            requiresConfirmation: Boolean(getConfirmationItemPayload(payload.items)?.confirmation_token || payload.requires_confirmation),
+            confirmationPayload: getConfirmationItemPayload(payload.items),
             actionState: payload.action_state,
           }));
           if (payload.conversation) {
@@ -1218,9 +1277,12 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
       const completed = results.find((item) => (
         item && typeof item === 'object' && (item as Record<string, unknown>).status === 'completed'
       )) as Record<string, unknown> | undefined;
-      const result = completed?.result && typeof completed.result === 'object'
+      const nested = completed?.result && typeof completed.result === 'object'
         ? completed.result as Record<string, unknown>
         : {};
+      const result = nested.result && typeof nested.result === 'object'
+        ? nested.result as Record<string, unknown>
+        : nested;
       const executionResult = getExecutionResult(result);
       const routePath = executionResult.href || '';
       updateSessionMessage(sessionId, message.id, (item) => {
@@ -1251,6 +1313,25 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
             ...item,
             trace: appendAgentTraceItem(item.trace, traceItem),
           }));
+          return;
+        }
+        if (event === 'item.created' || event === 'item.updated') {
+          const rawItem = data.item && typeof data.item === 'object'
+            ? data.item as Record<string, unknown>
+            : data;
+          updateSessionMessage(sessionId, message.id, (item) => {
+            const items = item.items || [];
+            const itemId = String(rawItem.item_id || rawItem.id || Date.now());
+            const existing = items.findIndex((entry) => String(entry.item_id || entry.id) === itemId);
+            const nextItems = existing >= 0
+              ? items.map((entry, index) => (index === existing ? rawItem : entry))
+              : [...items, rawItem];
+            return {
+              ...item,
+              items: nextItems,
+              steps: mapAgentSteps(nextItems) || item.steps,
+            };
+          });
           return;
         }
         if (event === 'run.completed') {

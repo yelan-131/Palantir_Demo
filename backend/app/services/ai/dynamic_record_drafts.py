@@ -48,7 +48,7 @@ async def resolve_dynamic_record_form(
         return None
     forms = (
         await session.execute(
-            select(Form).where(Form.tenant_id == tenant_id)
+            select(Form).where(Form.tenant_id == tenant_id).order_by(Form.id.desc())
         )
     ).scalars().all()
     normalized_candidates = [_normalize(item) for item in candidates if item]

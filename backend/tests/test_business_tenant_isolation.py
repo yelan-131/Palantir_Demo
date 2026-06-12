@@ -5,10 +5,29 @@ import uuid
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_token() -> str:
+    from app.core.security import create_access_token
+
+    return create_access_token(
+        "admin",
+        extra={
+            "uid": 1,
+            "tenant_id": 1,
+            "is_admin": True,
+            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
+        },
+    )
+
+
+def _admin_headers() -> dict[str, str]:
+    return _headers(_admin_token())
 
 
 def _ok(response, context: str) -> dict:
@@ -86,12 +105,26 @@ def test_business_module_tenant_isolation_for_data_pipeline_and_dashboards():
             spc_a = SPCPoint(tenant_id=tenant_a_id, parameter=f"dim-{suffix}", value=10, ucl=12, lcl=8, cl=10, equipment_id=equipment_a.id, timestamp=datetime.now())
             spc_b = SPCPoint(tenant_id=tenant_b_id, parameter=f"dim-{suffix}", value=20, ucl=12, lcl=8, cl=10, equipment_id=equipment_b.id, timestamp=datetime.now())
             session.add_all([defect_b, spc_a, spc_b])
+            await session.execute(text(
+                "CREATE TABLE IF NOT EXISTS business_quality_events ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "tenant_id INTEGER NOT NULL, "
+                "title TEXT, "
+                "deleted_at DATETIME"
+                ")"
+            ))
+            await session.execute(
+                text(
+                    "INSERT INTO business_quality_events (tenant_id, title, deleted_at) "
+                    "VALUES (:tenant_id, :title, NULL)"
+                ),
+                {"tenant_id": tenant_b_id, "title": f"tenant-b-quality-event-{suffix}"},
+            )
             await session.commit()
             return {"tenant_b_equipment": equipment_b.id}
 
     with TestClient(app) as client:
-        platform_token = _ok(client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}), "platform login")["token"]
-        platform_headers = _headers(platform_token)
+        platform_headers = _admin_headers()
         tenant_a = _ok(client.post("/api/v1/platform/tenants", headers=platform_headers, json={"name": f"Business A {suffix}", "slug": f"biz-a-{suffix}", "domains": [f"biz-a-{suffix}.example.com"], "admin_email": f"owner@biz-a-{suffix}.example.com"}), "create business tenant a")["data"]
         tenant_b = _ok(client.post("/api/v1/platform/tenants", headers=platform_headers, json={"name": f"Business B {suffix}", "slug": f"biz-b-{suffix}", "domains": [f"biz-b-{suffix}.example.com"], "admin_email": f"owner@biz-b-{suffix}.example.com"}), "create business tenant b")["data"]
         token_a = _ok(client.post("/api/v1/auth/invite/accept", json={"token": tenant_a["adminInvite"]["inviteUrl"].split("token=", 1)[1], "password": "BusinessA123!"}), "accept a")["token"]
@@ -125,5 +158,7 @@ def test_business_module_tenant_isolation_for_data_pipeline_and_dashboards():
         suppliers_a = _ok(client.get("/api/v1/supply-chain/suppliers", headers=_headers(token_a)), "suppliers a")
         assert all(item["tenant_id"] == tenant_a["id"] for item in suppliers_a["data"])
 
-        analytics_a = _ok(client.get("/api/v1/analytics/aggregate?model_name=equipment&metric=count", headers=_headers(token_a)), "analytics a")
-        assert analytics_a["data"]["value"] == 1
+        analytics_a = _ok(client.get("/api/v1/analytics/overview", headers=_headers(token_a)), "analytics a")
+        assert analytics_a["production_lines"] == 1
+        assert analytics_a["active_lines"] == 1
+        assert analytics_a["equipment_utilization"] == 100.0

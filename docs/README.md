@@ -1,6 +1,6 @@
 # ManuFoundry Documentation
 
-Last updated: 2026-06-10
+Last updated: 2026-06-12
 
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
@@ -69,6 +69,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.5](operations/release-0.3.5.md) | AI action drafts, action state, menu-node config, reference data admin, and private deployment tooling. |
 | [Release 0.3.6](operations/release-0.3.6.md) | AI workspace history, runtime form permissions, knowledge ontology intake, admin governance, auth hardening, and production deployment. |
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
+| [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
 | [Neo4j Beginner Guide](operations/neo4j-beginner-guide.md) | Beginner-friendly Neo4j browser and Cypher walkthrough for this project. |
 | [Demo Knowledge Assets](operations/demo-knowledge-assets.md) | Local scripts for generating and seeding demo knowledge-base files. |
 

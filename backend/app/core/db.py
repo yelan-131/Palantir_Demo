@@ -10,8 +10,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.production_errors import database_unavailable
 from app.core.logging import get_logger
 from app.database import AsyncSessionLocal
 
@@ -28,6 +30,12 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     session: AsyncSession = AsyncSessionLocal()
     try:
         yield session
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        logger.exception("DB session error; rolling back")
+        raise database_unavailable() from exc
     except Exception:
         await session.rollback()
         logger.exception("DB session error; rolling back")
@@ -48,5 +56,5 @@ async def safe_db_call(fn, *, default=None):
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 — intentional broad catch with logging
-        logger.warning("safe_db_call returning default: %s", exc)
-        return default
+        logger.warning("safe_db_call database unavailable: %s", exc)
+        raise database_unavailable() from exc

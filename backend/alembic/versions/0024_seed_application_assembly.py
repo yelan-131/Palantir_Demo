@@ -1,5 +1,10 @@
 """seed application form assembly menus
 
+Demo-only data seed for the manufacturing showcase (tenant 1). It does not
+belong to the core schema chain, so it is double-gated: it no-ops unless
+ENABLE_MANUFACTURING_DEMO_SEED=1 is set AND the demo applications exist.
+Production deployments keep a clean tenant 1.
+
 Revision ID: 0024_seed_application_assembly
 Revises: 0023_saas_hardening
 Create Date: 2026-05-28
@@ -7,6 +12,7 @@ Create Date: 2026-05-28
 from __future__ import annotations
 
 import json
+import os
 
 import sqlalchemy as sa
 from alembic import op
@@ -17,6 +23,10 @@ branch_labels = None
 depends_on = None
 
 TENANT_ID = 1
+
+
+def _demo_seed_enabled() -> bool:
+    return os.getenv("ENABLE_MANUFACTURING_DEMO_SEED") == "1"
 
 APPLICATION_ASSEMBLY = {
     "production-dashboard": [
@@ -244,6 +254,8 @@ def _insert_menu_node(
 
 
 def upgrade() -> None:
+    if not _demo_seed_enabled():
+        return
     conn = op.get_bind()
     for app_code, groups in APPLICATION_ASSEMBLY.items():
         app_id = _scalar(
@@ -294,6 +306,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _demo_seed_enabled():
+        return
     conn = op.get_bind()
     for app_code in APPLICATION_ASSEMBLY:
         app_id = _scalar(

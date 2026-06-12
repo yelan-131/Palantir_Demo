@@ -40,6 +40,43 @@ class SystemSetting(TimestampMixin, Base):
 
 # ── 工厂族 ──────────────────────────────────────────────
 
+class AIAgentSkillDefinition(TimestampMixin, Base):
+    __tablename__ = "ai_agent_skill_definitions"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_ai_agent_skill_definitions_name"),
+        Index("ix_ai_agent_skill_definitions_enabled", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), default="")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    definition: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(80), default="seed")
+    updated_by: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+
+class AIAgentToolDefinition(TimestampMixin, Base):
+    __tablename__ = "ai_agent_tool_definitions"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_ai_agent_tool_definitions_name"),
+        Index("ix_ai_agent_tool_definitions_enabled", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), default="")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    handler_key: Mapped[str] = mapped_column(String(160), default="not_implemented")
+    definition: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(80), default="seed")
+    updated_by: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+
 class Factory(TimestampMixin, Base):
     __tablename__ = "factories"
     __table_args__ = (Index("ix_factories_tenant_status", "tenant_id", "status"),)
@@ -856,6 +893,29 @@ class FormVersion(TimestampMixin, Base):
     form: Mapped["Form"] = relationship(back_populates="versions")
 
 
+class FormCodeSequence(TimestampMixin, Base):
+    """Atomic per-scope counter backing auto-encoding (料号) fields.
+
+    One row per (tenant, form, field, period). ``next_value`` holds the last
+    allocated sequence; allocation is an atomic UPDATE ... RETURNING so that
+    concurrent record creation can never hand out duplicate numbers.
+    ``period_key`` carries the rendered date token (e.g. ``20260612``) for
+    rules whose codes embed a date and therefore reset per period.
+    """
+
+    __tablename__ = "form_code_sequences"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "form_id", "field_name", "period_key", name="uq_form_code_sequences_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id"), index=True)
+    field_name: Mapped[str] = mapped_column(String(200))
+    period_key: Mapped[str] = mapped_column(String(64), default="")
+    next_value: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class DynamicRecord(TimestampMixin, Base):
     __tablename__ = "dynamic_records"
 
@@ -1227,7 +1287,7 @@ class KnowledgeExtractionResult(TimestampMixin, Base):
     document_id: Mapped[str] = mapped_column(String(100), index=True)
     domain: Mapped[str] = mapped_column(String(100), default="manufacturing")
     prompt_name: Mapped[str] = mapped_column(String(200), default="manufacturing_ontology_v1")
-    model_name: Mapped[str] = mapped_column(String(200), default="mock-chat")
+    model_name: Mapped[str] = mapped_column(String(200), default="rules-ontology-extractor")
     status: Mapped[str] = mapped_column(String(50), default="completed")
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     approved_result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -1419,6 +1479,21 @@ class OntologyPublishLog(TimestampMixin, Base):
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class OntologyMappingLayout(TimestampMixin, Base):
+    __tablename__ = "ontology_mapping_layouts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "object_code", "source_scope", name="uq_ontology_mapping_layout_scope"),
+        Index("ix_ontology_mapping_layout_tenant_object", "tenant_id", "object_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
+    object_code: Mapped[str] = mapped_column(String(120))
+    source_scope: Mapped[str] = mapped_column(String(120), default="all")
+    layout: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
 class DataSourceMetadata(TimestampMixin, Base):
     __tablename__ = "data_source_metadata"
     __table_args__ = (
@@ -1504,7 +1579,7 @@ class AIAgentRun(TimestampMixin, Base):
     mode: Mapped[str] = mapped_column(String(50), default="qa")
     input_message: Mapped[str] = mapped_column(Text)
     answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    steps: Mapped[list] = mapped_column(JSON, default=list)
+    items: Mapped[list] = mapped_column(JSON, default=list)
     evidence: Mapped[list] = mapped_column(JSON, default=list)
     actions: Mapped[list] = mapped_column(JSON, default=list)
     risk_level: Mapped[str] = mapped_column(String(50), default="low")
@@ -1583,3 +1658,17 @@ class AIMemoryEntry(TimestampMixin, Base):
     exported_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     export_checksum: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="active")
+
+
+class AIConfirmationToken(Base):
+    __tablename__ = "ai_confirmation_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    user_key: Mapped[str] = mapped_column(String(100), default="")
+    risk_level: Mapped[str] = mapped_column(String(20), default="low")
+    actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

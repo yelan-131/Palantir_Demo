@@ -10,9 +10,37 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _admin_headers() -> dict[str, str]:
+    from app.core.security import create_access_token
+
+    token = create_access_token(
+        "admin",
+        extra={
+            "uid": 1,
+            "tenant_id": 1,
+            "is_admin": True,
+            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
+        },
+    )
+    return _headers(token)
+
+
 def _assert_ok(response, *, context: str) -> dict:
     assert response.status_code < 400, f"{context}: {response.status_code} {response.text}"
     return response.json()
+
+
+def _confirmation_payload(payload: dict) -> dict:
+    for item in reversed(payload.get("items") or []):
+        item_payload = item.get("payload") or {}
+        if item.get("type") == "confirmation" and item_payload.get("confirmation_token"):
+            return item_payload
+    return {}
+
+
+def _confirmation_actions(payload: dict) -> list[dict]:
+    actions = _confirmation_payload(payload).get("actions")
+    return actions if isinstance(actions, list) else []
 
 
 def test_admin_agent_can_confirm_low_code_form_creation():
@@ -20,11 +48,7 @@ def test_admin_agent_can_confirm_low_code_form_creation():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
 
         response = _assert_ok(
             client.post(
@@ -47,9 +71,9 @@ def test_admin_agent_can_confirm_low_code_form_creation():
 
         assert response["requires_confirmation"] is True
         assert response["risk_level"] == "high"
-        assert response["actions"][0]["skill"] == "low_code.create_form_definition"
+        assert _confirmation_actions(response)[0]["skill"] == "low_code.create_form_definition"
 
-        token = response["confirmation_payload"]["confirmation_token"]
+        token = _confirmation_payload(response)["confirmation_token"]
         confirmed = _assert_ok(
             client.post(
                 f"/api/v1/ai/agent-runs/{response['run_id']}/confirm",
@@ -77,11 +101,7 @@ def test_agent_conversation_history_restores_run_steps_and_actions():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         conversation = _assert_ok(
             client.post(
                 "/api/v1/ai/agent/conversations",
@@ -123,9 +143,10 @@ def test_agent_conversation_history_restores_run_steps_and_actions():
 
         assert assistant["run_id"] == response["run_id"]
         assert assistant["requires_confirmation"] is True
-        assert assistant["confirmation_payload"]["confirmation_token"] == response["confirmation_payload"]["confirmation_token"]
-        assert assistant["actions"][0]["skill"] == "low_code.create_form_definition"
-        assert any(step["id"] == "step-planner" for step in assistant["steps"])
+        assert _confirmation_payload(response)["confirmation_token"].startswith("confirm-")
+        assert _confirmation_payload(assistant)["confirmation_token"] == "[REDACTED_SECRET]"
+        assert _confirmation_actions(assistant)[0]["skill"] == "low_code.create_form_definition"
+        assert any(item["id"] == "step-planner" for item in assistant["items"])
 
 
 def test_confirmed_agent_run_clears_pending_action_state():
@@ -133,11 +154,7 @@ def test_confirmed_agent_run_clears_pending_action_state():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         conversation = _assert_ok(
             client.post(
                 "/api/v1/ai/agent/conversations",
@@ -175,7 +192,7 @@ def test_confirmed_agent_run_clears_pending_action_state():
         current_before = next(item for item in before if item["conversation_id"] == conversation["conversation_id"])
         assert current_before["metadata"].get("pending_action_state")
 
-        token = response["confirmation_payload"]["confirmation_token"]
+        token = _confirmation_payload(response)["confirmation_token"]
         confirmed = _assert_ok(
             client.post(
                 f"/api/v1/ai/agent-runs/{response['run_id']}/confirm",
@@ -210,11 +227,7 @@ def test_confirmed_generic_action_creates_dynamic_record_draft_when_form_exists(
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         form = _assert_ok(
             client.post(
                 "/api/v1/forms",
@@ -255,7 +268,7 @@ def test_confirmed_generic_action_creates_dynamic_record_draft_when_form_exists(
             ),
             context="create agent run",
         )
-        token = created["confirmation_payload"]["confirmation_token"]
+        token = _confirmation_payload(created)["confirmation_token"]
         confirmed = _assert_ok(
             client.post(
                 f"/api/v1/ai/agent-runs/{created['run_id']}/confirm",
@@ -292,11 +305,7 @@ def test_manual_ai_draft_save_persists_to_database():
             return await session.scalar(select(AIDraft).where(AIDraft.draft_id == draft_id))
 
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         response = _assert_ok(
             client.post(
                 "/api/v1/ai/drafts/save",
@@ -330,11 +339,7 @@ def test_ai_agent_can_resume_saved_draft_for_confirmation():
     from app.main import app
 
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         saved = _assert_ok(
             client.post(
                 "/api/v1/ai/drafts/save",
@@ -366,9 +371,10 @@ def test_ai_agent_can_resume_saved_draft_for_confirmation():
         )
 
         assert response["requires_confirmation"] is True
-        assert response["actions"][0]["skill"] == "quality.create_capa_draft"
-        assert response["actions"][0]["payload"]["problem"] == "BGA solder void trend"
-        assert response["actions"][0]["payload"]["containment"] == "hold affected lot"
+        actions = _confirmation_actions(response)
+        assert actions[0]["skill"] == "quality.create_capa_draft"
+        assert actions[0]["payload"]["problem"] == "BGA solder void trend"
+        assert actions[0]["payload"]["containment"] == "hold affected lot"
         assert response["action_state"]["status"] == "ready_for_confirmation"
 
         reviewing = _assert_ok(
@@ -378,7 +384,7 @@ def test_ai_agent_can_resume_saved_draft_for_confirmation():
         resumed = next(item for item in reviewing if item["draft_id"] == saved["draft_id"])
         assert resumed["status"] == "reviewing"
 
-        token = response["confirmation_payload"]["confirmation_token"]
+        token = _confirmation_payload(response)["confirmation_token"]
         confirmed = _assert_ok(
             client.post(
                 f"/api/v1/ai/agent-runs/{response['run_id']}/confirm",
@@ -466,11 +472,7 @@ def test_low_code_agent_guides_before_write_when_requirements_are_missing():
     from app.main import app
 
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
 
         response = _assert_ok(
             client.post(
@@ -482,10 +484,10 @@ def test_low_code_agent_guides_before_write_when_requirements_are_missing():
         )
 
         assert response["requires_confirmation"] is False
-        assert response["actions"] == []
+        assert _confirmation_actions(response) == []
         assert "先不直接生成可确认动作" in response["answer"]
-        assert any(step["id"] == "step-tool-contract" for step in response["steps"])
-        assert any(step["id"] == "step-requirement-gap" for step in response["steps"])
+        assert any(item["id"] == "step-tool-contract" for item in response["items"])
+        assert any(item["id"] == "step-requirement-gap" for item in response["items"])
 
 
 def test_low_code_agent_prepares_confirmation_after_user_supplies_fields():
@@ -493,11 +495,7 @@ def test_low_code_agent_prepares_confirmation_after_user_supplies_fields():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         conversation = _assert_ok(
             client.post(
                 "/api/v1/ai/agent/conversations",
@@ -531,8 +529,8 @@ def test_low_code_agent_prepares_confirmation_after_user_supplies_fields():
         )
 
         assert response["requires_confirmation"] is True
-        assert response["actions"][0]["skill"] == "low_code.create_form_definition"
-        payload = response["actions"][0]["payload"]
+        assert _confirmation_actions(response)[0]["skill"] == "low_code.create_form_definition"
+        payload = _confirmation_actions(response)[0]["payload"]
         assert payload["menu"]["create"] is True
         assert [field["label"] for field in payload["fields"][:3]] == ["供应商名称", "风险等级", "整改负责人"]
 
@@ -542,11 +540,7 @@ def test_low_code_slot_filling_state_persists_between_turns():
 
     suffix = uuid.uuid4().hex[:8]
     with TestClient(app) as client:
-        login = _assert_ok(
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"}),
-            context="login",
-        )
-        headers = _headers(login["token"])
+        headers = _admin_headers()
         conversation = _assert_ok(
             client.post(
                 "/api/v1/ai/agent/conversations",
@@ -585,7 +579,7 @@ def test_low_code_slot_filling_state_persists_between_turns():
 
         assert second["requires_confirmation"] is True
         assert second["action_state"]["status"] == "ready_for_confirmation"
-        payload = second["actions"][0]["payload"]
+        payload = _confirmation_actions(second)[0]["payload"]
         assert payload["form"]["name"] == f"客户准入{suffix}"
         assert [field["label"] for field in payload["fields"][:3]] == ["客户名称", "准入等级", "状态"]
 

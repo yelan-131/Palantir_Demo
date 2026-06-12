@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.api.deps import get_current_user
 from app.core.logging import get_logger
+from app.core.production_errors import graph_unavailable, seed_data_required
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -140,7 +141,7 @@ def quality_graph_payload_from_result(event_id: str, result: dict, source: str =
     nodes = [_frontend_node_from_graph_node(node) for node in (result.get("nodes") or [])]
     edges = [_frontend_edge_from_graph_edge(edge, index) for index, edge in enumerate(result.get("edges") or [])]
     if not nodes:
-        return _quality_graph_fallback(event_id, source="backend-demo-empty-graph")
+        raise seed_data_required("Quality graph seed data is required")
     return {
         "event": event or QUALITY_EVENT_DEMO["events"][0],
         "root": _frontend_node_from_graph_node(result.get("root") or result["nodes"][0]),
@@ -250,24 +251,26 @@ MOCK_STATS = {
 
 
 async def _try_neo4j(fn):
-    """Try Neo4j query; logs and returns None on failure or timeout."""
+    """Run a Neo4j query or fail explicitly when the graph backend is unavailable."""
     timeout = _neo4j_query_timeout(5)
     try:
         from app.database import get_neo4j
+
         neo4j_session = None
-        async for s in get_neo4j():
-            neo4j_session = s
+        async for session in get_neo4j():
+            neo4j_session = session
             break
         if neo4j_session is None:
-            return None
+            raise graph_unavailable("Neo4j driver is not configured")
         return await asyncio.wait_for(fn(neo4j_session), timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.warning("Neo4j query timed out (%ss), falling back to mock", timeout)
-        return None
-    except Exception as exc:  # noqa: BLE001 — fallback to mock with log
-        logger.warning("Neo4j query failed, falling back to mock: %s", exc)
-        return None
-
+    except HTTPException:
+        raise
+    except asyncio.TimeoutError as exc:
+        logger.warning("Neo4j query timed out (%ss)", timeout)
+        raise graph_unavailable(f"Neo4j query timed out after {timeout}s") from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Neo4j query failed: %s", exc)
+        raise graph_unavailable("Neo4j query failed") from exc
 
 # Whitelisted templates exposed via `template` param.
 _TEMPLATE_WHITELIST = {
@@ -305,13 +308,7 @@ async def execute_cypher(body: CypherQuery):
     result = await _try_neo4j(_query)
     if result is not None:
         return result
-
-    # Mock fallback
-    return {
-        "data": [{"n": node} for node in MOCK_NODES[:5]],
-        "count": 5,
-        "note": "Mock data — Neo4j not connected",
-    }
+    raise seed_data_required("Graph query returned no data")
 
 
 @router.get("/assets/nodes")
@@ -391,8 +388,7 @@ async def get_neighbors(
     result = await _try_neo4j(_query)
     if result is not None:
         return result
-
-    # Mock fallback — find neighbors from mock relationships
+    raise seed_data_required("Graph neighbor data is required")
     neighbors = []
     for rel in MOCK_RELATIONSHIPS:
         if rel["source"] == entity_id:
@@ -424,8 +420,7 @@ async def shortest_path(
     result = await _try_neo4j(_query)
     if result is not None:
         return result
-
-    # Mock fallback — simple path from mock graph
+    raise seed_data_required("Graph path data is required")
     src_node = next((n for n in MOCK_NODES if n["id"] == src_id), None)
     tgt_node = next((n for n in MOCK_NODES if n["id"] == tgt_id), None)
     if not src_node or not tgt_node:
@@ -453,8 +448,7 @@ async def get_subgraph(
     result = await _try_neo4j(_query)
     if result is not None:
         return result
-
-    # Mock fallback — return subgraph around entity
+    raise seed_data_required("Graph subgraph data is required")
     visited = {entity_id}
     frontier = [entity_id]
     for _ in range(depth):
@@ -503,9 +497,7 @@ async def graph_stats():
     result = await _try_neo4j(_query)
     if result is not None:
         return result
-
-    # Mock fallback
-    return MOCK_STATS
+    raise seed_data_required("Graph statistics are required")
 
 
 @router.post("/sync/quality-demo")
@@ -601,17 +593,10 @@ async def sync_quality_demo_graph():
         return await asyncio.wait_for(_sync(), timeout=8)
     except asyncio.TimeoutError:
         logger.warning("Quality demo graph sync timed out")
+        raise graph_unavailable("Quality graph sync timed out")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Quality demo graph sync failed: %s", exc)
-
-    return {
-        "data": {
-            "nodes": 0,
-            "edges": 0,
-            "source": "fallback",
-            "message": "Neo4j unavailable; sync skipped and fallback graph remains active.",
-        }
-    }
+        raise graph_unavailable("Quality graph sync failed") from exc
 
 
 @router.get("/impact-analysis-by-object")
@@ -631,12 +616,13 @@ async def impact_analysis_by_object(
         if data:
             return {"data": {**data, "source": "neo4j"}}
     except asyncio.TimeoutError:
-        logger.warning("Business impact analysis timed out, falling back")
+        logger.warning("Business impact analysis timed out")
+        raise graph_unavailable("Business impact analysis timed out")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Business impact analysis failed, falling back: %s", exc)
+        logger.warning("Business impact analysis failed: %s", exc)
+        raise graph_unavailable("Business impact analysis failed") from exc
 
-    event_id = object_id if object_type == "QualityEvent" else "QE-20260521-001"
-    return {"data": _quality_graph_fallback(event_id, source="backend-demo")}
+    raise seed_data_required("Impact graph data is required")
 
 
 # ── New graph-first endpoints ─────────────────────────────
@@ -654,15 +640,11 @@ async def get_graph_entity(label: str, entity_id: int):
         node = await asyncio.wait_for(graph_service.get_entity(label, entity_id), timeout=5)
         if node:
             return {"data": node}
-    except asyncio.TimeoutError:
-        pass
-    except Exception:
-        pass
+    except asyncio.TimeoutError as exc:
+        raise graph_unavailable("Graph entity lookup timed out") from exc
+    except Exception as exc:
+        raise graph_unavailable("Graph entity lookup failed") from exc
 
-    # Mock fallback
-    mock = next((n for n in MOCK_NODES if n["id"] == entity_id), None)
-    if mock:
-        return {"data": mock}
     raise HTTPException(404, f"Entity {label}/{entity_id} not found")
 
 
@@ -682,26 +664,10 @@ async def get_graph_relationships(
         from app.services.graph_service import graph_service
         data = await asyncio.wait_for(graph_service.get_relationships(entity_id, rel_type, limit), timeout=5)
         return {"data": data}
-    except asyncio.TimeoutError:
-        pass
-    except Exception:
-        pass
-
-    # Mock fallback
-    results = []
-    for rel in MOCK_RELATIONSHIPS:
-        if rel["source"] == entity_id or rel["target"] == entity_id:
-            if rel_type and rel["type"] != rel_type:
-                continue
-            direction = "outgoing" if rel["source"] == entity_id else "incoming"
-            other_id = rel["target"] if direction == "outgoing" else rel["source"]
-            other = next((n for n in MOCK_NODES if n["id"] == other_id), None)
-            results.append({
-                "rel_type": rel["type"],
-                "direction": direction,
-                "target": other,
-            })
-    return {"data": results[:limit]}
+    except asyncio.TimeoutError as exc:
+        raise graph_unavailable("Graph relationship lookup timed out") from exc
+    except Exception as exc:
+        raise graph_unavailable("Graph relationship lookup failed") from exc
 
 
 @router.get("/impact-analysis/{entity_id}")
@@ -715,25 +681,10 @@ async def impact_analysis(
         from app.services.graph_service import graph_service
         data = await asyncio.wait_for(graph_service.impact_analysis(entity_id, max_hops, limit), timeout=5)
         return {"data": data, "entity_id": entity_id}
-    except asyncio.TimeoutError:
-        pass
-    except Exception:
-        pass
-
-    # Mock fallback — simple 2-hop expansion
-    affected = set()
-    frontier = {entity_id}
-    for _ in range(max_hops):
-        next_frontier = set()
-        for rel in MOCK_RELATIONSHIPS:
-            if rel["source"] in frontier and rel["target"] not in affected:
-                next_frontier.add(rel["target"])
-                affected.add(rel["target"])
-        frontier = next_frontier
-        if not frontier:
-            break
-    nodes = [n for n in MOCK_NODES if n["id"] in affected][:limit]
-    return {"data": nodes, "entity_id": entity_id, "note": "Mock fallback"}
+    except asyncio.TimeoutError as exc:
+        raise graph_unavailable("Graph impact analysis timed out") from exc
+    except Exception as exc:
+        raise graph_unavailable("Graph impact analysis failed") from exc
 
 
 @router.get("/trace/{entity_id}")
@@ -747,30 +698,10 @@ async def trace_chain(
         from app.services.graph_service import graph_service
         data = await asyncio.wait_for(graph_service.trace_chain(entity_id, max_hops, limit), timeout=5)
         return {"data": data, "entity_id": entity_id}
-    except asyncio.TimeoutError:
-        pass
-    except Exception:
-        pass
-
-    # Mock fallback — BFS expansion
-    visited = {entity_id}
-    frontier = [entity_id]
-    for _ in range(max_hops):
-        next_frontier = []
-        for nid in frontier:
-            for rel in MOCK_RELATIONSHIPS:
-                neighbor = None
-                if rel["source"] == nid:
-                    neighbor = rel["target"]
-                elif rel["target"] == nid:
-                    neighbor = rel["source"]
-                if neighbor is not None and neighbor not in visited:
-                    visited.add(neighbor)
-                    next_frontier.append(neighbor)
-        frontier = next_frontier
-    nodes = [n for n in MOCK_NODES if n["id"] in visited][:limit]
-    rels = [r for r in MOCK_RELATIONSHIPS if r["source"] in visited and r["target"] in visited]
-    return {"data": {"nodes": nodes, "relationships": rels}, "entity_id": entity_id, "note": "Mock fallback"}
+    except asyncio.TimeoutError as exc:
+        raise graph_unavailable("Graph trace timed out") from exc
+    except Exception as exc:
+        raise graph_unavailable("Graph trace failed") from exc
 
 
 @router.get("/analytics/centrality")
@@ -780,20 +711,7 @@ async def centrality_analysis(limit: int = Query(20, ge=1, le=100)):
         from app.services.graph_service import graph_service
         data = await asyncio.wait_for(graph_service.centrality(limit), timeout=5)
         return {"data": data}
-    except asyncio.TimeoutError:
-        pass
-    except Exception:
-        pass
-
-    # Mock fallback
-    from collections import Counter
-    degree = Counter()
-    for rel in MOCK_RELATIONSHIPS:
-        degree[rel["source"]] += 1
-        degree[rel["target"]] += 1
-    results = []
-    for node_id, deg in degree.most_common(limit):
-        node = next((n for n in MOCK_NODES if n["id"] == node_id), None)
-        if node:
-            results.append({"label": node["label"], "pg_id": node_id, "name": node["name"], "degree": deg})
-    return {"data": results, "note": "Mock fallback"}
+    except asyncio.TimeoutError as exc:
+        raise graph_unavailable("Graph centrality analysis timed out") from exc
+    except Exception as exc:
+        raise graph_unavailable("Graph centrality analysis failed") from exc

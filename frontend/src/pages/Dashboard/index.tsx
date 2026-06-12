@@ -30,6 +30,7 @@ import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { useNavigate } from 'react-router-dom';
 import { getAlerts, getOEE, getOverview, getProductionStats } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 interface OverviewData {
   factories: { count: number };
@@ -239,7 +240,7 @@ export default function DashboardPage() {
       title: '时间',
       dataIndex: 'timestamp',
       width: 172,
-      render: (value: string) => (value ? new Date(value).toLocaleString('zh-CN') : '-'),
+      render: (value: string) => formatServerDateTime(value),
     },
   ];
 

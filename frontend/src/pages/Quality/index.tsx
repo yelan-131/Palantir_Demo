@@ -36,6 +36,7 @@ import {
   listInspections,
   wfStartInstance,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 import { exportCSV } from '@/utils/csvExport';
 
 const { Title, Text } = Typography;
@@ -482,7 +483,7 @@ export default function QualityPage() {
       dataIndex: 'inspected_at',
       key: 'inspected_at',
       width: 170,
-      render: (v: string) => (v ? new Date(v).toLocaleString('zh-CN') : '-'),
+      render: (v: string) => formatServerDateTime(v),
     },
   ];
 
@@ -707,9 +708,7 @@ export default function QualityPage() {
                         </div>
                         <div>
                           <Text type="secondary" style={{ fontSize: 12 }}>
-                            {step.timestamp
-                              ? new Date(step.timestamp).toLocaleString('zh-CN')
-                              : ''}
+                            {formatServerDateTime(step.timestamp, '')}
                           </Text>
                         </div>
                       </div>

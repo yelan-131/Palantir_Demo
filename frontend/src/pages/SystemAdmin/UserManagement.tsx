@@ -41,6 +41,7 @@ import {
   adminUpdateUser,
   adminUpdateUserSecurity,
 } from '@/services/api';
+import { formatServerDateTime } from '@/utils/dateTime';
 
 interface RoleItem { id: number; name: string; label: string }
 interface OrgUnitItem { id: number; name: string; org_type: string }
@@ -91,26 +92,6 @@ function renderCompactTags<T>(
 function getUserAvatarText(user: UserItem) {
   const source = user.display_name || user.username || '?';
   return source.trim().slice(0, 1).toUpperCase();
-}
-
-function formatServerDateTime(value?: string | null) {
-  if (!value) return '-';
-  const raw = String(value).trim();
-  if (!raw) return '-';
-  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
-  const normalized = raw.replace(' ', 'T').replace(/\.(\d{3})\d+/, '.$1');
-  const date = new Date(hasTimezone ? normalized : `${normalized}Z`);
-  if (Number.isNaN(date.getTime())) return raw;
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date).replace(/\//g, '-');
 }
 
 function normalizeUserPayload(values: any) {
@@ -611,8 +592,8 @@ function UserPreviewPanel({
           columns={[
             { title: '方式', dataIndex: 'login_method', width: 80 },
             { title: 'IP', dataIndex: 'ip_address', width: 120 },
-            { title: '过期时间', dataIndex: 'expires_at', width: 150, render: formatServerDateTime },
-            { title: '撤销时间', dataIndex: 'revoked_at', width: 150, render: formatServerDateTime },
+            { title: '过期时间', dataIndex: 'expires_at', width: 150, render: (value: string | null) => formatServerDateTime(value) },
+            { title: '撤销时间', dataIndex: 'revoked_at', width: 150, render: (value: string | null) => formatServerDateTime(value) },
             {
               title: '操作',
               width: 80,

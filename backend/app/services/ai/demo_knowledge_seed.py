@@ -385,6 +385,7 @@ def _asset_bytes(asset: dict[str, Any]) -> bytes:
 
 
 async def seed_demo_knowledge_assets() -> dict[str, int]:
+    tenant_id = 1
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
     seeded_documents = 0
     seeded_chunks = 0
@@ -398,6 +399,7 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
             updated_at = datetime.now()
             document = {
                 "document_id": asset["document_id"],
+                "tenant_id": tenant_id,
                 "source_file_name": asset["file_name"],
                 "source_type": source_type,
                 "title": asset["title"],
@@ -409,12 +411,15 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
                 "status": "indexed",
                 "updated_at": updated_at.isoformat(),
             }
-            chunks = markdown_to_chunks(markdown, asset["document_id"], asset["permission_scope"])
+            chunks = markdown_to_chunks(markdown, asset["document_id"], asset["permission_scope"], tenant_id=tenant_id)
             for index, chunk in enumerate(chunks, start=1):
                 chunk["chunk_id"] = f"{asset['document_id']}-chunk-{index:02d}"
 
             row = await session.scalar(
-                select(KnowledgeDocument).where(KnowledgeDocument.document_id == asset["document_id"])
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.tenant_id == tenant_id,
+                    KnowledgeDocument.document_id == asset["document_id"],
+                )
             )
             if row:
                 row.source_file_name = document["source_file_name"]
@@ -429,6 +434,7 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
                 row.updated_at = updated_at
             else:
                 session.add(KnowledgeDocument(
+                    tenant_id=tenant_id,
                     document_id=document["document_id"],
                     source_file_name=document["source_file_name"],
                     source_type=document["source_type"],
@@ -443,9 +449,15 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
                 ))
                 seeded_documents += 1
 
-            await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == asset["document_id"]))
+            await session.execute(
+                delete(KnowledgeChunk).where(
+                    KnowledgeChunk.tenant_id == tenant_id,
+                    KnowledgeChunk.document_id == asset["document_id"],
+                )
+            )
             for chunk in chunks:
                 session.add(KnowledgeChunk(
+                    tenant_id=tenant_id,
                     chunk_id=chunk["chunk_id"],
                     document_id=chunk["document_id"],
                     title=chunk["title"],
@@ -457,9 +469,15 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
                 ))
                 seeded_chunks += 1
 
-            await session.execute(delete(KnowledgeObjectLink).where(KnowledgeObjectLink.document_id == asset["document_id"]))
+            await session.execute(
+                delete(KnowledgeObjectLink).where(
+                    KnowledgeObjectLink.tenant_id == tenant_id,
+                    KnowledgeObjectLink.document_id == asset["document_id"],
+                )
+            )
             for object_type, object_id, object_name in asset["links"]:
                 session.add(KnowledgeObjectLink(
+                    tenant_id=tenant_id,
                     document_id=asset["document_id"],
                     object_type=object_type,
                     object_id=object_id,
@@ -474,6 +492,7 @@ async def seed_demo_knowledge_assets() -> dict[str, int]:
                 CHUNKS[chunk["chunk_id"]] = chunk
             JOBS[f"job-{asset['document_id']}"] = {
                 "job_id": f"job-{asset['document_id']}",
+                "tenant_id": tenant_id,
                 "asset_id": f"asset-{asset['document_id']}",
                 "document_id": asset["document_id"],
                 "status": "completed",

@@ -188,6 +188,48 @@ export interface DataSourceMetadataInfo {
   error?: string | null;
 }
 
+export interface DataQualityRuleInfo {
+  key?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  status?: string;
+  passRate?: number | null;
+  owner?: string;
+  updatedAt?: string;
+  [key: string]: unknown;
+}
+
+export interface SemanticMappingNode {
+  id: string;
+  type: string;
+  label: string;
+  data: Record<string, unknown>;
+  position: { x: number; y: number };
+}
+
+export interface SemanticMappingEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  status: string;
+  label?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface SemanticMappingWorkbenchResponse {
+  object_code?: string | null;
+  source_id?: number | null;
+  nodes: SemanticMappingNode[];
+  edges: SemanticMappingEdge[];
+  objects: OntologyObjectInfo[];
+  metadata: DataSourceMetadataInfo[];
+  candidates: OntologyCandidateInfo[];
+  mappings: OntologyMappingInfo[];
+  layout?: Record<string, unknown>;
+}
+
 // ── Request interceptor: attach Authorization: Bearer <token> ─────
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem('mf_token');
@@ -291,6 +333,12 @@ export const getEntityRelationships = (entityType: string, entityId: number, rel
 export const listSemanticDataAssets = () => api.get('/semantic-assets/data-assets');
 export const scanSemanticDataAssetMetadata = (assetId: number, data?: { limit_tables?: number; sample_limit?: number }) =>
   api.post('/semantic-assets/data-assets/' + assetId + '/metadata-scan', data ?? {});
+export const createSemanticDataQualityRule = (data: Partial<DataQualityRuleInfo>) =>
+  api.post('/semantic-assets/data-quality-rules', data);
+export const updateSemanticDataQualityRule = (ruleId: number | string, data: Partial<DataQualityRuleInfo>) =>
+  api.put(`/semantic-assets/data-quality-rules/${ruleId}`, data);
+export const deleteSemanticDataQualityRule = (ruleId: number | string) =>
+  api.delete(`/semantic-assets/data-quality-rules/${ruleId}`);
 export const listSemanticOntologyObjects = () => api.get<{ data: OntologyObjectInfo[]; source?: string }>('/semantic-assets/ontology-objects');
 export const listSemanticOntologyRelations = () => api.get<{ data: OntologyRelationInfo[]; source?: string }>('/semantic-assets/ontology-relations');
 export const createSemanticOntologyObject = (data: Partial<OntologyObjectInfo> & { fields?: OntologyFieldInfo[] }) =>
@@ -303,6 +351,22 @@ export const generateSemanticOntologyCandidates = (data?: { source_id?: number; 
   api.post<{ data: OntologyCandidateInfo[]; count: number }>('/semantic-assets/ontology-candidates/generate', data ?? {});
 export const listSemanticOntologyCandidates = (params?: { status?: string; candidate_type?: string }) =>
   api.get<{ data: OntologyCandidateInfo[] }>('/semantic-assets/ontology-candidates', { params });
+export const getSemanticMappingWorkbench = (params?: { object_code?: string; source_id?: number; status?: string }) =>
+  api.get<{ data: SemanticMappingWorkbenchResponse }>('/semantic-assets/semantic-mapping/workbench', { params });
+export const createSemanticMappingCandidate = (data: {
+  source_node: SemanticMappingNode | Record<string, unknown>;
+  target_node: SemanticMappingNode | Record<string, unknown>;
+  confidence?: number;
+  note?: string;
+}) => api.post<{ data: OntologyCandidateInfo }>('/semantic-assets/semantic-mapping/candidates', data);
+export const updateSemanticMappingCandidate = (id: number, data: { target_object_code?: string; target_field_code?: string; confidence?: number; note?: string }) =>
+  api.put<{ data: OntologyCandidateInfo }>(`/semantic-assets/semantic-mapping/candidates/${id}`, data);
+export const approveSemanticMappingCandidate = (id: number, data?: { note?: string }) =>
+  api.post(`/semantic-assets/semantic-mapping/candidates/${id}/approve`, data ?? {});
+export const rejectSemanticMappingCandidate = (id: number, data?: { note?: string }) =>
+  api.post(`/semantic-assets/semantic-mapping/candidates/${id}/reject`, data ?? {});
+export const saveSemanticMappingLayout = (data: { object_code?: string | null; source_id?: number | null; layout: Record<string, unknown> }) =>
+  api.put('/semantic-assets/semantic-mapping/layout', data);
 export const approveSemanticOntologyCandidate = (id: number, data?: { note?: string }) =>
   api.post(`/semantic-assets/ontology-candidates/${id}/approve`, data ?? {});
 export const rejectSemanticOntologyCandidate = (id: number, data?: { note?: string }) =>
@@ -559,6 +623,9 @@ export const testAIProvider = (providerConfig: Record<string, unknown>) =>
 export const getAISettings = () => api.get('/ai/settings');
 export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
 export const testSavedAISettings = () => api.post('/ai/settings/test');
+export const getAIAgentRegistry = () => api.get('/ai/agent-registry');
+export const seedAIAgentRegistry = () => api.post('/ai/agent-registry/seed');
+export const updateAIAgentRegistry = (payload: Record<string, unknown>) => api.put('/ai/agent-registry', payload);
 
 // Reports
 export const listReports = (params?: Record<string, unknown>) => api.get('/reports', { params });
@@ -628,7 +695,13 @@ export const authLoginWithMfa = (username: string, password: string, mfaCode?: s
 export const authLogout = () => api.post('/auth/logout');
 export const authMe = () => api.get('/auth/me');
 export const getOidcConfig = () => api.get('/auth/oidc/config');
-export const getOidcLoginUrl = (redirectUri?: string) => api.post('/auth/oidc/login-url', { redirect_uri: redirectUri });
+export const getOidcLoginUrl = (redirectUri?: string, options?: { tenantId?: number; tenantSlug?: string; loginHint?: string }) =>
+  api.post('/auth/oidc/login-url', {
+    redirect_uri: redirectUri,
+    tenant_id: options?.tenantId,
+    tenant_slug: options?.tenantSlug,
+    login_hint: options?.loginHint,
+  });
 export const completeOidcLogin = (data: Record<string, unknown>) => api.post('/auth/oidc/callback', data);
 
 // Admin (Phase 3)
@@ -998,9 +1071,9 @@ export const listPlatformForms = (params?: { application_id?: number }) =>
   api.get('/forms', { params });
 export const createPlatformForm = (data: Record<string, unknown>) =>
   api.post('/forms', data);
-export const getPlatformForm = (id: number | string, params?: { schema?: 'draft' | 'published' }) =>
+export const getPlatformForm = (id: number | string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'create' | 'edit' | 'designer' }) =>
   api.get(`/forms/${id}`, { params });
-export const getPlatformFormByCode = (code: string, params?: { schema?: 'draft' | 'published' }) =>
+export const getPlatformFormByCode = (code: string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'create' | 'edit' | 'designer' }) =>
   api.get(`/forms/code/${code}`, { params });
 export const updatePlatformForm = (id: number | string, data: Record<string, unknown>) =>
   api.put(`/forms/${id}`, data);
