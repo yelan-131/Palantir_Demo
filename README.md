@@ -1,6 +1,6 @@
 # ManuFoundry / Palantir Demo
 
-Current version: 0.3.8
+Current version: 0.3.9
 
 ManuFoundry is a manufacturing low-code data workspace prototype. It combines configurable applications, forms, menus, identity access, knowledge assets, graph exploration, quality impact analysis, and an evolving AI Agent layer for assisted business configuration.
 
@@ -18,16 +18,15 @@ This repository is still in active development and is intended for demo and prod
 - AI assistant APIs, provider abstraction, prompt/tool scaffolding, knowledge context, and low-code action guidance.
 - AI Agent work in progress, inspired by OpenClaw and Harness Agent style architecture: model invocation boundaries, task planning drafts, tool calls, knowledge context, action review, and safety policies.
 
-## 0.3.8 Focus
+## 0.3.9 Focus
 
-- AI Agent items, tool-use loop, events, hooks, context layers, compaction, budget, and tool result processing.
-- Runtime configuration, production error handling, permission resolving, tenant context, and confirmation storage for auditable Agent writes.
-- Physical low-code form tables, form code sequences, platform configuration seeds, and clearer form engine boundaries.
-- Data quality rules and ontology mapping layouts for richer semantic asset governance.
-- AI Agent registry tables plus `data/agent_registry` configuration for versioned skills, tools, hooks, and tenant policies.
-- Frontend updates across AI workspace, form designer, semantic asset center, workflow, account center, and Taobao prototype pages.
+- Workflow definitions now snapshot each version into `workflow_def_versions`, so running instances are protected from later definition edits.
+- Workflow instances pin `workflow_version` when they start, including instances launched by form record creation.
+- Workflow definition create/update/delete routes require administrator access, while approval actions use the authenticated token identity.
+- Workflow notifications, read markers, cancellation, approval, and legacy `act` behavior have tighter user-scope checks.
+- Workflow tests now exercise the database-backed path for version pinning, countersign, terminal-state protection, notification scope, and permissions.
 
-See [docs/operations/release-0.3.8.md](docs/operations/release-0.3.8.md) for the detailed release notes.
+See [docs/operations/release-0.3.9.md](docs/operations/release-0.3.9.md) for the detailed release notes.
 
 ## Tech Stack
 

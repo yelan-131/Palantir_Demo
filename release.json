@@ -1,25 +1,21 @@
 {
-  "version": "0.3.8",
-  "released_at": "2026-06-12",
-  "title": "Agent 工具协议、物理表单与本体映射增强",
-  "summary": "0.3.8 聚焦 AI Agent items/tool-use 协议、运行时配置、确认与预算治理、物理表单表、数据质量规则、Agent 注册表、编码序列和本体映射布局。",
+  "version": "0.3.9",
+  "released_at": "2026-06-15",
+  "title": "工作流定义快照与审批治理增强",
+  "summary": "0.3.9 聚焦工作流定义版本快照、实例版本锁定、管理员定义治理、审批身份校验、通知范围隔离和表单触发工作流的版本固定。",
   "highlights": [
-    "AI Agent 增强 items 协议、tool-use loop、事件、hook、上下文层、压缩、预算和工具结果处理链路。",
-    "新增运行时配置、生产错误处理、权限解析、租户上下文和确认存储，让 Agent 写入路径更可审计。",
-    "低代码表单支持物理表、编码序列和配置种子，动态记录与表单引擎边界更清晰。",
-    "新增数据质量规则与本体映射布局迁移，语义资产中心可承载更完整的映射、候选和布局信息。",
-    "新增 AI Agent 注册表表结构和 data/agent_registry 配置，为技能、工具、hook 和租户策略提供可版本化来源。",
-    "前端补强 AI 工作区、表单设计器、语义资产中心、工作流、账号中心和淘宝原型页体验。"
+    "工作流定义创建和更新会写入 workflow_def_versions 快照，运行中的实例不再被后续编辑重塑。",
+    "工作流实例新增 workflow_version 绑定，表单触发和手动启动都固定到启动时定义版本。",
+    "定义创建、更新、删除收紧到管理员入口，审批和旧 act 接口统一使用登录 token 身份。",
+    "通知查询、标记已读和取消实例增加用户范围控制，减少跨用户误操作风险。",
+    "后端工作流测试改为真实数据库路径，覆盖版本锁定、会签、终态保护、通知隔离和权限边界。"
   ],
   "details": [
-    "新增 0029_form_physical_tables、0030_seed_platform_config、0031_role_is_active、0032_data_quality_rules、0033_ai_agent_items_protocol、0034_ai_agent_registry_tables、0035_form_code_sequences 和 0036_ontology_mapping_layouts 迁移。",
-    "新增 Agent items、tool envelope、tool loader、tool handlers、tool-use loop、tool result processor、events、hooks、budget、compactor、context layers、permission resolver 和 confirmation store 服务及测试。",
-    "新增 form_engine API 模块、runtime_config、production_errors、semantic mapping service 和 ontology AI candidate service，整理生产运行边界。",
-    "扩展 AI Assistant、知识库、语义资产、图谱、表单、工作流、应用、认证和管理 API，以支撑更稳定的多租户演示路径。",
-    "前端更新 App Programs、Dynamic Page、Form Settings、Semantic Asset Center、Workflow、Account Center、Login 和共享样式。",
-    "新增淘宝原型页面、统一日期时间工具和 Agent 注册表数据目录；清理根目录 OGSM 生成稿。",
-    "更新测试覆盖 AI 工具循环、上下文层、hook、预算、确认存储、权限解析、运行时配置、工具加载和结果处理。",
-    "版本信息同步到 release.json、backend/release.json、backend APP_VERSION、frontend package metadata、README 和文档索引。"
+    "新增 0037_workflow_def_versions 迁移，串接在 0036_ontology_mapping_layouts 之后，创建 workflow_def_versions 并为现有定义回填当前版本快照。",
+    "新增 WorkflowDefVersion 模型和 WorkflowInstance.workflow_version 字段，列表、详情、审批推进和业务数据集读取优先使用实例绑定快照。",
+    "移除工作流 API 的内存 mock 回退，生产与测试统一走数据库，缺失或不可用时返回明确错误。",
+    "表单记录创建触发工作流时写入 workflow_version，避免表单提交后的流程被定义草稿或新版配置影响。",
+    "更新 release.json、backend/release.json、backend APP_VERSION、frontend package metadata、README 和运维文档索引。"
   ],
   "show_popup": true
 }

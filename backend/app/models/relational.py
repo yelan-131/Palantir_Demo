@@ -1118,12 +1118,37 @@ class WorkflowDef(TimestampMixin, Base):
     instances: Mapped[list["WorkflowInstance"]] = relationship(back_populates="definition")
 
 
+class WorkflowDefVersion(TimestampMixin, Base):
+    """Immutable snapshot of a workflow definition at a published version.
+
+    Instances pin ``workflow_version`` at start so editing a definition can
+    never reshape the steps of in-flight instances (the form layer has the
+    same pattern in FormVersion).
+    """
+
+    __tablename__ = "workflow_def_versions"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "version", name="uq_workflow_def_versions_workflow_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow_defs.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    config: Mapped[str] = mapped_column(Text, default="{}")
+    form_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft")
+    published_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class WorkflowInstance(TimestampMixin, Base):
     __tablename__ = "workflow_instances"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
     workflow_id: Mapped[int] = mapped_column(ForeignKey("workflow_defs.id"))
+    workflow_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     initiator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")

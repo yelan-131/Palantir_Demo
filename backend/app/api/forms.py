@@ -690,6 +690,8 @@ async def _start_form_workflows(
         workflow_def = await db.get(WorkflowDef, binding.workflow_id)
         if not workflow_def or workflow_def.tenant_id != tenant_id or workflow_def.status not in {"published", "active"}:
             continue
+        # At creation time the live config equals the latest snapshot; the
+        # instance pins workflow_version below so later edits cannot reshape it.
         config = json.loads(workflow_def.config) if isinstance(workflow_def.config, str) else workflow_def.config
         steps = _workflow_config_steps(config if isinstance(config, dict) else {})
         first_step_index = _find_first_approval_step(steps) if steps else 0
@@ -721,6 +723,7 @@ async def _start_form_workflows(
         instance = WorkflowInstance(
             tenant_id=tenant_id,
             workflow_id=workflow_def.id,
+            workflow_version=int(workflow_def.version or 1),
             title=title,
             initiator_id=initiator_id,
             form_data=json.dumps(form_data, ensure_ascii=False, default=str),

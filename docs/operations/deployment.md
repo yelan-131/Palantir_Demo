@@ -1,6 +1,6 @@
 # Deployment
 
-Last updated: 2026-06-12
+Last updated: 2026-06-15
 
 This document reflects the current repository files and the project deployment convention.
 
@@ -194,10 +194,11 @@ are create-only and do not rotate existing user password hashes.
 
 Current migration head includes SaaS hardening, ontology center persistence,
 physical form tables, data quality rules, AI Agent items/registry tables, form
-code sequences, and ontology mapping layouts up through
-`0036_ontology_mapping_layouts.py`. Run migrations before verifying tenant
-management, form publishing, Knowledge Center chat, Agent drafts, dynamic form
-records, semantic mappings, and application menus.
+code sequences, ontology mapping layouts, and workflow definition version
+snapshots up through `0037_workflow_def_versions.py`. Run migrations before
+verifying tenant management, form publishing, Knowledge Center chat, Agent
+drafts, dynamic form records, semantic mappings, application menus, and
+workflow approvals.
 
 Seed data when needed:
 
