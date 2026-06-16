@@ -29,6 +29,7 @@ def load_release_info() -> dict[str, Any]:
             "summary": "",
             "highlights": [],
             "details": [],
+            "records": [],
             "show_popup": False,
         }
 
@@ -38,6 +39,7 @@ def load_release_info() -> dict[str, Any]:
     data.setdefault("version", settings.APP_VERSION)
     data.setdefault("highlights", [])
     data.setdefault("details", [])
+    data.setdefault("records", [])
     data.setdefault("show_popup", True)
     return data
 

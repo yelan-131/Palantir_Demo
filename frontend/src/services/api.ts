@@ -15,7 +15,25 @@ export interface ReleaseInfo {
   summary?: string;
   highlights?: string[];
   details?: string[];
+  records?: ReleaseRecord[];
+  history?: ReleaseRecord[];
   show_popup?: boolean;
+}
+
+export interface ReleaseRecord {
+  version: string;
+  released_at?: string | null;
+  date?: string | null;
+  title?: string;
+  summary?: string;
+  categories?: {
+    added?: string[];
+    improved?: string[];
+    removed?: string[];
+  };
+  added?: string[];
+  improved?: string[];
+  removed?: string[];
 }
 
 export interface PublicTenantProfile {

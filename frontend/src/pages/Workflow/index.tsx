@@ -1,6 +1,7 @@
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
   EditOutlined,
   FileSearchOutlined,
   FormOutlined,
@@ -8,10 +9,11 @@ import {
   InboxOutlined,
   RollbackOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Empty, Space, Tabs, Tag, Timeline, Tooltip, Typography } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { Button, Drawer, Empty, Input, Modal, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { createRef, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { wfListBusinessItems } from '@/services/api';
+import { wfApproveOrReject, wfListBusinessItems } from '@/services/api';
+import { useAuthStore } from '@/stores/authStore';
 import { formatServerDateTime } from '@/utils/dateTime';
 
 export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned' | 'rejected';
@@ -214,6 +216,7 @@ function workflowStatusClass(status: string) {
 
 export default function WorkflowPage() {
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTab = searchParams.get('tab') as WorkflowViewTab | null;
   const validTabs: WorkflowViewTab[] = ['all', ...orderedTabs];
@@ -223,6 +226,7 @@ export default function WorkflowPage() {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [detailOpen, setDetailOpen] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState<'approve' | 'reject' | null>(null);
 
   const loadItems = async () => {
     setLoading(true);
@@ -244,6 +248,19 @@ export default function WorkflowPage() {
     activeTab === 'all' ? dataset.items : dataset.items.filter((item) => item.status === activeTab)
   ), [activeTab, dataset.items]);
   const selectedItem = dataset.items.find((item) => item.id === selectedId);
+  const currentUserId = Number(user?.id || 0);
+  const canApproveSelectedItem = Boolean(
+    selectedItem?.status === 'pending'
+    && selectedItem.workflow?.id
+    && (
+      user?.is_admin
+      || selectedItem.current_assignees?.some((assignee) => Number(assignee.id) === currentUserId)
+      || selectedItem.workflow?.current_assignees?.some((assignee) => Number(assignee.id) === currentUserId)
+      || selectedItem.workflow?.approvals?.some((approval) => (
+        Number(approval.approver_id) === currentUserId && !approval.action
+      ))
+    ),
+  );
 
   const countByTab = (tab: WorkflowViewTab) => {
     if (tab === 'all') return dataset.items.length;
@@ -265,6 +282,46 @@ export default function WorkflowPage() {
 
   const openSourceRecord = (item: WorkflowBusinessItem) => {
     if (item.route_path) navigate(item.route_path);
+  };
+
+  const handleWorkflowAction = (action: 'approve' | 'reject') => {
+    if (!selectedItem?.workflow?.id || approvalLoading) return;
+    const item = selectedItem;
+    const commentRef = createRef<any>();
+    Modal.confirm({
+      title: action === 'approve' ? '审批通过' : '驳回申请',
+      content: (
+        <div style={{ marginTop: 12 }}>
+          <Typography.Text type="secondary">{item.title}</Typography.Text>
+          <Input.TextArea
+            ref={commentRef}
+            rows={3}
+            placeholder="审批意见（可选）"
+            style={{ marginTop: 12 }}
+          />
+        </div>
+      ),
+      okText: action === 'approve' ? '通过' : '驳回',
+      okButtonProps: { danger: action === 'reject' },
+      cancelText: '取消',
+      onOk: async () => {
+        const comment = commentRef.current?.resizableTextArea?.textArea?.value
+          ?? commentRef.current?.input?.value
+          ?? '';
+        setApprovalLoading(action);
+        try {
+          await wfApproveOrReject(item.workflow!.id, { action, comment });
+          message.success(action === 'approve' ? '审批已通过' : '已驳回申请');
+          await loadItems();
+          setDetailOpen(false);
+          setSelectedId(undefined);
+        } catch {
+          message.error('审批操作失败');
+        } finally {
+          setApprovalLoading(null);
+        }
+      },
+    });
   };
 
   const renderWorkflowDetail = () => {
@@ -398,12 +455,28 @@ export default function WorkflowPage() {
             },
           ]}
         />
-        <div className="workflow-detail-footer">
-          <button type="button"><HistoryOutlined />审批历史</button>
-          <button type="button"><FileSearchOutlined />历史版本</button>
-          <button type="button"><ClockCircleOutlined />操作日志</button>
-          <button type="button"><FormOutlined />发布记录</button>
-        </div>
+        {canApproveSelectedItem && (
+          <div className="workflow-detail-approval-actions">
+            <Button
+              danger
+              icon={<CloseOutlined />}
+              loading={approvalLoading === 'reject'}
+              disabled={Boolean(approvalLoading)}
+              onClick={() => handleWorkflowAction('reject')}
+            >
+              驳回
+            </Button>
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              loading={approvalLoading === 'approve'}
+              disabled={Boolean(approvalLoading)}
+              onClick={() => handleWorkflowAction('approve')}
+            >
+              通过
+            </Button>
+          </div>
+        )}
       </div>
     );
   };

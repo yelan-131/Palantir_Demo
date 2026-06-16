@@ -24,10 +24,12 @@ import {
   DownloadOutlined,
   DownOutlined,
   HomeOutlined,
+  LeftOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RightOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
   ShopOutlined,
@@ -98,7 +100,57 @@ interface ReleaseInfo {
   summary?: string;
   highlights?: string[];
   details?: string[];
+  records?: ReleaseRecord[];
+  history?: ReleaseRecord[];
   show_popup?: boolean;
+}
+
+type ReleaseCategoryKey = 'added' | 'improved' | 'removed';
+
+interface ReleaseRecord {
+  version: string;
+  released_at?: string | null;
+  date?: string | null;
+  title?: string;
+  summary?: string;
+  categories?: Partial<Record<ReleaseCategoryKey, string[]>>;
+  added?: string[];
+  improved?: string[];
+  removed?: string[];
+}
+
+const releaseCategoryOrder: ReleaseCategoryKey[] = ['added', 'improved', 'removed'];
+const releaseCategoryLabels: Record<ReleaseCategoryKey, string> = {
+  added: '新增功能',
+  improved: '优化功能',
+  removed: '删减功能',
+};
+
+function normalizeReleaseRecords(release?: ReleaseInfo | null): ReleaseRecord[] {
+  if (!release) return [];
+  const records = release.records?.length ? release.records : release.history;
+  if (records?.length) return records;
+  if (!release.version) return [];
+  return [{
+    version: release.version,
+    released_at: release.released_at,
+    title: release.title,
+    summary: release.summary,
+    categories: {
+      added: release.highlights || [],
+      improved: release.details || [],
+    },
+  }];
+}
+
+function releaseRecordCategories(record: ReleaseRecord) {
+  return releaseCategoryOrder
+    .map((key) => ({
+      key,
+      label: releaseCategoryLabels[key],
+      items: record.categories?.[key] || record[key] || [],
+    }))
+    .filter((section) => section.items.length);
 }
 
 const runtimeRouteAliasMap: Record<string, string> = {
@@ -333,6 +385,7 @@ function AppContent() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
+  const [releaseRecordIndex, setReleaseRecordIndex] = useState(0);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -435,8 +488,20 @@ function AppContent() {
     && !location.pathname.startsWith('/form-settings/')
     && !['/', '/workflow', '/system-admin', '/account-center'].includes(location.pathname);
   const runtimeTitle = currentMenuTitle || getRuntimePageTitle(location.pathname);
-  const releaseUpdates = [...(releaseInfo?.highlights || []), ...(releaseInfo?.details || [])];
-  const releaseUpdatesScrollable = releaseUpdates.length > 10;
+  const releaseRecords = normalizeReleaseRecords(releaseInfo);
+  const activeReleaseIndex = releaseRecords.length
+    ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
+    : 0;
+
+  useEffect(() => {
+    if (!releaseModalOpen) return;
+    setReleaseRecordIndex(0);
+  }, [releaseModalOpen, releaseInfo?.version]);
+
+  const moveReleaseRecord = (direction: -1 | 1) => {
+    if (!releaseRecords.length) return;
+    setReleaseRecordIndex((current) => (current + direction + releaseRecords.length) % releaseRecords.length);
+  };
 
 
   const breadcrumbItems = useMemo(() => {
@@ -705,10 +770,10 @@ function AppContent() {
 
       <Modal
         className="release-update-modal"
-        title={releaseInfo?.title || 'Release update'}
+        title="版本记录"
         open={releaseModalOpen}
         onCancel={acknowledgeRelease}
-        width={680}
+        width={760}
         footer={[
           <Button key="ok" type="primary" onClick={acknowledgeRelease}>
             我知道了
@@ -716,25 +781,78 @@ function AppContent() {
         ]}
       >
         <Space direction="vertical" size={14} className="release-update-content">
-          <div className="release-update-head">
-            <Typography.Text type="secondary">当前版本</Typography.Text>
-            <Typography.Title level={4} className="release-update-version">
-              v{releaseInfo?.version}
-            </Typography.Title>
-            {releaseInfo?.released_at && (
-              <Typography.Text type="secondary">发布日期：{releaseInfo.released_at}</Typography.Text>
-            )}
-          </div>
-          {releaseInfo?.summary && <Typography.Paragraph>{releaseInfo.summary}</Typography.Paragraph>}
-          {!!releaseUpdates.length && (
-            <div className="release-update-section">
-              <Typography.Text strong>本次更新</Typography.Text>
-              <div className={releaseUpdatesScrollable ? 'release-update-list release-update-list-scroll' : 'release-update-list'}>
-                {releaseUpdates.map((item, index) => (
-                  <div className="release-update-item" key={`${index}-${item}`}>
-                    <span>{index + 1}</span>
-                    <p>{item}</p>
+          {!!releaseRecords.length && (
+            <div className="release-record-carousel">
+              <div className="release-carousel-header">
+                <div className="release-carousel-version-meta">
+                  <span className="release-record-version">v{releaseRecords[activeReleaseIndex]?.version}</span>
+                  {(releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date) && (
+                    <span className="release-record-date">
+                      {releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date}
+                    </span>
+                  )}
+                </div>
+                <div className="release-carousel-inline-actions">
+                  <Button
+                    aria-label="上一版本"
+                    className="release-carousel-inline-button"
+                    disabled={releaseRecords.length < 2}
+                    icon={<LeftOutlined />}
+                    size="small"
+                    onClick={() => moveReleaseRecord(-1)}
+                  >
+                    上一版本
+                  </Button>
+                  <Button
+                    aria-label="下一版本"
+                    className="release-carousel-inline-button"
+                    disabled={releaseRecords.length < 2}
+                    icon={<RightOutlined />}
+                    iconPosition="end"
+                    size="small"
+                    onClick={() => moveReleaseRecord(1)}
+                  >
+                    下一版本
+                  </Button>
+                </div>
+              </div>
+              <div className="release-carousel-shell">
+                <div className="release-carousel-viewport">
+                  <div className="release-carousel-track" style={{ transform: `translateX(-${activeReleaseIndex * 100}%)` }}>
+                    {releaseRecords.map((record) => {
+                      const sections = releaseRecordCategories(record);
+                      return (
+                        <section className="release-record-entry" key={`${record.version}-${record.released_at || record.date || ''}`}>
+                          {record.title && <div className="release-record-title">{record.title}</div>}
+                          {record.summary && <Typography.Paragraph className="release-record-summary">{record.summary}</Typography.Paragraph>}
+                          <div className="release-category-list">
+                            {sections.map((section) => (
+                              <div className="release-category-block" key={`${record.version}-${section.key}`}>
+                                <div className={`release-category-title release-category-${section.key}`}>{section.label}</div>
+                                <ul>
+                                  {section.items.map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    })}
                   </div>
+                </div>
+              </div>
+              <div className="release-carousel-dots">
+                {releaseRecords.map((record, index) => (
+                  <button
+                    className={index === activeReleaseIndex ? 'release-carousel-dot is-active' : 'release-carousel-dot'}
+                    key={`${record.version}-${index}`}
+                    type="button"
+                    onClick={() => setReleaseRecordIndex(index)}
+                  >
+                    <span>{record.version}</span>
+                  </button>
                 ))}
               </div>
             </div>

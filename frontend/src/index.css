@@ -52,7 +52,16 @@ button {
 }
 
 .release-update-modal .ant-modal-body {
-  padding-top: 12px;
+  padding-top: 8px;
+}
+
+.release-update-modal .ant-modal-title {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.release-update-modal .ant-modal-footer {
+  display: none;
 }
 
 .release-update-content {
@@ -60,10 +69,199 @@ button {
 }
 
 .release-update-head {
-  padding: 12px 14px;
-  border: 1px solid var(--mf-border);
+  display: none;
+}
+
+.release-update-content > .ant-typography {
+  display: none;
+}
+
+.release-record-carousel {
+  width: 100%;
+}
+
+.release-carousel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #e3e9ee;
   border-radius: 8px;
-  background: var(--mf-panel-soft);
+  background: #f8fafb;
+}
+
+.release-carousel-version-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.release-carousel-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.release-carousel-inline-button.ant-btn {
+  height: 28px;
+  border-radius: 6px;
+  color: var(--mf-primary-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.release-carousel-shell {
+  position: relative;
+  min-height: 480px;
+}
+
+.release-carousel-viewport {
+  overflow: hidden;
+}
+
+.release-carousel-track {
+  display: flex;
+  width: 100%;
+  transition: transform 320ms ease;
+  will-change: transform;
+}
+
+.release-carousel-track .release-record-entry {
+  flex: 0 0 100%;
+  max-height: min(64vh, 600px);
+  overflow-y: auto;
+  padding: 0 4px 4px;
+}
+
+.release-carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.release-carousel-dot {
+  min-width: 42px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #eef2f5;
+  color: var(--mf-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 180ms ease;
+}
+
+.release-carousel-dot.is-active {
+  border-color: rgba(47, 95, 115, 0.34);
+  background: var(--mf-primary);
+  color: #fff;
+}
+
+.release-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+}
+
+.release-record-list-scroll {
+  max-height: min(68vh, 620px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.release-record-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.release-record-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 30px;
+}
+
+.release-record-version {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2f7df6, #7847f4);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.release-record-date {
+  color: #5d6972;
+  font-size: 14px;
+}
+
+.release-record-title {
+  color: var(--mf-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.release-record-summary.ant-typography {
+  margin: 0;
+  color: var(--mf-muted);
+  line-height: 1.7;
+}
+
+.release-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.release-category-block {
+  padding: 14px 18px 12px;
+  border-radius: 8px;
+  background: #f6f7f8;
+}
+
+.release-category-title {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.release-category-added {
+  color: #268344;
+}
+
+.release-category-improved {
+  color: #2867b2;
+}
+
+.release-category-removed {
+  color: #9a4d21;
+}
+
+.release-category-block ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.release-category-block li {
+  margin: 4px 0;
+  color: #363f45;
+  line-height: 1.55;
 }
 
 .release-update-version.ant-typography {
@@ -71,13 +269,13 @@ button {
 }
 
 .release-update-section {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 8px;
 }
 
 .release-update-list {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 8px;
   margin-top: 2px;
@@ -10775,6 +10973,24 @@ button {
 .workflow-detail-footer .anticon {
   color: #2f3d46;
   font-size: 17px;
+}
+
+.workflow-detail-approval-actions {
+  flex: 0 0 auto;
+  margin: 0 -24px -12px;
+  padding: 14px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #e8eef2;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -8px 18px rgba(31, 111, 134, 0.06);
+}
+
+.workflow-detail-approval-actions .ant-btn {
+  min-width: 92px;
+  border-radius: 4px;
+  font-weight: 600;
 }
 
 .workflow-approval-drawer .workflow-opinion-form {
