@@ -336,7 +336,7 @@ export default function PipelinePage() {
             <Statistic
               title="活跃管线"
               value={activeCount}
-              valueStyle={{ color: '#52c41a' }}
+              valueStyle={{ color: 'var(--mf-success)' }}
               prefix={<CheckCircleOutlined />}
             />
           </Card>
@@ -346,7 +346,7 @@ export default function PipelinePage() {
             <Statistic
               title="运行中"
               value={runningCount}
-              valueStyle={{ color: '#1677ff' }}
+              valueStyle={{ color: 'var(--mf-primary)' }}
               prefix={<SyncOutlined spin={runningCount > 0} />}
             />
           </Card>

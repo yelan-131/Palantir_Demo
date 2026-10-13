@@ -1,13 +1,7 @@
 import { useMemo } from 'react';
 import {
-  AppstoreOutlined,
-  AuditOutlined,
-  DatabaseOutlined,
-  FileSearchOutlined,
   LogoutOutlined,
-  NodeIndexOutlined,
-  RobotOutlined,
-  SafetyCertificateOutlined,
+  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { Avatar, Dropdown, Space, Tag } from 'antd';
@@ -30,9 +24,10 @@ interface AccountMenuProps {
   user: AccountMenuUser | null;
   onNavigate: (path: string) => void;
   onLogout: () => void;
+  compact?: boolean;
 }
 
-export default function AccountMenu({ user, onNavigate, onLogout }: AccountMenuProps) {
+export default function AccountMenu({ user, onNavigate, onLogout, compact = false }: AccountMenuProps) {
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
 
   const menu = useMemo<MenuProps>(() => ({
@@ -42,10 +37,10 @@ export default function AccountMenu({ user, onNavigate, onLogout }: AccountMenuP
         disabled: true,
         label: (
           <div className="user-menu-header">
-            <Avatar size={40} icon={<UserOutlined />} style={{ backgroundColor: '#2f5f73' }} />
+            <Avatar size={40} icon={<UserOutlined />} style={{ backgroundColor: 'var(--shell-avatar-background, #697586)' }} />
             <div>
-              <strong>{user?.display_name || '系统管理员'}</strong>
-              <span>{user?.email || user?.username || 'admin@manufoundry.local'}</span>
+              <strong>{user?.display_name || user?.username || '用户'}</strong>
+              <span>{user?.email || user?.username || ''}</span>
               <Tag color={user?.is_admin ? 'gold' : 'blue'}>{roleLabel}</Tag>
             </div>
           </div>
@@ -54,70 +49,17 @@ export default function AccountMenu({ user, onNavigate, onLogout }: AccountMenuP
       { type: 'divider' },
       {
         key: 'account-center',
-        label: '账号中心',
+        label: '个人账号',
         icon: <UserOutlined />,
         onClick: () => onNavigate('/account-center?section=account'),
       },
-      ...(user?.is_admin
-        ? [
-            { type: 'divider' as const },
-            {
-              key: 'ai-platform',
-              label: 'AI 与平台设置',
-              icon: <RobotOutlined />,
-              onClick: () => onNavigate('/account-center?section=ai'),
-            },
-            {
-              key: 'app-menu',
-              label: '应用与菜单',
-              icon: <AppstoreOutlined />,
-              onClick: () => onNavigate('/account-center?section=app-menu'),
-            },
-            {
-              key: 'data-assets',
-              label: '数据资产中心',
-              icon: <DatabaseOutlined />,
-              onClick: () => onNavigate('/account-center?section=data-assets'),
-            },
-            {
-              key: 'reference-data',
-              label: '数据字典与基础档案',
-              icon: <DatabaseOutlined />,
-              onClick: () => onNavigate('/account-center?section=reference-data'),
-            },
-            {
-              key: 'ontology-modeling',
-              label: '对象与关系中心',
-              icon: <NodeIndexOutlined />,
-              onClick: () => onNavigate('/account-center?section=ontology-modeling'),
-            },
-            {
-              key: 'knowledge',
-              label: '知识库中心',
-              icon: <FileSearchOutlined />,
-              onClick: () => onNavigate('/account-center?section=knowledge'),
-            },
-            {
-              key: 'identity-access',
-              label: '身份与权限',
-              icon: <SafetyCertificateOutlined />,
-              onClick: () => onNavigate('/account-center?section=identity-access'),
-            },
-            {
-              key: 'audit',
-              label: '审计与日志',
-              icon: <AuditOutlined />,
-              onClick: () => onNavigate('/account-center?section=audit'),
-            },
-          ]
-        : []),
-      { type: 'divider' },
       {
-        key: 'templates',
-        label: '模板市场',
-        icon: <AppstoreOutlined />,
-        onClick: () => onNavigate('/templates'),
+        key: 'preferences',
+        label: '个人设置',
+        icon: <SettingOutlined />,
+        onClick: () => onNavigate('/account-center?section=preferences'),
       },
+      { type: 'divider' },
       {
         key: 'logout',
         label: '退出登录',
@@ -129,11 +71,25 @@ export default function AccountMenu({ user, onNavigate, onLogout }: AccountMenuP
   }), [onLogout, onNavigate, roleLabel, user]);
 
   return (
-    <Dropdown menu={menu} trigger={['click']}>
-      <Space style={{ cursor: 'pointer' }}>
-        <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#2f5f73' }} />
-        <span style={{ fontSize: 13, color: '#273640' }}>{user?.display_name || '系统管理员'}</span>
-      </Space>
+    <Dropdown menu={menu} trigger={['click']} placement={compact ? 'topRight' : 'bottomRight'}>
+      <button
+        type="button"
+        className={compact ? 'shell-account-button' : 'account-menu-button'}
+        aria-label="用户与账号"
+        style={{
+          cursor: 'pointer',
+          border: 0,
+          background: 'transparent',
+          padding: compact ? 8 : 0,
+          borderRadius: 'var(--shell-radius, 10px)',
+          color: 'var(--shell-text, #273640)',
+        }}
+      >
+        <Space>
+          <Avatar size={compact ? 30 : 'small'} icon={<UserOutlined />} style={{ backgroundColor: 'var(--shell-avatar-background, #697586)' }} />
+          {!compact && <span style={{ fontSize: 13 }}>{user?.display_name || user?.username || '用户'}</span>}
+        </Space>
+      </button>
     </Dropdown>
   );
 }

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Spin, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
+import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import type { EChartsOption } from 'echarts';
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
 import type { WidgetInstance } from './types';
 import { fetchDataFromApi } from './WidgetRegistry';
 
@@ -51,11 +53,11 @@ export default function LineChartWidget({ widget, isEditing }: Props) {
     const uclData = controlLimits.ucl ? data.map((d: any) => d[controlLimits.ucl!]) : [];
     const lclData = controlLimits.lcl ? data.map((d: any) => d[controlLimits.lcl!]) : [];
     const clData = controlLimits.cl ? data.map((d: any) => d[controlLimits.cl!]) : [];
-    if (uclData.length) (option.series as any[]).push({ name: 'UCL', type: 'line', data: uclData, lineStyle: { type: 'dashed', color: '#ff4d4f' }, symbol: 'none' });
-    if (lclData.length) (option.series as any[]).push({ name: 'LCL', type: 'line', data: lclData, lineStyle: { type: 'dashed', color: '#ff4d4f' }, symbol: 'none' });
-    if (clData.length) (option.series as any[]).push({ name: 'CL', type: 'line', data: clData, lineStyle: { type: 'dashed', color: '#faad14' }, symbol: 'none' });
+    if (uclData.length) (option.series as any[]).push({ name: 'UCL', type: 'line', data: uclData, itemStyle: { color: colors.danger }, lineStyle: { type: 'dashed', color: colors.danger }, symbol: 'none' });
+    if (lclData.length) (option.series as any[]).push({ name: 'LCL', type: 'line', data: lclData, itemStyle: { color: colors.danger }, lineStyle: { type: 'dashed', color: colors.danger }, symbol: 'none' });
+    if (clData.length) (option.series as any[]).push({ name: 'CL', type: 'line', data: clData, itemStyle: { color: colors.warning }, lineStyle: { type: 'dashed', color: colors.warning }, symbol: 'none' });
     if (option.legend) (option.legend as any).data = [...(option.legend as any).data, 'UCL', 'LCL', 'CL'];
   }
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />;
+  return <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={option} style={{ height: '100%', width: '100%' }} />;
 }

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Spin, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
+import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import type { EChartsOption } from 'echarts';
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
 import type { WidgetInstance } from './types';
 import { fetchDataFromApi } from './WidgetRegistry';
 
@@ -50,7 +52,7 @@ export default function GaugeWidget({ widget, isEditing }: Props) {
       progress: { show: true, width: 14 },
       axisLine: { lineStyle: { width: 14 } },
       axisTick: { show: false },
-      splitLine: { length: 8, lineStyle: { width: 2, color: '#999' } },
+      splitLine: { length: 8, lineStyle: { width: 2, color: colors.borderStrong } },
       axisLabel: { distance: 20, fontSize: 11 },
       pointer: { itemStyle: { color: 'auto' } },
       detail: { valueAnimation: true, formatter: '{value}%', fontSize: 20, offsetCenter: [0, '70%'] },
@@ -58,5 +60,5 @@ export default function GaugeWidget({ widget, isEditing }: Props) {
     }],
   };
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />;
+  return <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={option} style={{ height: '100%', width: '100%' }} />;
 }

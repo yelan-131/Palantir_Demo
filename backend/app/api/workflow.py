@@ -12,7 +12,7 @@ router = APIRouter()
 
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, require_admin
 from app.core.audit import write_audit_log
-from app.core.permissions import allowed_form_fields, has_form_permission
+from app.core.permissions import allowed_form_fields, has_form_permission, evaluate_form_permission
 
 
 # ── Schemas ───────────────────────────────────────────────
@@ -330,6 +330,7 @@ async def _resolve_step_approver_ids(
     variables: dict,
     initiator_id: int | None,
     fallback_user_id: int | None,
+    *, allow_fallback: bool = True,
 ) -> list[int]:
     rules = step.get("assignee_rules")
     if not isinstance(rules, list) or not rules:
@@ -345,7 +346,15 @@ async def _resolve_step_approver_ids(
         if rule_type == "role":
             _append_unique_ids(approver_ids, await _resolve_users_by_role(db, tenant_id, value))
         elif rule_type in {"user", "fixed"}:
-            _append_unique_ids(approver_ids, await _resolve_users_by_token(db, tenant_id, value))
+            if not allow_fallback:
+                tokens = value if isinstance(value, list) else [value]
+                for token in tokens:
+                    resolved = await _resolve_users_by_token(db, tenant_id, token)
+                    if not resolved:
+                        raise HTTPException(409, "指定审批人已停用或不可用，请管理员恢复或重新配置后重试")
+                    _append_unique_ids(approver_ids, resolved)
+            else:
+                _append_unique_ids(approver_ids, await _resolve_users_by_token(db, tenant_id, value))
         elif rule_type == "organization":
             _append_unique_ids(approver_ids, await _resolve_users_by_org(db, tenant_id, value, rule.get("scope") == "children"))
         elif rule_type == "field":
@@ -360,9 +369,9 @@ async def _resolve_step_approver_ids(
             if initiator_id:
                 _append_unique_ids(approver_ids, [initiator_id])
 
-    if not approver_ids and fallback_user_id:
+    if allow_fallback and not approver_ids and fallback_user_id:
         _append_unique_ids(approver_ids, [fallback_user_id])
-    if not approver_ids and initiator_id:
+    if allow_fallback and not approver_ids and initiator_id:
         _append_unique_ids(approver_ids, [initiator_id])
     return approver_ids
 
@@ -372,21 +381,9 @@ def _set_current_assignees(state: dict, approver_ids: list[int]) -> None:
     state["current_assignee_id"] = approver_ids[0] if approver_ids else None
 
 
-def _add_approval_notifications(db, tenant_id: int, approver_ids: list[int], title: str, instance_id: int) -> None:
-    from app.models.relational import Notification
-
-    for approver_id in approver_ids:
-        db.add(Notification(
-            tenant_id=tenant_id,
-            user_id=approver_id,
-            title=f"待审批：{title}",
-            content="您有一条新的工作流审批待处理",
-            type="approval",
-            is_read=False,
-            resource_type="workflow_instance",
-            resource_id=instance_id,
-            link="/workflow?tab=pending",
-        ))
+async def _add_approval_notifications(db, tenant_id: int, approver_ids: list[int], title: str, instance_id: int) -> None:
+    from app.services.approval_notifications import notify_pending
+    await notify_pending(db, tenant_id, approver_ids, title, instance_id)
 
 
 def _is_last_step(steps: list[dict], current_step: int) -> bool:
@@ -485,6 +482,10 @@ async def _configs_for_instances(db, instances, defs_by_id: dict) -> dict[int, d
 WORKFLOW_VIEW_STATUSES = {"draft", "pending", "running", "done", "returned", "rejected"}
 RECORD_STATUS_TO_VIEW_TAB = {
     "draft": "draft",
+    "待提交": "draft",
+    "待审批": "pending",
+    "已通过": "done",
+    "已驳回": "rejected",
     "pending": "pending",
     "submitted": "pending",
     "reviewing": "pending",
@@ -542,6 +543,23 @@ def _workflow_view_status_for_user(inst, approvals: list, user: dict) -> Optiona
     if raw_view_status == "running" and (user_approvals or is_initiator):
         return "running"
     return None
+
+
+def _personal_workflow_views(inst, approvals: list, user: dict, state: dict, *, record_owner=None) -> list[str]:
+    """Personal inbox membership is based on real tasks, never admin visibility."""
+    uid = current_user_id(user)
+    if not uid:
+        return []
+    node = state.get("current_node")
+    mine = [approval for approval in approvals if approval.approver_id == uid]
+    pending = str(inst.status).lower() in ACTIONABLE_INSTANCE_STATUSES and any(
+        approval.action is None and approval.node_id == node for approval in mine
+    )
+    processed = any(approval.action in {"approve", "reject"} and approval.acted_at is not None for approval in mine)
+    return [name for name, include in (
+        ("pending", pending), ("initiated", inst.initiator_id == uid or record_owner == uid),
+        ("processed", processed),
+    ) if include]
 
 
 def _is_business_form(form) -> bool:
@@ -607,7 +625,7 @@ def _source_record_route(form, app: Optional[dict], record_id: int) -> str:
     return f"/dynamic/{form.id}?recordId={record_id}"
 
 
-async def _workflow_business_dataset(db, user: dict) -> dict:
+async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, source_record_id=None) -> dict:
     from app.models.relational import (
         Application,
         ApplicationForm,
@@ -617,6 +635,7 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         WorkflowApproval,
         WorkflowDef,
         WorkflowInstance,
+        WorkflowBinding,
         User,
     )
 
@@ -657,7 +676,7 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
                 })
 
     if not forms_by_id:
-        return {"applications": [], "forms": [], "items": []}
+        return {"applications": [], "forms": [], "items": [], "view_counts": {"pending": 0, "initiated": 0, "processed": 0}}
 
     field_rows = (await db.execute(
         select(FormField)
@@ -678,8 +697,17 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         for app in apps:
             applications[app["id"]] = app
 
+    active_bindings = (await db.execute(select(WorkflowBinding).join(WorkflowDef,
+        WorkflowDef.id == WorkflowBinding.workflow_id).where(
+        WorkflowBinding.tenant_id == tenant_id, WorkflowDef.tenant_id == tenant_id,
+        WorkflowBinding.form_id.in_(forms_by_id), WorkflowBinding.enabled.is_(True),
+        WorkflowDef.status.in_(STARTABLE_DEFINITION_STATUSES)))).scalars().all()
+    configured_forms = {binding.form_id for binding in active_bindings}
+    submit_forms = {binding.form_id for binding in active_bindings if binding.trigger_action == "submit"}
     form_payloads = []
     for form in forms_by_id.values():
+        if str(form.status).lower() not in STARTABLE_DEFINITION_STATUSES:
+            continue
         form_payloads.append({
             "id": form.id,
             "name": form.name,
@@ -687,6 +715,11 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             "status": form.status,
             "applications": applications_by_form.get(form.id, []),
             "record_count": 0,
+            "route_path": f"/program/{form.code}" if form.code else f"/dynamic/{form.id}",
+            "can_create": await has_form_permission(user, form.id, "create", db),
+            "approval_configured": form.id in configured_forms,
+            "runtime_submission_available": form.id in submit_forms or
+                (form.code == "material-application" and form.id in configured_forms),
         })
 
     records = (await db.execute(
@@ -699,12 +732,30 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         .order_by(DynamicRecord.updated_at.desc(), DynamicRecord.id.desc())
     )).scalars().all()
 
-    records_by_id = {record.id: record for record in records}
+    # Include physical business records so saved drafts appear in my applications.
+    from types import SimpleNamespace
+    from app.api.form_engine import _uses_physical_form_table
+    from app.api.alerts import _records
+    for form in forms_by_id.values():
+        if _uses_physical_form_table(form):
+            from app.api.dashboard import _table_exists
+            if not form.table_name or not await _table_exists(db, str(form.table_name)):
+                continue
+            for payload in await _records(db, form, fields_by_form.get(form.id, []), None):
+                records.append(SimpleNamespace(**{key: payload.get(key) for key in
+                    ("id", "data", "created_by")}, form_id=form.id,
+                    status=payload.get("data", {}).get("status") if form.code == "material-application" else payload.get("status"),
+                    created_at=datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else None,
+                    updated_at=datetime.fromisoformat(payload["updated_at"]) if payload.get("updated_at") else None))
+    records_by_key = {(record.form_id, record.id): record for record in records}
+    records_by_id = {record.id: record for record in records if not _uses_physical_form_table(forms_by_id[record.form_id])}
     items_by_key: dict[str, dict] = {}
     record_count_by_form: dict[int, int] = {}
     for record in records:
         record_count_by_form[record.form_id] = record_count_by_form.get(record.form_id, 0) + 1
-        view_status = _workflow_view_status(record.status)
+        form = forms_by_id.get(record.form_id)
+        raw_status = (record.data or {}).get("status") if form and form.code == "material-application" else record.status
+        view_status = _workflow_view_status(raw_status)
         if view_status is None:
             continue
         form = forms_by_id.get(record.form_id)
@@ -712,14 +763,20 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             continue
         fields = visible_fields_by_form.get(record.form_id, [])
         data = record.data or {}
+        if not (await evaluate_form_permission(user, form.id, "view", db, record_data=data))["allowed"]:
+            continue
+        if record.created_by != current_user_id(user) or data.get("migration_marker"):
+            continue
         apps = applications_by_form.get(record.form_id, [])
         primary_app = apps[0] if apps else None
-        key = f"record:{record.id}"
+        key = f"record:{form.id}:{record.id}"
         items_by_key[key] = {
             "id": key,
             "source": "dynamic_record",
+            "views": ["initiated"],
+            "can_approve": False,
             "status": view_status,
-            "raw_status": record.status,
+            "raw_status": raw_status,
             "title": _record_title(form, fields, data, record.id),
             "summary": _record_summary(fields, data),
             "application": primary_app,
@@ -735,11 +792,11 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             "current_node": "未提交" if view_status == "draft" else "表单记录",
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
             "created_at": record.created_at.isoformat() if record.created_at else None,
-            "route_path": f"/dynamic/{form.id}?recordId={record.id}",
+            "route_path": _source_record_route(form, primary_app, record.id),
         }
 
     workflow_instances = (await db.execute(
-        select(WorkflowInstance).where(WorkflowInstance.tenant_id == tenant_id).order_by(WorkflowInstance.updated_at.desc(), WorkflowInstance.id.desc())
+        select(WorkflowInstance).where(WorkflowInstance.tenant_id == tenant_id).order_by(WorkflowInstance.id.desc())
     )).scalars().all()
     # Batch-load definitions, approvals and pinned configs (no N+1).
     workflow_defs: dict[int, Any] = {}
@@ -774,6 +831,7 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         )).scalars().all()
         users_by_id = {user.id: user for user in users}
 
+    represented_records = set()
     for inst in workflow_instances:
         state = _safe_json(inst.workflow_state, {})
         form_data = _safe_json(inst.form_data, {})
@@ -781,14 +839,22 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         variables = state.get("variables") if isinstance(state.get("variables"), dict) else {}
         variable_form_id = variables.get("form_id")
         variable_record_id = variables.get("record_id") or resource_id
-        linked_record = records_by_id.get(resource_id) if isinstance(resource_id, int) else None
+        # A linked form outside the permitted set must never become an untyped item.
+        if isinstance(variable_form_id, int) and variable_form_id not in forms_by_id:
+            continue
+        linked_record = records_by_key.get((variable_form_id, variable_record_id)) if isinstance(variable_form_id, int) else (
+            records_by_id.get(resource_id) if state.get("resource_type") == "dynamic_record" and isinstance(resource_id, int) else None
+        )
         if linked_record and linked_record.form_id in forms_by_id:
             form = forms_by_id[linked_record.form_id]
             fields = visible_fields_by_form.get(linked_record.form_id, [])
-            data = linked_record.data or form_data or {}
+            data = form_data if isinstance(form_data, dict) else {}
             apps = applications_by_form.get(form.id, [])
             primary_app = apps[0] if apps else None
-            key = f"record:{linked_record.id}"
+            record_key = f"record:{form.id}:{linked_record.id}"
+            # Distinct submissions retain their own approval history; only the latest replaces the record.
+            key = record_key if record_key not in represented_records else f"workflow:{inst.id}"
+            represented_records.add(record_key)
             linked_record_payload = {"id": linked_record.id, "status": linked_record.status}
             route_path = _source_record_route(form, primary_app, linked_record.id)
         elif isinstance(variable_form_id, int) and variable_form_id in forms_by_id:
@@ -812,12 +878,33 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
             key = f"workflow:{inst.id}"
             linked_record_payload = None
             route_path = None
-        view_status = _workflow_view_status_for_user(inst, approvals_by_instance.get(inst.id, []), user)
-        if view_status is None:
+        if form:
+            decision = await evaluate_form_permission(user, form.id, "view", db, record_data=data)
+            if not decision["allowed"]:
+                continue
+            scopes = [entry.get("data_scope") for entry in decision.get("matched", [])
+                      if entry.get("effect") == "allow" and entry.get("data_scope")]
+            if scopes and "all" not in scopes and not user.get("is_admin"):
+                uid = current_user_id(user)
+                if uid != inst.initiator_id and (not linked_record or linked_record.created_by != uid) and not any(
+                    approval.approver_id == uid for approval in approvals_by_instance.get(inst.id, [])
+                ):
+                    continue
+        views = _personal_workflow_views(inst, approvals_by_instance.get(inst.id, []), user, state,
+                                        record_owner=linked_record.created_by if linked_record else None)
+        view_status = _workflow_view_status(inst.status)
+        source_match = (source_form_id is not None and source_record_id is not None and form is not None
+                        and form.id == source_form_id and linked_record_payload
+                        and linked_record_payload.get("id") == source_record_id)
+        if view_status is None or (not views and not source_match):
+            if linked_record:
+                record_key = f"record:{form.id}:{linked_record.id}"
+                if items_by_key.get(record_key, {}).get("source") == "dynamic_record":
+                    items_by_key.pop(record_key, None)
             continue
         wf_def = workflow_defs.get(inst.workflow_id)
         config = configs_by_instance.get(inst.id) or {}
-        steps = config.get("steps") if isinstance(config, dict) else []
+        steps = _workflow_config_steps(config) if isinstance(config, dict) else []
         current_step = state.get("current_step", 0) if isinstance(state, dict) else 0
         current_node = state.get("current_node") if isinstance(state, dict) else None
         current_assignee_ids = state.get("current_assignee_ids") if isinstance(state, dict) else []
@@ -836,9 +923,11 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
         item = {
             "id": key,
             "source": "workflow_instance",
+            "views": views,
+            "can_approve": "pending" in views,
             "status": view_status,
             "raw_status": inst.status,
-            "title": inst.title,
+            "title": _record_title(form, fields, data, linked_record_payload.get("id") if linked_record_payload else inst.id) if form else inst.title,
             "summary": _record_summary(fields, data) if fields else (wf_def.description if wf_def else "工作流实例"),
             "application": primary_app,
             "applications": apps,
@@ -874,7 +963,10 @@ async def _workflow_business_dataset(db, user: dict) -> dict:
     for form_payload in form_payloads:
         form_payload["record_count"] = record_count_by_form.get(form_payload["id"], 0)
 
+    personal_items = list(items_by_key.values())
     return {
+        "view_counts": {view: sum(view in item.get("views", []) for item in personal_items)
+                        for view in ("pending", "initiated", "processed")},
         "applications": sorted(applications.values(), key=lambda app: (app.get("name") or "", app.get("id") or 0)),
         "forms": sorted(form_payloads, key=lambda item: (item.get("name") or "", item.get("id") or 0)),
         "items": sorted(items_by_key.values(), key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True),
@@ -1043,11 +1135,23 @@ async def delete_definition(def_id: int, user: dict = Depends(require_admin)):
 @router.get("/business-items")
 async def list_business_workflow_items(
     status: Optional[str] = Query(default=None),
+    view: Optional[str] = Query(default=None),
+    source_form_id: Optional[int] = Query(default=None),
+    source_record_id: Optional[int] = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
     """Return workflow center items backed by real forms and dynamic records."""
     async def _query(db):
-        dataset = await _workflow_business_dataset(db, user)
+        dataset = await _workflow_business_dataset(db, user,
+            source_form_id=source_form_id, source_record_id=source_record_id)
+        if source_form_id is not None and source_record_id is not None:
+            dataset["items"] = [item for item in dataset["items"]
+                if (item.get("form") or {}).get("id") == source_form_id
+                and (item.get("record") or {}).get("id") == source_record_id]
+        if view:
+            if view not in {"pending", "initiated", "processed"}:
+                raise HTTPException(400, "Invalid personal workflow view")
+            dataset["items"] = [item for item in dataset["items"] if view in item.get("views", [])]
         if status and status != "all":
             if status not in WORKFLOW_VIEW_STATUSES:
                 raise HTTPException(400, "Invalid workflow tab status")
@@ -1202,6 +1306,10 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
         if str(d.status or "").lower() not in STARTABLE_DEFINITION_STATUSES:
             raise HTTPException(409, "Workflow definition is not published")
         config = await _instance_config(db, d, int(d.version or 1))
+        if (config.get("domainCode") == "material-application-approval"
+                or str(config.get("domainCode") or "").startswith("form-approval:")
+                or (body.variables or {}).get("form_code") == "material-application"):
+            raise HTTPException(409, "业务表单审批请通过对应表单提交入口发起")
         steps = _workflow_config_steps(config if isinstance(config, dict) else {})
 
         # Determine the first step
@@ -1249,7 +1357,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
                     approver_id=approver_id,
                     node_id=current_step.get("node_id", current_step.get("name", "")),
                 ))
-            _add_approval_notifications(db, tenant_id, approver_ids, body.title, inst.id)
+            await _add_approval_notifications(db, tenant_id, approver_ids, body.title, inst.id)
         await db.commit()
         await db.refresh(inst)
         await write_audit_log(
@@ -1285,7 +1393,7 @@ async def reject_step(inst_id: int, body: StepApprovalRequest, user: dict = Depe
     return await _act_on_step(inst_id, body, action="reject", user=user)
 
 
-async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, user: dict | None = None):
+async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, user: dict | None = None, db=None):
     """Core step action logic — approve moves forward, reject terminates.
 
     Authorization: the acting identity comes from the auth token only. The
@@ -1300,6 +1408,8 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
     if action not in ("approve", "reject"):
         raise HTTPException(400, "action must be 'approve' or 'reject'")
 
+    shared_db = db
+
     async def _query(db):
         from app.models.relational import WorkflowInstance, WorkflowApproval, WorkflowDef
         tenant_id = current_tenant_id(user or {})
@@ -1307,10 +1417,36 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         if not acting_user_id:
             raise HTTPException(403, "Authenticated user required for workflow actions")
 
+        # Use the same lock order as material endpoints: request then instance.
+        candidate = await db.get(WorkflowInstance, inst_id)
+        candidate_state = _safe_json(candidate.workflow_state, {}) if candidate else {}
+        candidate_vars = candidate_state.get('variables') or {}
+        if candidate and candidate.tenant_id == tenant_id and candidate_vars.get('form_code') == 'material-application':
+            from app.models.relational import Form
+            material_form = await db.scalar(select(Form).where(Form.id == candidate_vars.get('form_id'), Form.tenant_id == tenant_id))
+            if material_form and material_form.code == 'material-application':
+                from app.api.material_applications import _record
+                await _record(db, user or {}, candidate_vars.get('record_id'), 'view', True)
+
+        if candidate and candidate.tenant_id == tenant_id and candidate_vars.get('form_code') != 'material-application':
+            from app.models.relational import Form
+            from app.services.form_application_lifecycle import events, locked_record
+            source_form = await db.get(Form, candidate_vars.get('form_id')) if candidate_vars.get('form_id') else None
+            if source_form and source_form.tenant_id == tenant_id and candidate_vars.get('record_id'):
+                if await events(db, source_form, candidate_vars['record_id']):
+                    source_record = await locked_record(db, source_form, candidate_vars['record_id'])
+                    from app.core.permissions import evaluate_form_permission
+                    decision = await evaluate_form_permission(user or {}, source_form.id, 'view', db,
+                                                              record_data=source_record.get('data') or {})
+                    if not decision.get('allowed'):
+                        raise HTTPException(403, '没有查看此申请表单的权限')
+                    if action == 'reject' and not str(body.comment or '').strip():
+                        raise HTTPException(422, '驳回时必须填写原因')
+
         # Row lock: concurrent actions on the same instance serialize here.
         # (SQLite ignores FOR UPDATE but serializes writes at the DB level.)
         inst = (await db.execute(
-            select(WorkflowInstance).where(WorkflowInstance.id == inst_id).with_for_update()
+            select(WorkflowInstance).where(WorkflowInstance.id == inst_id).with_for_update().execution_options(populate_existing=True)
         )).scalar_one_or_none()
         if not inst or inst.tenant_id != tenant_id:
             return None
@@ -1324,6 +1460,12 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         config = await _instance_config(db, wf_def, inst.workflow_version)
         steps = _workflow_config_steps(config if isinstance(config, dict) else {})
         state = _safe_json(inst.workflow_state, {})
+        bound_vars = state.get("variables") or {}
+        if str(config.get("domainCode") or "").startswith("form-approval:"):
+            from app.api.forms import _ensure_form_permission
+            await _ensure_form_permission(db, user or {}, bound_vars.get("form_id"), "view")
+            if action == "reject" and not str(body.comment or "").strip():
+                raise HTTPException(422, "驳回时必须填写原因")
         current_step_idx = state.get("current_step", 0)
         form_data = _safe_json(inst.form_data, {})
         variables = state.get("variables") if isinstance(state.get("variables"), dict) else {}
@@ -1346,7 +1488,9 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             if any(a.approver_id == acting_user_id and a.action is not None for a in node_approvals):
                 raise HTTPException(409, "You have already acted on the current step")
             is_admin = bool((user or {}).get("is_admin"))
-            unassigned_initiator = not pending_approvals and inst.initiator_id == acting_user_id
+            unassigned_initiator = (not pending_approvals and inst.initiator_id == acting_user_id
+                                    and config.get("domainCode") != "material-application-approval"
+                                    and not str(config.get("domainCode") or "").startswith("form-approval:"))
             if not (is_admin or unassigned_initiator):
                 raise HTTPException(403, "You are not an approver of the current step")
             # Admin override / unassigned-node fallback: record the action under
@@ -1357,6 +1501,21 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                 node_id=current_node_id,
             )
             db.add(acting_approval)
+
+        async def finalize():
+            from app.services.material_workflow import sync_material_instance
+            await sync_material_instance(db, inst, user=user or {}, action=action, comment=body.comment)
+            from app.services.form_application_lifecycle import sync_form_application_instance
+            await sync_form_application_instance(db, inst, user=user or {}, action=action, comment=body.comment)
+            from app.services.approval_notifications import notify_result
+            await notify_result(db, inst, action=action, comment=body.comment)
+            from app.models.relational import AuditLog
+            db.add(AuditLog(tenant_id=tenant_id, user_id=acting_user_id, action=action,
+                            resource_type='workflow_instance', resource_id=inst.id))
+            if shared_db is None:
+                await db.commit()
+            else:
+                await db.flush()
 
         acting_approval.action = action
         acting_approval.comment = body.comment
@@ -1377,14 +1536,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             state["current_node"] = "end"
             _set_current_assignees(state, [])
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
-            await db.commit()
-            await write_audit_log(
-                tenant_id=tenant_id,
-                user_id=acting_user_id,
-                action=action,
-                resource_type="workflow_instance",
-                resource_id=inst.id,
-            )
+            await finalize()
             return {"id": inst.id, "status": "rejected", "current_step": current_step_idx}
 
         if approval_mode == "countersign":
@@ -1392,14 +1544,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             if remaining:
                 inst.status = "pending"
                 inst.workflow_state = json.dumps(state, ensure_ascii=False)
-                await db.commit()
-                await write_audit_log(
-                    tenant_id=tenant_id,
-                    user_id=acting_user_id,
-                    action=action,
-                    resource_type="workflow_instance",
-                    resource_id=inst.id,
-                )
+                await finalize()
                 return {"id": inst.id, "status": inst.status, "current_step": current_step_idx, "message": "已通过，等待其他会签人"}
 
         # Approve: move to next step
@@ -1420,7 +1565,12 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                     variables,
                     inst.initiator_id,
                     acting_user_id,
+                    allow_fallback=not (config.get("domainCode") == "material-application-approval"
+                                        or str(config.get("domainCode") or "").startswith("form-approval:")),
                 )
+                if not approver_ids and (config.get("domainCode") == "material-application-approval"
+                                          or str(config.get("domainCode") or "").startswith("form-approval:")):
+                    raise HTTPException(409, "下一审批步骤没有有效审批人，请管理员恢复审批人后重试")
                 _set_current_assignees(state, approver_ids)
                 for approver_id in approver_ids:
                     db.add(WorkflowApproval(
@@ -1428,7 +1578,8 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                         approver_id=approver_id,
                         node_id=next_step.get("node_id", next_step.get("name", "")),
                     ))
-                _add_approval_notifications(db, tenant_id, approver_ids, inst.title, inst.id)
+                inst.workflow_state = json.dumps(state, ensure_ascii=False)
+                await _add_approval_notifications(db, tenant_id, approver_ids, inst.title, inst.id)
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
         else:
             # No more steps — workflow completed
@@ -1438,21 +1589,14 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             _set_current_assignees(state, [])
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
 
-        await db.commit()
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=acting_user_id,
-            action=action,
-            resource_type="workflow_instance",
-            resource_id=inst.id,
-        )
+        await finalize()
         return {
             "id": inst.id, "status": inst.status,
             "current_step": state.get("current_step", current_step_idx),
             "message": "已通过" if inst.status == "approved" else "已进入下一步",
         }
 
-    result = await _try_db(_query)
+    result = await _query(shared_db) if shared_db is not None else await _try_db(_query)
     if result is None:
         raise HTTPException(404, "Instance not found")
     return result
@@ -1485,6 +1629,16 @@ async def cancel_instance(inst_id: int, user: dict = Depends(get_current_user)):
             raise HTTPException(403, "Only the initiator or an admin can cancel this instance")
         if str(inst.status or "").lower() not in ACTIONABLE_INSTANCE_STATUSES:
             raise HTTPException(409, f"Instance is already {inst.status}; it cannot be cancelled")
+        material_state = _safe_json(inst.workflow_state, {})
+        if (material_state.get("variables") or {}).get("form_code") == "material-application":
+            raise HTTPException(409, "料号申请请通过审批或驳回结束处理")
+        from app.services.form_application_lifecycle import events
+        from app.models.relational import Form
+        cancel_vars = material_state.get("variables") or {}
+        source_form = await db.get(Form, cancel_vars.get("form_id")) if cancel_vars.get("form_id") else None
+        if source_form and source_form.tenant_id == tenant_id and cancel_vars.get("record_id"):
+            if await events(db, source_form, cancel_vars["record_id"]):
+                raise HTTPException(409, "表单申请请通过审批或驳回结束处理")
         inst.status = "cancelled"
         state = _safe_json(inst.workflow_state, {})
         state["current_node"] = "end"

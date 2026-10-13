@@ -43,7 +43,7 @@ async def test_list_notifications_user_1():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert "data" in result
     assert all(n["user_id"] == 1 for n in result["data"])
     assert result["total"] >= 3  # mock has 3 notifications for user 1
@@ -56,7 +56,7 @@ async def test_list_notifications_pagination():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=1,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert len(result["data"]) == 1
     assert result["page"] == 1
     assert result["page_size"] == 1
@@ -69,7 +69,7 @@ async def test_list_notifications_page2():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=None, type=None, page=2, page_size=2,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert len(result["data"]) <= 2
     assert result["page"] == 2
 
@@ -82,7 +82,7 @@ async def test_list_notifications_filter_unread():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=False, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert all(n["is_read"] is False for n in result["data"])
 
 
@@ -92,7 +92,7 @@ async def test_list_notifications_filter_read():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=True, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert all(n["is_read"] is True for n in result["data"])
 
 
@@ -102,7 +102,7 @@ async def test_list_notifications_filter_type():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=1, is_read=None, type="warning", page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert all(n["type"] == "warning" for n in result["data"])
 
 
@@ -112,7 +112,7 @@ async def test_list_notifications_empty_for_unknown_user():
     from app.api.notifications import list_notifications
     result = await list_notifications(
         user_id=999, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 999, "tenant_id": 1})
     assert result["data"] == []
     assert result["total"] == 0
     assert result["unread_count"] == 0
@@ -130,7 +130,7 @@ async def test_create_notification():
         content="This is a test",
         type="info",
     )
-    result = await create_notification(body)
+    result = await create_notification(body, user={"uid": 1, "tenant_id": 1})
     assert result["title"] == "Test notification"
     assert result["content"] == "This is a test"
     assert result["type"] == "info"
@@ -150,7 +150,7 @@ async def test_create_notification_invalid_type():
         type="invalid",
     )
     with pytest.raises(HTTPException) as exc_info:
-        await create_notification(body)
+        await create_notification(body, user={"uid": 1, "tenant_id": 1})
     assert exc_info.value.status_code == 400
 
 
@@ -160,17 +160,17 @@ async def test_create_notification_increments_list():
     from app.api.notifications import NotificationCreate, create_notification, list_notifications
     before = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     count_before = before["total"]
 
     body = NotificationCreate(
         user_id=1, title="New item", content="Added", type="info",
     )
-    await create_notification(body)
+    await create_notification(body, user={"uid": 1, "tenant_id": 1})
 
     after = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert after["total"] == count_before + 1
 
 
@@ -180,7 +180,7 @@ async def test_create_notification_increments_list():
 async def test_mark_notification_read():
     """POST /notifications/{id}/read marks a notification as read."""
     from app.api.notifications import mark_notification_read
-    result = await mark_notification_read(notification_id=1)
+    result = await mark_notification_read(notification_id=1, user={"uid": 1, "tenant_id": 1})
     assert result["is_read"] is True
     assert result["id"] == 1
 
@@ -191,7 +191,7 @@ async def test_mark_notification_read_not_found():
     from fastapi import HTTPException
     from app.api.notifications import mark_notification_read
     with pytest.raises(HTTPException) as exc_info:
-        await mark_notification_read(notification_id=9999)
+        await mark_notification_read(notification_id=9999, user={"uid": 1, "tenant_id": 1})
     assert exc_info.value.status_code == 404
 
 
@@ -201,13 +201,13 @@ async def test_mark_notification_read_not_found():
 async def test_mark_all_read():
     """POST /notifications/read-all marks all user notifications as read."""
     from app.api.notifications import MarkAllReadRequest, mark_all_read, list_notifications
-    result = await mark_all_read(body=MarkAllReadRequest(user_id=1))
+    result = await mark_all_read(body=MarkAllReadRequest(user_id=1), user={"uid": 1, "tenant_id": 1})
     assert result["marked_count"] >= 1  # user 1 has unread mock data
 
     # Verify all are now read
     after = await list_notifications(
         user_id=1, is_read=False, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert after["total"] == 0
 
 
@@ -216,7 +216,7 @@ async def test_mark_all_read_no_unread():
     """Mark all read when already all read returns 0 marked."""
     from app.api.notifications import MarkAllReadRequest, mark_all_read
     # User 2 has only read notifications in mock data
-    result = await mark_all_read(body=MarkAllReadRequest(user_id=2))
+    result = await mark_all_read(body=MarkAllReadRequest(user_id=2), user={"uid": 2, "tenant_id": 1})
     assert result["marked_count"] == 0
 
 
@@ -226,7 +226,7 @@ async def test_mark_all_read_no_unread():
 async def test_get_unread_count():
     """GET /notifications/unread-count returns correct count."""
     from app.api.notifications import get_unread_count
-    result = await get_unread_count(user_id=1)
+    result = await get_unread_count(user_id=1, user={"uid": 1, "tenant_id": 1})
     # User 1 has 2 unread in mock data (IDs 1 and 2)
     assert result["unread_count"] == 2
 
@@ -235,7 +235,7 @@ async def test_get_unread_count():
 async def test_get_unread_count_no_notifications():
     """Unknown user has 0 unread notifications."""
     from app.api.notifications import get_unread_count
-    result = await get_unread_count(user_id=999)
+    result = await get_unread_count(user_id=999, user={"uid": 999, "tenant_id": 1})
     assert result["unread_count"] == 0
 
 
@@ -243,9 +243,9 @@ async def test_get_unread_count_no_notifications():
 async def test_unread_count_decreases_after_read():
     """Unread count decreases after marking a notification as read."""
     from app.api.notifications import get_unread_count, mark_notification_read
-    before = await get_unread_count(user_id=1)
-    await mark_notification_read(notification_id=1)
-    after = await get_unread_count(user_id=1)
+    before = await get_unread_count(user_id=1, user={"uid": 1, "tenant_id": 1})
+    await mark_notification_read(notification_id=1, user={"uid": 1, "tenant_id": 1})
+    after = await get_unread_count(user_id=1, user={"uid": 1, "tenant_id": 1})
     assert after["unread_count"] == before["unread_count"] - 1
 
 
@@ -257,15 +257,15 @@ async def test_delete_notification():
     from app.api.notifications import delete_notification, list_notifications
     before = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     count_before = before["total"]
 
-    result = await delete_notification(notification_id=1)
+    result = await delete_notification(notification_id=1, user={"uid": 1, "tenant_id": 1})
     assert result["ok"] is True
 
     after = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert after["total"] == count_before - 1
 
 
@@ -275,7 +275,7 @@ async def test_delete_notification_not_found():
     from fastapi import HTTPException
     from app.api.notifications import delete_notification
     with pytest.raises(HTTPException) as exc_info:
-        await delete_notification(notification_id=9999)
+        await delete_notification(notification_id=9999, user={"uid": 1, "tenant_id": 1})
     assert exc_info.value.status_code == 404
 
 
@@ -287,7 +287,7 @@ async def test_send_notification_helper():
     from app.api.notifications import send_notification, list_notifications
     before = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     count_before = before["total"]
 
     await send_notification(
@@ -299,7 +299,7 @@ async def test_send_notification_helper():
 
     after = await list_notifications(
         user_id=1, is_read=None, type=None, page=1, page_size=20,
-    )
+    user={"uid": 1, "tenant_id": 1})
     assert after["total"] == count_before + 1
 
 

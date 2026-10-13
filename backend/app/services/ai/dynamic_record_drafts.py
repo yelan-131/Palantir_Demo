@@ -20,7 +20,7 @@ SKILL_FORM_CANDIDATES = {
     "forms.create_record_draft": [],
     "maintenance.create_work_order_draft": ["work-order", "work_order", "maintenance-order", "alert-center"],
     "supply.create_purchase_request_draft": ["purchase-request", "purchase_request", "risk-review"],
-    "material.create_material_application_draft": ["material-application", "material_application", "risk-review"],
+    "material.create_material_application_draft": ["material-application"],
     "quality.create_capa_draft": ["capa", "capa-draft", "quality-capa", "quality-event"],
 }
 
@@ -73,6 +73,8 @@ async def resolve_dynamic_record_form(
     best_form: Form | None = None
     best_score = 0
     for form in forms:
+        if skill == "material.create_material_application_draft" and form.code != "material-application":
+            continue
         haystacks = [
             _normalize(str(form.code or "")),
             _normalize(str(form.table_name or "")),

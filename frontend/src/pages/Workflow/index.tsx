@@ -5,19 +5,20 @@ import {
   EditOutlined,
   FileSearchOutlined,
   FormOutlined,
+  SearchOutlined,
   HistoryOutlined,
   InboxOutlined,
   RollbackOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Empty, Input, Modal, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
-import { createRef, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Drawer, Empty, Input, Modal, Select, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { createRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { wfApproveOrReject, wfListBusinessItems } from '@/services/api';
-import { useAuthStore } from '@/stores/authStore';
+import { APPROVAL_NOTIFICATIONS_CHANGED } from '@/components/NotificationCenter';
 import { formatServerDateTime } from '@/utils/dateTime';
 
 export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned' | 'rejected';
-type WorkflowViewTab = WorkflowTab | 'all';
+type WorkflowViewTab = 'pending' | 'initiated' | 'processed';
 
 type WorkflowBusinessApplication = {
   id: number;
@@ -56,6 +57,8 @@ type WorkflowBusinessItem = {
   source: 'dynamic_record' | 'workflow_instance' | string;
   status: WorkflowTab;
   raw_status?: string;
+  views?: WorkflowViewTab[];
+  can_approve?: boolean;
   title: string;
   summary?: string;
   application?: WorkflowBusinessApplication | null;
@@ -81,29 +84,41 @@ type WorkflowBusinessDataset = {
   applications: WorkflowBusinessApplication[];
   forms: WorkflowBusinessForm[];
   items: WorkflowBusinessItem[];
-  counts?: Partial<Record<WorkflowViewTab, number>>;
+  view_counts?: Partial<Record<WorkflowViewTab, number>>;
 };
 
 const statusMeta: Record<string, { label: string; color: string; icon: JSX.Element; description: string }> = {
   draft: { label: '草稿', color: 'default', icon: <EditOutlined />, description: '已保存但还没有提交' },
   pending: { label: '待审批', color: 'warning', icon: <InboxOutlined />, description: '需要当前用户处理' },
   running: { label: '审批中', color: 'processing', icon: <ClockCircleOutlined />, description: '正在流程中流转' },
-  done: { label: '已审批', color: 'success', icon: <CheckCircleOutlined />, description: '已完成闭环' },
+  done: { label: '已通过', color: 'success', icon: <CheckCircleOutlined />, description: '已完成闭环' },
   returned: { label: '已退回', color: 'error', icon: <RollbackOutlined />, description: '需要补充后重新提交' },
 };
 
-statusMeta.rejected = { label: '拒绝', color: 'error', icon: <RollbackOutlined />, description: '审批已拒绝' };
+statusMeta.rejected = { label: '已驳回', color: 'error', icon: <RollbackOutlined />, description: '审批已拒绝' };
 
-const orderedTabs: WorkflowTab[] = ['draft', 'pending', 'running', 'done', 'returned', 'rejected'];
 const approvalTabs: Array<{ key: WorkflowViewTab; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'draft', label: '草稿' },
   { key: 'pending', label: '待审批' },
-  { key: 'running', label: '审批中' },
-  { key: 'done', label: '已审批' },
-  { key: 'returned', label: '已退回' },
-  { key: 'rejected', label: '拒绝' },
+  { key: 'initiated', label: '我发起的' },
+  { key: 'processed', label: '我已处理的' },
 ];
+
+function normalizedView(tab: string | null): WorkflowViewTab {
+  if (tab === 'pending' || tab === 'initiated' || tab === 'processed') return tab;
+  if (tab === 'done' || tab === 'rejected') return 'processed';
+  if (tab) return 'initiated';
+  return 'pending';
+}
+
+function actionLabel(action?: string | null) {
+  return ({ approve: '审批通过', reject: '驳回申请', return: '退回申请', cancel: '取消申请' } as Record<string, string>)[action || ''] || action || '等待处理';
+}
+
+function actionError(error: unknown) {
+  const response = error as { response?: { status?: number; data?: { detail?: unknown } } };
+  const detail = response.response?.data?.detail;
+  return { status: response.response?.status, message: typeof detail === 'string' ? detail : '操作失败，请刷新后重试' };
+}
 
 function unwrapDataset(payload: unknown): WorkflowBusinessDataset {
   const response = payload as { data?: unknown };
@@ -116,7 +131,7 @@ function unwrapDataset(payload: unknown): WorkflowBusinessDataset {
     applications: Array.isArray(data?.applications) ? data.applications : [],
     forms: Array.isArray(data?.forms) ? data.forms : [],
     items: Array.isArray(data?.items) ? data.items : [],
-    counts: data?.counts || {},
+    view_counts: data?.view_counts || {},
   };
 }
 
@@ -216,25 +231,40 @@ function workflowStatusClass(status: string) {
 
 export default function WorkflowPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((state) => state.user);
   const [searchParams, setSearchParams] = useSearchParams();
-  const queryTab = searchParams.get('tab') as WorkflowViewTab | null;
-  const validTabs: WorkflowViewTab[] = ['all', ...orderedTabs];
-  const initialTab = queryTab && validTabs.includes(queryTab) ? queryTab : 'pending';
-  const [activeTab, setActiveTab] = useState<WorkflowViewTab>(initialTab);
-  const [dataset, setDataset] = useState<WorkflowBusinessDataset>({ applications: [], forms: [], items: [], counts: {} });
+  const activeTab = searchParams.get('section') === 'materials' ? 'initiated' : normalizedView(searchParams.get('tab'));
+
+  useEffect(() => {
+    if (searchParams.get('section') !== 'materials') return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('section');
+    next.set('tab', 'initiated');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+  const [dataset, setDataset] = useState<WorkflowBusinessDataset>({ applications: [], forms: [], items: [], view_counts: {} });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [query, setQuery] = useState('');
+  const [formFilter, setFormFilter] = useState<number | undefined>();
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [detailOpen, setDetailOpen] = useState(false);
+  const openedInstance = useRef<string | null>(null);
+  const [instanceNotice, setInstanceNotice] = useState('');
   const [approvalLoading, setApprovalLoading] = useState<'approve' | 'reject' | null>(null);
 
   const loadItems = async () => {
     setLoading(true);
+    setLoadError('');
     try {
-      const res = await wfListBusinessItems();
+      const sourceForm = Number(searchParams.get('source_form_id'));
+      const sourceRecord = Number(searchParams.get('source_record_id'));
+      const res = await wfListBusinessItems(sourceForm > 0 && sourceRecord > 0
+        ? { source_form_id: sourceForm, source_record_id: sourceRecord }
+        : undefined);
       setDataset(unwrapDataset(res));
-    } catch {
-      setDataset({ applications: [], forms: [], items: [], counts: {} });
+    } catch (error) {
+      setLoadError(actionError(error).message);
+      setDataset({ applications: [], forms: [], items: [], view_counts: {} });
     } finally {
       setLoading(false);
     }
@@ -242,35 +272,73 @@ export default function WorkflowPage() {
 
   useEffect(() => {
     loadItems();
-  }, []);
+  }, [searchParams.get('source_form_id'), searchParams.get('source_record_id')]);
 
-  const filteredItems = useMemo(() => (
-    activeTab === 'all' ? dataset.items : dataset.items.filter((item) => item.status === activeTab)
-  ), [activeTab, dataset.items]);
-  const selectedItem = dataset.items.find((item) => item.id === selectedId);
-  const currentUserId = Number(user?.id || 0);
-  const canApproveSelectedItem = Boolean(
-    selectedItem?.status === 'pending'
-    && selectedItem.workflow?.id
-    && (
-      user?.is_admin
-      || selectedItem.current_assignees?.some((assignee) => Number(assignee.id) === currentUserId)
-      || selectedItem.workflow?.current_assignees?.some((assignee) => Number(assignee.id) === currentUserId)
-      || selectedItem.workflow?.approvals?.some((approval) => (
-        Number(approval.approver_id) === currentUserId && !approval.action
-      ))
-    ),
-  );
+  useEffect(() => {
+    const refresh = () => { void loadItems(); };
+    window.addEventListener(APPROVAL_NOTIFICATIONS_CHANGED, refresh);
+    return () => window.removeEventListener(APPROVAL_NOTIFICATIONS_CHANGED, refresh);
+  }, [searchParams.get('source_form_id'), searchParams.get('source_record_id')]);
 
-  const countByTab = (tab: WorkflowViewTab) => {
-    if (tab === 'all') return dataset.items.length;
-    return dataset.items.filter((item) => item.status === tab).length;
+  useEffect(() => {
+    const requested = searchParams.get('instance_id');
+    if (!requested) { openedInstance.current = null; setInstanceNotice(''); return; }
+    if (loading || loadError || openedInstance.current === requested) return;
+    const item = dataset.items.find(item => item.workflow?.id === Number(requested));
+    if (!item) {
+      setSelectedId(undefined);
+      setDetailOpen(false);
+      setInstanceNotice('该流程已不可查看或当前账号没有访问权限，请刷新待办或联系管理员。');
+      return;
+    }
+    openedInstance.current = requested;
+    setInstanceNotice('');
+    setSelectedId(item.id);
+    setDetailOpen(true);
+    // Finished notifications belong to history; never leave them on pending.
+    const tab = normalizedView(searchParams.get('tab'));
+    if (!item.views?.includes(tab)) {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', item.views?.includes('initiated') ? 'initiated' : item.views?.includes('processed') ? 'processed' : 'pending');
+      setSearchParams(next, { replace: true });
+    }
+  }, [dataset.items, loading, loadError, searchParams, setSearchParams]);
+
+  const closeWorkflowDetail = () => {
+    setDetailOpen(false);
+    const next = new URLSearchParams(searchParams);
+    next.delete('instance_id');
+    setSearchParams(next, { replace: true });
   };
+
+  const sourceFormId = Number(searchParams.get('source_form_id'));
+  const sourceRecordId = Number(searchParams.get('source_record_id'));
+  const sourceScoped = sourceFormId > 0 && sourceRecordId > 0;
+  const sourceItems = useMemo(() => sourceScoped
+    ? dataset.items.filter(item => item.form?.id === sourceFormId && item.record?.id === sourceRecordId)
+    : dataset.items, [dataset.items, sourceScoped, sourceFormId, sourceRecordId]);
+  const filteredItems = useMemo(() => sourceItems.filter(item => {
+    if (!sourceScoped && !item.views?.includes(activeTab)) return false;
+    if (formFilter && item.form?.id !== formFilter) return false;
+    const text = query.trim().toLowerCase();
+    if (!text) return true;
+    return [item.title, item.summary, item.form?.name, item.form?.code, item.application?.name,
+      item.workflow?.id, item.record?.id, ...(item.fields || []).map(field => formatValue(field.value))]
+      .some(value => String(value || '').toLowerCase().includes(text));
+  }), [activeTab, sourceItems, sourceScoped, formFilter, query]);
+  const selectedItem = dataset.items.find((item) => item.id === selectedId);
+  const canApproveSelectedItem = Boolean(selectedItem?.can_approve && selectedItem.workflow?.id);
+
+  const countByTab = (tab: WorkflowViewTab) => sourceItems.filter(item => item.views?.includes(tab)).length;
 
   const switchTab = (key: string) => {
     const nextTab = key as WorkflowViewTab;
-    setActiveTab(nextTab);
-    setSearchParams({ tab: nextTab });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', nextTab);
+    nextParams.delete('section');
+    nextParams.delete('instance_id');
+    setInstanceNotice('');
+    setSearchParams(nextParams);
     setSelectedId(undefined);
     setDetailOpen(false);
   };
@@ -296,7 +364,7 @@ export default function WorkflowPage() {
           <Input.TextArea
             ref={commentRef}
             rows={3}
-            placeholder="审批意见（可选）"
+            placeholder={action === 'reject' ? '请填写驳回理由（必填）' : '审批意见（可选）'}
             style={{ marginTop: 12 }}
           />
         </div>
@@ -308,15 +376,22 @@ export default function WorkflowPage() {
         const comment = commentRef.current?.resizableTextArea?.textArea?.value
           ?? commentRef.current?.input?.value
           ?? '';
+        if (action === 'reject' && !String(comment).trim()) {
+          message.warning('请填写驳回理由');
+          throw new Error('请填写驳回理由');
+        }
         setApprovalLoading(action);
         try {
           await wfApproveOrReject(item.workflow!.id, { action, comment });
           message.success(action === 'approve' ? '审批已通过' : '已驳回申请');
           await loadItems();
-          setDetailOpen(false);
+          closeWorkflowDetail();
           setSelectedId(undefined);
-        } catch {
-          message.error('审批操作失败');
+        } catch (error) {
+          const failure = actionError(error);
+          message.error(failure.message);
+          if (failure.status === 409 || failure.status === 403 || failure.status === 400) await loadItems();
+          throw error;
         } finally {
           setApprovalLoading(null);
         }
@@ -351,25 +426,14 @@ export default function WorkflowPage() {
         ),
       },
       ...((selectedItem.workflow?.approvals || []).map((approval) => ({
-        color: approval.action ? 'green' : 'gray',
+        color: approval.action === 'reject' ? 'red' : approval.action ? 'green' : 'gray',
         children: (
           <div className="workflow-step-item">
             <strong>{approval.node_id || '审批节点'}</strong>
-            <span>{approval.action ? `${approval.approver_name || '处理人'} ${approval.action} · ${formatTime(approval.acted_at)}` : `等待 ${approval.approver_name || '处理人'} 处理`}</span>
+            <span>{approval.action ? `${approval.approver_name || '处理人'} ${actionLabel(approval.action)} · ${formatTime(approval.acted_at)}` : `等待 ${approval.approver_name || '处理人'} 处理`}</span>
+            {approval.comment && <span>意见：{approval.comment}</span>}
           </div>
         ),
-      }))),
-    ];
-    const operationLogs = [
-      {
-        title: '发起申请',
-        meta: selectedItem.form?.name || '业务表单',
-        description: formatTime(selectedItem.created_at),
-      },
-      ...((selectedItem.workflow?.approvals || []).map((approval) => ({
-        title: approval.action ? (approval.action === 'approve' ? '审批通过' : approval.action) : '等待处理',
-        meta: approval.node_id || '审批节点',
-        description: approval.acted_at ? formatTime(approval.acted_at) : `等待 ${approval.approver_name || '处理人'} 处理`,
       }))),
     ];
 
@@ -408,11 +472,11 @@ export default function WorkflowPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="workflow-business-sheet-footer">
-                      <button type="button"><HistoryOutlined />审批历史</button>
-                      <button type="button"><FileSearchOutlined />历史版本</button>
-                      <button type="button"><ClockCircleOutlined />操作日志</button>
-                      <button type="button"><FormOutlined />发布记录</button>
+                    <div className="workflow-business-sheet-grid">
+                      {metaFields.map(field => <div className="workflow-business-sheet-cell" key={field.label}>
+                        <span className="workflow-business-sheet-label">{field.label}</span>
+                        <div className="workflow-business-sheet-value"><strong>{field.value}</strong></div>
+                      </div>)}
                     </div>
                   </section>
                 </div>
@@ -438,18 +502,7 @@ export default function WorkflowPage() {
                     <div className="workflow-form-section-title">后台流程轨迹</div>
                     <Timeline items={timelineItems} />
                   </div>
-                  <div className="workflow-operation-log-card">
-                    <div className="workflow-form-section-title">操作日志</div>
-                    <div className="workflow-operation-log-list">
-                      {operationLogs.map((log, index) => (
-                        <div className="workflow-operation-log-row" key={`${log.title}-${index}`}>
-                          <strong>{log.title}</strong>
-                          <span>{log.meta}</span>
-                          <time>{log.description}</time>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+
                 </div>
               ),
             },
@@ -483,11 +536,13 @@ export default function WorkflowPage() {
 
   return (
     <div className="workflow-page workflow-approval-page">
+      {sourceScoped && <Alert style={{ marginBottom: 16 }} type="info" showIcon message="历史申请的原流程记录" description="此处只显示对应来源记录的流程。没有审批实例的历史申请不会自动生成新审批。" action={<Button onClick={() => setSearchParams({ tab: 'initiated' })}>返回我的申请</Button>} />}
+
       <section className="workflow-approval-topbar">
         <div>
-          <Typography.Title level={3}>流程中心</Typography.Title>
+          <Typography.Title level={3}>流程与待办</Typography.Title>
           <Typography.Text type="secondary">
-            已接入后台应用 {dataset.applications.length} 个，业务表单 {dataset.forms.length} 个，当前展示真实表单记录和流程实例。
+            统一处理各业务表单的审批任务，追踪我的申请与处理记录。新申请请从对应业务表单发起。
           </Typography.Text>
         </div>
         <Space>
@@ -496,7 +551,10 @@ export default function WorkflowPage() {
         </Space>
       </section>
 
-      <Tabs
+      {instanceNotice && <Alert style={{ marginBottom: 16 }} type="warning" showIcon message={instanceNotice} />}
+      {loadError && <Alert type="error" showIcon message="审批任务读取失败" description={loadError} action={<Button onClick={loadItems}>重试</Button>} />}
+
+      {!sourceScoped && <Tabs
         className="workflow-approval-tabs"
         activeKey={activeTab}
         onChange={(key) => switchTab(key as WorkflowViewTab)}
@@ -509,7 +567,13 @@ export default function WorkflowPage() {
             </span>
           ),
         }))}
-      />
+      />}
+
+      <Space wrap style={{ padding: '0 4px' }}>
+        <Input allowClear prefix={<SearchOutlined />} placeholder="搜索申请、表单或编号" value={query} onChange={event => setQuery(event.target.value)} style={{ width: 300 }} />
+        <Select allowClear showSearch optionFilterProp="label" placeholder="所有来源表单" value={formFilter} onChange={setFormFilter} style={{ minWidth: 200 }} options={dataset.forms.map(form => ({ value: form.id, label: form.name }))} />
+        <Typography.Text type="secondary">共 {filteredItems.length} 条</Typography.Text>
+      </Space>
 
       <div className="workflow-approval-list">
         {loading ? (
@@ -532,6 +596,8 @@ export default function WorkflowPage() {
                 <div className="workflow-approval-card-meta">
                   <span>应用：{item.application?.name || '未绑定应用'}</span>
                   <span>表单：{item.form?.name || '未绑定表单'}</span>
+                  <span>流程编号：{item.workflow?.id ? `#${item.workflow.id}` : '未提交'}</span>
+                  <span>当前处理人：{currentAssigneeLabel(item)}</span>
                   <span>申请时间：{formatTime(item.created_at || item.updated_at)}</span>
                 </div>
               </div>
@@ -541,7 +607,7 @@ export default function WorkflowPage() {
             </button>
           );
         }) : (
-          <Empty description="后台暂时没有符合当前状态的表单记录" />
+          <Empty description={loadError ? "读取失败，请点击重试" : sourceScoped ? "没有可查看的原流程记录" : query || formFilter ? "没有符合筛选条件的申请" : `暂无${approvalTabs.find(tab => tab.key === activeTab)?.label || '申请'}`} />
         )}
       </div>
 
@@ -551,7 +617,7 @@ export default function WorkflowPage() {
         width="min(560px, calc(100vw - 180px))"
         placement="right"
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={closeWorkflowDetail}
         extra={selectedItem ? (
           <Space size={6}>
             <Button size="small" disabled={!selectedItem.route_path} onClick={() => openSourceRecord(selectedItem)}>打开表单</Button>

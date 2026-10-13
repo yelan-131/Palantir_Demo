@@ -26,6 +26,8 @@ import {
   AlertOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
+import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
 import {
   listSuppliers,
   getInventoryOverview,
@@ -106,9 +108,9 @@ const SHIPMENT_STATUS_TEXT: Record<string, string> = {
 };
 
 const RISK_LEVEL_COLORS: Record<string, string> = {
-  high: '#ff4d4f',
-  medium: '#faad14',
-  low: '#52c41a',
+  high: TECH_WHITE_PALETTE.danger,
+  medium: TECH_WHITE_PALETTE.warning,
+  low: TECH_WHITE_PALETTE.success,
 };
 
 export default function SupplyChainPage() {
@@ -162,7 +164,7 @@ export default function SupplyChainPage() {
             data: analytics.inventory_turnover.values,
             smooth: true,
             areaStyle: { opacity: 0.15 },
-            itemStyle: { color: '#1677ff' },
+            itemStyle: { color: TECH_WHITE_PALETTE.primary },
           },
         ],
         grid: { left: 50, right: 20, bottom: 30, top: 20 },
@@ -181,14 +183,14 @@ export default function SupplyChainPage() {
             type: 'bar' as const,
             stack: 'total',
             data: analytics.delivery_performance.on_time,
-            itemStyle: { color: '#52c41a' },
+            itemStyle: { color: TECH_WHITE_PALETTE.success },
           },
           {
             name: '延迟',
             type: 'bar' as const,
             stack: 'total',
             data: analytics.delivery_performance.delayed,
-            itemStyle: { color: '#ff4d4f' },
+            itemStyle: { color: TECH_WHITE_PALETTE.danger },
           },
         ],
         grid: { left: 50, right: 20, bottom: 30, top: 40 },
@@ -208,7 +210,7 @@ export default function SupplyChainPage() {
             type: 'line' as const,
             data: analytics.cost_trend.values,
             smooth: true,
-            itemStyle: { color: '#fa8c16' },
+            itemStyle: { color: CHART_SERIES_COLORS[1] },
             areaStyle: { opacity: 0.1 },
           },
         ],
@@ -218,6 +220,7 @@ export default function SupplyChainPage() {
 
   const categoryDistOption = analytics?.category_distribution
     ? {
+        color: CHART_SERIES_COLORS,
         tooltip: { trigger: 'item' as const },
         series: [
           {
@@ -271,7 +274,7 @@ export default function SupplyChainPage() {
       sorter: (a: Supplier, b: Supplier) => a.on_time_rate - b.on_time_rate,
       render: (rate: number) => {
         const pct = ((rate ?? 0) * 100).toFixed(1);
-        const color = rate >= 0.9 ? '#52c41a' : rate >= 0.7 ? '#faad14' : '#ff4d4f';
+        const color = rate >= 0.9 ? TECH_WHITE_PALETTE.success : rate >= 0.7 ? TECH_WHITE_PALETTE.warning : TECH_WHITE_PALETTE.danger;
         return <Progress percent={parseFloat(pct)} size="small" strokeColor={color} />;
       },
     },
@@ -281,7 +284,7 @@ export default function SupplyChainPage() {
       key: 'quality_score',
       width: 80,
       render: (score: number) => (
-        <Text style={{ color: score >= 90 ? '#52c41a' : score >= 70 ? '#faad14' : '#ff4d4f' }}>
+        <Text style={{ color: score >= 90 ? TECH_WHITE_PALETTE.success : score >= 70 ? TECH_WHITE_PALETTE.warning : TECH_WHITE_PALETTE.danger }}>
           {score}
         </Text>
       ),
@@ -317,7 +320,7 @@ export default function SupplyChainPage() {
       render: (val: number, record: InventoryItem) => {
         const isLow = val < record.min_stock;
         return (
-          <Text strong style={{ color: isLow ? '#ff4d4f' : undefined }}>
+          <Text strong style={{ color: isLow ? TECH_WHITE_PALETTE.danger : undefined }}>
             {val} {record.unit}
           </Text>
         );
@@ -343,7 +346,7 @@ export default function SupplyChainPage() {
       width: 150,
       render: (_: unknown, record: InventoryItem) => {
         const pct = Math.min(100, Math.round((record.current_stock / record.max_stock) * 100));
-        const color = record.current_stock < record.min_stock ? '#ff4d4f' : pct < 50 ? '#faad14' : '#52c41a';
+        const color = record.current_stock < record.min_stock ? TECH_WHITE_PALETTE.danger : pct < 50 ? TECH_WHITE_PALETTE.warning : TECH_WHITE_PALETTE.success;
         return <Progress percent={pct} size="small" strokeColor={color} />;
       },
     },
@@ -406,7 +409,7 @@ export default function SupplyChainPage() {
       width: 100,
       sorter: (a: RiskItem, b: RiskItem) => a.risk_score - b.risk_score,
       render: (score: number) => (
-        <Text strong style={{ color: score >= 70 ? '#ff4d4f' : score >= 40 ? '#faad14' : '#52c41a' }}>
+        <Text strong style={{ color: score >= 70 ? TECH_WHITE_PALETTE.danger : score >= 40 ? TECH_WHITE_PALETTE.warning : TECH_WHITE_PALETTE.success }}>
           {score}
         </Text>
       ),
@@ -459,7 +462,7 @@ export default function SupplyChainPage() {
             <Statistic
               title="库存短缺"
               value={shortageCount}
-              valueStyle={{ color: shortageCount > 0 ? '#ff4d4f' : '#52c41a' }}
+              valueStyle={{ color: shortageCount > 0 ? TECH_WHITE_PALETTE.danger : TECH_WHITE_PALETTE.success }}
               prefix={<WarningOutlined />}
             />
           </Card>
@@ -470,7 +473,7 @@ export default function SupplyChainPage() {
               title="在途物流"
               value={activeShipments}
               prefix={<CarOutlined />}
-              valueStyle={{ color: '#1677ff' }}
+              valueStyle={{ color: TECH_WHITE_PALETTE.primary }}
             />
           </Card>
         </Col>
@@ -479,7 +482,7 @@ export default function SupplyChainPage() {
             <Statistic
               title="高风险项"
               value={highRisks}
-              valueStyle={{ color: highRisks > 0 ? '#ff4d4f' : '#52c41a' }}
+              valueStyle={{ color: highRisks > 0 ? TECH_WHITE_PALETTE.danger : TECH_WHITE_PALETTE.success }}
               prefix={<AlertOutlined />}
             />
           </Card>
@@ -589,7 +592,7 @@ export default function SupplyChainPage() {
                 <Col span={12}>
                   <Card title="库存周转率趋势" size="small">
                     {inventoryTurnoverOption ? (
-                      <ReactECharts option={inventoryTurnoverOption} style={{ height: 300 }} />
+                      <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={inventoryTurnoverOption} style={{ height: 300 }} />
                     ) : (
                       <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Text type="secondary">暂无数据</Text>
@@ -600,7 +603,7 @@ export default function SupplyChainPage() {
                 <Col span={12}>
                   <Card title="交付表现" size="small">
                     {deliveryPerformanceOption ? (
-                      <ReactECharts option={deliveryPerformanceOption} style={{ height: 300 }} />
+                      <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={deliveryPerformanceOption} style={{ height: 300 }} />
                     ) : (
                       <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Text type="secondary">暂无数据</Text>
@@ -611,7 +614,7 @@ export default function SupplyChainPage() {
                 <Col span={12} style={{ marginTop: 16 }}>
                   <Card title="成本趋势" size="small">
                     {costTrendOption ? (
-                      <ReactECharts option={costTrendOption} style={{ height: 300 }} />
+                      <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={costTrendOption} style={{ height: 300 }} />
                     ) : (
                       <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Text type="secondary">暂无数据</Text>
@@ -622,7 +625,7 @@ export default function SupplyChainPage() {
                 <Col span={12} style={{ marginTop: 16 }}>
                   <Card title="品类分布" size="small">
                     {categoryDistOption ? (
-                      <ReactECharts option={categoryDistOption} style={{ height: 300 }} />
+                      <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={categoryDistOption} style={{ height: 300 }} />
                     ) : (
                       <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Text type="secondary">暂无数据</Text>

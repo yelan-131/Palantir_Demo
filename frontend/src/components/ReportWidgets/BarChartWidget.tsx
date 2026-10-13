@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Spin, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
+import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import type { EChartsOption } from 'echarts';
 import type { WidgetInstance } from './types';
 import { fetchDataFromApi } from './WidgetRegistry';
@@ -45,5 +46,5 @@ export default function BarChartWidget({ widget, isEditing }: Props) {
     })),
   };
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />;
+  return <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={option} style={{ height: '100%', width: '100%' }} />;
 }

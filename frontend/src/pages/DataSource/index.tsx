@@ -323,7 +323,7 @@ export default function DataSourcePage() {
             <Statistic
               title="已连接"
               value={connectedCount}
-              valueStyle={{ color: '#52c41a' }}
+              valueStyle={{ color: 'var(--mf-success)' }}
               prefix={<CheckCircleOutlined />}
             />
           </Card>
@@ -333,7 +333,7 @@ export default function DataSourcePage() {
             <Statistic
               title="同步中"
               value={syncingCount}
-              valueStyle={{ color: '#1677ff' }}
+              valueStyle={{ color: 'var(--mf-primary)' }}
               prefix={<SyncOutlined spin={syncingCount > 0} />}
             />
           </Card>

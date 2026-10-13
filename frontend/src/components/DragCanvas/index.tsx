@@ -1,3 +1,4 @@
+import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import React from 'react';
 import type { WidgetInstance, WidgetType } from '../ReportWidgets/types';
 import { WIDGET_REGISTRY } from '../ReportWidgets/types';
@@ -55,11 +56,12 @@ export default function DragCanvas({ widgets, isEditing, selectedId, onSelect, o
       style={{
         position: 'relative',
         minHeight: canvasHeight,
-        background: isEditing
-          ? 'repeating-linear-gradient(0deg, transparent, transparent 49px, #f0f0f0 49px, #f0f0f0 50px), repeating-linear-gradient(90deg, transparent, transparent calc(100%/24 - 1px), #f0f0f0 calc(100%/24 - 1px), #f0f0f0 calc(100%/24))'
-          : '#fafafa',
-        borderRadius: 6,
-        border: '1px dashed #d9d9d9',
+        backgroundColor: TECH_WHITE_PALETTE.surface,
+        backgroundImage: isEditing
+          ? `repeating-linear-gradient(0deg, transparent, transparent 49px, ${TECH_WHITE_PALETTE.border} 49px, ${TECH_WHITE_PALETTE.border} 50px), repeating-linear-gradient(90deg, transparent, transparent calc(100%/24 - 1px), ${TECH_WHITE_PALETTE.border} calc(100%/24 - 1px), ${TECH_WHITE_PALETTE.border} calc(100%/24))`
+          : 'none',
+        borderRadius: TECH_WHITE_GEOMETRY.panelRadius,
+        border: `1px dashed ${TECH_WHITE_PALETTE.borderStrong}`,
         overflow: 'hidden',
       }}
     >
@@ -67,7 +69,7 @@ export default function DragCanvas({ widgets, isEditing, selectedId, onSelect, o
         <div style={{
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#bbb', fontSize: 16, pointerEvents: 'none',
+          color: TECH_WHITE_PALETTE.faint, fontSize: 16, pointerEvents: 'none',
         }}>
           从左侧面板拖拽组件到此处，或点击组件添加
         </div>

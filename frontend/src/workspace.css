@@ -1,0 +1,542 @@
+/* Workspace surfaces share the shell palette. Layout, scrolling and table
+   density are deliberately owned by each page and its existing preferences. */
+.tech-white-shell.density-standard {
+  --density-card-pad: 20px;
+  --density-content-pad: 24px;
+}
+.tech-white-shell .app-content :is(.assembly-column-card, .assembly-menu-card, .assembly-property-card) .ant-card-body {
+  padding: 12px !important;
+}
+.tech-white-shell .app-content .ant-card,
+.tech-white-shell .app-content :is(.simple-workbench-panel, .config-list-card, .config-editor-card, .assembly-column-card, .assembly-menu-card, .assembly-property-card, .app-program-header) {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  box-shadow: none;
+}
+.tech-white-shell .app-content .ant-card-head {
+  border-bottom-color: var(--mf-border) !important;
+  padding-inline: var(--density-card-pad);
+}
+.tech-white-shell .app-content .ant-card-head-title {
+  color: var(--mf-text);
+  font-weight: 600;
+}
+.tech-white-shell .app-content .ant-btn:not(.ant-btn-circle):not(.ant-btn-round) {
+  border-radius: var(--mf-control-radius);
+  box-shadow: none;
+}
+.tech-white-shell .app-content :is(.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-picker),
+.tech-white-shell .app-content .ant-select .ant-select-selector {
+  border-radius: var(--mf-control-radius);
+}
+.tech-white-shell .app-content .ant-input-affix-wrapper .ant-input {
+  border-radius: 0;
+}
+.tech-white-shell .app-content .ant-table-thead > tr > th {
+  background: var(--mf-rail);
+  color: var(--mf-text);
+  font-weight: 600;
+  border-color: var(--mf-border) !important;
+}
+.tech-white-shell .app-content .ant-table-tbody > tr > td {
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content .ant-table-thead > tr > th.ant-table-column-sort {
+  background: var(--mf-selected);
+}
+.tech-white-shell .app-content .ant-table-thead > tr > th.ant-table-column-has-sorters:hover {
+  background: var(--mf-hover);
+}
+.tech-white-shell .app-content .ant-table-tbody > tr:hover > td,
+.tech-white-shell .app-content .ant-table-tbody > tr > td.ant-table-cell-row-hover {
+  background: var(--mf-hover);
+}
+.tech-white-shell .app-content .ant-table-tbody > :is(.ant-table-row-selected, .app-business-row-selected, .user-row-selected, .role-row-selected, .org-row-selected, .workflow-selected-row) > td {
+  background: var(--mf-selected) !important;
+}
+.tech-white-shell .app-content .app-business-data-table .ant-table {
+  border-color: var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+}
+.tech-white-shell .app-content .app-business-panel-head {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content :is(.node-editor-hero, .node-config-card, .permission-rule-panel) {
+  border-color: var(--mf-border);
+  border-radius: var(--mf-control-radius);
+  background: var(--mf-panel);
+}
+.tech-white-shell .app-content :is(.permission-rule-inherit, .assembly-permission-inherited) {
+  color: var(--mf-muted);
+  background: var(--mf-rail);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-control-radius);
+}
+.tech-white-shell .app-content :is(.admin-app-list-item, .assembly-form-card, .business-form-directory-entry) {
+  border-radius: var(--mf-control-radius);
+}
+.tech-white-shell .app-content :is(.admin-app-list-item:hover, .admin-app-list-item.active, .assembly-form-card.bound) {
+  background: var(--mf-selected);
+  outline-color: var(--mf-border-strong);
+}
+.tech-white-shell .app-content .assembly-menu-card .ant-tree-node-selected {
+  background: var(--mf-selected) !important;
+  outline-color: var(--mf-border-strong);
+}
+.tech-white-shell .app-content :is(.application-icon, .assembly-row-icon, .shell-library-icon) {
+  background: var(--mf-hover);
+  color: var(--mf-primary);
+  border-radius: var(--mf-control-radius);
+}
+.tech-white-shell .app-content .workflow-approval-card {
+  border-color: var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-panel);
+  box-shadow: none;
+}
+.tech-white-shell .app-content .workflow-approval-card:hover {
+  border-color: var(--mf-border-strong);
+  background: var(--mf-hover);
+  box-shadow: none;
+}
+.tech-white-shell .app-content .workflow-approval-card-primary,
+.tech-white-shell .app-content .workflow-approval-card-primary > span,
+.tech-white-shell .app-content .workflow-approval-card-side {
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content .simple-workbench-page { gap: var(--density-gap); }
+.tech-white-shell .app-content .shell-library-grid { gap: var(--density-gap); }
+
+/* Ant Design overlays are portaled outside the shell; scope to the signed-in
+   shell rather than changing portal containers or focus/scroll behavior. */
+body:has(.tech-white-shell) .ant-modal-content {
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-panel);
+  padding: 24px;
+  box-shadow: 0 12px 40px rgba(32, 35, 38, .12);
+}
+body:has(.tech-white-shell) .ant-modal-header {
+  background: var(--mf-panel);
+  border-bottom: 1px solid var(--mf-border);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+body:has(.tech-white-shell) :is(.ant-modal-title, .ant-drawer-title) {
+  color: var(--mf-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+body:has(.tech-white-shell) .ant-modal-footer {
+  background: var(--mf-panel);
+  border-top: 1px solid var(--mf-border);
+  padding-top: 16px;
+  margin-top: 20px;
+}
+body:has(.tech-white-shell) .ant-drawer-content {
+  background: var(--mf-panel);
+}
+body:has(.tech-white-shell) .ant-drawer-header {
+  padding: 20px 24px;
+  background: var(--mf-panel);
+  border-bottom-color: var(--mf-border);
+}
+body:has(.tech-white-shell) .ant-drawer-body { padding: 20px 24px; }
+body:has(.tech-white-shell) .ant-drawer-footer {
+  padding: 16px 24px;
+  border-top-color: var(--mf-border);
+  background: var(--mf-panel);
+}
+body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer) .ant-btn:not(.ant-btn-circle):not(.ant-btn-round) {
+  border-radius: var(--mf-control-radius);
+  box-shadow: none;
+  font-weight: 500;
+}
+body:has(.tech-white-shell) :is(.ant-modal-close, .ant-drawer-close) { color: var(--mf-muted); }
+body:has(.tech-white-shell) :is(.ant-modal-close, .ant-drawer-close):hover {
+  color: var(--mf-text);
+  background: var(--mf-hover);
+}
+/* Rule editor owns a fixed flex layout and scrollable body. Keep that layout,
+   while giving its three sections the same spacing as regular overlays. */
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-content { padding: 0; }
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-header {
+  padding: 20px 24px 16px;
+  margin: 0;
+}
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-body { padding: 20px 24px; }
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-footer {
+  padding: 16px 24px;
+  margin: 0;
+}
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-footer .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):not(.ant-btn-loading) {
+  background: var(--mf-primary);
+  border-color: var(--mf-primary);
+}
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-footer .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):not(.ant-btn-loading):hover {
+  background: var(--mf-primary-strong);
+  border-color: var(--mf-primary-strong);
+}
+.tech-white-shell .app-content :is(.form-designer-toolbar, .form-designer-left, .form-designer-right, .form-designer-canvas, .professional-flow-properties, .designer-prop-summary) {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  box-shadow: none;
+}
+.tech-white-shell .app-content .form-designer-shell-flow .form-designer-canvas { background: transparent; }
+.tech-white-shell .app-content .form-designer-toolbar { padding: 12px 16px; }
+.tech-white-shell .app-content :is(.form-designer-left, .form-designer-right) { padding: 16px; }
+.tech-white-shell .app-content .form-designer-title .ant-typography { color: var(--mf-text); font-weight: 600; }
+.tech-white-shell .app-content :is(.designer-panel-head span, .designer-title-meta) { color: var(--mf-muted); }
+.tech-white-shell .app-content .form-designer-tabs .ant-tabs-ink-bar { background: var(--mf-primary); }
+.tech-white-shell .app-content .designer-prop-summary-badge {
+  color: var(--mf-primary);
+  background: var(--mf-hover);
+  font-weight: 500;
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content .form-designer-right .designer-prop-section {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-control-radius);
+}
+.tech-white-shell .app-content .form-designer-right .designer-prop-section-title {
+  background: var(--mf-rail);
+  border-color: var(--mf-border);
+  color: var(--mf-text);
+  font-weight: 600;
+}
+.tech-white-shell .app-content .designer-prop-section-title::before { background: var(--mf-primary); }
+.tech-white-shell .app-content .designer-rule-toggle .designer-rule-check-on {
+  background: var(--mf-primary);
+}
+.tech-white-shell .app-content .designer-rule-toggle .designer-rule-check-on:is(:hover, :active, :focus) {
+  background: var(--mf-primary-strong);
+}
+.tech-white-shell .app-content .designer-rule-toggle .designer-rule-check:focus-visible {
+  outline: 2px solid var(--mf-primary);
+  outline-offset: 2px;
+}
+.tech-white-shell .app-content .canvas-field-active {
+  border-color: var(--mf-primary) !important;
+  background: var(--mf-sidebar);
+}
+.tech-white-shell .app-content :is(.canvas-topbar, .professional-flow-library) {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content .canvas-board:not(.canvas-board-drag-over) {
+  border-color: var(--mf-border-strong);
+  border-radius: var(--mf-control-radius);
+}
+body:has(.tech-white-shell) .designer-rule-group-list {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-control-radius);
+}
+body:has(.tech-white-shell) .designer-rule-condition-row :is(.ant-input, .ant-input-number):not(:disabled):not(.ant-input-number-disabled):not([class*='status-error']):not([class*='status-warning']),
+body:has(.tech-white-shell) .designer-rule-condition-row .ant-select:not(.ant-select-disabled):not(.ant-select-status-error):not(.ant-select-status-warning) .ant-select-selector {
+  border-color: var(--mf-border) !important;
+  border-radius: var(--mf-control-radius) !important;
+  background: var(--mf-panel) !important;
+}
+body:has(.tech-white-shell) .designer-rule-condition-row .ant-input:focus:not(:disabled):not(.ant-input-status-error):not(.ant-input-status-warning),
+body:has(.tech-white-shell) .designer-rule-condition-row .ant-input-number-focused:not(.ant-input-number-disabled):not(.ant-input-number-status-error):not(.ant-input-number-status-warning),
+body:has(.tech-white-shell) .designer-rule-condition-row .ant-select-focused:not(.ant-select-disabled):not(.ant-select-status-error):not(.ant-select-status-warning) .ant-select-selector {
+  border-color: var(--mf-primary) !important;
+  box-shadow: 0 0 0 2px rgba(82, 107, 134, .12) !important;
+}
+
+/* Selection is neutral; semantic status colors remain independent of it. */
+body:has(.tech-white-shell) :is(.ant-select-dropdown, .ant-dropdown .ant-dropdown-menu) {
+  background: var(--mf-panel);
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(32, 35, 38, .08);
+}
+body:has(.tech-white-shell) :is(.ant-select-item-option, .ant-dropdown-menu-item, .ant-dropdown-menu-submenu-title) {
+  border-radius: var(--mf-control-radius);
+}
+body:has(.tech-white-shell) .ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled):not(.ant-dropdown-menu-item-danger):is(:hover, .ant-dropdown-menu-item-active),
+body:has(.tech-white-shell) .ant-dropdown-menu-submenu:not(.ant-dropdown-menu-submenu-disabled) > .ant-dropdown-menu-submenu-title:hover {
+  background: var(--mf-hover);
+  color: var(--mf-text);
+}
+body:has(.tech-white-shell) .ant-dropdown-menu-item-selected:not(.ant-dropdown-menu-item-disabled):not(.ant-dropdown-menu-item-danger) {
+  background: var(--mf-selected);
+  color: var(--mf-text);
+  font-weight: 600;
+}
+body:has(.tech-white-shell) .ant-dropdown-menu-item-selected:not(.ant-dropdown-menu-item-disabled):not(.ant-dropdown-menu-item-danger):is(:hover, .ant-dropdown-menu-item-active) { background: var(--mf-selected); }
+body:has(.tech-white-shell) .ant-select-item-option-selected:not(.ant-select-item-option-disabled) { background: var(--mf-selected); }
+body:has(.tech-white-shell) .ant-select-item-option-active:not(.ant-select-item-option-disabled):not(.ant-select-item-option-selected) { background: var(--mf-hover); }
+body:has(.tech-white-shell) .ant-tabs-nav::before { border-color: var(--mf-border); }
+body:has(.tech-white-shell) .ant-tabs-tab:not(.ant-tabs-tab-disabled) {
+  border-radius: var(--mf-control-radius) var(--mf-control-radius) 0 0;
+}
+body:has(.tech-white-shell) .ant-tabs-tab:not(.ant-tabs-tab-disabled):hover { background: var(--mf-hover); }
+body:has(.tech-white-shell) .ant-tabs-tab .ant-tabs-tab-btn { color: var(--mf-muted); font-weight: 500; }
+body:has(.tech-white-shell) .ant-tabs-tab:not(.ant-tabs-tab-disabled):hover .ant-tabs-tab-btn { color: var(--mf-text); }
+body:has(.tech-white-shell) .ant-tabs-tab-active:not(.ant-tabs-tab-disabled) {
+  background: var(--mf-selected);
+}
+body:has(.tech-white-shell) .ant-tabs-tab-active:not(.ant-tabs-tab-disabled) .ant-tabs-tab-btn {
+  color: var(--mf-text);
+  font-weight: 600;
+  text-shadow: none;
+}
+body:has(.tech-white-shell) .ant-tabs-tab-disabled .ant-tabs-tab-btn { color: var(--mf-faint); }
+body:has(.tech-white-shell) .ant-tabs-ink-bar { background: var(--mf-primary); }
+body:has(.tech-white-shell) .ant-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+body:has(.tech-white-shell) :is(.ant-tag-success, .ant-tag-green) {
+  color: var(--mf-success);
+  background: var(--mf-success-bg);
+  border-color: var(--mf-success-border);
+}
+body:has(.tech-white-shell) :is(.ant-tag-warning, .ant-tag-orange, .ant-tag-gold, .ant-tag-yellow) {
+  color: var(--mf-warning);
+  background: var(--mf-warning-bg);
+  border-color: var(--mf-warning-border);
+}
+body:has(.tech-white-shell) :is(.ant-tag-error, .ant-tag-red, .ant-tag-volcano) {
+  color: var(--mf-danger);
+  background: var(--mf-danger-bg);
+  border-color: var(--mf-danger-border);
+}
+body:has(.tech-white-shell) :is(.ant-tag-processing, .ant-tag-blue) {
+  color: var(--mf-primary);
+  background: var(--mf-info-bg);
+  border-color: var(--mf-info-border);
+}
+body:has(.tech-white-shell) .ant-tag-checkable:not(.ant-tag-checkable-checked):hover { background: var(--mf-hover); }
+body:has(.tech-white-shell) .ant-tag-checkable-checked { background: var(--mf-selected); color: var(--mf-text); }
+body:has(.tech-white-shell) :is(.workflow-business-choice-tag, .quality-formula-token).ant-tag {
+  background: var(--mf-rail);
+  color: var(--mf-text);
+  border-color: var(--mf-border);
+}
+body:has(.tech-white-shell) .workflow-approval-card-status.ant-tag { border-radius: 999px; }
+body:has(.tech-white-shell) .designer-version-status-warning { color: var(--mf-warning) !important; background: var(--mf-warning-bg); }
+body:has(.tech-white-shell) :is(.designer-version-status-success, .designer-version-status-published) { color: var(--mf-success) !important; background: var(--mf-success-bg); }
+body:has(.tech-white-shell) .designer-version-status-history { color: var(--mf-muted) !important; background: var(--mf-rail); }
+body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-pending { color: var(--mf-warning); border-color: var(--mf-warning-border); }
+body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-running { color: var(--mf-primary); border-color: var(--mf-info-border); }
+body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-done { color: var(--mf-success); border-color: var(--mf-success-border); }
+body:has(.tech-white-shell) .workflow-approval-stamp:is(.workflow-status-returned, .workflow-status-rejected) { color: var(--mf-danger); border-color: var(--mf-danger-border); }
+
+/* A small type scale keeps ordinary reading comfortable while compact editor
+   controls and metadata retain their existing layouts. Code fonts are untouched. */
+.tech-white-shell,
+body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer, .ant-dropdown, .ant-select-dropdown) {
+  font-family: var(--mf-font-family);
+  font-size: var(--mf-font-body);
+  line-height: 1.6;
+}
+.tech-white-shell .app-content :is(.navigation-area-heading, .shell-page-heading, .runtime-page-bar) h3.ant-typography {
+  color: var(--mf-text) !important;
+  font-size: var(--mf-font-title) !important;
+  font-weight: 600;
+  line-height: 1.4 !important;
+}
+.tech-white-shell .app-content :is(.simple-workbench-head, .favorite-center-panel) h4,
+.tech-white-shell .app-content .shell-library-grid h4,
+.tech-white-shell .app-content .form-designer-title h4 {
+  color: var(--mf-text);
+  font-size: var(--mf-font-section) !important;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.tech-white-shell .app-content .ant-card-head-title {
+  font-size: var(--mf-font-body);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.tech-white-shell .app-content .ant-table,
+.tech-white-shell .app-content .ant-table :is(th, td) {
+  font-size: var(--mf-font-compact);
+  line-height: 1.5;
+}
+.tech-white-shell .app-content .ant-table th { font-weight: 600; }
+.tech-white-shell .app-content .ant-typography-secondary,
+.tech-white-shell .shell-search-result small,
+.tech-white-shell .shell-search-results-heading,
+.tech-white-shell .shell-search-results-footer {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-auxiliary);
+  line-height: 1.6;
+}
+.tech-white-shell .app-menu .ant-menu-item-group-title { font-size: var(--mf-font-auxiliary); }
+.tech-white-shell .shell-search-input .ant-input,
+.tech-white-shell .shell-search-result { font-size: var(--mf-font-compact); }
+.tech-white-shell .shell-search-shortcut { font-size: 11px; }
+.tech-white-shell .app-content .workflow-approval-card-primary small {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-auxiliary);
+  font-weight: 400;
+}
+.tech-white-shell .app-content .workflow-approval-card-primary strong {
+  color: var(--mf-text);
+  font-size: var(--mf-font-body);
+  font-weight: 600;
+}
+.tech-white-shell .app-content .workflow-approval-card-meta {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-auxiliary);
+}
+.tech-white-shell .app-content .form-designer-right .designer-prop-section-title,
+.tech-white-shell .app-content .designer-props label > span {
+  font-size: var(--mf-font-compact);
+  line-height: 1.5;
+}
+.tech-white-shell .app-content .ant-btn { font-family: var(--mf-font-family); }
+.tech-white-shell .app-content .form-designer-right .designer-prop-summary small,
+.tech-white-shell .app-content .designer-panel-head span {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-auxiliary);
+}
+.tech-white-shell .app-content .app-business-configured-search .ant-form-item-label > label,
+.tech-white-shell .app-content .app-business-search-grid label > span { font-size: var(--mf-font-compact); }
+.tech-white-shell .app-content .ant-statistic-content { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tech-white-shell .app-content :is(.business-form-directory-entry, .todo-metric-item, .workflow-approval-card) { font-family: var(--mf-font-family); }
+.tech-white-shell .app-content :is(.business-form-directory-entry, .todo-metric-item) strong {
+  font-size: var(--mf-font-body);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.tech-white-shell .app-content .todo-metric-item small { color: var(--mf-muted); font-size: var(--mf-font-auxiliary); }
+.tech-white-shell .app-content .todo-metric-item em { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Action glyphs inherit their control's semantic color, including danger,
+   disabled and loading. Rail, charts and large illustration icons keep size. */
+.tech-white-shell .app-content .ant-btn .anticon,
+body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer, .ant-dropdown-menu) .ant-btn .anticon,
+body:has(.tech-white-shell) .ant-dropdown-menu-item .anticon {
+  font-size: var(--mf-icon-action);
+}
+.tech-white-shell .app-content :is(.ant-input-prefix, .ant-select-arrow, .ant-picker-suffix) .anticon { font-size: 14px; }
+
+/* Feedback keeps semantic icons and existing interaction/scroll containers. */
+body:has(.tech-white-shell) .ant-spin { color: var(--mf-primary); }
+body:has(.tech-white-shell) .ant-spin .ant-spin-text {
+  font-size: var(--mf-font-compact);
+  line-height: 1.6;
+  text-shadow: none;
+}
+body:has(.tech-white-shell) .ant-empty-description {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-compact);
+  line-height: 1.6;
+}
+body:has(.tech-white-shell) .ant-empty-footer { margin-top: 16px; }
+body:has(.tech-white-shell) .ant-alert {
+  border-radius: var(--mf-control-radius);
+  font-family: var(--mf-font-family);
+}
+body:has(.tech-white-shell) .ant-alert-message { color: var(--mf-text); font-size: var(--mf-font-body); font-weight: 500; }
+body:has(.tech-white-shell) .ant-alert-description { color: var(--mf-muted); font-size: var(--mf-font-compact); line-height: 1.6; }
+body:has(.tech-white-shell) .ant-alert-success { background: var(--mf-success-bg); border-color: var(--mf-success-border); }
+body:has(.tech-white-shell) .ant-alert-warning { background: var(--mf-warning-bg); border-color: var(--mf-warning-border); }
+body:has(.tech-white-shell) .ant-alert-error { background: var(--mf-danger-bg); border-color: var(--mf-danger-border); }
+body:has(.tech-white-shell) .ant-alert-info { background: var(--mf-info-bg); border-color: var(--mf-info-border); }
+body:has(.tech-white-shell) :is(.ant-message-notice-content, .ant-notification-notice) {
+  background: var(--mf-panel);
+  color: var(--mf-text);
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  box-shadow: 0 8px 24px rgba(32, 35, 38, .08);
+  font-family: var(--mf-font-family);
+  font-size: var(--mf-font-body);
+  line-height: 1.6;
+}
+body:has(.tech-white-shell) .ant-notification-notice-message { color: var(--mf-text); font-size: var(--mf-font-body); font-weight: 600; }
+body:has(.tech-white-shell) .ant-notification-notice-description { color: var(--mf-muted); font-size: var(--mf-font-compact); }
+body:has(.tech-white-shell) :is(.ant-alert-success .ant-alert-icon, .ant-message-success > .anticon, .ant-notification-notice-icon-success) { color: var(--mf-success); }
+body:has(.tech-white-shell) :is(.ant-alert-warning .ant-alert-icon, .ant-message-warning > .anticon, .ant-notification-notice-icon-warning) { color: var(--mf-warning); }
+body:has(.tech-white-shell) :is(.ant-alert-error .ant-alert-icon, .ant-message-error > .anticon, .ant-notification-notice-icon-error) { color: var(--mf-danger); }
+body:has(.tech-white-shell) :is(.ant-alert-info .ant-alert-icon, .ant-message-info > .anticon, .ant-message-loading > .anticon, .ant-notification-notice-icon-info) { color: var(--mf-primary); }
+.shell-page-loading { padding: 40px; }
+.shell-page-error { display: grid; gap: 16px; padding: 24px; }
+.shell-error-details { color: var(--mf-muted); font-size: var(--mf-font-compact); }
+.shell-error-details summary { cursor: pointer; }
+.shell-error-details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-control-radius);
+  background: var(--mf-panel);
+  font-size: var(--mf-font-auxiliary);
+}
+.shell-page-error > .ant-btn { justify-self: start; }
+.tech-white-shell .app-content :is(.form-designer-loading-state, .workflow-empty-state, .workflow-empty-detail, .professional-flow-empty, .view-config-table-empty, .designer-empty-props) {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-compact);
+  line-height: 1.6;
+}
+.tech-white-shell .app-content .dashboard-page { display: flex; flex-direction: column; gap: var(--density-gap); min-width: 0; }
+.tech-white-shell .app-content .dashboard-command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-panel);
+}
+.tech-white-shell .app-content .dashboard-command-header > div:first-child { display: flex; align-items: center; gap: 12px; }
+.tech-white-shell .app-content .dashboard-command-header > div:first-child > .anticon { color: var(--mf-primary); font-size: 24px; }
+.tech-white-shell .app-content .dashboard-command-header .app-program-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--mf-control-radius); color: var(--mf-primary); background: var(--mf-hover); font-size: 22px; flex-shrink: 0; }
+.tech-white-shell .app-content .dashboard-command-header .ant-typography-secondary { display: block; margin-top: 4px; }
+.tech-white-shell .app-content .dashboard-command-header h3 { margin: 0; font-size: var(--mf-font-section); font-weight: 600; }
+.tech-white-shell .app-content .dashboard-kpi-card .ant-statistic-content { color: var(--mf-text); font-size: 24px; }
+.tech-white-shell .app-content .dashboard-kpi-card .ant-statistic-title { color: var(--mf-muted); font-size: var(--mf-font-compact); }
+
+/* Remaining custom surfaces and navigation use the same states as Ant Design. */
+.tech-white-shell .app-content :is(.alert-center-stat, .alert-center-table, .material-applications-stat, .material-applications-table, .ai-status-tile, .ai-switch-panel, .ai-policy-section, .quality-command-hero) {
+  background: var(--mf-panel);
+  border-color: var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  box-shadow: none;
+}
+.tech-white-shell .app-content :is(.alert-center-header, .material-applications-header) h2 {
+  font-size: var(--mf-font-title);
+  font-weight: 600;
+}
+.tech-white-shell .app-content .quality-impact-page { background: var(--mf-bg); }
+.tech-white-shell .app-content .quality-command-hero .ant-typography { color: var(--mf-muted); }
+.tech-white-shell .app-content .quality-command-hero h3 { color: var(--mf-text) !important; font-size: var(--mf-font-title) !important; font-weight: 600 !important; }
+.tech-white-shell .app-content .quality-command-kicker { color: var(--mf-primary) !important; font-weight: 600; }
+.tech-white-shell .app-content .quality-command-hero .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary); border-color: var(--mf-primary); }
+.tech-white-shell .app-content .quality-command-hero .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover { background: var(--mf-primary-strong); }
+.tech-white-shell .app-content :is(.quality-task-panel, .quality-impact-graph-card) .ant-card-body { background: var(--mf-panel); }
+.tech-white-shell .app-content :is(.quality-event-card.quality-object-entry, .quality-task-filter button, .knowledge-tree-folder) { background: var(--mf-panel); border-color: var(--mf-border); }
+.tech-white-shell .app-content :is(.quality-event-card.quality-object-entry:hover, .knowledge-source-item:hover, .knowledge-document-item:hover) { background: var(--mf-hover); border-color: var(--mf-border-strong); }
+.tech-white-shell .app-content :is(.quality-event-card.quality-object-entry.active, .knowledge-source-item.active, .knowledge-document-item.active) { background: var(--mf-selected); border-color: var(--mf-border-strong); }
+.tech-white-shell .app-content .quality-task-filter button:hover { background: var(--mf-hover); color: var(--mf-text); }
+.tech-white-shell .app-content .quality-task-filter button.active { background: var(--mf-selected); color: var(--mf-text); border-color: var(--mf-border-strong); font-weight: 600; }
+.tech-white-shell .app-content .knowledge-directory-tree .ant-tree-node-content-wrapper.ant-tree-node-selected { background: var(--mf-selected); color: var(--mf-text); }
+.tech-white-shell .app-content :is(.knowledge-intake-action, .knowledge-intake-metric, .knowledge-publish-action) { background: var(--mf-rail); border-color: var(--mf-border); border-radius: var(--mf-control-radius); }
+.tech-white-shell .app-content .app-business-tab-active { background: var(--mf-selected); color: var(--mf-text); border-color: var(--mf-border-strong); }
+.tech-white-shell .app-content :is(.app-program-icon, .alert-business-icon) { background: var(--mf-hover); color: var(--mf-primary); }
+body:has(.tech-white-shell) .dynamic-business-modal .ant-modal-body { background: var(--mf-panel); }
+.tech-white-shell .ai-chat-message.user .ai-chat-bubble { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+body:has(.tech-white-shell) .ai-session-history-popover .ant-popover-inner { background: var(--mf-panel); border-color: var(--mf-border); border-radius: var(--mf-panel-radius); box-shadow: 0 8px 24px rgba(32,35,38,.08); }
+body:has(.tech-white-shell) :is(.ai-session-history-search, .ai-session-history-scope) { background: var(--mf-rail); border-color: var(--mf-border); }
+body:has(.tech-white-shell) .ai-session-history-row:hover { background: var(--mf-hover); }
+body:has(.tech-white-shell) .ai-session-history-row.active { background: var(--mf-selected); border-color: var(--mf-border-strong); }
+body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-selected, .ant-segmented-thumb) { background: var(--mf-selected); color: var(--mf-text); }
+.tech-white-shell :is(.ai-skill-action-card, .ai-action-state-panel) { background: var(--mf-panel); border-color: var(--mf-border); border-radius: var(--mf-control-radius); }
+.tech-white-shell .ai-skill-action-card { box-shadow: inset 3px 0 0 var(--mf-primary); }
+.tech-white-shell .ai-skill-action-icon { color: var(--mf-primary); background: var(--mf-hover); }
+.tech-white-shell .app-content .designer-width-option-active,
+.tech-white-shell .app-content .designer-layout-setting :is(.ant-segmented-item-selected, .ant-segmented-thumb) { background: var(--mf-selected); color: var(--mf-text); border-color: var(--mf-border-strong); box-shadow: none; }
+.tech-white-shell .app-content .designer-props label:not(.designer-prop-locked) .ant-input:not(:disabled):not([readonly]),
+.tech-white-shell .app-content .designer-props label:not(.designer-prop-locked) .ant-select:not(.ant-select-disabled):not(.ant-select-status-error):not(.ant-select-status-warning) .ant-select-selector { background: var(--mf-panel) !important; }

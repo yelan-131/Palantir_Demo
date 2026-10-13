@@ -1,3 +1,4 @@
+import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import { useEffect, useState } from 'react';
 import { Form, Input, InputNumber, Select, Divider, Typography, Space } from 'antd';
 import type { WidgetInstance, WidgetFieldConfig } from '../ReportWidgets/types';
@@ -29,7 +30,7 @@ export default function ConfigPanel({ widget, onChange }: Props) {
 
   if (!widget) {
     return (
-      <div style={{ padding: 16, textAlign: 'center', color: '#999' }}>
+      <div style={{ padding: 16, textAlign: 'center', color: TECH_WHITE_PALETTE.faint }}>
         选择画布中的组件进行配置
       </div>
     );
@@ -179,9 +180,9 @@ export default function ConfigPanel({ widget, onChange }: Props) {
             <Form.Item label="颜色">
               <Input
                 type="color"
-                value={(widget.style?.color as string) || '#1677ff'}
+                value={(widget.style?.color as string) || TECH_WHITE_PALETTE.primary}
                 onChange={(e) => handleStyleChange('color', e.target.value)}
-                style={{ width: 60, padding: 2 }}
+                style={{ width: 60, padding: 2, borderRadius: TECH_WHITE_GEOMETRY.controlRadius }}
               />
             </Form.Item>
           </>

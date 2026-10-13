@@ -41,10 +41,8 @@ import {
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 import { useAuthStore } from '../../stores/authStore';
-import AppMenuManagement from '../SystemAdmin/AppMenuManagement';
-import IdentityAccessManagement from '../SystemAdmin/IdentityAccessManagement';
-import ReferenceDataManagement from '../SystemAdmin/ReferenceDataManagement';
-import SemanticAssetCenter, { KnowledgeCenter } from '../SystemAdmin/SemanticAssetCenter';
+import ThemePalette from '../../components/ThemePalette';
+import { useShellPreferences } from '../../hooks/useShellPreferences';
 import {
   adminListUsers,
   closeAgentConversation,
@@ -176,103 +174,20 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
   const user = useAuthStore((s) => s.user);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSection = searchParams.get('section') || 'account';
-  const identityDefaultTab = activeSection === 'tenants' ? 'tenants' : activeSection === 'roles' || activeSection === 'ai-role-policies' ? 'roles' : activeSection === 'orgs' ? 'orgs' : activeSection === 'users' ? 'users' : 'overview';
-  const normalizedSection = ['tenants', 'users', 'roles', 'orgs', 'ai-role-policies'].includes(activeSection)
-    ? 'identity-access'
-    : activeSection === 'ai-personal' || activeSection === 'preferences'
-      ? 'account'
-    : activeSection === 'palantir-config' || activeSection === 'data-ontology' || activeSection === 'semantic-mapping' || activeSection === 'ontology-modeling'
-      ? 'data-assets'
-      : activeSection === 'knowledge-graph'
-        ? 'knowledge'
-      : activeSection;
   const roles = user?.roles?.length ? user.roles.map((role: any) => role.label || role.name).join(' / ') : '-';
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
   const accountDefaultSubTab = activeSection === 'preferences' ? 'preferences' : 'profile';
-  const semanticDefaultView = activeSection === 'semantic-mapping'
-    ? 'mapping'
-    : activeSection === 'ontology-modeling'
-      ? 'ontology'
-      : 'data';
-
-  const items = useMemo(() => {
-    const baseItems = [
-      {
-        key: 'account',
-        label: '账号中心',
-        icon: <UserOutlined />,
-        children: (
-          <AccountProfilePanel
-            user={user}
-            roleLabel={roleLabel}
-            roles={roles}
-            currentApplication={currentApplication}
-            defaultActiveKey={accountDefaultSubTab}
-          />
-        ),
-      },
-    ];
-
-    if (!user?.is_admin) return baseItems;
-
-    return [
-      ...baseItems,
-      {
-        key: 'ai',
-        label: 'AI 与平台设置',
-        icon: <RobotOutlined />,
-        children: <AIPlatformPanelV2 />,
-      },
-      {
-        key: 'app-menu',
-        label: '应用与菜单',
-        icon: <AppstoreOutlined />,
-        children: <AppMenuManagement />,
-      },
-      {
-        key: 'data-assets',
-        label: '数据资产中心',
-        icon: <DatabaseOutlined />,
-        children: <SemanticAssetCenter view={semanticDefaultView} />,
-      },
-      {
-        key: 'reference-data',
-        label: '数据字典与基础档案',
-        icon: <DatabaseOutlined />,
-        children: <ReferenceDataManagement />,
-      },
-      {
-        key: 'knowledge',
-        label: '知识库中心',
-        icon: <FileSearchOutlined />,
-        children: <KnowledgeCenter />,
-      },
-      {
-        key: 'identity-access',
-        label: '身份与权限',
-        icon: <SafetyCertificateOutlined />,
-        children: (
-          <IdentityAccessManagement
-            key={identityDefaultTab}
-            defaultActiveKey={identityDefaultTab}
-            onTabChange={(key) => setSearchParams({ section: key === 'overview' ? 'identity-access' : key })}
-          />
-        ),
-      },
-      {
-        key: 'audit',
-        label: '审计与日志',
-        icon: <AuditOutlined />,
-        children: <AuditPanel />,
-      },
-    ];
-  }, [accountDefaultSubTab, currentApplication, identityDefaultTab, roleLabel, roles, setSearchParams, user]);
+  const normalizedSection = 'account';
+  const items = [{
+    key: 'account', label: '个人资料与偏好',
+    children: <AccountProfilePanel user={user} roleLabel={roleLabel} roles={roles} currentApplication={currentApplication} defaultActiveKey={accountDefaultSubTab} />,
+  }];
 
   return (
     <div className="account-center-page">
       <div className="account-center-head">
         <Space size={16} align="center">
-          <Avatar size={56} icon={<UserOutlined />} style={{ backgroundColor: '#2f5f73' }} />
+          <Avatar size={56} icon={<UserOutlined />} style={{ backgroundColor: 'var(--mf-primary)' }} />
           <div>
             <Title level={3}>{user?.display_name || '系统管理员'}</Title>
             <Text type="secondary">{user?.email || user?.username || 'admin@manufoundry.local'}</Text>
@@ -391,6 +306,11 @@ function AccountSecurityPanel({
 
 function PreferencePanel() {
   const [form] = Form.useForm();
+  const { preferences, updatePreferences } = useShellPreferences();
+
+  useEffect(() => {
+    form.setFieldsValue(preferences);
+  }, [form, preferences]);
 
   return (
     <div className="account-center-grid two-columns">
@@ -398,7 +318,7 @@ function PreferencePanel() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ density: 'standard', theme: 'light', sidebar: 'expanded', home: 'workspace', language: 'zh-CN' }}
+          initialValues={preferences}
         >
           <Form.Item name="density" label="显示密度">
             <Radio.Group optionType="button" buttonStyle="solid">
@@ -407,11 +327,18 @@ function PreferencePanel() {
               <Radio.Button value="relaxed">宽松</Radio.Button>
             </Radio.Group>
           </Form.Item>
-          <Form.Item name="theme" label="主题模式">
+          <Form.Item
+            name="theme"
+            label="主题模式"
+            extra={<span style={{ color: 'var(--shell-text-secondary, #6b7280)' }}>柔和灰白界面，适合长时间办公；应用栏、菜单栏与工作区保持清晰分层。</span>}
+          >
             <Radio.Group>
-              <Radio value="light">浅色</Radio>
+              <Radio value="tech-white">科技灰白</Radio>
               <Radio value="dark" disabled>深色（规划中）</Radio>
             </Radio.Group>
+          </Form.Item>
+          <Form.Item name="aiBubbleVisible" label="右下角 AI 助手气泡" valuePropName="checked">
+            <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
           </Form.Item>
           <Form.Item name="sidebar" label="默认侧边栏">
             <Radio.Group>
@@ -440,7 +367,7 @@ function PreferencePanel() {
             type="primary"
             icon={<SkinOutlined />}
             onClick={() => {
-              localStorage.setItem('mf_user_preferences', JSON.stringify(form.getFieldsValue()));
+              updatePreferences(form.getFieldsValue());
               message.success('工作偏好已保存');
             }}
           >
@@ -456,6 +383,7 @@ function PreferencePanel() {
           <span><Switch /> <ApiOutlined /> 数据任务运行结果</span>
         </Space>
       </Card>
+      <ThemePalette />
     </div>
   );
 }
@@ -663,7 +591,7 @@ function AIPlatformPanel() {
   );
 }
 
-function AIPlatformPanelV2() {
+export function AIPlatformPanelV2() {
   const [form] = Form.useForm();
   const [permissionRuleForm] = Form.useForm();
   const [validationRuleForm] = Form.useForm();
@@ -2190,7 +2118,7 @@ function ClosedLoopPolicyTable({ policies }: { policies: ClosedLoopPolicy[] }) {
     />
   );
 }
-function AuditPanel() {
+export function AuditPanel() {
   const [logs, setLogs] = useState<AuditLogRecord[]>([]);
   const [usersById, setUsersById] = useState<Record<number, string>>({});
   const [summary, setSummary] = useState<{ resource_counts?: Record<string, number>; action_counts?: Record<string, number> }>({});

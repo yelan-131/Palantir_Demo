@@ -33,7 +33,7 @@ class NotificationCreate(BaseModel):
 
 
 class MarkAllReadRequest(BaseModel):
-    user_id: int
+    user_id: int | None = None
 
 
 # ── Mock fallback data ────────────────────────────────────
@@ -93,6 +93,8 @@ def _notification_to_dict(n) -> dict:
         "resource_type": n.resource_type,
         "resource_id": n.resource_id,
         "created_at": n.created_at.isoformat() if n.created_at else None,
+        "category": "todo" if n.type == "approval" else "result" if n.type == "approval_result" else "other",
+        "actionable": False, "can_approve": False, "target_url": None, "workflow_status": None,
     }
 
 
@@ -110,7 +112,7 @@ async def list_notifications(
     """List notifications for a user with pagination and filters."""
     tenant_id = current_tenant_id(user)
     effective_user_id = user_id or current_user_id(user)
-    if effective_user_id != current_user_id(user) and not user.get("is_admin"):
+    if effective_user_id != current_user_id(user):
         raise HTTPException(403, "Cannot read notifications for another user")
 
     async def _query(db):
@@ -118,7 +120,7 @@ async def list_notifications(
         stmt = (
             select(Notification)
             .where(Notification.tenant_id == tenant_id, Notification.user_id == effective_user_id)
-            .order_by(Notification.created_at.desc())
+            .order_by(Notification.created_at.desc(), Notification.id.desc())
         )
         if is_read is not None:
             stmt = stmt.where(Notification.is_read == is_read)
@@ -150,8 +152,10 @@ async def list_notifications(
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await db.execute(stmt)
         notifications = result.scalars().all()
+        from app.services.approval_notifications import notification_context, notification_navigation
+        contexts = await notification_context(db, notifications, user)
         return {
-            "data": [_notification_to_dict(n) for n in notifications],
+            "data": [{**_notification_to_dict(n), **notification_navigation(n, contexts)} for n in notifications],
             "total": total or 0,
             "page": page,
             "page_size": page_size,
@@ -163,7 +167,7 @@ async def list_notifications(
         return result
 
     # Mock fallback
-    notifications = [n for n in MOCK_NOTIFICATIONS if n["user_id"] == effective_user_id]
+    notifications = [n for n in MOCK_NOTIFICATIONS if n["user_id"] == effective_user_id and n.get("tenant_id", 1) == tenant_id]
     if is_read is not None:
         notifications = [n for n in notifications if n["is_read"] == is_read]
     if type is not None:
@@ -172,7 +176,7 @@ async def list_notifications(
     total = len(notifications)
     unread_count = sum(
         1 for n in MOCK_NOTIFICATIONS
-        if n["user_id"] == effective_user_id and not n["is_read"]
+        if n["user_id"] == effective_user_id and n.get("tenant_id", 1) == tenant_id and not n["is_read"]
     )
     start = (page - 1) * page_size
     page_items = notifications[start:start + page_size]
@@ -249,7 +253,7 @@ async def mark_notification_read(notification_id: int, user: dict = Depends(get_
     async def _query(db):
         from app.models.relational import Notification
         n = await db.get(Notification, notification_id)
-        if not n or n.tenant_id != tenant_id or (n.user_id != user_id and not user.get("is_admin")):
+        if not n or n.tenant_id != tenant_id or (n.user_id != user_id):
             raise HTTPException(404, "Notification not found")
         n.is_read = True
         await db.commit()
@@ -262,7 +266,7 @@ async def mark_notification_read(notification_id: int, user: dict = Depends(get_
 
     # Mock fallback
     for n in MOCK_NOTIFICATIONS:
-        if n["id"] == notification_id and n["user_id"] == user_id:
+        if n["id"] == notification_id and n["user_id"] == user_id and n.get("tenant_id", 1) == tenant_id:
             n["is_read"] = True
             n["source"] = "fallback"
             return n
@@ -274,14 +278,15 @@ async def mark_all_read(body: MarkAllReadRequest, user: dict = Depends(get_curre
     """Mark all notifications as read for a user."""
     tenant_id = current_tenant_id(user)
     user_id = current_user_id(user)
-    if body.user_id != user_id and not user.get("is_admin"):
+    if body.user_id is not None and body.user_id != user_id:
         raise HTTPException(403, "Cannot update notifications for another user")
+    effective_user_id = user_id
 
     async def _query(db):
         from app.models.relational import Notification
         stmt = (
             select(Notification)
-            .where(Notification.tenant_id == tenant_id, Notification.user_id == body.user_id, Notification.is_read == False)
+            .where(Notification.tenant_id == tenant_id, Notification.user_id == effective_user_id, Notification.is_read == False)
         )
         result = await db.execute(stmt)
         notifications = result.scalars().all()
@@ -299,7 +304,7 @@ async def mark_all_read(body: MarkAllReadRequest, user: dict = Depends(get_curre
     # Mock fallback
     count = 0
     for n in MOCK_NOTIFICATIONS:
-        if n["user_id"] == body.user_id and not n["is_read"]:
+        if n["user_id"] == effective_user_id and n.get("tenant_id", 1) == tenant_id and not n["is_read"]:
             n["is_read"] = True
             count += 1
     return {"marked_count": count, "source": "fallback"}
@@ -310,7 +315,7 @@ async def get_unread_count(user_id: int | None = Query(None, description="User I
     """Get unread notification count for a user."""
     tenant_id = current_tenant_id(user)
     effective_user_id = user_id or current_user_id(user)
-    if effective_user_id != current_user_id(user) and not user.get("is_admin"):
+    if effective_user_id != current_user_id(user):
         raise HTTPException(403, "Cannot read notifications for another user")
 
     async def _query(db):
@@ -321,7 +326,7 @@ async def get_unread_count(user_id: int | None = Query(None, description="User I
             .where(Notification.tenant_id == tenant_id, Notification.user_id == effective_user_id, Notification.is_read == False)
         )
         count = await db.scalar(stmt)
-        return {"unread_count": count or 0}
+        return {"unread_count": count or 0, "count": count or 0}
 
     result = await _try_db(_query)
     if result is not None:
@@ -330,9 +335,9 @@ async def get_unread_count(user_id: int | None = Query(None, description="User I
     # Mock fallback
     count = sum(
         1 for n in MOCK_NOTIFICATIONS
-        if n["user_id"] == effective_user_id and not n["is_read"]
+        if n["user_id"] == effective_user_id and n.get("tenant_id", 1) == tenant_id and not n["is_read"]
     )
-    return {"unread_count": count, "source": "fallback"}
+    return {"unread_count": count, "count": count, "source": "fallback"}
 
 
 @router.delete("/{notification_id}")
@@ -344,7 +349,7 @@ async def delete_notification(notification_id: int, user: dict = Depends(get_cur
     async def _query(db):
         from app.models.relational import Notification
         n = await db.get(Notification, notification_id)
-        if not n or n.tenant_id != tenant_id or (n.user_id != user_id and not user.get("is_admin")):
+        if not n or n.tenant_id != tenant_id or (n.user_id != user_id):
             raise HTTPException(404, "Notification not found")
         await db.delete(n)
         await db.commit()
@@ -357,7 +362,7 @@ async def delete_notification(notification_id: int, user: dict = Depends(get_cur
     # Mock fallback
     global MOCK_NOTIFICATIONS
     original_len = len(MOCK_NOTIFICATIONS)
-    MOCK_NOTIFICATIONS = [n for n in MOCK_NOTIFICATIONS if n["id"] != notification_id]
+    MOCK_NOTIFICATIONS = [n for n in MOCK_NOTIFICATIONS if not (n["id"] == notification_id and n["user_id"] == user_id and n.get("tenant_id", 1) == tenant_id)]
     if len(MOCK_NOTIFICATIONS) == original_len:
         raise HTTPException(404, "Notification not found")
     return {"ok": True, "source": "fallback"}
@@ -389,6 +394,8 @@ async def send_notification(
                 content=content,
                 type=type,
                 is_read=False,
+                resource_type=kwargs.get("resource_type"),
+                resource_id=kwargs.get("resource_id"),
             )
             db.add(n)
             await db.commit()

@@ -5,6 +5,7 @@ low-code forms. Creating fields updates metadata only; it does not execute
 DDL against business tables.
 """
 from __future__ import annotations
+from app.services.record_domains import prepare_domain_create, validate_domain_update, protect_migrated_request
 
 import json
 import copy
@@ -652,6 +653,17 @@ def _workflow_instance_title(form, record_payload: dict, binding_config: Optiona
     return f"{form.name} #{record_payload.get('id')}"
 
 
+async def _runtime_submission_available(db, tenant_id, form_id, trigger_action="submit"):
+    from app.models.relational import WorkflowBinding, WorkflowDef
+    return bool(await db.scalar(
+        select(WorkflowBinding.id).join(WorkflowDef, WorkflowDef.id == WorkflowBinding.workflow_id)
+        .where(WorkflowBinding.tenant_id == tenant_id, WorkflowBinding.form_id == form_id,
+               WorkflowBinding.enabled.is_(True), WorkflowBinding.trigger_action == trigger_action,
+               WorkflowDef.tenant_id == tenant_id, WorkflowDef.status.in_(["published", "active"]))
+        .limit(1)
+    ))
+
+
 async def _start_form_workflows(
     db: AsyncSession,
     *,
@@ -661,6 +673,8 @@ async def _start_form_workflows(
     user: dict,
     trigger_action: str = "submit",
 ) -> list[dict]:
+    if form.code == "material-application" and trigger_action != "manual_submit":
+        return []
     from app.api.workflow import (
         _add_approval_notifications,
         _find_first_approval_step,
@@ -668,7 +682,7 @@ async def _start_form_workflows(
         _set_current_assignees,
         _workflow_config_steps,
     )
-    from app.models.relational import WorkflowApproval, WorkflowBinding, WorkflowDef, WorkflowInstance
+    from app.models.relational import WorkflowApproval, WorkflowBinding, WorkflowDef, WorkflowDefVersion, WorkflowInstance
 
     bindings = (await db.execute(
         select(WorkflowBinding)
@@ -689,10 +703,18 @@ async def _start_form_workflows(
     for binding in bindings:
         workflow_def = await db.get(WorkflowDef, binding.workflow_id)
         if not workflow_def or workflow_def.tenant_id != tenant_id or workflow_def.status not in {"published", "active"}:
-            continue
-        # At creation time the live config equals the latest snapshot; the
-        # instance pins workflow_version below so later edits cannot reshape it.
-        config = json.loads(workflow_def.config) if isinstance(workflow_def.config, str) else workflow_def.config
+            raise HTTPException(409, "此表单的审批流程尚未发布，请联系管理员配置")
+        snapshot = await db.scalar(select(WorkflowDefVersion).where(
+            WorkflowDefVersion.tenant_id == tenant_id,
+            WorkflowDefVersion.workflow_id == workflow_def.id,
+            WorkflowDefVersion.version == int(workflow_def.version or 1),
+            WorkflowDefVersion.status.in_(["published", "active"]),
+        ))
+        raw_config = snapshot.config if snapshot else workflow_def.config
+        config = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
+        managed = str((config or {}).get("domainCode", "")).startswith("form-approval:") or (config or {}).get("domainCode") == "material-application-approval"
+        if managed and not snapshot:
+            raise HTTPException(409, "审批流程缺少已发布版本，请重新发布配置")
         steps = _workflow_config_steps(config if isinstance(config, dict) else {})
         first_step_index = _find_first_approval_step(steps) if steps else 0
         current_step = steps[first_step_index] if steps and first_step_index < len(steps) else None
@@ -702,6 +724,16 @@ async def _start_form_workflows(
             "record_id": record_payload.get("id"),
             "trigger_action": trigger_action,
         }
+        if managed:
+            for step in steps:
+                if step.get("type") != "approval":
+                    continue
+                stage_ids = await _resolve_step_approver_ids(db, tenant_id, step, form_data, variables,
+                                                           initiator_id, None, allow_fallback=False)
+                if not stage_ids:
+                    raise HTTPException(409, f"审批节点 {step.get('name', '')} 没有有效审批人，请重新配置")
+            if not current_step or current_step.get("type") != "approval":
+                raise HTTPException(409, "审批流程没有有效审批节点")
         approver_ids = await _resolve_step_approver_ids(
             db,
             tenant_id,
@@ -710,6 +742,7 @@ async def _start_form_workflows(
             variables,
             initiator_id,
             initiator_id,
+            allow_fallback=not managed,
         ) if current_step and current_step.get("type") == "approval" else []
         state = {
             "current_node": current_step.get("node_id", current_step.get("name", "start")) if current_step else "end",
@@ -739,7 +772,7 @@ async def _start_form_workflows(
                     approver_id=approver_id,
                     node_id=current_step.get("node_id", current_step.get("name", "")),
                 ))
-            _add_approval_notifications(db, tenant_id, approver_ids, title, instance.id)
+            await _add_approval_notifications(db, tenant_id, approver_ids, title, instance.id)
         started.append({
             "instance_id": instance.id,
             "workflow_id": workflow_def.id,
@@ -1850,10 +1883,12 @@ async def get_form(
             if not user.get("is_admin") and not _is_anonymous_reader(user):
                 visible_names = await allowed_form_fields(user, form_id, "view", fields, db)
                 payload["fields"] = [field for field in payload["fields"] if field.get("field_name") in visible_names]
+            payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
             payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
             payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, payload.get("fields") or [], db)
             return {"data": _scoped_form_payload(payload, scope)}
     payload = _form_payload(form, fields=fields, applications=applications)
+    payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
     payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
     payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, fields, db)
     return {"data": _scoped_form_payload(payload, scope)}
@@ -2387,6 +2422,7 @@ async def list_dynamic_records(
 ):
     from app.models.relational import DynamicRecord, Form
 
+    from app.services.form_application_lifecycle import decorate
     tenant_id = current_tenant_id(user)
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != tenant_id:
@@ -2397,7 +2433,7 @@ async def list_dynamic_records(
     if _uses_physical_form_table(form):
         if cursor_after_id is not None or cursor_before_id is not None:
             raise HTTPException(400, "Cursor pagination is not supported for physical form tables")
-        return await _list_physical_records(
+        result = await _list_physical_records(
             db,
             form,
             fields,
@@ -2411,6 +2447,9 @@ async def list_dynamic_records(
             page=page,
             page_size=page_size,
         )
+        for record in result["data"]:
+            await decorate(db, form, record, user)
+        return result
     query_fields = _visible_field_subset(fields, visible_fields)
     db_filters = [DynamicRecord.form_id == form_id, DynamicRecord.tenant_id == tenant_id]
     if not include_deleted:
@@ -2445,7 +2484,7 @@ async def list_dynamic_records(
             total = await db.scalar(select(func.count(DynamicRecord.id)).where(*db_filters))
         result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
         return {
-            "data": [_record_payload(record, visible_fields=visible_fields) for record in result.scalars().all()],
+            "data": [await decorate(db, form, _record_payload(record, visible_fields=visible_fields), user) for record in result.scalars().all()],
             "total": int(total or 0) if total is not None else None,
             "page": page,
             "page_size": page_size,
@@ -2465,7 +2504,7 @@ async def list_dynamic_records(
         page_rows = rows[:page_size]
         next_cursor = page_rows[-1].id if len(rows) > page_size and page_rows else None
         return {
-            "data": [_record_payload(record, visible_fields=visible_fields) for record in page_rows],
+            "data": [await decorate(db, form, _record_payload(record, visible_fields=visible_fields), user) for record in page_rows],
             "total": int(total) if total is not None else None,
             "page": page,
             "page_size": page_size,
@@ -2484,7 +2523,7 @@ async def list_dynamic_records(
     start = (page - 1) * page_size
     end = start + page_size
     return {
-        "data": [_record_payload(record, visible_fields=visible_fields) for record in matched[start:end]],
+        "data": [await decorate(db, form, _record_payload(record, visible_fields=visible_fields), user) for record in matched[start:end]],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -2501,6 +2540,7 @@ async def get_dynamic_record(
 ):
     from app.models.relational import DynamicRecord, Form
 
+    from app.services.form_application_lifecycle import decorate
     tenant_id = current_tenant_id(user)
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != tenant_id:
@@ -2509,7 +2549,9 @@ async def get_dynamic_record(
     fields = await _runtime_form_fields(db, tenant_id, form_id)
     visible_fields = await _runtime_visible_field_names(user, form_id, fields, db)
     if _uses_physical_form_table(form):
-        return await _get_physical_record(db, form, fields, visible_fields, record_id, include_deleted=include_deleted)
+        result = await _get_physical_record(db, form, fields, visible_fields, record_id, include_deleted=include_deleted)
+        await decorate(db, form, result["data"], user)
+        return result
     record = await db.get(DynamicRecord, record_id)
     if (
         not record
@@ -2518,7 +2560,7 @@ async def get_dynamic_record(
         or (record.deleted_at is not None and not include_deleted)
     ):
         raise HTTPException(404, "Record not found")
-    return {"data": _record_payload(record, visible_fields=visible_fields)}
+    return {"data": await decorate(db, form, _record_payload(record, visible_fields=visible_fields), user)}
 
 
 @router.post("/{form_id}/records")
@@ -2528,6 +2570,10 @@ async def create_dynamic_record(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    return await _create_dynamic_record(form_id, body, db, user)
+
+
+async def _create_dynamic_record(form_id, body, db, user, *, defer_commit=False):
     from app.models.relational import DynamicRecord, Form
 
     tenant_id = current_tenant_id(user)
@@ -2536,15 +2582,20 @@ async def create_dynamic_record(
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "create")
     _validate_record_status(body.status)
+    from app.services.form_application_lifecycle import enabled, audit as lifecycle_audit, decorate
+    managed_draft = await enabled(db, form)
+    if managed_draft and body.status not in {None, 'active', 'draft'}:
+        raise HTTPException(409, '新申请只能保存为草稿，请通过提交操作发起审批')
+    record_status = 'draft' if managed_draft else body.status
     fields = await _runtime_form_fields(db, tenant_id, form_id)
     editable_fields = await allowed_form_fields(user, form_id, "create", fields, db)
-    input_data = dict(body.data or {})
+    input_data = prepare_domain_create(form.code, dict(body.data or {}), user)
     if _uses_physical_form_table(form):
         await _ensure_physical_form_table(db, form, fields)
     record_data = await _apply_record_encoding_rules(db, tenant_id, form, fields, input_data)
     generated_fields: set[str] = set()
     generated_fields = {key for key, value in record_data.items() if input_data.get(key) != value}
-    _validate_record_data(fields, record_data)
+    _validate_record_data(fields, record_data, partial=managed_draft)
     if _uses_physical_form_table(form):
         payload = _physical_write_payload(fields, record_data, editable_fields | generated_fields)
         table_name = str(form.table_name)
@@ -2562,7 +2613,7 @@ async def create_dynamic_record(
             assert_safe_identifier(column)
         params = {
             "tenant_id": tenant_id,
-            "record_status": body.status,
+            "record_status": record_status,
             "created_by": _uid(user),
             "updated_by": _uid(user),
             **physical_values,
@@ -2574,7 +2625,7 @@ async def create_dynamic_record(
             params,
         )).first()
         result = _physical_record_payload(row, form, fields)
-        workflow_instances = await _start_form_workflows(
+        workflow_instances = [] if managed_draft else await _start_form_workflows(
             db,
             tenant_id=tenant_id,
             form=form,
@@ -2582,8 +2633,10 @@ async def create_dynamic_record(
             user=user,
             trigger_action="submit",
         )
-        await db.commit()
-        await write_audit_log(
+        if managed_draft:
+            await lifecycle_audit(db, form, result["id"], user, "draft", status="draft")
+            await decorate(db, form, result, user)
+        await _record_creation_audit(db, defer_commit,
             tenant_id=tenant_id,
             user_id=current_user_id(user),
             action="create",
@@ -2604,7 +2657,7 @@ async def create_dynamic_record(
         model_id=form.model_id,
         data=record_data,
         schema_version=latest_version.version if latest_version else 1,
-        status=body.status,
+        status=record_status,
         created_by=_uid(user),
         updated_by=_uid(user),
     )
@@ -2612,7 +2665,7 @@ async def create_dynamic_record(
     await db.flush()
     await db.refresh(record)
     record_result = _record_payload(record)
-    workflow_instances = await _start_form_workflows(
+    workflow_instances = [] if managed_draft else await _start_form_workflows(
         db,
         tenant_id=tenant_id,
         form=form,
@@ -2620,10 +2673,10 @@ async def create_dynamic_record(
         user=user,
         trigger_action="submit",
     )
-    await db.commit()
-    await db.refresh(record)
-    record_result = _record_payload(record)
-    await write_audit_log(
+    if managed_draft:
+        await lifecycle_audit(db, form, record.id, user, "draft", status="draft")
+        await decorate(db, form, record_result, user)
+    await _record_creation_audit(db, defer_commit,
         tenant_id=tenant_id,
         user_id=current_user_id(user),
         action="create",
@@ -2632,6 +2685,40 @@ async def create_dynamic_record(
         new_values={**record_result, "workflow_instances": workflow_instances},
     )
     return {"data": {**record_result, "workflow_instances": workflow_instances}}
+
+
+async def _record_creation_audit(db, defer_commit, **values):
+    from app.models.relational import AuditLog
+    import json
+    new_values = values.pop("new_values", None)
+    db.add(AuditLog(**values, new_values=json.dumps(new_values, ensure_ascii=False, default=str)))
+    await db.flush()
+    if not defer_commit:
+        await db.commit()
+
+
+async def _protect_pending_form_record(db, tenant_id, form_id, record_id):
+    """Keep submitted source content stable while managed approval is pending."""
+    from app.models.relational import WorkflowInstance, WorkflowDef, WorkflowDefVersion
+    rows = (await db.execute(select(WorkflowInstance, WorkflowDef)
+        .join(WorkflowDef, WorkflowDef.id == WorkflowInstance.workflow_id)
+        .where(WorkflowInstance.tenant_id == tenant_id, WorkflowDef.tenant_id == tenant_id,
+               WorkflowInstance.status.in_(["pending", "in_progress"])))).all()
+    for instance, definition in rows:
+        snapshot = await db.scalar(select(WorkflowDefVersion).where(
+            WorkflowDefVersion.tenant_id == tenant_id, WorkflowDefVersion.workflow_id == definition.id,
+            WorkflowDefVersion.version == instance.workflow_version)) if instance.workflow_version else None
+        raw_config = snapshot.config if snapshot else definition.config
+        try:
+            config = json.loads(raw_config or "{}") if isinstance(raw_config, str) else raw_config or {}
+            state = json.loads(instance.workflow_state or "{}") if isinstance(instance.workflow_state, str) else instance.workflow_state or {}
+        except (ValueError, TypeError):
+            continue
+        variables = state.get("variables") or {}
+        if (config.get("domainCode") == f"form-approval:{form_id}"
+                and str(variables.get("form_id")) == str(form_id)
+                and str(variables.get("record_id")) == str(record_id)):
+            raise HTTPException(409, "记录正在审批中，不能修改或删除，请先完成审批")
 
 
 @router.put("/{form_id}/records/{record_id}")
@@ -2649,17 +2736,27 @@ async def update_dynamic_record(
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "edit")
+    from app.services.form_application_lifecycle import locked_record, guard_edit, decorate, metadata, audit as lifecycle_audit
+    locked = await locked_record(db, form, record_id)
+    await guard_edit(db, form, locked, user, body.status)
+    tracked = await metadata(db, form, locked, user)
+    await _protect_pending_form_record(db, tenant_id, form_id, record_id)
     _validate_record_status(body.status)
+    validate_domain_update(form.code, body.data or {})
+    if form.code == "material-application":
+        raise HTTPException(409, "料号申请请通过专用入口修改")
     if _uses_physical_form_table(form):
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         await _ensure_physical_form_table(db, form, fields)
         editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db)
         updates = body.dict(exclude_unset=True)
+        if tracked:
+            updates.pop("status", None)
         data_updates = updates.get("data") or {}
         all_field_names = {field.field_name for field in fields if not field.archived}
         existing = await _get_physical_record(db, form, fields, all_field_names, record_id, include_deleted=False)
         merged = _merged_record_data(existing["data"]["data"], data_updates)
-        _validate_record_data(fields, merged)
+        _validate_record_data(fields, merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, data_updates, exclude_record_id=record_id)
         payload = _physical_write_payload(fields, data_updates, editable_fields)
         table_name = str(form.table_name)
@@ -2681,22 +2778,28 @@ async def update_dynamic_record(
         )).first()
         if not row:
             raise HTTPException(404, "Record not found")
+        if tracked:
+            await lifecycle_audit(db, form, record_id, user, "edit", status=locked["status"])
         await db.commit()
         result = _physical_record_payload(row, form, fields)
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=current_user_id(user),
-            action="update",
-            resource_type="physical_record",
-            resource_id=record_id,
-            new_values=updates,
-        )
-        return {"data": result}
+        if not tracked:
+            await write_audit_log(
+                tenant_id=tenant_id,
+                user_id=current_user_id(user),
+                action="update",
+                resource_type="physical_record",
+                resource_id=record_id,
+                new_values=updates,
+            )
+        return {"data": await decorate(db, form, result, user)}
 
     record = await db.get(DynamicRecord, record_id)
     if not record or record.form_id != form_id or record.tenant_id != tenant_id or record.deleted_at is not None:
         raise HTTPException(404, "Record not found")
+    protect_migrated_request(form.code, record.data or {})
     updates = body.dict(exclude_unset=True)
+    if tracked:
+        updates.pop("status", None)
     if "data" in updates and updates["data"] is not None:
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db)
@@ -2704,23 +2807,26 @@ async def update_dynamic_record(
         if denied_fields:
             raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
         merged = _merged_record_data(record.data, updates["data"])
-        _validate_record_data(fields, merged)
+        _validate_record_data(fields, merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, updates["data"], exclude_record_id=record_id)
         updates["data"] = merged
     for key, value in updates.items():
         setattr(record, key, value)
     record.updated_by = _uid(user)
+    if tracked:
+        await lifecycle_audit(db, form, record_id, user, "edit", status=record.status)
     await db.commit()
     await db.refresh(record)
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="update",
-        resource_type="dynamic_record",
-        resource_id=record.id,
-        new_values=updates,
-    )
-    return {"data": _record_payload(record)}
+    if not tracked:
+        await write_audit_log(
+            tenant_id=tenant_id,
+            user_id=current_user_id(user),
+            action="update",
+            resource_type="dynamic_record",
+            resource_id=record.id,
+            new_values=updates,
+        )
+    return {"data": await decorate(db, form, _record_payload(record), user)}
 
 
 @router.delete("/{form_id}/records/{record_id}")
@@ -2737,6 +2843,12 @@ async def delete_dynamic_record(
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "delete")
+    from app.services.form_application_lifecycle import locked_record, guard_edit
+    locked = await locked_record(db, form, record_id)
+    await guard_edit(db, form, locked, user)
+    await _protect_pending_form_record(db, tenant_id, form_id, record_id)
+    if form.code == "material-application":
+        raise HTTPException(403, "料号申请和审批记录不可通过通用表单删除")
     if _uses_physical_form_table(form):
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         await _ensure_physical_form_table(db, form, fields)
@@ -2761,6 +2873,7 @@ async def delete_dynamic_record(
     record = await db.get(DynamicRecord, record_id)
     if not record or record.form_id != form_id or record.tenant_id != tenant_id or record.deleted_at is not None:
         raise HTTPException(404, "Record not found")
+    protect_migrated_request(form.code, record.data or {})
     record.deleted_at = datetime.now()
     record.updated_by = _uid(user)
     await db.commit()
@@ -2772,3 +2885,42 @@ async def delete_dynamic_record(
         resource_id=record.id,
     )
     return {"ok": True}
+
+
+class FormApplicationSubmit(BaseModel):
+    expected_status: str
+
+
+@router.post("/{form_id}/records/{record_id}/submit")
+async def submit_form_application(form_id: int, record_id: int, body: FormApplicationSubmit,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from app.models.relational import Form
+    from app.services.form_application_lifecycle import enabled, locked_record, metadata, audit, set_status, decorate
+    form = await db.get(Form, form_id)
+    tenant_id = current_tenant_id(user)
+    if not form or form.tenant_id != tenant_id:
+        raise HTTPException(404, "Form not found")
+    await _ensure_form_permission(db, user, form_id, "edit")
+    if not await enabled(db, form):
+        raise HTTPException(409, "此表单尚未配置审批流程")
+    record = await locked_record(db, form, record_id)
+    state = await metadata(db, form, record, user)
+    if not state:
+        raise HTTPException(409, "历史记录不能直接转换为申请，请新建草稿")
+    if body.expected_status not in {"draft", "rejected"} or state['status'] != body.expected_status:
+        raise HTTPException(409, "申请状态已变化，请刷新重试")
+    if not state['can_submit']:
+        raise HTTPException(403, "仅申请人或管理员可以提交")
+    await _protect_pending_form_record(db, tenant_id, form_id, record_id)
+    fields = await _runtime_form_fields(db, tenant_id, form_id)
+    _validate_record_data(fields, record['data'])
+    instances = await _start_form_workflows(db, tenant_id=tenant_id, form=form, record_payload=record, user=user)
+    if len(instances) != 1:
+        raise HTTPException(409, "表单须配置唯一的审批流程")
+    await set_status(db, form, record, "pending", user)
+    await audit(db, form, record_id, user, "submit", status="pending", workflow_id=instances[0]['instance_id'])
+    await db.commit()
+    visible = await _runtime_visible_field_names(user, form_id, fields, db)
+    record['data'] = {key: value for key, value in record['data'].items() if key in visible}
+    await decorate(db, form, record, user)
+    return {"data": {**record, "workflow_instances": instances}}

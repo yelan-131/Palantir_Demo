@@ -86,9 +86,10 @@ import ProfessionalFlowDesigner, {
   type FlowDesignerEdge,
   type FlowDesignerNode,
 } from './ProfessionalFlowDesigner';
+import FormApprovalSettings from '@/components/FormApprovalSettings';
 import './style.css';
 
-type DesignerTab = 'form' | 'dataset' | 'dashboard' | 'filter' | 'style' | 'flow' | 'permission';
+type DesignerTab = 'form' | 'dataset' | 'dashboard' | 'filter' | 'style' | 'flow' | 'approval' | 'permission';
 type ComponentPanel = 'components' | 'fieldTypes';
 type ControlSource = 'field' | 'component';
 type ControlWidth = 'quarter' | 'half' | 'threeQuarter' | 'full';
@@ -1335,6 +1336,7 @@ const tabs = [
   { key: 'form', label: '表单设计', icon: <FormOutlined /> },
   { key: 'filter', label: '数据筛选', icon: <SearchOutlined /> },
   { key: 'flow', label: '流程设计', icon: <UserSwitchOutlined /> },
+  { key: 'approval', label: '审批设置', icon: <CheckSquareOutlined /> },
   { key: 'permission', label: '权限设计', icon: <LockOutlined /> },
 ];
 
@@ -2545,7 +2547,7 @@ export default function FormSettingsPage() {
   } | null>(null);
   const isAnalysisDesigner = baseConfig.kind === 'analysis';
   const designerTabs = isAnalysisDesigner ? analyticsTabs : tabs;
-  const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
+  const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
 
   useEffect(() => {
     const requestedTab = searchParams.get('tab') as DesignerTab | null;
@@ -5634,8 +5636,8 @@ export default function FormSettingsPage() {
           >
             {version} 当前草稿
           </Button>
-          <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />
-          <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>
+          {activeTab !== 'approval' && <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />}
+          {activeTab !== 'approval' && <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>}
         </Space>
       </header>
 
@@ -5874,6 +5876,8 @@ export default function FormSettingsPage() {
               {renderAnalyticsStyleDesigner()}
             </div>
           )}
+
+          {activeTabKey === 'approval' && <FormApprovalSettings formId={platformForm?.id} />}
 
           {activeTabKey === 'flow' && (
             <ProfessionalFlowDesigner
@@ -6178,7 +6182,7 @@ export default function FormSettingsPage() {
           )}
         </main>
 
-        {!isAnalysisDesigner && !(['permission', 'filter', 'flow'] as DesignerTab[]).includes(activeTab) && (
+        {!isAnalysisDesigner && !(['permission', 'filter', 'flow', 'approval'] as DesignerTab[]).includes(activeTab) && (
         <aside className="form-designer-right">
           <div className="designer-panel-head">
             <strong>属性</strong>

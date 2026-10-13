@@ -327,14 +327,14 @@ export default function OntologyPage() {
                           marginBottom: 4,
                           borderRadius: 6,
                           cursor: 'pointer',
-                          background: selected ? '#e6f4ff' : 'transparent',
-                          borderLeft: selected ? '3px solid #1677ff' : '3px solid transparent',
+                          background: selected ? 'var(--mf-selected)' : 'transparent',
+                          borderLeft: selected ? '3px solid var(--mf-primary)' : '3px solid transparent',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 8,
                         }}
                       >
-                        <span style={{ fontSize: 16, color: selected ? '#1677ff' : '#8c8c8c' }}>
+                        <span style={{ fontSize: 16, color: selected ? 'var(--mf-text)' : 'var(--mf-muted)' }}>
                           {ICON_MAP[iconKey] ?? ICON_MAP.default}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>

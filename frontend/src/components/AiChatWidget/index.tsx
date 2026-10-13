@@ -25,6 +25,7 @@ import {
   updateAgentConversation,
 } from '@/services/api';
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
+import { LEGACY_ACCOUNT_SECTIONS, navigationAreaForPath } from '@/config/navigation';
 import { useAiWorkbench } from './context';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
@@ -143,6 +144,7 @@ interface PageContext {
 }
 
 interface AiChatWidgetProps {
+  enabled?: boolean;
   pageTitle: string;
   applicationName?: string;
 }
@@ -260,17 +262,53 @@ const contextByRoute: Array<{
     },
   },
   {
-    test: (pathname) => pathname.includes('/system-admin') || pathname.includes('/account-center'),
+    test: (pathname) => pathname === '/account-center',
+    context: {
+      title: '个人账号',
+      scope: '个人资料、密码、通知与个人偏好',
+      intro: '我会基于个人账号页面提供帮助，可以解释个人资料和偏好设置。',
+    },
+  },
+  {
+    test: (pathname) => pathname === '/data-center/knowledge',
+    context: {
+      title: '知识库',
+      scope: '知识文档、SOP、证据、抽取与发布状态',
+      intro: '我会基于知识库页面提供帮助，可以检索知识、解释文档内容，也可以总结证据与抽取结果。',
+    },
+  },
+  {
+    test: (pathname) => navigationAreaForPath(pathname) === 'studio',
+    context: {
+      title: '应用工作室',
+      scope: '应用、表单、菜单、分析报表、业务规则与模板',
+      intro: '我会基于应用工作室提供帮助，可以解释应用配置、表单和报表，也可以生成业务规则草稿。',
+    },
+  },
+  {
+    test: (pathname) => navigationAreaForPath(pathname) === 'data',
+    context: {
+      title: '数据中心',
+      scope: '数据连接、同步管道、基础档案、资产映射、对象关系与图谱',
+      intro: '我会基于数据中心提供帮助，可以解释数据连接、资产映射、对象关系和图谱。',
+    },
+  },
+  {
+    test: (pathname) => navigationAreaForPath(pathname) === 'admin',
     context: {
       title: '平台管理',
-      scope: '应用、菜单、权限、审计、AI 设置',
-      intro: '我会基于平台管理页面提供帮助，可以解释配置、生成规则草稿，也可以总结审计线索。',
+      scope: '组织、身份、权限、审计、AI 与平台设置',
+      intro: '我会基于管理控制台提供帮助，可以解释权限和平台配置，也可以总结审计线索。',
     },
   },
 ];
 
-function buildPageContext(pathname: string, fallbackTitle: string): PageContext {
-  const matched = contextByRoute.find((item) => item.test(pathname));
+function buildPageContext(pathname: string, fallbackTitle: string, search = ''): PageContext {
+  const legacySection = pathname === '/account-center' ? new URLSearchParams(search).get('section') : null;
+  const contextPath = legacySection && LEGACY_ACCOUNT_SECTIONS[legacySection]
+    ? LEGACY_ACCOUNT_SECTIONS[legacySection].split('?')[0]
+    : pathname;
+  const matched = contextByRoute.find((item) => item.test(contextPath));
   if (matched) {
     return {
       title: matched.context.title || fallbackTitle,
@@ -809,7 +847,7 @@ function generateUnavailableReply(): AssistantReply {
   };
 }
 
-export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidgetProps) {
+export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
   const { knowledgeContext } = useAiWorkbench();
   const [open, setOpen] = useState(false);
@@ -828,8 +866,8 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const pageContext = useMemo(
-    () => buildPageContext(location.pathname, pageTitle),
-    [location.pathname, pageTitle],
+    () => buildPageContext(location.pathname, pageTitle, location.search),
+    [location.pathname, location.search, pageTitle],
   );
   const surface = knowledgeContext ? 'knowledge' : 'global';
   const contextKey = AI_WORKBENCH_PAGE;
@@ -838,6 +876,7 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
   const messages = activeSession?.messages || [];
 
   useEffect(() => {
+    if (!enabled || sessions.length) return;
     let active = true;
     const contextPayload = {
       surface: 'global',
@@ -884,10 +923,10 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
     return () => {
       active = false;
     };
-  }, [contextKey, intro]);
+  }, [contextKey, intro, enabled]);
 
   useEffect(() => {
-    if (!activeSession?.id || activeSession.messages.length) return;
+    if (!enabled || !activeSession?.id || activeSession.messages.length) return;
     let active = true;
     listAgentConversationMessages(activeSession.id)
       .then((response) => {
@@ -901,16 +940,18 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
     return () => {
       active = false;
     };
-  }, [activeSession?.id, activeSession?.messages.length, intro]);
+  }, [activeSession?.id, activeSession?.messages.length, intro, enabled]);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length, open]);
 
   useEffect(() => {
-    document.body.classList.toggle('ai-workbench-open', open);
+    document.body.classList.toggle('ai-workbench-open', open && enabled);
     return () => document.body.classList.remove('ai-workbench-open');
-  }, [open]);
+  }, [open, enabled]);
+
+  useEffect(() => { if (!enabled) setOpen(false); }, [enabled]);
 
   const loadHistoryConversations = async () => {
     try {
@@ -1816,19 +1857,20 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
 
   return (
     <>
-      <Tooltip title={open ? '收起 AI 工作栏' : '打开 AI 工作栏'} placement="left">
+      {enabled && <Tooltip title={open ? '收起 AI 助手' : '打开 AI 助手'} placement="left">
         <Button
           className="ai-edge-toggle"
           type="primary"
           onClick={() => setOpen((prev) => !prev)}
-          aria-label="AI Assistant"
+          aria-label={open ? '收起 AI 助手' : '打开 AI 助手'}
+          aria-expanded={open}
         >
           <MessageOutlined />
-          <span>AI</span>
-        </Button>
-      </Tooltip>
 
-      {open && (
+        </Button>
+      </Tooltip>}
+
+      {enabled && open && (
         <section className="ai-chat-panel ai-workbench-panel" aria-label="AI chat panel">
           <header className="ai-chat-header">
             <div className="ai-agent-tab-strip" role="tablist" aria-label="AI 对话窗口">
@@ -1938,7 +1980,7 @@ export default function AiChatWidget({ pageTitle, applicationName }: AiChatWidge
                 </Tooltip>
               </Popover>
               <Tooltip title="收起">
-                <Button type="text" icon={<CloseOutlined />} onClick={() => setOpen(false)} />
+                <Button type="text" aria-label="关闭 AI 对话" icon={<CloseOutlined />} onClick={() => setOpen(false)} />
               </Tooltip>
             </Space>
           </header>

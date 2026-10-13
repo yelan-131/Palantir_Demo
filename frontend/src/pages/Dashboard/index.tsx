@@ -27,6 +27,8 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
+import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
 import type { EChartsOption } from 'echarts';
 import { useNavigate } from 'react-router-dom';
 import { getAlerts, getOEE, getOverview, getProductionStats } from '@/services/api';
@@ -151,7 +153,7 @@ export default function DashboardPage() {
   );
 
   const productionOption = useMemo<EChartsOption>(() => ({
-    color: ['#1677ff', '#13c2c2', '#faad14'],
+    color: CHART_SERIES_COLORS,
     tooltip: { trigger: 'axis' },
     legend: { top: 0, data: ['计划产量', '实际产量', '合格率'] },
     grid: { left: 36, right: 42, top: 48, bottom: 32 },
@@ -179,7 +181,7 @@ export default function DashboardPage() {
   }), [productionData]);
 
   const oeeOption = useMemo<EChartsOption>(() => ({
-    color: ['#1677ff', '#52c41a', '#faad14'],
+    color: CHART_SERIES_COLORS,
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: { top: 0, data: ['OEE', '目标'] },
     grid: { left: 112, right: 28, top: 44, bottom: 24 },
@@ -207,7 +209,7 @@ export default function DashboardPage() {
   }), [topLines]);
 
   const lineHealthOption = useMemo<EChartsOption>(() => ({
-    color: ['#52c41a', '#faad14', '#ff4d4f'],
+    color: [TECH_WHITE_PALETTE.success, TECH_WHITE_PALETTE.warning, TECH_WHITE_PALETTE.danger],
     tooltip: { trigger: 'item' },
     legend: { bottom: 0 },
     series: [
@@ -309,7 +311,7 @@ export default function DashboardPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={16}>
           <Card title="产量与合格率趋势" extra={<Tag color="blue">近 14 天</Tag>}>
-            <ReactECharts option={productionOption} style={{ height: 360 }} notMerge lazyUpdate />
+            <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={productionOption} style={{ height: 360 }} notMerge lazyUpdate />
           </Card>
         </Col>
         <Col xs={24} xl={8}>
@@ -317,15 +319,15 @@ export default function DashboardPage() {
             <Space direction="vertical" size={18} style={{ width: '100%' }}>
               <div>
                 <Typography.Text type="secondary">平均 OEE</Typography.Text>
-                <Progress percent={percent(oeeAverage)} strokeColor="#1677ff" />
+                <Progress percent={percent(oeeAverage)} strokeColor={TECH_WHITE_PALETTE.primary} />
               </div>
               <div>
                 <Typography.Text type="secondary">平均合格率</Typography.Text>
-                <Progress percent={percent(yieldAverage)} strokeColor="#52c41a" />
+                <Progress percent={percent(yieldAverage)} strokeColor={TECH_WHITE_PALETTE.success} />
               </div>
               <div>
                 <Typography.Text type="secondary">设备健康度</Typography.Text>
-                <Progress percent={percent(overview?.avg_equipment_health)} strokeColor="#13c2c2" />
+                <Progress percent={percent(overview?.avg_equipment_health)} strokeColor={TECH_WHITE_PALETTE.primary} />
               </div>
               <Alert
                 type={alerts.some((item) => item.severity === 'critical') ? 'error' : 'success'}
@@ -340,12 +342,12 @@ export default function DashboardPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={14}>
           <Card title="产线 OEE 排名">
-            <ReactECharts option={oeeOption} style={{ height: 360 }} notMerge lazyUpdate />
+            <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={oeeOption} style={{ height: 360 }} notMerge lazyUpdate />
           </Card>
         </Col>
         <Col xs={24} xl={10}>
           <Card title="产线状态分布">
-            <ReactECharts option={lineHealthOption} style={{ height: 360 }} notMerge lazyUpdate />
+            <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={lineHealthOption} style={{ height: 360 }} notMerge lazyUpdate />
           </Card>
         </Col>
       </Row>

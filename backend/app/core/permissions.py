@@ -282,8 +282,10 @@ async def evaluate_form_permission(
             )
         )).scalars().all()
     bindings = cache[bindings_key]
-    if any(_binding_allows(binding, action) for binding in bindings):
-        return {"allowed": True, "source": "application_form", "reason": "application binding", "matched": matched + form_matched}
+    allowed_bindings = [binding for binding in bindings if _binding_allows(binding, action)]
+    if allowed_bindings:
+        binding_matches = [{"id": binding.id, "effect": "allow", "source": "application_form", "data_scope": binding.data_scope} for binding in allowed_bindings]
+        return {"allowed": True, "source": "application_form", "reason": "application binding", "matched": matched + form_matched + binding_matches}
     return {"allowed": False, "source": "default", "reason": "no matching allow", "matched": matched + form_matched}
 
 

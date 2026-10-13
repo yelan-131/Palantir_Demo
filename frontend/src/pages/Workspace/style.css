@@ -1,0 +1,4 @@
+.business-form-directory { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-top: 24px; }
+.business-form-directory-entry { display: grid; justify-items: start; gap: 12px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; background: #fff; text-align: left; cursor: pointer; }
+.business-form-directory-entry > span:first-child { font-size: 26px; color: #1677ff; }
+.business-form-directory-entry:hover, .business-form-directory-entry:focus-visible { border-color: #1677ff; background: #f7faff; }

@@ -3,58 +3,45 @@ import {
   BellOutlined,
   CheckCircleOutlined,
   FileDoneOutlined,
-  PlusOutlined,
-  SafetyCertificateOutlined,
+  FormOutlined,
   SendOutlined,
 } from '@ant-design/icons';
-import { Button, Skeleton, Typography } from 'antd';
+import { Alert, Button, Empty, Skeleton, Tag, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { listNotifications, wfListInstances } from '@/services/api';
+import { wfListBusinessItems } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
+import './style.css';
 
-interface WorkflowInstance {
-  id: number | string;
-  status: string;
-  initiator_id?: number;
-  approvals?: Array<{ action?: string | null; approver_id?: number }>;
-}
-
-interface NotificationItem {
-  id: number | string;
-  is_read?: boolean;
-}
-
-function pickData<T>(payload: unknown): T[] {
-  const data = payload as { data?: unknown };
-  return Array.isArray(data?.data) ? data.data as T[] : [];
+interface BusinessForm {
+  id: number;
+  code: string;
+  name: string;
+  route_path?: string;
+  approval_configured?: boolean;
+  can_create?: boolean;
 }
 
 export default function WorkspacePage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const [workflowInstances, setWorkflowInstances] = useState<WorkflowInstance[]>([]);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [forms, setForms] = useState<BusinessForm[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [formError, setFormError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadWorkbench = async () => {
     setLoading(true);
 
-    const [workflowRes, notificationRes] = await Promise.allSettled([
-      wfListInstances(),
-      listNotifications({ user_id: user?.id, page_size: 6 }),
-    ]);
-
-    if (workflowRes.status === 'fulfilled') {
-      setWorkflowInstances(pickData<WorkflowInstance>(workflowRes.value.data));
-    } else {
-      setWorkflowInstances([]);
-    }
-
-    if (notificationRes.status === 'fulfilled') {
-      const payload = notificationRes.value.data as { source?: string };
-      setNotifications(payload.source === 'fallback' ? [] : pickData<NotificationItem>(payload));
-    } else {
-      setNotifications([]);
+    try {
+      const response = await wfListBusinessItems();
+      const payload = response.data?.data || {};
+      setForms(Array.isArray(payload.forms) ? payload.forms : []);
+      setCounts(payload.view_counts || {});
+      setFormError(false);
+    } catch {
+      setForms([]);
+      setCounts({});
+      setFormError(true);
     }
 
     setLoading(false);
@@ -64,51 +51,31 @@ export default function WorkspacePage() {
     loadWorkbench();
   }, [user?.id]);
 
-  const userId = typeof user?.id === 'number' ? user.id : undefined;
-  const activeStatuses = new Set(['pending', 'running', 'in_progress']);
-  const doneStatuses = new Set(['approved', 'done']);
-  const pendingCount = workflowInstances.filter((item) => {
-    if (item.status !== 'pending') return false;
-    if (user?.is_admin) return true;
-    return item.approvals?.some((approval) => approval.approver_id === userId && !approval.action);
-  }).length;
-  const runningCount = workflowInstances.filter((item) => (
-    item.initiator_id === userId && activeStatuses.has(item.status)
-  )).length;
-  const doneCount = workflowInstances.filter((item) => (
-    doneStatuses.has(item.status)
-    || item.approvals?.some((approval) => approval.approver_id === userId && Boolean(approval.action))
-  )).length;
-  const unreadCount = notifications.filter((item) => !item.is_read).length;
+  const pendingCount = counts.pending || 0;
+  const runningCount = counts.initiated || 0;
+  const doneCount = counts.processed || 0;
 
   const todoMetrics = [
     {
-      label: '我的待办',
+      label: '待审批',
       value: pendingCount,
       suffix: '个待处理',
       icon: <BellOutlined />,
       path: '/workflow?tab=pending',
     },
     {
-      label: '我的发起',
+      label: '我发起的',
       value: runningCount,
-      suffix: '个正在运行',
+      suffix: '个申请',
       icon: <SendOutlined />,
-      path: '/workflow?tab=running',
+      path: '/workflow?tab=initiated',
     },
     {
-      label: '我的已办',
+      label: '我已处理的',
       value: doneCount,
       suffix: '个已处理',
       icon: <CheckCircleOutlined />,
-      path: '/workflow?tab=done',
-    },
-    {
-      label: '我的待阅',
-      value: unreadCount,
-      suffix: '个待阅',
-      icon: <FileDoneOutlined />,
-      path: '/workflow',
+      path: '/workflow?tab=processed',
     },
   ];
 
@@ -147,17 +114,15 @@ export default function WorkspacePage() {
           </section>
 
           <section className="simple-workbench-panel favorite-center-panel">
-            <Typography.Title level={4}>我的收藏</Typography.Title>
-            <div className="favorite-app-grid">
-              <button className="favorite-app-entry" onClick={() => navigate('/workflow')}>
-                <span><PlusOutlined /></span>
-                <strong>进入应用</strong>
-              </button>
-              <button className="favorite-app-entry favorite-graph-entry" onClick={() => navigate('/program/quality-event')}>
-                <span><SafetyCertificateOutlined /></span>
-                <strong>质量异常闭环</strong>
-              </button>
-            </div>
+            <Typography.Title level={4}>业务表单</Typography.Title>
+            <Typography.Paragraph type="secondary">从对应业务表单填写并发起申请，审批任务统一进入流程与待办。</Typography.Paragraph>
+            {formError ? <Alert type="error" message="业务表单加载失败" action={<Button onClick={loadWorkbench}>重试</Button>} /> : forms.length ? <div className="business-form-directory">
+              {forms.map((form) => <button className="business-form-directory-entry" key={form.id} onClick={() => navigate(form.route_path || '/program/' + encodeURIComponent(form.code))}>
+                <span><FormOutlined /></span>
+                <strong>{form.name}</strong>
+                <Tag color={form.approval_configured ? 'blue' : 'default'}>{form.can_create === false ? '查看表单' : form.approval_configured ? '申请审批' : '普通填报'}</Tag>
+              </button>)}
+            </div> : <Empty description="暂无可访问的业务表单" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           </section>
         </>
       )}

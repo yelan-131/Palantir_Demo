@@ -14,6 +14,7 @@ from app.api._model_driven_shared import assert_safe_identifier
 from app.api.deps import current_tenant_id, get_current_user, get_db
 from app.core.db import safe_db_call as _try_db
 from app.models.relational import DynamicRecord, Form
+from app.services.alert_service import is_material_request
 
 router = APIRouter()
 
@@ -91,6 +92,26 @@ async def get_program_data(
     if result is None:
         return {"data": None, "source": "unsupported", "program_id": program_id}
     result["program_id"] = program_id
+    form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == program_id))
+    if form:
+        from app.services.form_application_lifecycle import decorate
+        from app.api.alerts import _records
+        from app.api.forms import _runtime_form_fields
+        fields = await _runtime_form_fields(db, tenant_id, form.id)
+        ids = {row.get("recordId") for row in result.get("rows", [])}
+        payloads = {record["id"]: record for record in await _records(db, form, fields, None) if record["id"] in ids}
+        for row in result.get("rows", []):
+            record = payloads.get(row.get("recordId"))
+            if record:
+                from app.core.permissions import evaluate_form_permission
+                decision = await evaluate_form_permission(user, form.id, 'view', db, record_data=record.get('data') or {})
+                if not decision.get('allowed'):
+                    continue
+                await decorate(db, form, record, user)
+                if "_approval" in record:
+                    row["_approval"] = record["_approval"]
+                    # Business status and approval status are separate fields.
+                    row["status"] = record.get("data", {}).get("status")
     return result
 
 
@@ -119,6 +140,9 @@ async def _count_table_rows(db: AsyncSession, table_name: str, tenant_id: int) -
     assert_safe_identifier(table_name)
     if not await _table_exists(db, table_name):
         return 0
+    if table_name == 'business_alert_center':
+        titles = await db.scalars(text(f"SELECT title FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL"), {"tenant_id": tenant_id})
+        return sum(not is_material_request({'title': title}) for title in titles)
     return int(await db.scalar(text(f"SELECT count(*) FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL"), {"tenant_id": tenant_id}) or 0)
 
 
@@ -128,11 +152,14 @@ async def _fetch_physical_rows(db: AsyncSession, table_name: str, tenant_id: int
         return []
     rows = (
         await db.execute(
-            text(f"SELECT * FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL ORDER BY id DESC LIMIT :limit"),
+            text(f"SELECT * FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL ORDER BY id DESC" + ("" if table_name == 'business_alert_center' else " LIMIT :limit")),
             {"tenant_id": tenant_id, "limit": limit},
         )
     ).all()
-    return [dict(row._mapping) for row in rows]
+    result = [dict(row._mapping) for row in rows]
+    if table_name == 'business_alert_center':
+        result = [row for row in result if not is_material_request(row)][:limit]
+    return result
 
 
 async def _query_overview(db: AsyncSession, tenant_id: int):

@@ -1,3 +1,5 @@
+import { CHART_SERIES_COLORS } from '../../theme/charts';
+import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Button, Modal, Input, Select, Tag, Empty,
@@ -14,11 +16,11 @@ import {
 import PageDesigner from './PageDesigner';
 
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
-  production: { label: '生产', color: '#1677ff' },
-  maintenance: { label: '维护', color: '#faad14' },
-  quality: { label: '质量', color: '#52c41a' },
-  supply_chain: { label: '供应链', color: '#722ed1' },
-  general: { label: '通用', color: '#8c8c8c' },
+  production: { label: '生产', color: CHART_SERIES_COLORS[0] },
+  maintenance: { label: '维护', color: CHART_SERIES_COLORS[2] },
+  quality: { label: '质量', color: CHART_SERIES_COLORS[1] },
+  supply_chain: { label: '供应链', color: CHART_SERIES_COLORS[3] },
+  general: { label: '通用', color: TECH_WHITE_PALETTE.muted },
 };
 
 interface ReportItem {
@@ -166,7 +168,7 @@ export default function ReportCenter() {
               <Col key={r.id} xs={24} sm={12} md={8} lg={6}>
                 <Card
                   hoverable
-                  style={{ height: '100%' }}
+                  style={{ height: '100%', background: TECH_WHITE_PALETTE.surface, borderColor: TECH_WHITE_PALETTE.border, borderRadius: TECH_WHITE_GEOMETRY.panelRadius }}
                   actions={[
                     <EyeOutlined key="preview" onClick={() => { setCurrentReport(r); setView('preview'); }} />,
                     <EditOutlined key="edit" onClick={() => { setCurrentReport(r); setView('edit'); }} />,
@@ -179,17 +181,17 @@ export default function ReportCenter() {
                     title={
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                        {r.is_published && <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>已发布</Tag>}
+                        {r.is_published && <Tag color={TECH_WHITE_PALETTE.success} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>已发布</Tag>}
                       </div>
                     }
                     description={
                       <div>
-                        <div style={{ marginBottom: 4, color: '#666', minHeight: 20 }}>
+                        <div style={{ marginBottom: 4, color: TECH_WHITE_PALETTE.muted, minHeight: 20 }}>
                           {r.description || '暂无描述'}
                         </div>
                         <Space size={4}>
                           <Tag color={cat.color}>{cat.label}</Tag>
-                          <span style={{ fontSize: 12, color: '#999' }}>{widgetCount} 个组件</span>
+                          <span style={{ fontSize: 12, color: TECH_WHITE_PALETTE.faint }}>{widgetCount} 个组件</span>
                         </Space>
                       </div>
                     }

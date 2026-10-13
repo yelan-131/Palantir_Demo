@@ -1,3 +1,4 @@
+import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import React, { useState, useCallback, useEffect } from 'react';
 import { Button, Space, Typography, message, Tooltip } from 'antd';
 import {
@@ -118,11 +119,11 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
   const selectedWidget = config.widgets.find((w) => w.id === selectedId) || null;
 
   return (
-    <div style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
+    <div className={`report-page-editor${isEditing ? ' report-page-editor-editing' : ''}`} style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', background: TECH_WHITE_PALETTE.surface, border: `1px solid ${TECH_WHITE_PALETTE.border}`, borderRadius: TECH_WHITE_GEOMETRY.panelRadius, overflow: 'hidden' }}>
       {/* Toolbar */}
-      <div style={{
+      <div className="report-editor-toolbar" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', borderRadius: '8px 8px 0 0',
+        padding: '8px 16px', borderBottom: `1px solid ${TECH_WHITE_PALETTE.border}`, background: TECH_WHITE_PALETTE.rail, borderRadius: `${TECH_WHITE_GEOMETRY.panelRadius}px ${TECH_WHITE_GEOMETRY.panelRadius}px 0 0`,
       }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
@@ -152,16 +153,16 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
       </div>
 
       {/* Main area */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="report-editor-main" style={{ flex: 1, display: 'flex', overflow: 'auto' }}>
         {/* Left panel: component palette */}
         {isEditing && (
-          <div style={{ width: 180, borderRight: '1px solid #f0f0f0', overflow: 'auto', background: '#fafafa' }}>
+          <div className="report-editor-palette" style={{ width: 180, borderRight: `1px solid ${TECH_WHITE_PALETTE.border}`, overflow: 'auto', background: TECH_WHITE_PALETTE.rail }}>
             <ComponentPanel onAddWidget={handleAddWidget} />
           </div>
         )}
 
         {/* Canvas */}
-        <div style={{ flex: 1, overflow: 'auto', padding: 12, background: '#f5f5f5' }}>
+        <div className="report-editor-canvas" style={{ flex: 1, overflow: 'auto', padding: 12, background: TECH_WHITE_PALETTE.canvas }}>
           <DragCanvas
             widgets={config.widgets}
             isEditing={isEditing}
@@ -175,7 +176,7 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
 
         {/* Right panel: config */}
         {isEditing && (
-          <div style={{ width: 260, borderLeft: '1px solid #f0f0f0', overflow: 'auto', background: '#fafafa' }}>
+          <div className="report-editor-properties" style={{ width: 260, borderLeft: `1px solid ${TECH_WHITE_PALETTE.border}`, overflow: 'auto', background: TECH_WHITE_PALETTE.rail }}>
             <ConfigPanel widget={selectedWidget} onChange={handleWidgetChange} />
           </div>
         )}

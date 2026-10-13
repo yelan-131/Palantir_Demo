@@ -1,0 +1,15 @@
+.alert-center { padding: 24px; max-width: 1600px; margin: 0 auto; }
+.alert-center-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+.alert-center-header h2 { margin: 0 0 6px !important; }
+.alert-center-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.alert-center-stat { border: 1px solid #e8edf3; background: #fff; border-radius: 10px; padding: 14px 18px; }
+.alert-center-stat .ant-statistic-content { font-size: 24px; }
+.alert-center-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.alert-center-filters .ant-input-search { max-width: 360px; }
+.alert-center-filters .ant-select { min-width: 150px; }
+.alert-center-table { border: 1px solid #e8edf3; border-radius: 10px; overflow: hidden; background: #fff; }
+.alert-center-detail .ant-descriptions { margin: 20px 0; }
+.alert-center-detail-actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid #edf0f4; }
+.alert-center-history-comment { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+@media (max-width: 1000px) { .alert-center-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .alert-center { padding: 14px; } .alert-center-header { flex-direction: column; } .alert-center-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

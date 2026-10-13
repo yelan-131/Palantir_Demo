@@ -188,6 +188,9 @@ from app.api import (  # noqa: E402
     ai_builder,
     analytics,
     applications,
+    alerts,
+    material_applications,
+    form_approvals,
     auth,
     config_io,
     dashboard,
@@ -224,6 +227,9 @@ app.include_router(platform.router, prefix="/api/v1/platform", tags=["platform"]
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["applications"])
 app.include_router(applications.admin_router, prefix="/api/v1/admin", tags=["applications-admin"])
 app.include_router(forms.router, prefix="/api/v1/forms", tags=["forms"])
+app.include_router(form_approvals.router, prefix="/api/v1/forms", tags=["表单审批设置"])
+app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["alerts"])
+app.include_router(material_applications.router, prefix="/api/v1/material-applications", tags=["料号申请"])
 
 # Data foundation
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["数据源管理"])

@@ -1,0 +1,61 @@
+/* Keep scrolling inside each workspace, rather than widening the window. */
+body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
+.tech-white-shell .shell-workspace-layout { flex: 1; min-width: 0; }
+.tech-white-shell .shell-mobile-menu-toggle { display: none; }
+.tech-white-shell .shell-context-menu .ant-layout-sider-children { overflow: hidden; }
+.tech-white-shell .app-menu { overflow-y: auto; min-height: 0; }
+.tech-white-shell .ant-layout-sider-collapsed .app-menu .ant-menu-item-group-title { display: none; }
+.tech-white-shell .ant-layout-sider-collapsed .app-menu :is(.ant-menu-item,.ant-menu-submenu-title) { padding-inline: 0 !important; display: flex; justify-content: center; align-items: center; }
+.tech-white-shell .ant-layout-sider-collapsed .app-menu .ant-menu-title-content { width: 0; opacity: 0; overflow: hidden; margin-inline-start: 0 !important; }
+.tech-white-shell .ant-layout-sider-collapsed .app-menu .anticon { margin-inline-end: 0; font-size: 16px; }
+.tech-white-shell .content-surface { min-width: 0; max-width: 100%; }
+.tech-white-shell .app-content .ant-table-wrapper { max-width: 100%; min-width: 0; }
+.tech-white-shell .app-content .ant-table-content { overflow-x: auto; }
+.tech-white-shell .app-content .ant-table:not(.ant-table-fixed-header) table { min-width: 640px; }
+.tech-white-shell .app-content :is(.app-business-content, .dynamic-business-content) { min-width: 0; }
+.tech-white-shell .report-editor-main { min-height: 0; }
+.tech-white-shell .report-editor-palette { flex: 0 0 180px; }
+.tech-white-shell .report-editor-properties { flex: 0 0 260px; }
+.tech-white-shell .report-page-editor-editing .report-editor-canvas { min-width: 600px; }
+.tech-white-shell .report-editor-toolbar { flex-wrap: wrap; gap: 12px; }
+
+@media (max-width: 1440px) {
+  .tech-white-shell .app-header { padding-inline: 16px; gap: 12px; grid-template-columns: minmax(110px, 1fr) minmax(220px, 360px) 36px; }
+  .tech-white-shell .app-content { padding: 16px; }
+  .tech-white-shell .shell-page-heading { flex-wrap: wrap; gap: 12px; }
+  .tech-white-shell .app-content .content-surface:has(.form-designer-page) { overflow: auto; min-height: 0; }
+  .tech-white-shell .app-content .form-designer-page { min-width: 1084px; min-height: 560px; height: 100%; overflow: hidden; }
+  .tech-white-shell .app-content .form-designer-toolbar { display: grid; grid-template-columns: minmax(190px,260px) minmax(360px,1fr) max-content; align-items: center; }
+  .tech-white-shell .app-content .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) { grid-template-columns: 240px minmax(540px,1fr) 280px; overflow: hidden; }
+  .tech-white-shell .app-content :is(.form-designer-shell-no-left, .form-designer-shell-permission, .form-designer-shell-flow) { grid-template-columns: minmax(0,1fr); overflow: hidden; }
+  .tech-white-shell .app-content .form-designer-right { grid-column: auto; }
+  .tech-white-shell .app-content :is(.form-designer-left, .form-designer-right, .form-designer-canvas) { height: 100%; min-height: 0; }
+  .tech-white-shell .app-content .professional-flow-designer { min-width: 1084px; grid-template-columns: 240px minmax(540px,1fr) 280px; }
+  .tech-white-shell .app-content .professional-flow-properties { grid-column: auto; }
+  .tech-white-shell .report-page-editor { min-height: 560px; }
+  .tech-white-shell .app-content .app-assembly-workspace { min-width: 1100px; }
+  .tech-white-shell .app-content .assembly-grid { flex-wrap: nowrap; }
+  .tech-white-shell .app-content .assembly-grid > .ant-col:nth-child(-n+2) { flex: 0 0 20.8333%; max-width: 20.8333%; }
+  .tech-white-shell .app-content .assembly-grid > .ant-col:nth-child(n+3) { flex: 0 0 29.1667%; max-width: 29.1667%; }
+  .tech-white-shell .app-content :is(.alert-center, .material-applications) { padding: 0; }
+}
+@media (max-width: 760px) {
+  .tech-white-shell .shell-context-menu.ant-layout-sider-collapsed { visibility: hidden; pointer-events: none; }
+  .tech-white-shell.shell-menu-overlay-open .shell-context-menu { position: fixed; left: 52px; top: 0; bottom: 0; z-index: 30; box-shadow: 8px 0 24px rgba(32,35,38,.12); visibility: visible; pointer-events: auto; }
+  .shell-menu-backdrop { position: fixed; inset: 0 0 0 52px; z-index: 29; border: 0; background: rgba(32,35,38,.18); cursor: pointer; }
+  .tech-white-shell .shell-mobile-menu-toggle { display: inline-flex; grid-column: 1; grid-row: 1; }
+  .tech-white-shell .app-header { height: 100px; min-height: 100px; padding: 8px 12px; gap: 4px 8px; grid-template-columns: 32px minmax(0,1fr) 32px; grid-template-rows: 36px 40px; }
+  .tech-white-shell .app-header > .shell-page-title { grid-column: 2; grid-row: 1; }
+  .tech-white-shell .shell-header-actions { grid-column: 3; grid-row: 1; }
+  .tech-white-shell .shell-inline-search { grid-column: 1 / -1; grid-row: 2; }
+  .tech-white-shell .app-content { height: calc(100vh - 100px); padding: 12px; }
+  .tech-white-shell .app-content:has(.form-designer-page) { height: calc(100vh - 100px); }
+  .tech-white-shell .runtime-page-bar { flex-wrap: wrap; gap: 12px; }
+  .tech-white-shell .app-content :is(.alert-center-header, .material-applications-header) { flex-wrap: wrap; }
+  .tech-white-shell .app-content :is(.alert-center-stats, .material-applications-stats) { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .tech-white-shell .app-content .todo-metric-row { grid-template-columns: 1fr; gap: 20px; }
+  .tech-white-shell .app-content .shell-library-search { width: 100%; }
+  .tech-white-shell .app-content .shell-library-grid { grid-template-columns: 1fr; }
+  .tech-white-shell .ai-workbench-panel.ai-chat-panel { right: 12px; bottom: 76px; width: min(460px,calc(100vw - 76px)); max-width: calc(100vw - 76px); }
+  .tech-white-shell .ai-edge-toggle { right: 16px; bottom: 16px; }
+}

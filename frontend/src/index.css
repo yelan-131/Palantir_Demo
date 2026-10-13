@@ -410,6 +410,39 @@ button {
   border-inline-end: 0 !important;
 }
 
+.area-switch-menu {
+  flex: none;
+  padding: 8px;
+  background: transparent !important;
+  border-inline-end: 0 !important;
+  border-bottom: 1px solid var(--mf-border);
+}
+
+.area-switch-menu .ant-menu-item {
+  font-weight: 600;
+}
+
+.area-context-label {
+  padding: 16px 24px 0;
+  color: var(--mf-text-secondary, #647480);
+  font-size: 12px;
+}
+
+.app-menu {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.navigation-area-heading {
+  padding: 4px 0 16px;
+  border-bottom: 1px solid var(--mf-border);
+  margin-bottom: 20px;
+}
+
+.navigation-area-heading h3.ant-typography {
+  margin: 6px 0 0;
+}
+
 .app-menu .ant-menu-item,
 .app-menu .ant-menu-submenu-title {
   color: #34444e !important;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Spin, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
+import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import type { EChartsOption } from 'echarts';
 import type { WidgetInstance } from './types';
 import { fetchDataFromApi } from './WidgetRegistry';
@@ -38,9 +39,9 @@ export default function PieChartWidget({ widget, isEditing }: Props) {
       type: 'pie',
       radius: ['40%', '70%'],
       data: data.map((d: any) => ({ name: d[nameField], value: d[valueField] })),
-      emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
+      emphasis: { itemStyle: { shadowBlur: 8, shadowOffsetX: 0, shadowColor: 'rgba(32, 35, 38, 0.12)' } },
     }],
   };
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} />;
+  return <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME} option={option} style={{ height: '100%', width: '100%' }} />;
 }

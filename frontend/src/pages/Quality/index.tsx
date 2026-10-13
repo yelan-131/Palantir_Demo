@@ -28,6 +28,8 @@ import {
   DownloadOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
+import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
 import {
   getSPCData,
   listDefects,
@@ -279,7 +281,7 @@ export default function QualityPage() {
           `LCL: ${(point.lcl ?? 0).toFixed(4)}`,
         ];
         if (point.out_of_control) {
-          lines.push('<span style="color:#ff4d4f;font-weight:bold">失控点!</span>');
+          lines.push(`<span style="color:${TECH_WHITE_PALETTE.danger};font-weight:bold">失控点!</span>`);
         }
         return lines.join('<br/>');
       },
@@ -312,37 +314,37 @@ export default function QualityPage() {
         name: 'UCL',
         type: 'line',
         data: spcData.map((p) => p.ucl),
-        lineStyle: { color: '#ff4d4f', type: 'dashed' as const, width: 1 },
+        lineStyle: { color: TECH_WHITE_PALETTE.danger, type: 'dashed' as const, width: 1 },
         symbol: 'none',
-        itemStyle: { color: '#ff4d4f' },
+        itemStyle: { color: TECH_WHITE_PALETTE.danger },
       },
       {
         name: 'CL',
         type: 'line',
         data: spcData.map((p) => p.cl),
-        lineStyle: { color: '#52c41a', type: 'dashed' as const, width: 1 },
+        lineStyle: { color: TECH_WHITE_PALETTE.success, type: 'dashed' as const, width: 1 },
         symbol: 'none',
-        itemStyle: { color: '#52c41a' },
+        itemStyle: { color: TECH_WHITE_PALETTE.success },
       },
       {
         name: 'LCL',
         type: 'line',
         data: spcData.map((p) => p.lcl),
-        lineStyle: { color: '#ff4d4f', type: 'dashed' as const, width: 1 },
+        lineStyle: { color: TECH_WHITE_PALETTE.danger, type: 'dashed' as const, width: 1 },
         symbol: 'none',
-        itemStyle: { color: '#ff4d4f' },
+        itemStyle: { color: TECH_WHITE_PALETTE.danger },
       },
       {
         name: '测量值',
         type: 'line',
         data: spcData.map((p) => p.value),
-        lineStyle: { color: '#1890ff', width: 2 },
+        lineStyle: { color: TECH_WHITE_PALETTE.primary, width: 2 },
         symbol: 'circle',
         symbolSize: 6,
         itemStyle: {
           color: (params: { dataIndex: number }) => {
             const point = spcData[params.dataIndex];
-            return point?.out_of_control ? '#ff4d4f' : '#1890ff';
+            return point?.out_of_control ? TECH_WHITE_PALETTE.danger : TECH_WHITE_PALETTE.primary;
           },
         },
       },
@@ -383,9 +385,9 @@ export default function QualityPage() {
         itemStyle: {
           color: (params: { dataIndex: number }) => {
             const cumPct = paretoData[params.dataIndex]?.cumulative_percentage ?? 0;
-            if (cumPct <= 80) return '#1890ff';
-            if (cumPct <= 95) return '#faad14';
-            return '#d9d9d9';
+            if (cumPct <= 80) return TECH_WHITE_PALETTE.primary;
+            if (cumPct <= 95) return TECH_WHITE_PALETTE.warning;
+            return TECH_WHITE_PALETTE.borderStrong;
           },
         },
         barMaxWidth: 40,
@@ -395,13 +397,13 @@ export default function QualityPage() {
         type: 'line',
         yAxisIndex: 1,
         data: paretoData.map((d) => d.cumulative_percentage),
-        lineStyle: { color: '#ff4d4f', width: 2 },
-        itemStyle: { color: '#ff4d4f' },
+        lineStyle: { color: CHART_SERIES_COLORS[1], width: 2 },
+        itemStyle: { color: CHART_SERIES_COLORS[1] },
         symbol: 'circle',
         symbolSize: 6,
         markLine: {
           silent: true,
-          data: [{ yAxis: 80, lineStyle: { color: '#faad14', type: 'dashed' } }],
+          data: [{ yAxis: 80, lineStyle: { color: TECH_WHITE_PALETTE.warning, type: 'dashed' } }],
           label: { formatter: '80%' },
         },
       },
@@ -582,7 +584,7 @@ export default function QualityPage() {
         }
       >
         <Spin spinning={spcLoading}>
-          <ReactECharts
+          <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME}
             option={spcChartOption}
             style={{ height: 340 }}
             notMerge
@@ -610,7 +612,7 @@ export default function QualityPage() {
               />
             }
           >
-            <ReactECharts
+            <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME}
               option={paretoChartOption}
               style={{ height: 320 }}
               notMerge

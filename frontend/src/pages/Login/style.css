@@ -1,0 +1,101 @@
+.technology-login { --login-gap: clamp(72px, calc(18vh - 40px), 220px); display: grid; grid-template-columns: minmax(480px,1.08fr) minmax(440px,1fr); min-height: calc(100dvh - 48px); margin: 24px; border: 1px solid #dde3eb; border-radius: 24px; overflow: hidden; background: #f5f7fa; color: #21324a; box-shadow: 0 16px 60px rgba(26,44,72,.06); }
+.technology-login-intro { position: relative; isolation: isolate; overflow: hidden; padding: 38px clamp(36px,5vw,80px) 42px; background: #edf3fa; border-right: none; display: flex; flex-direction: column; }
+.technology-login-atmosphere { position: absolute; inset: 0; z-index: -2; pointer-events: none; overflow: hidden; }
+.technology-login-atmosphere span { position: absolute; width: 80%; aspect-ratio: 1; border-radius: 50%; background: #aac9ef; filter: blur(90px); opacity: .45; animation: mf-atmosphere 9s ease-in-out infinite alternate; }
+.technology-login-atmosphere span:nth-child(1) { top: -25%; left: -35%; }
+.technology-login-atmosphere span:nth-child(2) { right: -30%; top: 36%; background: #b3ddd9; animation-delay: -6s; }
+.technology-login-atmosphere span:nth-child(3) { left: 10%; bottom: -50%; background: #c1cbe7; animation-delay: -9s; }
+.technology-login-intro::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(125deg,rgba(255,255,255,.46),rgba(246,250,255,.62)); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.technology-login-intro::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .045; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath d='M0 0h160v160H0z' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"); }
+.technology-login-brand { display: flex; align-items: center; gap: 12px; color: #29405d; }
+.technology-login-mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.9); background: rgba(255,255,255,.55); box-shadow: 0 3px 12px rgba(60,90,128,.06); border-radius: 12px; font-size: 13px; font-weight: 700; }
+.technology-login-brand > div { display: grid; gap: 4px; }
+.technology-login-brand strong { font-size: 18px; letter-spacing: -.4px; }
+.technology-login-brand > div > span { color: #657a92; font-size: 11px; }
+.technology-login-motion-toggle { margin-left: auto; padding: 7px 10px; border: 1px solid #ccdae9; border-radius: 20px; background: rgba(255,255,255,.35); color: #657e99; font: inherit; font-size: 11px; cursor: pointer; }
+.technology-login-motion-toggle:hover { background: rgba(255,255,255,.7); }
+.technology-login-motion-toggle:focus-visible { outline: 2px solid #5288b2; outline-offset: 3px; }
+.technology-login-description { max-width: 660px; margin: var(--login-gap) 0 auto; }
+.technology-login-kicker { display: flex; align-items: center; gap: 9px; color: #627e99; font-size: 12px; letter-spacing: 2px; margin-bottom: 24px; }
+.technology-login-kicker i { width: 6px; height: 6px; border-radius: 50%; background: #5c9eaa; box-shadow: 0 0 0 4px rgba(92,158,170,.1); }
+.technology-login-description h1.ant-typography { color: #263e5a; font-size: clamp(34px,3.3vw,54px); font-weight: 600; line-height: 1.32; letter-spacing: -1.5px; margin: 0 0 24px; }
+.technology-login-description h1 em { font-style: normal; color: #407b92; }
+.technology-login-description p { color: #5e738d; font-size: 15px; line-height: 1.9; margin: 0; }
+.technology-login-scene { width: calc(100% + 70px); max-width: 760px; margin: 22px -35px 16px; }
+.technology-login-scene svg { width: 100%; display: block; }
+.technology-login-scene-core { animation: mf-core-float 5s ease-in-out infinite; }
+.technology-login-scene-flow { animation: mf-data-flow 3s linear infinite; }
+.technology-login-values { display: flex; gap: 24px; padding-top: 22px; border-top: 1px solid #d0ddeb; color: #526d8a; font-size: 12px; }
+.technology-login-values span { white-space: nowrap; }
+.technology-login-values b { color: #7792b0; font-size: 10px; font-weight: 500; margin-right: 6px; }
+.technology-login-access { padding: calc(80px + var(--login-gap)) clamp(28px,4vw,64px) 64px; display: flex; align-items: flex-start; justify-content: center; background: #f5f7fa; }
+.technology-login-form { width: 100%; max-width: 460px; padding: 40px; border: 1px solid #dde4ee; border-radius: 20px; background: #fff; box-shadow: 0 12px 40px rgba(32,54,87,.05); }
+.technology-login-form-head { margin-bottom: 32px; }
+.technology-login-form-kicker { display: block; color: #638093; font-size: 12px; margin-bottom: 12px; }
+.technology-login-form-head h2.ant-typography { color: #22344e; font-size: 27px; line-height: 1.4; margin: 0 0 10px; font-weight: 600; letter-spacing: -.7px; }
+.technology-login-form-head .ant-typography-secondary { font-size: 13px; color: #748196; }
+.technology-login-form .ant-form-item { margin-bottom: 22px; }
+.technology-login-form .ant-form-item-label { padding-bottom: 9px; }
+.technology-login-form .ant-form-item-label > label { font-size: 13px; color: #42536b; }
+.technology-login-form .ant-input-affix-wrapper { min-height: 48px; border-radius: 8px; border-color: #d5dee9; background: #fafbfd; padding: 8px 13px; }
+.technology-login-form .ant-input { font-size: 14px; background: transparent; }
+.technology-login-form .ant-input::placeholder { color: #8b97a8; }
+.technology-login-form .ant-input-prefix { color: #8191a5; margin-right: 10px; }
+.technology-login-form .ant-input-password-icon { padding: 6px; color: #8191a5; }
+.technology-login-form .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):hover { border-color: #6e8ca9; }
+.technology-login-form .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):focus-within { border-color: #4c7794; box-shadow: 0 0 0 3px rgba(76,119,148,.1); }
+.technology-login-form .ant-btn { height: 48px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.technology-login-form .technology-login-submit { background: #223e59; box-shadow: none; }
+.technology-login-form .technology-login-submit:not(:disabled):hover { background: #315873 !important; }
+.technology-login-form .ant-btn-default { color: #52667e; border-color: #d5dee9; box-shadow: none; }
+.technology-login-help { display: flex; justify-content: flex-end; margin: -10px 0 18px; }
+.technology-login-help .ant-btn { height: auto; min-height: 32px; padding: 4px 0; font-size: 12px; color: #52768f; }
+.technology-login-form .ant-btn:focus-visible { outline: 2px solid #6f9bb7; outline-offset: 3px; }
+.technology-login-error { margin-bottom: 18px; }
+.technology-login-form .technology-login-divider { margin: 22px 0; color: #929baa; font-size: 12px; border-color: #e8edf3; }
+.technology-login-auth-note { margin-top: 24px; color: #8290a2; font-size: 11px; line-height: 1.8; text-align: center; }
+.technology-login-transition { position: absolute; inset: 0 0 0 auto; width: clamp(90px, 10vw, 170px); z-index: -1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(245,247,250,.72) 65%, #f5f7fa); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); mask-image: linear-gradient(90deg, transparent, #000 65%); -webkit-mask-image: linear-gradient(90deg, transparent, #000 65%); }
+.technology-login-scene-halo { transform-box: fill-box; transform-origin: center; animation: mf-halo-breathe 5s ease-in-out infinite; }
+.technology-login-scene-packets { filter: drop-shadow(0 0 3px rgba(82,141,175,.25)); }
+.technology-login-scene-packets path { animation: mf-packet-flow 3.5s linear infinite; }
+.technology-login-scene-packets path:nth-child(2) { animation-delay: -1.2s; }
+.technology-login-scene-packets path:nth-child(3) { animation-delay: -2.4s; }
+@keyframes mf-halo-breathe { 0%,100% { opacity: .45; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+@keyframes mf-packet-flow { from { stroke-dashoffset: 100; opacity: .1; } 20%,75% { opacity: .9; } to { stroke-dashoffset: 0; opacity: .1; } }
+.technology-login-intro[data-motion-paused='true'] * { animation-play-state: paused; }
+@keyframes mf-atmosphere { from { opacity: .3; transform: translate(-12px,12px) scale(.88); } to { opacity: .8; transform: translate(36px,-28px) scale(1.18); } }
+@keyframes mf-core-float { 50% { transform: translateY(-10px); } }
+@keyframes mf-data-flow { to { stroke-dashoffset: -66; } }
+@media (max-height: 820px) and (min-width: 901px) {
+ .technology-login { --login-gap: 56px; }
+ .technology-login-intro { padding-top: 28px; }
+ .technology-login-description h1.ant-typography { font-size: 38px; margin-bottom: 18px; }
+ .technology-login-kicker { margin-bottom: 18px; }
+ .technology-login-scene { width: calc(100% + 32px); max-width: 600px; margin: 12px -16px 14px; }
+ .technology-login-access { padding-top: calc(70px + var(--login-gap)); padding-bottom: 32px; }
+ .technology-login-form { padding: 30px; }
+}
+@media (max-width: 1100px) and (min-width: 901px) {
+ .technology-login { grid-template-columns: minmax(440px,1fr) minmax(400px,1fr); margin: 16px; }
+ .technology-login-intro { padding-left: 30px; padding-right: 30px; }
+ .technology-login-access { padding-left: 24px; padding-right: 24px; }
+ .technology-login-form { padding: 28px; }
+ .technology-login-values { gap: 14px; }
+}
+@media (max-width: 900px) {
+ .technology-login { grid-template-columns: 1fr; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; }
+ .technology-login-intro { padding: 26px 28px 32px; border-right: none; border-bottom: 1px solid #cedae8; }
+ .technology-login-description { margin-top: 34px; }
+ .technology-login-kicker { margin-bottom: 16px; font-size: 11px; }
+ .technology-login-description h1.ant-typography { font-size: 32px; letter-spacing: -.8px; margin-bottom: 16px; }
+ .technology-login-description p { font-size: 13px; }
+ .technology-login-scene, .technology-login-values, .technology-login-transition { display: none; }
+ .technology-login-access { padding: 28px 20px 40px; }
+ .technology-login-form { padding: 28px 24px; border-radius: 16px; }
+ .technology-login-form-head h2.ant-typography { font-size: 25px; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .technology-login-atmosphere span, .technology-login-scene-core, .technology-login-scene-flow, .technology-login-scene-halo, .technology-login-scene-packets path { animation: none; }
+ .technology-login-scene-packets { display: none; }
+ .technology-login-motion-toggle { display: none; }
+}

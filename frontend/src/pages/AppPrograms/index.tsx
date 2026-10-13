@@ -1,12 +1,18 @@
 import React from 'react';
+import dayjs from 'dayjs';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { ColumnsType, ColumnType } from 'antd/es/table';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import DashboardPage from '../Dashboard';
 import {
   createPlatformDynamicRecord,
+  updatePlatformDynamicRecord,
+  submitPlatformDynamicRecord,
+  approvalStatusLabels,
+  type RecordApproval,
   getAppProgramData,
+  getPlatformDynamicRecord,
   getPlatformFormByCode,
   listPlatformFormLayouts,
   type PlatformForm,
@@ -240,8 +246,9 @@ function buildConfiguredProgram(programId: string, payload: ProgramDataPayload, 
   };
 }
 
-function AppProgramPage() {
-  const { programId } = useParams();
+function AppProgramPage({ programId: configuredProgramId }: { programId?: string } = {}) {
+  const params = useParams();
+  const programId = configuredProgramId || params.programId;
   const navigate = useNavigate();
   const [programData, setProgramData] = React.useState<ProgramDataPayload | null | undefined>(undefined);
   const [programLoading, setProgramLoading] = React.useState(false);
@@ -680,6 +687,7 @@ function AlertBusinessProgram({
           if (viewColumn.fieldName === 'occurredAt' || viewColumn.fieldName === 'dueAt') return formatAlertTime(actual);
           if (viewColumn.fieldName === 'title') return <Typography.Text strong>{String(actual)}</Typography.Text>;
           if (viewColumn.renderType === 'tag') return <Tag>{String(actual)}</Tag>;
+          if (viewColumn.renderType === 'date') return formatServerShortDateTime(String(actual));
           return String(actual);
         };
         return {
@@ -1065,6 +1073,34 @@ function BusinessProgram({
   onReload: () => void;
   loading?: boolean;
 }) {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedRecordId = Number(searchParams.get('recordId') || searchParams.get('record_id'));
+  React.useEffect(() => {
+    if (!Number.isSafeInteger(linkedRecordId) || linkedRecordId <= 0) return;
+
+    let cancelled = false;
+    const loadLinkedRecord = async () => {
+      try {
+        const formResponse = await getPlatformFormByCode(program.id, { schema: 'published', scope: 'list' });
+        const formId = formResponse.data?.data?.id;
+        if (!formId || cancelled) return;
+        const response = await getPlatformDynamicRecord(formId, linkedRecordId);
+        const record = response.data?.data;
+        if (!cancelled && record) {
+          setSelectedRow({ ...record.data, id: record.id, recordId: record.id, key: String(record.id),
+            name: record.data?.title || record.data?.name || `${program.title} ${record.id}`,
+            _formData: record.data, _approval: record._approval, created_at: record.created_at, updated_at: record.updated_at });
+        }
+      } catch {
+        if (!cancelled) message.error('无法打开来源记录，请确认记录和查看权限');
+      }
+    };
+    void loadLinkedRecord();
+    return () => { cancelled = true; };
+  }, [linkedRecordId, program.id, program.rows]);
+  const [editingRow, setEditingRow] = React.useState<ProgramRow | null>(null);
+  const [approvalBusy, setApprovalBusy] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [selectedRow, setSelectedRow] = React.useState<ProgramRow | null>(null);
   const [filterValues, setFilterValues] = React.useState<Record<string, unknown>>({});
@@ -1074,6 +1110,7 @@ function BusinessProgram({
   const [runtimeLayoutFields, setRuntimeLayoutFields] = React.useState<RuntimeFormLayoutField[]>([]);
   const [runtimeFormLoading, setRuntimeFormLoading] = React.useState(false);
   const [createSubmitting, setCreateSubmitting] = React.useState(false);
+  const usesDraftLifecycle = Boolean(runtimeForm?.runtime_submission_available && (!editingRow || editingRow._approval));
   const viewConfig = React.useMemo(() => normalizeViewConfig(program.viewConfig, programFieldsForView(program)), [program]);
   const activeFilters = React.useMemo(() => sortByOrder(viewConfig.filters).filter((filter) => filter.enabled), [viewConfig.filters]);
   const viewColumns = React.useMemo(() => sortByOrder(viewConfig.table.columns).filter((column) => column.enabled), [viewConfig.table.columns]);
@@ -1082,6 +1119,7 @@ function BusinessProgram({
     const fieldPermissions = runtimeForm.runtime_field_permissions || {};
     return [...runtimeForm.fields]
       .filter((field) => !field.archived && fieldPermissions[field.field_name]?.visible !== false)
+      .filter((field) => program.id !== 'material-application' || ['part_no', 'title'].includes(field.field_name))
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .map((field) => ({
         ...field,
@@ -1122,6 +1160,52 @@ function BusinessProgram({
       .map(([key, value]) => ({ key, label: fieldLabelMap[key] || key, value }));
     return [...visibleFields, ...extraFields];
   }, [runtimeCreateLayoutFields, selectedRow, viewColumns]);
+  const approval = selectedRow?._approval as RecordApproval | undefined;
+  const approvalHistory = (approval?.history || []).map((item) => ({
+    title: ({ draft: '保存草稿', edit: '修改草稿', create: '保存草稿', update: '修改草稿', submit: '提交审批', approve: '审批通过', reject: '驳回' } as Record<string, string>)[String(item.action)] || String(item.action || '审批记录'),
+    description: [item.actor_name, item.comment, item.created_at].filter(Boolean).map(String).join(' · '),
+  }));
+  const openRecordDetail = async (row: ProgramRow) => {
+    setSelectedRow({ ...row, _approval: undefined });
+    if (!runtimeForm) return;
+    try {
+      const response = await getPlatformDynamicRecord(runtimeForm.id, Number(row.recordId || row.id));
+      const record = response.data?.data;
+      if (record) setSelectedRow({ ...row, ...record.data, _formData: record.data, _approval: record._approval,
+        id: record.id, recordId: record.id });
+    } catch (error: any) { message.error(error?.response?.data?.detail || '记录详情加载失败'); }
+  };
+  const openEditRecord = async () => {
+    if (!selectedRow || !runtimeForm || (approval && !approval.can_edit)) return;
+    try {
+      const response = await getPlatformFormByCode(program.id, { schema: 'published', scope: 'edit' });
+      setRuntimeForm(response.data?.data);
+      setEditingRow(selectedRow);
+      createForm.resetFields();
+      const values = { ...getRowFormData(selectedRow), ...selectedRow };
+      for (const field of runtimeCreateLayoutFields) {
+        if (['date', 'datetime'].includes(field.field_type) && values[field.field_name])
+          values[field.field_name] = dayjs(String(values[field.field_name]));
+      }
+      createForm.setFieldsValue(values);
+      setCreateOpen(true);
+    } catch (error: any) { message.error(error?.response?.data?.detail || '无法编辑此记录'); }
+  };
+  const submitRecord = () => {
+    if (!selectedRow || !runtimeForm || !approval?.can_submit) return;
+    Modal.confirm({ title: approval.status === 'rejected' ? '确认重新提交审批？' : '确认提交审批？',
+      content: '提交后进入流程与待办，审批期间不能修改来源记录。',
+      onOk: async () => {
+        setApprovalBusy(true);
+        try {
+          await submitPlatformDynamicRecord(runtimeForm.id, Number(selectedRow.recordId || selectedRow.id), approval.status);
+          message.success('已提交审批，可在流程与待办 → 我发起的追踪');
+          await openRecordDetail(selectedRow); onReload();
+        } catch (error: any) { message.error(error?.response?.data?.detail || '提交失败，请检查必填字段'); throw error; }
+        finally { setApprovalBusy(false); }
+      },
+    });
+  };
   const interactionEntries = React.useMemo(() => getInteractionEntries(selectedRow), [selectedRow]);
   const progressStatus = selectedRow
     ? String(selectedRow.processStatus || selectedRow.status || '未启动')
@@ -1141,6 +1225,7 @@ function BusinessProgram({
           const actual = value ?? formData[viewColumn.fieldName];
           if (actual === undefined || actual === null || actual === '') return viewColumn.emptyText || '-';
           if (viewColumn.renderType === 'tag') return <Tag>{String(actual)}</Tag>;
+          if (viewColumn.renderType === 'date') return formatServerShortDateTime(String(actual));
           return String(actual);
         };
         return {
@@ -1154,11 +1239,15 @@ function BusinessProgram({
           render: source?.render || renderCell,
         };
       });
+    if (runtimeForm?.runtime_submission_available) baseColumns.push({ title: '审批状态', key: '_approval', width: 110,
+      render: (_: unknown, row: ProgramRow) => { const state = row._approval as RecordApproval | undefined; return state ? <Tag color={state.status === 'rejected' ? 'red' : 'blue'}>{approvalStatusLabels[state.status] || state.status}</Tag> : '历史记录'; },
+    });
     return baseColumns;
-  }, [program.columns, viewColumns]);
+  }, [program.columns, viewColumns, runtimeForm?.runtime_submission_available]);
 
   const closeCreateModal = () => {
     setCreateOpen(false);
+    setEditingRow(null);
     createForm.resetFields();
   };
 
@@ -1242,13 +1331,18 @@ function BusinessProgram({
       message.warning('当前页面没有绑定后台表单设计，不能新增业务记录');
       return;
     }
+    if ((latestRuntimeForm || runtimeForm)?.runtime_permissions?.create === false) {
+      message.warning('当前没有此表单的新增权限');
+      return;
+    }
+    setEditingRow(null);
     createForm.resetFields();
     createForm.setFieldsValue(businessCreateInitialValues(runtimeCreateLayoutFields));
     setCreateOpen(true);
   };
 
   const submitCreateModal = async () => {
-    const values = await createForm.validateFields();
+    const values = usesDraftLifecycle ? createForm.getFieldsValue() : await createForm.validateFields();
     const payload = Object.fromEntries(
       Object.entries(values).map(([key, value]) => [key, normalizeBusinessCreateValue(value)]),
     );
@@ -1258,13 +1352,24 @@ function BusinessProgram({
     }
     setCreateSubmitting(true);
     try {
-      await createPlatformDynamicRecord(runtimeForm.id, payload);
-      message.success(`${runtimeForm.name || program.title} 已新增`);
+      const response = editingRow
+        ? await updatePlatformDynamicRecord(runtimeForm.id, Number(editingRow.recordId || editingRow.id), payload)
+        : await createPlatformDynamicRecord(runtimeForm.id, payload);
+      const record = response.data?.data;
+      message.success(record?._approval ? '草稿已保存，请从记录详情提交审批' : '已保存');
+      if (record) {
+        setSelectedRow({ ...record.data, _formData: record.data, _approval: record._approval,
+          name: record.data?.title || record.data?.name || `${program.title} ${record.id}`,
+          id: record.id, recordId: record.id, key: String(record.id) });
+        const params = new URLSearchParams(searchParams);
+        params.set('recordId', String(record.id));
+        setSearchParams(params, { replace: true });
+      }
       closeCreateModal();
       onReload();
-    } catch (error) {
+    } catch (error: any) {
       console.error('create dynamic record failed', error);
-      message.error('新增失败，请检查表单字段和权限配置');
+      message.error(error?.response?.data?.detail || '新增失败，请检查表单字段和权限配置');
     } finally {
       setCreateSubmitting(false);
     }
@@ -1287,11 +1392,10 @@ function BusinessProgram({
         <div className="app-business-title-row">
           <Typography.Title level={4}>{program.title}</Typography.Title>
           <Space size={8} wrap>
-            <Button type="primary" icon={<PlusOutlined />} loading={runtimeFormLoading} onClick={openCreateModal}>新增</Button>
-            <Button icon={<UploadOutlined />}>申请</Button>
-            <Button>批量处理</Button>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
-            <Button icon={<DownloadOutlined />}>导出</Button>
+            <Button disabled={runtimeForm?.runtime_permissions?.create === false} type="primary" aria-label={program.id === 'material-application' ? '登记料号申请' : '新增记录'} icon={<PlusOutlined />} loading={runtimeFormLoading} onClick={openCreateModal}>{runtimeForm?.runtime_submission_available ? '填写申请' : '新增'}</Button>
+
+            <Button aria-label="刷新记录" icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
+            {program.id !== 'material-application' && <Button icon={<DownloadOutlined />}>导出</Button>}
             <Button icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
           </Space>
         </div>
@@ -1326,23 +1430,24 @@ function BusinessProgram({
           scroll={{ x: 1100, y: '100%' }}
           rowClassName={(record) => record.key === selectedRow?.key ? 'app-business-row-selected' : ''}
           onRow={(record) => ({
-            onClick: () => setSelectedRow(record),
+            onClick: () => { void openRecordDetail(record); },
           })}
         />
       </div>
     </div>
 
       <Modal
-        title={`新增${runtimeForm?.name || program.title}`}
+        title={`${editingRow ? '编辑：' : runtimeForm?.runtime_submission_available ? '填写申请：' : '新增'}${runtimeForm?.name || program.title}`}
         open={createOpen}
         width={820}
-        okText={runtimeForm ? '提交' : '确认'}
+        okText={usesDraftLifecycle ? '保存草稿' : '保存'}
         cancelText="取消"
         confirmLoading={createSubmitting}
         onCancel={closeCreateModal}
         onOk={submitCreateModal}
       >
         <Form form={createForm} layout="vertical" className="app-business-create-form">
+          {usesDraftLifecycle && <Typography.Paragraph type="secondary">先保存草稿，可继续填写；完成后从记录详情提交审批。驳回后可修改并重新提交。</Typography.Paragraph>}
           <Row gutter={12}>
             {runtimeCreateLayoutFields.map((field) => (
               <Col key={field.field_name} xs={24} md={getCreateFieldColSpan(field)}>
@@ -1358,11 +1463,12 @@ function BusinessProgram({
         destroyOnClose
         extra={(
           <Space>
-            <Button size="small">处理</Button>
-            <Button size="small" type="primary">编辑</Button>
+            {(approval ? approval.can_edit : runtimeForm?.runtime_permissions?.edit) && <Button size="small" onClick={openEditRecord}>编辑{approval ? '草稿' : ''}</Button>}
+            {approval?.can_submit && <Button size="small" type="primary" loading={approvalBusy} onClick={submitRecord}>{approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
+            {approval?.workflow_id && <Button size="small" onClick={() => navigate(`/workflow?tab=initiated&source_form_id=${runtimeForm?.id}&source_record_id=${selectedRow?.recordId || selectedRow?.id}`)}>查看审批</Button>}
           </Space>
         )}
-        onClose={() => setSelectedRow(null)}
+        onClose={() => { setSelectedRow(null); const params = new URLSearchParams(searchParams); params.delete('recordId'); params.delete('record_id'); setSearchParams(params, { replace: true }); }}
         open={Boolean(selectedRow)}
         placement="right"
         title={selectedRowTitle}
@@ -1376,6 +1482,7 @@ function BusinessProgram({
                 <Typography.Text strong>{selectedRowTitle}</Typography.Text>
                 <Typography.Text type="secondary">{program.title} · 表单记录</Typography.Text>
               </div>
+              {approval && <Tag color={approval.status === 'rejected' ? 'red' : 'blue'}>审批：{approvalStatusLabels[approval.status] || approval.status}</Tag>}
               {selectedRow.status ? <Tag color={String(selectedRow.status).includes('关闭') ? 'default' : 'processing'}>{String(selectedRow.status)}</Tag> : null}
             </div>
             <Tabs
@@ -1392,7 +1499,9 @@ function BusinessProgram({
                           {detailItems.map((item) => (
                             <Col xs={24} md={12} key={item.key}>
                               <Form.Item label={item.label}>
-                                <Input value={formatDetailValue(item.value)} readOnly />
+                                {item.key === 'approval_source' && item.value && typeof item.value === 'object' && String((item.value as Record<string, unknown>).route || '').startsWith('/workflow?')
+                                  ? <Button onClick={() => navigate(String((item.value as Record<string, unknown>).route))}>查看原审批记录</Button>
+                                  : <Input value={formatDetailValue(item.value)} readOnly />}
                               </Form.Item>
                             </Col>
                           ))}
@@ -1409,18 +1518,18 @@ function BusinessProgram({
                       <div className="workflow-progress-summary">
                         <div>
                           <span>当前节点</span>
-                          <strong>{currentNode}</strong>
+                          <strong>{approval ? approvalStatusLabels[approval.status] : currentNode}</strong>
                         </div>
                         <div>
-                          <span>当前处理人</span>
-                          <strong>{currentHandler}</strong>
+                          <span>{approval ? '审批来源' : '当前处理人'}</span>
+                          <strong>{approval ? '本表单审批流程' : currentHandler}</strong>
                         </div>
-                        <Tag color={progressStatus.includes('完成') || progressStatus.includes('关闭') ? 'green' : 'blue'}>{progressStatus}</Tag>
+                        <Tag color={progressStatus.includes('完成') || progressStatus.includes('关闭') ? 'green' : 'blue'}>{approval ? approvalStatusLabels[approval.status] : progressStatus}</Tag>
                       </div>
                       <div className="workflow-progress-card">
                         <div className="workflow-form-section-title">处理记录</div>
                         <Timeline
-                          items={(interactionEntries.length ? interactionEntries : [
+                          items={(approval ? approvalHistory : interactionEntries.length ? interactionEntries : [
                             { title: '创建业务记录', description: formatDetailValue(selectedRow._createdAt || selectedRow.occurredAt) },
                             { title: currentNode, description: currentHandler },
                           ]).map((entry, index) => ({

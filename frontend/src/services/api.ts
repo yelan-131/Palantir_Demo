@@ -890,7 +890,10 @@ export const wfStartInstance = (defId: number, data: Record<string, unknown>) =>
 export const wfListInstances = (params?: Record<string, unknown>) =>
   api.get('/workflow/instances', { params });
 export const wfApproveOrReject = (instId: number, data: Record<string, unknown>) =>
-  api.post(`/workflow/instances/${instId}/act`, data);
+  api.post(`/workflow/instances/${instId}/act`, data).then(response => {
+    window.dispatchEvent(new CustomEvent('approval-notifications-changed'));
+    return response;
+  });
 export const wfCancelInstance = (instId: number) =>
   api.post(`/workflow/instances/${instId}/cancel`);
 export const wfGetStats = () => api.get('/workflow/stats');
@@ -1006,6 +1009,7 @@ export interface PlatformForm {
   fields?: PlatformFormField[];
   applications?: Array<Record<string, unknown>>;
   permission_design?: Record<string, unknown>;
+  runtime_submission_available?: boolean;
   runtime_permissions?: Record<string, boolean>;
   runtime_field_permissions?: Record<string, { visible: boolean; editable: boolean; exportable: boolean; required?: boolean }>;
 }
@@ -1166,6 +1170,20 @@ export const updatePlatformDynamicRecord = (
   recordId: number | string,
   data: Record<string, unknown>,
 ) => api.put(`/forms/${formId}/records/${recordId}`, { data });
+export interface RecordApproval {
+  status: 'draft' | 'pending' | 'approved' | 'rejected';
+  can_edit: boolean;
+  can_submit: boolean;
+  workflow_id?: number;
+  history?: Array<Record<string, unknown>>;
+}
+export const approvalStatusLabels: Record<string, string> = { draft: '草稿', pending: '审批中', approved: '已通过', rejected: '已驳回' };
+export const submitPlatformDynamicRecord = (formId: number | string, recordId: number | string, expectedStatus: string) =>
+  api.post(`/forms/${formId}/records/${recordId}/submit`, { expected_status: expectedStatus }).then(response => {
+    window.dispatchEvent(new CustomEvent('approval-notifications-changed'));
+    return response;
+  });
+
 export const deletePlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
   api.delete(`/forms/${formId}/records/${recordId}`);
 

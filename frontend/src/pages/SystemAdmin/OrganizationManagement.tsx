@@ -349,7 +349,7 @@ export default function OrganizationManagement() {
       title: '成员',
       dataIndex: 'member_count',
       width: 90,
-      render: (value?: number) => <Badge count={value || 0} showZero style={{ backgroundColor: '#2f5f73' }} />,
+      render: (value?: number) => <Badge count={value || 0} showZero style={{ backgroundColor: 'var(--mf-primary)' }} />,
     },
     {
       title: '状态',
@@ -745,7 +745,7 @@ function MembersBlock({ members, total }: { members: UserItem[]; total: number }
           const roleLabel = member.roles?.map((role) => role.label || role.name).join(' / ') || '未分配角色';
           return (
             <div key={member.id} className="org-member-row">
-              <Avatar size={34} style={{ backgroundColor: member.is_active === false ? '#9aa6ad' : '#2f5f73' }}>
+              <Avatar size={34} style={{ backgroundColor: member.is_active === false ? 'var(--mf-faint)' : 'var(--mf-primary)' }}>
                 {displayName.slice(0, 1)}
               </Avatar>
               <div>

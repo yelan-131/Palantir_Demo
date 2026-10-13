@@ -1,10 +1,8 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Badge,
-  Breadcrumb,
+  Alert,
   Button,
-  Dropdown,
   Input,
   Layout,
   Menu,
@@ -12,15 +10,15 @@ import {
   Space,
   Spin,
   Typography,
+  Tooltip,
   message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   AppstoreOutlined,
-  BellOutlined,
   CheckOutlined,
-  CloseOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   DownloadOutlined,
   DownOutlined,
   HomeOutlined,
@@ -31,45 +29,39 @@ import {
   ReloadOutlined,
   RightOutlined,
   SafetyCertificateOutlined,
-  SearchOutlined,
   ShopOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
-import AccountMenu from './components/AccountMenu';
+import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, useApplicationLibrary, type LibraryApp } from './components/ShellNavigation';
+import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
 import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
+import NotificationCenter from './components/NotificationCenter';
+import { LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath, visibleNavigationEntries } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
   getCurrentRelease,
   listApplicationMenus,
   listApplications,
-  wfApproveOrReject,
-  wfListNotifications,
-  wfMarkAllRead,
-  wfMarkNotificationRead,
 } from './services/api';
-import { formatServerDateTime } from './utils/dateTime';
 
+const NavigationAreaPage = lazy(() => import('./pages/NavigationArea'));
+const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => ({ default: module.AccountEntry })));
+
+const SchedulerPage = lazy(() => import('./pages/Scheduler'));
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
+const AlertCenterPage = lazy(() => import('./pages/AlertCenter'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
-const DataSourcePage = lazy(() => import('./pages/DataSource'));
-const OntologyPage = lazy(() => import('./pages/Ontology'));
-const GraphExplorerPage = lazy(() => import('./pages/GraphExplorer'));
-const PipelinePage = lazy(() => import('./pages/Pipeline'));
 const MaintenancePage = lazy(() => import('./pages/Maintenance'));
 const QualityPage = lazy(() => import('./pages/Quality'));
 const SupplyChainPage = lazy(() => import('./pages/SupplyChain'));
-const AccountCenterPage = lazy(() => import('./pages/AccountCenter'));
-const ReportCenterPage = lazy(() => import('./pages/ReportCenter'));
 const DynamicPage = lazy(() => import('./pages/DynamicPage'));
 const AppProgramPage = lazy(() => import('./pages/AppPrograms'));
 const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
-const SystemAdminPage = lazy(() => import('./pages/SystemAdmin'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
+const MaterialApplicationsPage = lazy(() => import('./pages/MaterialApplications'));
 const LoginPage = lazy(() => import('./pages/Login'));
-const TemplateMarketPage = lazy(() => import('./pages/TemplateMarket'));
-const RuleEnginePage = lazy(() => import('./pages/RuleEngine'));
 
 const { Header, Sider, Content } = Layout;
 interface DynamicMenu {
@@ -200,6 +192,7 @@ const pageTitleMap: Record<string, string> = {
 };
 
 const programTitleMap: Record<string, string> = {
+  'material-application': '料号申请',
   'production-overview': '\u751f\u4ea7\u603b\u89c8',
   'oee-trend-report': 'OEE \u8d8b\u52bf\u62a5\u8868',
   'line-status': '\u4ea7\u7ebf\u72b6\u6001',
@@ -251,8 +244,8 @@ function getRuntimePageTitle(pathname: string): string {
 
 function PageLoader() {
   return (
-    <div style={{ padding: 40 }}>
-      <Spin size="large" tip={'\u52a0\u8f7d\u5de5\u4f5c\u53f0...'}>
+    <div className="shell-page-loading" role="status" aria-live="polite">
+      <Spin size="large" tip="正在加载页面…">
         <div style={{ minHeight: 200 }} />
       </Spin>
     </div>
@@ -269,11 +262,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: 40 }}>
-          <Typography.Title level={4} type="danger">{'\u9875\u9762\u6e32\u67d3\u5931\u8d25'}</Typography.Title>
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, background: '#fff', padding: 16, borderRadius: 6 }}>
-            {this.state.error}
-          </pre>
+        <div className="shell-page-error">
+          <Alert type="error" showIcon message="页面暂时无法显示" description="请重新加载页面。如果问题持续出现，可查看错误详情并联系管理员。" />
+          <details className="shell-error-details">
+            <summary>错误详情</summary>
+            <pre>{this.state.error}</pre>
+          </details>
           <Button type="primary" onClick={() => window.location.reload()}>{'\u91cd\u65b0\u52a0\u8f7d\u9875\u9762'}</Button>
         </div>
       );
@@ -282,6 +276,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
+  // Material requests belong to the workflow center rather than application menus.
+  items = items.filter(item => !['/program/material-application', '/workflow?section=materials'].includes((item.route_path || '').split('#')[0].replace(/\/$/, '')));
   if (items.some((item) => item.children?.length)) {
     return items.map((item) => ({
       key: normalizeRuntimeRoute(item.route_path) || `dynamic-${item.id}`,
@@ -345,19 +341,6 @@ function findMenuLabelPath(items: MenuProps['items'], route: string): string[] |
   return null;
 }
 
-function getProgramRouteForBreadcrumb(pathname: string): { route: string; mode: 'view' | 'settings' } | null {
-  if (pathname.startsWith('/program/')) {
-    const programId = pathname.split('/').filter(Boolean)[1];
-    return programId ? { route: `/program/${programId}`, mode: 'view' } : null;
-  }
-  if (pathname.startsWith('/form-settings/')) {
-    const formId = pathname.split('/').filter(Boolean)[1];
-    if (!formId) return null;
-    const route = /^\d+$/.test(formId) ? `/dynamic/${formId}` : `/program/${formId}`;
-    return { route, mode: 'settings' };
-  }
-  return null;
-}
 
 function findFirstDynamicMenuRoute(items: DynamicMenu[]): string | undefined {
   for (const item of items) {
@@ -375,28 +358,70 @@ function AppContent() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const activeArea = navigationAreaForPath(location.pathname);
+  const activeAreaInfo = NAVIGATION_AREAS.find(area => area.key === activeArea)!;
+  const isAdmin = Boolean(user?.is_admin);
+  const areaEntry = NAVIGATION_ENTRIES.find(entry => entry.path === location.pathname);
 
-  const [collapsed, setCollapsed] = useState(false);
+  const { preferences, updatePreferences } = useShellPreferences();
+  const [compactViewport, setCompactViewport] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [smallViewport, setSmallViewport] = useState(() => window.matchMedia('(max-width: 760px)').matches);
+  const [temporaryMenuExpanded, setTemporaryMenuExpanded] = useState(false);
+  useEffect(() => {
+    const compactQuery = window.matchMedia('(max-width: 1100px)');
+    const smallQuery = window.matchMedia('(max-width: 760px)');
+    const onResize = () => {
+      setCompactViewport(compactQuery.matches);
+      setSmallViewport(smallQuery.matches);
+      setTemporaryMenuExpanded(false);
+    };
+    compactQuery.addEventListener('change', onResize);
+    smallQuery.addEventListener('change', onResize);
+    return () => {
+      compactQuery.removeEventListener('change', onResize);
+      smallQuery.removeEventListener('change', onResize);
+    };
+  }, []);
+  const collapsed = compactViewport ? !temporaryMenuExpanded : preferences.sidebar === 'collapsed';
+  const setCollapsed = (value: boolean) => {
+    if (compactViewport) setTemporaryMenuExpanded(!value);
+    else updatePreferences({ sidebar: value ? 'collapsed' : 'expanded' });
+  };
+  useEffect(() => { setTemporaryMenuExpanded(false); }, [location.pathname]);
+  const mobileMenuWasOpen = React.useRef(false);
+  useEffect(() => {
+    const isOpen = smallViewport && !collapsed;
+    const restoreFocus = mobileMenuWasOpen.current && smallViewport;
+    if (isOpen) document.getElementById('shell-context-menu')?.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus();
+    else if (restoreFocus) document.querySelector<HTMLButtonElement>('.shell-mobile-menu-toggle')?.focus();
+    mobileMenuWasOpen.current = isOpen;
+  }, [smallViewport, collapsed]);
+  useEffect(() => {
+    if (!smallViewport || collapsed) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setTemporaryMenuExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [smallViewport, collapsed]);
   const [dynamicMenus, setDynamicMenus] = useState<MenuProps['items']>([]);
+  const [menusLoadedFor, setMenusLoadedFor] = useState<number | null>(null);
+  const [firstApplicationRoute, setFirstApplicationRoute] = useState<string>();
   const [applications, setApplications] = useState<ApplicationInfo[]>([]);
   const [currentApplication, setCurrentApplication] = useState<ApplicationInfo | null>(null);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [rootApplicationId, setRootApplicationId] = useState<number | null>(null);
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseRecordIndex, setReleaseRecordIndex] = useState(0);
+  const library = useApplicationLibrary(applications, isAdmin);
+  const isApplicationWorkspace = activeArea === 'business' && (location.pathname === '/' && rootApplicationId === currentApplication?.id || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
+  const activeLibraryEntry = library.filter(app => !app.application && app.pinned).find(app => location.pathname === app.path || app.path === '/data-center' && location.pathname.startsWith('/data-center/') || app.path === '/admin' && location.pathname.startsWith('/admin/'));
+  const railKey = location.pathname === '/more' ? 'more' : location.pathname === '/scheduler' ? 'scheduler' : location.pathname === '/plugins' ? 'plugins' : activeLibraryEntry?.id || (activeArea !== 'business' ? 'space' : isApplicationWorkspace && currentApplication ? `app:${currentApplication.id}` : 'home');
+  const sidebarTitle = location.pathname === '/more' ? '更多' : location.pathname === '/scheduler' ? '定时任务' : location.pathname === '/plugins' ? '插件' : activeLibraryEntry?.name || (activeArea !== 'business' ? '空间' : isApplicationWorkspace && currentApplication ? library.find(app => app.id === `app:${currentApplication.id}`)?.name || currentApplication.name : '首页');
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+
 
   useEffect(() => {
     listApplications()
@@ -423,35 +448,62 @@ function AppContent() {
 
   useEffect(() => {
     if (!currentApplication) return;
+    let cancelled = false;
     listApplicationMenus(currentApplication.id)
       .then((res) => {
+        if (cancelled) return;
         const apiItems = res.data?.data || [];
         const items = apiItems
           .filter((m: DynamicMenu) => m.is_visible !== false);
         setDynamicMenus(buildDynamicMenuTree(items));
+        setFirstApplicationRoute(findFirstDynamicMenuRoute(apiItems));
+        setMenusLoadedFor(currentApplication.id);
       })
       .catch(() => {
+        if (cancelled) return;
+        setMenusLoadedFor(null);
         message.error('\u5e94\u7528\u83dc\u5355\u52a0\u8f7d\u5931\u8d25');
         setDynamicMenus([]);
       });
-  }, [currentApplication]);
-
-  const loadNotifications = useCallback(() => {
-    if (!user) return;
-    wfListNotifications(user.id)
-      .then((res) => {
-        const data = res.data?.data || [];
-        setNotifications(data);
-        setUnread(data.filter((n: any) => !n.is_read).length);
-      })
-      .catch(() => {});
-  }, [user]);
+    return () => { cancelled = true; };
+  }, [currentApplication, activeArea]);
 
   useEffect(() => {
-    loadNotifications();
-    const interval = setInterval(loadNotifications, 60000);
-    return () => clearInterval(interval);
-  }, [loadNotifications]);
+    if (location.pathname === '/' && rootApplicationId === currentApplication?.id && menusLoadedFor === currentApplication?.id && firstApplicationRoute) {
+      setRootApplicationId(null);
+      navigate(firstApplicationRoute);
+    }
+  }, [location.pathname, rootApplicationId, currentApplication?.id, menusLoadedFor, firstApplicationRoute, navigate]);
+
+  // Resolve bookmarked and search-result runtime pages to their actual application.
+  useEffect(() => {
+    if (!isApplicationWorkspace || !currentApplication || menusLoadedFor !== currentApplication.id || location.pathname === '/') return;
+    const route = normalizeRuntimeRoute(location.pathname);
+    if (normalizeRuntimeRoute(currentApplication.default_route) === route) return;
+    if (findMenuLabelPath(dynamicMenus, route)) return;
+    let cancelled = false;
+    const resolve = async () => {
+      const defaultOwner = applications.find(app => normalizeRuntimeRoute(app.default_route) === route);
+      let owner = defaultOwner;
+      if (!owner) {
+        const candidates = applications.filter(app => app.id !== currentApplication.id);
+        const results = await Promise.all(candidates.map(async app => {
+          try {
+            const response = await listApplicationMenus(app.id);
+            return findMenuLabelPath(buildDynamicMenuTree((response.data?.data || []).filter((item: DynamicMenu) => item.is_visible !== false)), route) ? app : undefined;
+          } catch { return undefined; }
+        }));
+        owner = results.find(Boolean);
+      }
+      if (!cancelled && owner && owner.id !== currentApplication.id) {
+        setDynamicMenus([]);
+        setCurrentApplication(owner);
+        localStorage.setItem('mf_current_app_id', String(owner.id));
+      }
+    };
+    void resolve();
+    return () => { cancelled = true; };
+  }, [isApplicationWorkspace, currentApplication, menusLoadedFor, dynamicMenus, applications, location.pathname]);
 
   useEffect(() => {
     getCurrentRelease()
@@ -469,25 +521,45 @@ function AppContent() {
   };
 
   const allMenuItems = useMemo<MenuProps['items']>(() => {
+    if (location.pathname === '/more') return [{ key: '/more', icon: <AppstoreOutlined />, label: '常见应用' }];
+    if (location.pathname === '/scheduler') return [{ key: '/scheduler', icon: <CheckOutlined />, label: '定时任务管理' }];
+    if (location.pathname === '/plugins') return [{ key: '/plugins', icon: <AppstoreOutlined />, label: '插件与扩展' }];
+    if (activeArea !== 'business') {
+      const contextArea = activeLibraryEntry?.id === 'data' || activeLibraryEntry?.id === 'knowledge' ? 'data' : activeLibraryEntry?.id === 'admin' ? 'admin' : activeLibraryEntry?.id === 'reports' ? 'studio' : undefined;
+      return NAVIGATION_AREAS.filter(area => area.key !== 'business' && (!contextArea || area.key === contextArea) && (!('adminOnly' in area) || isAdmin)).map(area => ({
+        key: area.key, type: 'group' as const, label: area.label,
+        children: visibleNavigationEntries(area.key, isAdmin).map(entry => ({ key: entry.path, label: entry.label, icon: collapsed ? <AppstoreOutlined /> : undefined })),
+      }));
+    }
+    if (!isApplicationWorkspace) {
+      const appLinks = applications.map(app => ({ key: `application:${app.id}`, icon: iconFor(app.icon), label: library.find(entry => entry.id === `app:${app.id}`)?.name || app.name }));
+      return [
+        { key: 'personal', type: 'group' as const, label: '工作空间', children: [workspaceMenuItem, { key: '/workflow', icon: <CheckOutlined />, label: '工作内容与待办' }] },
+        { key: 'business-apps', type: 'group' as const, label: '业务应用', children: appLinks.length ? appLinks : businessMenuItems.filter(item => item?.key !== '/') },
+        ...(location.pathname === '/account-center' ? [{ key: '/account-center', label: '个人账号与设置' }] : []),
+      ];
+    }
     const appItems = dynamicMenus?.length ? unwrapApplicationMenuRoot(dynamicMenus) : [];
-    return [workspaceMenuItem, { type: 'divider' }, ...(appItems || [])];
-  }, [dynamicMenus]);
+    return appItems?.length ? appItems : businessMenuItems;
+  }, [activeArea, dynamicMenus, isAdmin, isApplicationWorkspace, applications, library, activeLibraryEntry, location.pathname, collapsed]);
+
   const openMenuKeys = useMemo(() => {
     return (allMenuItems || [])
       .map((item) => (item && 'key' in item ? String(item.key) : ''))
       .filter(Boolean);
   }, [allMenuItems]);
-  const selectedKey = normalizeRuntimeRoute(location.pathname) || location.pathname;
+  const selectedKey = location.pathname.startsWith('/form-settings/') ? '/studio/applications' : normalizeRuntimeRoute(location.pathname) || location.pathname;
   const currentMenuTitle = useMemo(() => {
     const path = findMenuLabelPath(allMenuItems, selectedKey);
     return path?.length ? path[path.length - 1] : undefined;
   }, [allMenuItems, selectedKey]);
   const showRuntimePageBar =
-    !location.pathname.startsWith('/program/')
+    activeArea === 'business'
+    && !location.pathname.startsWith('/program/')
     && !location.pathname.startsWith('/dynamic/')
     && !location.pathname.startsWith('/form-settings/')
-    && !['/', '/workflow', '/system-admin', '/account-center'].includes(location.pathname);
-  const runtimeTitle = currentMenuTitle || getRuntimePageTitle(location.pathname);
+    && !['/', '/workflow', '/system-admin', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname);
+  const runtimeTitle = location.pathname === '/more' ? '常见应用' : location.pathname === '/scheduler' ? '定时任务' : location.pathname === '/plugins' ? '插件与扩展' : location.pathname.startsWith('/form-settings/') ? '页面设计' : areaEntry?.label || currentMenuTitle || (location.pathname === '/account-center' ? '个人账号' : activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
   const releaseRecords = normalizeReleaseRecords(releaseInfo);
   const activeReleaseIndex = releaseRecords.length
     ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
@@ -504,219 +576,42 @@ function AppContent() {
   };
 
 
-  const breadcrumbItems = useMemo(() => {
-    const programRoute = getProgramRouteForBreadcrumb(location.pathname);
-    const menuPath = programRoute ? findMenuLabelPath(allMenuItems, programRoute.route) : null;
-    const pagePath = !programRoute ? findMenuLabelPath(allMenuItems, location.pathname) : null;
-    const fallbackTitle = currentMenuTitle || getRuntimePageTitle(location.pathname);
-    const titles = menuPath?.length
-      ? (programRoute?.mode === 'settings' ? [...menuPath, '\u8868\u5355\u8bbe\u7f6e'] : menuPath)
-      : pagePath?.length
-        ? pagePath
-        : [fallbackTitle];
-    return [
-      { title: <a onClick={() => navigate('/')}><HomeOutlined /></a> },
-      ...titles.map((title) => ({ title })),
-    ];
-  }, [allMenuItems, currentMenuTitle, location.pathname, navigate]);
-
-  const handleApproval = (instId: number, action: string) => {
-    const commentRef = React.createRef<any>();
-    Modal.confirm({
-      title: action === 'approve' ? 'Approve request' : 'Reject request',
-      content: <Input.TextArea ref={commentRef} rows={3} placeholder="Approval comment" />,
-      onOk: async () => {
-        const comment = commentRef.current?.resizableTextArea?.textArea?.value
-          ?? commentRef.current?.input?.value
-          ?? '';
-        try {
-          await wfApproveOrReject(instId, { action, comment });
-          message.success(action === 'approve' ? 'Approved' : 'Rejected');
-          loadNotifications();
-        } catch {
-          message.error('Approval action failed');
-        }
-      },
-    });
-  };
-
   const switchApplication = (app: ApplicationInfo) => {
+    setRootApplicationId(app.default_route === '/' || !app.default_route ? app.id : null);
+    if (currentApplication?.id !== app.id) setDynamicMenus([]);
     setCurrentApplication(app);
     localStorage.setItem('mf_current_app_id', String(app.id));
     const defaultRoute = app.default_route || '/';
     navigate(normalizeRuntimeRoute(defaultRoute) || defaultRoute);
   };
 
-  const applicationMenu: MenuProps = {
-    items: applications.map((app) => ({
-      key: String(app.id),
-      icon: iconFor(app.icon),
-      label: (
-        <div className="application-switch-item">
-          <strong>{app.name}</strong>
-          <span>{app.description || app.code}</span>
-        </div>
-      ),
-      onClick: () => switchApplication(app),
-    })),
+  const openLibraryApp = (entry: LibraryApp) => {
+    if (entry.application) switchApplication(entry.application);
+    else navigate(entry.path);
   };
 
-  const notificationSource = notifications;
-  const notificationGroups = [
-    { key: 'action', title: 'Action', empty: 'No action items', items: notificationSource.filter((n: any) => n.category === 'action' || n.type === 'approval' || n.type === 'returned') },
-    { key: 'system', title: 'System', empty: 'No system notifications', items: notificationSource.filter((n: any) => n.category === 'system' || n.type === 'system') },
-    { key: 'ai', title: 'AI', empty: 'No AI notifications', items: notificationSource.filter((n: any) => n.category === 'ai' || n.type === 'ai') },
-  ];
-
-  const renderNotificationLabel = (n: any) => (
-    <div className="notification-menu-item" style={{ opacity: n.is_read ? 0.58 : 1 }}>
-      <div style={{ fontWeight: n.is_read ? 500 : 700 }}>{n.title}</div>
-      {n.content && <div style={{ fontSize: 12, color: '#5d6972', marginTop: 2 }}>{n.content}</div>}
-      <div style={{ fontSize: 11, color: '#8a97a1', marginTop: 2 }}>{formatServerDateTime(n.created_at)}</div>
-      {n.type === 'approval' && !n.is_read && (
-        <div style={{ marginTop: 8 }}>
-          <Button
-            size="small"
-            type="primary"
-            icon={<CheckOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleApproval(n.related_id || n.id, 'approve');
-            }}
-          >
-            {'\u901a\u8fc7'}
-          </Button>
-          <Button
-            size="small"
-            danger
-            icon={<CloseOutlined />}
-            style={{ marginLeft: 8 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleApproval(n.related_id || n.id, 'reject');
-            }}
-          >
-            {'\u9a73\u56de'}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-
-  const notificationMenuItems: NonNullable<MenuProps['items']> = [
-    { key: 'header', label: <strong>{'\u901a\u77e5\u4e2d\u5fc3'}</strong>, disabled: true },
-    { type: 'divider' },
-  ];
-
-  notificationGroups.forEach((group) => {
-    notificationMenuItems.push({ key: 'group-' + group.key, label: <strong>{group.title}</strong>, disabled: true });
-    if (group.items.length) {
-      group.items.slice(0, 4).forEach((n: any) => {
-        notificationMenuItems.push({ key: String(n.id), label: renderNotificationLabel(n) });
-      });
-    } else {
-      notificationMenuItems.push({ key: 'empty-' + group.key, label: group.empty, disabled: true });
-    }
-    notificationMenuItems.push({ type: 'divider' });
-  });
-
-  notificationMenuItems.push({
-    key: 'mark-all',
-    label: 'Mark all as read',
-    onClick: async () => {
-      if (!user) return;
-      await wfMarkAllRead(user.id);
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnread(0);
-    },
-  });
-
-  const notificationMenu: MenuProps = {
-    items: notificationMenuItems,
-    onClick: ({ key }) => {
-      const keyText = String(key);
-      if (keyText === 'header' || keyText === 'mark-all' || keyText.startsWith('group-') || keyText.startsWith('empty-')) return;
-      const matched = notificationSource.find((n: any) => String(n.id) === keyText);
-      if (!matched) return;
-      if (typeof matched.id === 'number') wfMarkNotificationRead(matched.id).catch(() => {});
-      setNotifications((prev) => prev.map((n) => (String(n.id) === keyText ? { ...n, is_read: true } : n)));
-      if (!matched.is_read) setUnread((prev) => Math.max(0, prev - 1));
-      navigate(matched.target_path || matched.link || (matched.category === 'ai' ? '/ai-assistant' : matched.category === 'system' ? '/account-center?section=app-menu' : '/workflow'));
-    },
-  };
-
-  const siderWidth = collapsed ? 68 : 236;
 
   return (
     <AiWorkbenchProvider>
-    <Layout className="app-shell density-standard">
-      <Sider
-        width={236}
-        collapsedWidth={68}
-        collapsed={collapsed}
-        trigger={null}
-        theme="light"
-        className="app-sider"
-        style={{ height: 'calc(100vh / var(--app-ui-scale))', position: 'fixed', left: 0, top: 0, bottom: 0 }}
-      >
-        <div className="app-brand">
-          <span className="app-brand-mark">MF</span>
-          {!collapsed && (
-            <span className="app-brand-title">
-              <strong>ManuFoundry</strong>
-              <span>Low-code Analytics</span>
-            </span>
-          )}
+    <Layout className={`app-shell tech-white-shell density-${preferences.density}${smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}`}>
+      <ApplicationRail onHome={() => { setRootApplicationId(null); navigate('/'); }} activeKey={railKey} library={library} user={user} onOpen={openLibraryApp} onLogout={() => { logout(); navigate('/login'); }} />
+      {smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
+      <Sider id="shell-context-menu" width={224} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
+        <div className="shell-menu-heading">
+          {!collapsed && <Typography.Text strong ellipsis>{sidebarTitle}</Typography.Text>}
+          <Tooltip title={collapsed ? '展开菜单栏' : '折叠菜单栏'}><Button type="text" aria-label={collapsed ? '展开菜单栏' : '折叠菜单栏'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /></Tooltip>
         </div>
-        <Menu
-          key={`menu-${currentApplication?.id || 'default'}-${openMenuKeys.join('|')}-${collapsed ? 'collapsed' : 'open'}`}
-          className="app-menu"
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          defaultOpenKeys={collapsed ? [] : openMenuKeys}
-          items={allMenuItems}
-          onClick={({ key }) => navigate(String(key))}
-        />
+        <Menu key={`menu-${railKey}-${currentApplication?.id || 'default'}-${openMenuKeys.join('|')}-${collapsed}`} className="app-menu" mode="inline" inlineCollapsed={collapsed} selectedKeys={[selectedKey]} defaultOpenKeys={collapsed ? [] : openMenuKeys} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) navigate(String(key)); }} />
       </Sider>
-
-      <Layout style={{ marginLeft: siderWidth, transition: 'margin-left 0.2s' }}>
+      <Layout className="shell-workspace-layout" {...(smallViewport && !collapsed ? { inert: '' } : {})}>
         <Header className="app-header">
-          <Space size={14} align="center">
-            <Button
-              type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-            />
-            <Dropdown menu={applicationMenu} trigger={['click']} disabled={!applications.length}>
-              <Button className="application-switch-button" icon={iconFor(currentApplication?.icon)}>
-                <span>{currentApplication?.name || '\u9009\u62e9\u5e94\u7528'}</span>
-                <DownOutlined />
-              </Button>
-            </Dropdown>
-            <Breadcrumb items={breadcrumbItems} />
-          </Space>
+          <Button className="shell-mobile-menu-toggle" type="text" aria-label="打开菜单栏" aria-controls="shell-context-menu" aria-expanded={!collapsed} icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} />
+          <Typography.Text className="shell-page-title" ellipsis title={runtimeTitle}>{runtimeTitle}</Typography.Text>
 
-          <Space size={12} align="center">
-            <Button
-              className="app-search-button"
-              icon={<SearchOutlined />}
-              onClick={() => setSearchOpen(true)}
-            >
-              {'\u641c\u7d22\u5e94\u7528\u3001\u6570\u636e\u8d44\u4ea7\u6216\u914d\u7f6e Ctrl+K'}
-            </Button>
-            <Dropdown menu={notificationMenu} trigger={['click']}>
-              <Badge count={unread} size="small">
-                <Button type="text" icon={<BellOutlined />} />
-              </Badge>
-            </Dropdown>
-            <AccountMenu
-              user={user}
-              onNavigate={navigate}
-              onLogout={() => {
-                logout();
-                navigate('/login');
-              }}
-            />
+          <GlobalSearch />
+          <Space className="shell-header-actions" size={12} align="center">
+            <NotificationCenter />
+
           </Space>
         </Header>
 
@@ -738,24 +633,29 @@ function AppContent() {
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/" element={<WorkspacePage />} />
+                  <Route path="/more" element={<ApplicationLibrary library={library} onOpen={openLibraryApp} isAdmin={isAdmin} />} />
+                  <Route path="/scheduler" element={<SchedulerPage />} />
+                  <Route path="/plugins" element={<ExtensionLibrary isAdmin={isAdmin} />} />
                   <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/data-sources" element={<DataSourcePage />} />
-                  <Route path="/ontology" element={<OntologyPage />} />
-                  <Route path="/graph" element={<GraphExplorerPage />} />
-                  <Route path="/pipeline" element={<PipelinePage />} />
+
                   <Route path="/maintenance" element={<MaintenancePage />} />
                   <Route path="/quality" element={<QualityPage />} />
                   <Route path="/supply-chain" element={<SupplyChainPage />} />
                   <Route path="/ai-assistant" element={<Navigate to="/" replace />} />
-                  <Route path="/account-center" element={<AccountCenterPage currentApplication={currentApplication} />} />
-                  <Route path="/reports" element={<ReportCenterPage />} />
+                  <Route path="/account-center" element={<AccountEntry currentApplication={currentApplication} />} />
+
                   <Route path="/dynamic/:slug" element={<DynamicPage />} />
+                  <Route path="/program/alert-center" element={<AlertCenterPage />} />
+                  <Route path="/program/material-application" element={<MaterialApplicationsPage />} />
                   <Route path="/program/:programId" element={<AppProgramPage />} />
                   <Route path="/form-settings/:formId" element={<FormSettingsPage />} />
-                  <Route path="/system-admin" element={<SystemAdminPage />} />
+                  <Route path="/studio/*" element={<NavigationAreaPage />} />
+                  <Route path="/data-center/*" element={<NavigationAreaPage />} />
+                  <Route path="/admin/*" element={<NavigationAreaPage />} />
+                  {Object.entries(LEGACY_ROUTES).map(([path, target]) => <Route key={path} path={path} element={<Navigate to={target + location.search} replace />} />)}
+
                   <Route path="/workflow" element={<WorkflowPage />} />
-                  <Route path="/templates" element={<TemplateMarketPage />} />
-                  <Route path="/rules" element={<RuleEnginePage />} />
+
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Suspense>
@@ -764,9 +664,8 @@ function AppContent() {
         </Content>
       </Layout>
 
-      <AiChatWidget pageTitle={runtimeTitle} applicationName={currentApplication?.name} />
+      <AiChatWidget enabled={preferences.aiBubbleVisible} pageTitle={runtimeTitle} applicationName={activeArea === 'business' && location.pathname !== '/account-center' || location.pathname.startsWith('/form-settings/') ? currentApplication?.name : undefined} />
 
-      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       <Modal
         className="release-update-modal"

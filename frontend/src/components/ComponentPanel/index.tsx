@@ -1,3 +1,4 @@
+import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import React from 'react';
 import { Card, Typography, Divider } from 'antd';
 import {
@@ -48,7 +49,7 @@ export default function ComponentPanel({ onAddWidget }: Props) {
           <React.Fragment key={cat.key}>
             {idx > 0 && <Divider style={{ margin: '8px 0', fontSize: 11 }} plain>{cat.label}</Divider>}
             {idx === 0 && (
-              <div style={{ fontSize: 12, color: '#999', marginBottom: 6 }}>{cat.label}</div>
+              <div style={{ fontSize: 12, color: TECH_WHITE_PALETTE.faint, marginBottom: 6 }}>{cat.label}</div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
               {widgets.map((w) => (
@@ -56,7 +57,7 @@ export default function ComponentPanel({ onAddWidget }: Props) {
                   key={w.type}
                   size="small"
                   hoverable
-                  style={{ cursor: 'grab' }}
+                  style={{ cursor: 'grab', background: TECH_WHITE_PALETTE.surface, borderColor: TECH_WHITE_PALETTE.border, borderRadius: TECH_WHITE_GEOMETRY.controlRadius }}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData('widget-type', w.type);
@@ -65,7 +66,7 @@ export default function ComponentPanel({ onAddWidget }: Props) {
                   onClick={() => onAddWidget(w.type)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 16, color: '#1677ff' }}>{ICON_MAP[w.icon] || <DashboardOutlined />}</span>
+                    <span style={{ fontSize: 16, color: TECH_WHITE_PALETTE.primary }}>{ICON_MAP[w.icon] || <DashboardOutlined />}</span>
                     <span style={{ fontSize: 12 }}>{w.label}</span>
                   </div>
                 </Card>

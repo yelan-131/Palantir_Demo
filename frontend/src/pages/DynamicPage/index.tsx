@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
-  Row, Col, Tooltip, Empty,
+  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined,
@@ -16,6 +16,10 @@ import {
   listPlatformForms,
   listPlatformDynamicRecords,
   createPlatformDynamicRecord,
+  getPlatformDynamicRecord,
+  submitPlatformDynamicRecord,
+  approvalStatusLabels,
+  type RecordApproval,
   updatePlatformDynamicRecord,
   deletePlatformDynamicRecord,
   type PlatformForm,
@@ -365,12 +369,15 @@ export default function DynamicPage() {
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
   const [sortState, setSortState] = useState<{ field?: string; order?: 'asc' | 'desc' }>({});
 
+  const [detailRecord, setDetailRecord] = useState<Record<string, any> | null>(null);
+  const [submittingApproval, setSubmittingApproval] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Record<string, any> | null>(null);
   const [form] = Form.useForm();
   const [filterForm] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [schemaLoading, setSchemaLoading] = useState(false);
+  const usesDraftLifecycle = Boolean(platformForm?.runtime_submission_available && (!editingRecord || editingRecord._approval));
 
   const viewConfig = useMemo(
     () => normalizeRuntimeViewConfig(pageConfig?.config?.viewConfig, fields),
@@ -400,7 +407,7 @@ export default function DynamicPage() {
         sort_order: sortState.order,
       });
       const records = unwrapApiList<any>(res);
-      setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status })));
+      setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval })));
       setTotal(res.data?.total ?? records.length);
     } catch { message.error('加载数据失败'); }
     finally { setLoading(false); }
@@ -512,13 +519,43 @@ export default function DynamicPage() {
     };
   });
 
-  if (canRunAction('edit') || canRunAction('delete')) {
+  const openDetail = async (record: Record<string, any>) => {
+    if (!platformForm) return;
+    try {
+      const item = unwrapApiData<any>(await getPlatformDynamicRecord(platformForm.id, record.id));
+      setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+    } catch (error: any) { message.error(error?.response?.data?.detail || '详情加载失败'); }
+  };
+  const submitApproval = () => {
+    const approval = detailRecord?._approval as RecordApproval | undefined;
+    if (!platformForm || !detailRecord || !approval?.can_submit) return;
+    Modal.confirm({ title: approval.status === 'rejected' ? '确认重新提交审批？' : '确认提交审批？',
+      content: '提交后统一进入流程与待办，审批期间不能修改来源记录。',
+      onOk: async () => {
+        setSubmittingApproval(true);
+        try {
+          await submitPlatformDynamicRecord(platformForm.id, detailRecord.id, approval.status);
+          message.success('已提交审批，可在流程与待办 → 我发起的追踪');
+          await openDetail(detailRecord); await loadData();
+        } catch (error: any) { message.error(error?.response?.data?.detail || '提交失败，请补充必填字段'); throw error; }
+        finally { setSubmittingApproval(false); }
+      },
+    });
+  };
+  if (platformForm?.runtime_submission_available) {
+    (tableColumns as any[]).push({ title: '审批状态', key: '_approval', width: 100,
+      render: (_: any, record: any) => record._approval
+        ? <Tag color={record._approval.status === 'rejected' ? 'red' : 'blue'}>{approvalStatusLabels[record._approval.status] || record._approval.status}</Tag> : '历史记录',
+    });
+  }
+  if (platformForm || canRunAction('edit') || canRunAction('delete')) {
     (tableColumns as any[]).push({
-      title: '操作', width: 120, fixed: 'right',
+      title: '操作', width: 180, fixed: 'right',
       render: (_val: any, record: any) => (
         <Space size={4}>
-          {canRunAction('edit') && <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)} />}
-          {canRunAction('delete') && (
+          <Button size="small" onClick={() => openDetail(record)}>详情</Button>
+          {canRunAction('edit') && (!record._approval || record._approval.can_edit) && <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)} />}
+          {canRunAction('delete') && (!record._approval || record._approval.can_edit) && (
             <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
               <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
@@ -557,7 +594,13 @@ export default function DynamicPage() {
 
   const openEditModal = async (record: Record<string, any>) => {
     if (!platformForm) return;
+    try {
+      const item = unwrapApiData<any>(await getPlatformDynamicRecord(platformForm.id, record.id));
+      record = { ...item.data, id: item.id, _approval: item._approval };
+      if (record._approval && !record._approval.can_edit) { message.warning('当前审批状态不能修改'); return; }
+    } catch (error: any) { message.error(error?.response?.data?.detail || '记录加载失败'); return; }
     setEditingRecord(record);
+    form.resetFields();
     let nextFields: FieldDef[] = [];
     try {
       nextFields = await loadMutationSchema('edit');
@@ -569,7 +612,7 @@ export default function DynamicPage() {
     const formValues: Record<string, any> = {};
     for (const f of nextFields) {
       const fn = f.field_name;
-      if (f?.field_type === 'date' && record[fn]) {
+      if (['date', 'datetime'].includes(f.field_type) && record[fn]) {
         formValues[fn] = dayjs(record[fn]);
       } else {
         formValues[fn] = record[fn] ?? undefined;
@@ -581,15 +624,17 @@ export default function DynamicPage() {
 
   const handleModalOk = async () => {
     try {
-      const values = await form.validateFields();
+      const values = usesDraftLifecycle ? form.getFieldsValue() : await form.validateFields();
       const payload = formFieldsToPayload(values, formFields);
       setConfirmLoading(true);
       if (platformForm && editingRecord) {
-        await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload);
-        message.success('Saved');
+        const item = unwrapApiData<any>(await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload));
+        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+        message.success(item._approval ? '草稿已保存' : '已保存');
       } else if (platformForm) {
-        await createPlatformDynamicRecord(platformForm.id, payload);
-        message.success('Created');
+        const item = unwrapApiData<any>(await createPlatformDynamicRecord(platformForm.id, payload));
+        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+        message.success(item._approval ? '草稿已保存，请从详情提交审批' : '已保存');
       } else if (editingRecord) {
         message.warning('当前页面没有绑定平台表单，不能写入业务记录');
         return;
@@ -603,7 +648,7 @@ export default function DynamicPage() {
       loadData();
     } catch (e: any) {
       if (e?.errorFields) return; // form validation error
-      message.error(editingRecord ? '更新失败' : '创建失败');
+      message.error(e?.response?.data?.detail || (editingRecord ? '更新失败' : '创建失败'));
     } finally {
       setConfirmLoading(false);
     }
@@ -692,8 +737,8 @@ export default function DynamicPage() {
         </Space>
         <Space size={8} wrap>
           {canRunAction('create') && (
-            <Tooltip title="新增">
-              <Button aria-label="新增" type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
+            <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
+              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
             </Tooltip>
           )}
           <Tooltip title="刷新">
@@ -776,18 +821,36 @@ export default function DynamicPage() {
       />
       </div>
 
+      <Drawer title={`${pageConfig.title} · 记录详情`} open={Boolean(detailRecord)} onClose={() => setDetailRecord(null)} width={560}
+        extra={<Space>
+          {(detailRecord?._approval ? detailRecord._approval.can_edit : canRunAction('edit')) && <Button onClick={() => detailRecord && openEditModal(detailRecord)}>编辑</Button>}
+          {detailRecord?._approval?.can_submit && <Button type="primary" loading={submittingApproval} onClick={submitApproval}>{detailRecord._approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
+        </Space>}>
+        {detailRecord && <>
+          {detailRecord._approval && <Typography.Paragraph>审批状态：<Tag>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</Tag></Typography.Paragraph>}
+          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_')).map(f => ({ key: f.field_name, label: f.label, children: typeof detailRecord[f.field_name] === 'object' ? JSON.stringify(detailRecord[f.field_name]) : String(detailRecord[f.field_name] ?? '—') }))} />
+          {detailRecord._approval && <>
+            <Typography.Title level={5}>审批与修改记录</Typography.Title>
+            <Timeline items={(detailRecord._approval.history || []).map((entry: Record<string, unknown>) => ({ children: <Space direction="vertical" size={0}>
+              <Typography.Text>{({ draft: '保存草稿', edit: '修改草稿', create: '保存草稿', update: '修改草稿', submit: '提交审批', approve: '审批通过', reject: '驳回' } as Record<string, string>)[String(entry.action)] || String(entry.action || '审批记录')}</Typography.Text>
+              <Typography.Text type="secondary">{[entry.actor_name, entry.comment, entry.created_at].filter(Boolean).map(String).join(' · ')}</Typography.Text>
+            </Space> }))} />
+          </>}
+        </>}
+      </Drawer>
       <Modal
         className="dynamic-business-modal"
-        title={editingRecord ? `编辑${pageConfig.title}` : `新增${pageConfig.title}`}
+        title={editingRecord ? `编辑${pageConfig.title}` : `${platformForm?.runtime_submission_available ? '填写申请：' : '新增'}${pageConfig.title}`}
         open={modalOpen}
         onOk={handleModalOk}
         onCancel={() => setModalOpen(false)}
         confirmLoading={confirmLoading}
-        okText="保存"
+        okText={usesDraftLifecycle ? '保存草稿' : '保存'}
         cancelText="取消"
         width={820}
         styles={{ body: { paddingTop: 16 } }}
       >
+        {usesDraftLifecycle && <Typography.Paragraph type="secondary">先保存草稿，完成填写后从记录详情提交审批；驳回后可修改并重新提交。</Typography.Paragraph>}
         <Form
           form={form}
           layout="vertical"

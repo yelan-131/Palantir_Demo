@@ -730,7 +730,7 @@ const normalizeWizardSourceType = (value: unknown) => {
   return text;
 };
 
-export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCenterView } = {}) {
+export default function SemanticAssetCenter({ view, onViewChange }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void } = {}) {
   const [dataSourceForm] = Form.useForm();
   const [qualityRuleForm] = Form.useForm();
   const [qualityScoreForm] = Form.useForm();
@@ -3190,7 +3190,10 @@ export default function SemanticAssetCenter({ view }: { view?: SemanticAssetCent
       </section>
       <Tabs
         activeKey={semanticCenterTab}
-        onChange={(key) => setSemanticCenterTab(key as SemanticAssetCenterView)}
+        onChange={(key) => {
+          setSemanticCenterTab(key as SemanticAssetCenterView);
+          onViewChange?.(key as SemanticAssetCenterView);
+        }}
         items={[
           { key: 'data', label: '数据资产', children: dataAssetView },
           { key: 'mapping', label: '语义映射', children: semanticMappingView },

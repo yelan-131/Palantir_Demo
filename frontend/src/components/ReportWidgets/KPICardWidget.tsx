@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
 import { Statistic, Spin } from 'antd';
 import {
   ToolOutlined,
@@ -58,7 +59,7 @@ export default function KPICardWidget({ widget, isEditing }: Props) {
     return () => { cancelled = true; };
   }, [widget.dataSource, isEditing]);
 
-  const color = (widget.style?.color as string) || '#1677ff';
+  const color = (widget.style?.color as string) || TECH_WHITE_PALETTE.primary;
   const iconStr = (widget.style?.icon as string) || 'DashboardOutlined';
 
   return (

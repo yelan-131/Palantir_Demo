@@ -27,6 +27,8 @@ import {
   DownloadOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
+import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
 import {
   getEquipmentHealth,
   getSingleEquipmentHealth,
@@ -127,9 +129,9 @@ const woStatusTag = (status: string) => {
 };
 
 const healthScoreColor = (score: number) => {
-  if (score >= 80) return '#52c41a';
-  if (score >= 60) return '#faad14';
-  return '#ff4d4f';
+  if (score >= 80) return TECH_WHITE_PALETTE.success;
+  if (score >= 60) return TECH_WHITE_PALETTE.warning;
+  return TECH_WHITE_PALETTE.danger;
 };
 
 // ── Component ──────────────────────────────────────────────────────
@@ -211,7 +213,7 @@ export default function MaintenancePage() {
       ],
       shape: 'polygon' as const,
       splitNumber: 5,
-      axisName: { color: '#666' },
+      axisName: { color: TECH_WHITE_PALETTE.muted },
     },
     series: [
       {
@@ -227,9 +229,9 @@ export default function MaintenancePage() {
                   breakdown.wear,
                 ],
                 name: '健康指标',
-                areaStyle: { color: 'rgba(24, 144, 255, 0.2)' },
-                lineStyle: { color: '#1890ff', width: 2 },
-                itemStyle: { color: '#1890ff' },
+                areaStyle: { color: TECH_WHITE_PALETTE.primary, opacity: 0.2 },
+                lineStyle: { color: TECH_WHITE_PALETTE.primary, width: 2 },
+                itemStyle: { color: TECH_WHITE_PALETTE.primary },
               },
             ]
           : [],
@@ -328,7 +330,7 @@ export default function MaintenancePage() {
       width: 100,
       render: (v: number) => (
         <Tooltip title="预计故障发生剩余天数">
-          <span style={{ color: v <= 7 ? '#ff4d4f' : v <= 14 ? '#faad14' : '#52c41a' }}>
+          <span style={{ color: v <= 7 ? TECH_WHITE_PALETTE.danger : v <= 14 ? TECH_WHITE_PALETTE.warning : TECH_WHITE_PALETTE.success }}>
             {v} 天
           </span>
         </Tooltip>
@@ -470,7 +472,7 @@ export default function MaintenancePage() {
               title="健康"
               value={summary?.healthy ?? 0}
               suffix="台"
-              valueStyle={{ color: '#52c41a' }}
+              valueStyle={{ color: TECH_WHITE_PALETTE.success }}
               prefix={<CheckCircleOutlined />}
             />
           </Card>
@@ -481,7 +483,7 @@ export default function MaintenancePage() {
               title="预警"
               value={summary?.warning ?? 0}
               suffix="台"
-              valueStyle={{ color: '#faad14' }}
+              valueStyle={{ color: TECH_WHITE_PALETTE.warning }}
               prefix={<WarningOutlined />}
             />
           </Card>
@@ -492,7 +494,7 @@ export default function MaintenancePage() {
               title="故障"
               value={summary?.critical ?? 0}
               suffix="台"
-              valueStyle={{ color: '#ff4d4f' }}
+              valueStyle={{ color: TECH_WHITE_PALETTE.danger }}
               prefix={<CloseCircleOutlined />}
             />
           </Card>
@@ -538,7 +540,7 @@ export default function MaintenancePage() {
             }
           >
             <Spin spinning={radarLoading}>
-              <ReactECharts
+              <ReactECharts theme={TECH_WHITE_CHART_THEME_NAME}
                 option={radarOption}
                 style={{ height: 280 }}
                 notMerge
