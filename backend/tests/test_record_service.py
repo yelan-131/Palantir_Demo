@@ -23,16 +23,35 @@ async def environment(request, tmp_path):
     external_url = os.getenv('RECORD_TEST_DATABASE_URL')
     if external_url:
         assert make_url(external_url).database.startswith('record_service_verify_'), 'Use a disposable verification database only'
+    schema_tables = None
+    if external_url:
+        # Test the dependency-closed record/workflow schema. Production uses
+        # Alembic for unrelated AI/knowledge tables, not metadata.create_all.
+        from app.models import relational
+        model_names = ['Tenant', 'User', 'Role', 'UserRole', 'Form', 'FormField', 'FormLayout',
+            'FormAction', 'FormPermission', 'FormVersion', 'FormCodeSequence', 'DynamicRecord',
+            'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode',
+            'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'WorkflowInstance',
+            'WorkflowApproval', 'RolePermission', 'UserOrgMembership', 'OrgUnit', 'AuditLog', 'Notification']
+        tables = {getattr(relational, name).__table__ for name in model_names}
+        pending = list(tables)
+        while pending:
+            for fk in pending.pop().foreign_keys:
+                if fk.column.table not in tables:
+                    tables.add(fk.column.table)
+                    pending.append(fk.column.table)
+        schema_tables = list(tables)
     engine = create_async_engine(external_url or f'sqlite+aiosqlite:///{tmp_path / "records.db"}')
     async with engine.begin() as connection:
         if external_url:
             await connection.execute(text('DROP TABLE IF EXISTS t1_business_contract'))
-            await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(lambda conn: Base.metadata.drop_all(conn, tables=schema_tables))
+        await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=schema_tables))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as db:
-        db.add_all([Tenant(id=1, name='One', slug='one'), Tenant(id=2, name='Two', slug='two'),
-            Role(id=1, tenant_id=1, name='reader', label='Reader')])
+        db.add_all([Tenant(id=1, name='One', slug='one'), Tenant(id=2, name='Two', slug='two')])
+        await db.flush()
+        db.add(Role(id=1, tenant_id=1, name='reader', label='Reader'))
         await db.flush()
         for uid in (1, 2):
             db.add(User(id=uid, tenant_id=1, username=f'user{uid}', hashed_password='test'))

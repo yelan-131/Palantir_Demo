@@ -30,7 +30,7 @@ def isolated_tests():
         env = dict(os.environ, POSTGRES_DB=name, DATABASE_BACKEND='postgresql',
             RECORD_TEST_DATABASE_URL=make_url(settings.DATABASE_URL).set(database=name).render_as_string(hide_password=False))
         print('Running dynamic/physical integration cases on PostgreSQL (disposable database)', flush=True)
-        result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_record_service.py', '-q', '--tb=short'],
+        result = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_record_service.py', '-q', '--tb=short', '--maxfail=1'],
             cwd=Path(__file__).resolve().parents[1], env=env)
         if result.returncode:
             raise RuntimeError('PostgreSQL record integration tests failed')
