@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from datetime import datetime, timedelta
 from typing import Any
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, text
@@ -31,14 +32,14 @@ MOCK_OVERVIEW = {
 @router.get("/overview")
 async def get_overview(user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    result = await _try_db(lambda db: _query_overview(db, tenant_id))
+    result = await _try_db(lambda db: _query_overview(db, tenant_id, user=user))
     return result or {**MOCK_OVERVIEW, "source": "fallback"}
 
 
 @router.get("/oee")
 async def get_oee(line_id: int | None = None, user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    lines = await _try_db(lambda db: _query_lines(db, tenant_id, line_id))
+    lines = await _try_db(lambda db: _query_lines(db, tenant_id, line_id, user=user))
     source = "physical_table" if lines else "fallback"
     if not lines:
         lines = [{"id": index, "name": f"Line {index:03d}", "oee_target": 0.86} for index in range(1, 25)]
@@ -65,7 +66,7 @@ async def get_oee(line_id: int | None = None, user: dict = Depends(get_current_u
 @router.get("/production")
 async def get_production_stats(days: int = Query(14, ge=1, le=90), user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    result = await _try_db(lambda db: _query_production_stats(db, tenant_id, days))
+    result = await _try_db(lambda db: _query_production_stats(db, tenant_id, days, user=user))
     if result is not None:
         return result
     return {"data": _mock_production_stats(days), "source": "fallback"}
@@ -74,7 +75,7 @@ async def get_production_stats(days: int = Query(14, ge=1, le=90), user: dict = 
 @router.get("/alerts")
 async def get_alerts(limit: int = Query(20, ge=1, le=100), user: dict = Depends(get_current_user)):
     tenant_id = current_tenant_id(user)
-    result = await _try_db(lambda db: _query_alerts(db, tenant_id, limit))
+    result = await _try_db(lambda db: _query_alerts(db, tenant_id, limit, user=user))
     if result is not None:
         return result
     return {"data": [], "total": 0, "source": "fallback"}
@@ -88,30 +89,10 @@ async def get_program_data(
     user: dict = Depends(get_current_user),
 ):
     tenant_id = current_tenant_id(user)
-    result = await _query_form_program(db, tenant_id, program_id, limit)
+    result = await _query_form_program(db, tenant_id, program_id, limit, user=user)
     if result is None:
         return {"data": None, "source": "unsupported", "program_id": program_id}
     result["program_id"] = program_id
-    form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == program_id))
-    if form:
-        from app.services.form_application_lifecycle import decorate
-        from app.api.alerts import _records
-        from app.api.forms import _runtime_form_fields
-        fields = await _runtime_form_fields(db, tenant_id, form.id)
-        ids = {row.get("recordId") for row in result.get("rows", [])}
-        payloads = {record["id"]: record for record in await _records(db, form, fields, None) if record["id"] in ids}
-        for row in result.get("rows", []):
-            record = payloads.get(row.get("recordId"))
-            if record:
-                from app.core.permissions import evaluate_form_permission
-                decision = await evaluate_form_permission(user, form.id, 'view', db, record_data=record.get('data') or {})
-                if not decision.get('allowed'):
-                    continue
-                await decorate(db, form, record, user)
-                if "_approval" in record:
-                    row["_approval"] = record["_approval"]
-                    # Business status and approval status are separate fields.
-                    row["status"] = record.get("data", {}).get("status")
     return result
 
 
@@ -136,39 +117,38 @@ async def _table_exists(db: AsyncSession, table_name: str) -> bool:
     return bool(await db.scalar(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": f"public.{table_name}"}))
 
 
-async def _count_table_rows(db: AsyncSession, table_name: str, tenant_id: int) -> int:
-    assert_safe_identifier(table_name)
-    if not await _table_exists(db, table_name):
-        return 0
-    if table_name == 'business_alert_center':
-        titles = await db.scalars(text(f"SELECT title FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL"), {"tenant_id": tenant_id})
-        return sum(not is_material_request({'title': title}) for title in titles)
-    return int(await db.scalar(text(f"SELECT count(*) FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL"), {"tenant_id": tenant_id}) or 0)
-
-
-async def _fetch_physical_rows(db: AsyncSession, table_name: str, tenant_id: int, limit: int) -> list[dict[str, Any]]:
-    assert_safe_identifier(table_name)
-    if not await _table_exists(db, table_name):
+async def _dashboard_records(db, table_name, tenant_id, user):
+    # Legacy metric names are resolved to configured forms, including dynamic storage.
+    from app.services.records import authorized_records
+    from app.core.permissions import evaluate_form_permission
+    code = table_name.removeprefix("business_").removeprefix("analysis_").replace("_", "-")
+    form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id,
+        (Form.table_name == table_name) | (Form.code == code)))
+    if form is None:
         return []
-    rows = (
-        await db.execute(
-            text(f"SELECT * FROM {table_name} WHERE tenant_id = :tenant_id AND deleted_at IS NULL ORDER BY id DESC" + ("" if table_name == 'business_alert_center' else " LIMIT :limit")),
-            {"tenant_id": tenant_id, "limit": limit},
-        )
-    ).all()
-    result = [dict(row._mapping) for row in rows]
-    if table_name == 'business_alert_center':
-        result = [row for row in result if not is_material_request(row)][:limit]
-    return result
+    if not (await evaluate_form_permission(user, form.id, "view", db))["allowed"]:
+        return []
+    records = await authorized_records(db, user, form, decorate=False)
+    records.sort(key=lambda record: record["id"], reverse=True)
+    return [{**record["data"], "id": record["id"]} for record in records
+        if table_name != "business_alert_center" or not is_material_request(record["data"])]
 
 
-async def _query_overview(db: AsyncSession, tenant_id: int):
-    production_total = await _count_table_rows(db, "business_production_plans", tenant_id)
-    alert_total = await _count_table_rows(db, "business_alert_center", tenant_id)
-    maintenance_total = await _count_table_rows(db, "business_maintenance_orders", tenant_id)
-    quality_total = await _count_table_rows(db, "business_quality_events", tenant_id)
-    line_rows = await _fetch_physical_rows(db, "analysis_line_status", tenant_id, 1000)
-    device_rows = await _fetch_physical_rows(db, "analysis_device_health", tenant_id, 1000)
+async def _count_table_rows(db: AsyncSession, table_name: str, tenant_id: int, *, user: dict) -> int:
+    return len(await _dashboard_records(db, table_name, tenant_id, user))
+
+
+async def _fetch_physical_rows(db: AsyncSession, table_name: str, tenant_id: int, limit: int, *, user: dict) -> list[dict[str, Any]]:
+    return (await _dashboard_records(db, table_name, tenant_id, user))[:limit]
+
+
+async def _query_overview(db: AsyncSession, tenant_id: int, *, user: dict):
+    production_total = await _count_table_rows(db, "business_production_plans", tenant_id, user=user)
+    alert_total = await _count_table_rows(db, "business_alert_center", tenant_id, user=user)
+    maintenance_total = await _count_table_rows(db, "business_maintenance_orders", tenant_id, user=user)
+    quality_total = await _count_table_rows(db, "business_quality_events", tenant_id, user=user)
+    line_rows = await _fetch_physical_rows(db, "analysis_line_status", tenant_id, 1000, user=user)
+    device_rows = await _fetch_physical_rows(db, "analysis_device_health", tenant_id, 1000, user=user)
     running_lines = sum(1 for row in line_rows if str(row.get("status") or "").lower() in {"normal", "running", "正常", "运行"})
     health_values = [_safe_float(row.get("actual") or row.get("health") or row.get("score")) for row in device_rows]
     avg_health = sum(health_values) / max(len(health_values), 1)
@@ -193,8 +173,8 @@ async def _query_overview(db: AsyncSession, tenant_id: int):
     }
 
 
-async def _query_lines(db: AsyncSession, tenant_id: int, line_id: int | None):
-    rows = await _fetch_physical_rows(db, "analysis_line_status", tenant_id, 1000)
+async def _query_lines(db: AsyncSession, tenant_id: int, line_id: int | None, *, user: dict):
+    rows = await _fetch_physical_rows(db, "analysis_line_status", tenant_id, 1000, user=user)
     if line_id:
         rows = [row for row in rows if int(row.get("id") or 0) == int(line_id)]
     return [
@@ -207,9 +187,9 @@ async def _query_lines(db: AsyncSession, tenant_id: int, line_id: int | None):
     ]
 
 
-async def _query_production_stats(db: AsyncSession, tenant_id: int, days: int):
+async def _query_production_stats(db: AsyncSession, tenant_id: int, days: int, *, user: dict):
     start = datetime.now() - timedelta(days=days - 1)
-    rows = await _fetch_physical_rows(db, "analysis_production_overview", tenant_id, days)
+    rows = await _fetch_physical_rows(db, "analysis_production_overview", tenant_id, days, user=user)
     buckets: dict[str, dict[str, int]] = {}
     for row in rows:
         day = str(row.get("date") or datetime.now().strftime("%Y-%m-%d"))[:10]
@@ -253,8 +233,8 @@ def _mock_production_stats(days: int) -> list[dict]:
     return data
 
 
-async def _query_alerts(db: AsyncSession, tenant_id: int, limit: int):
-    alert_rows = await _fetch_physical_rows(db, "business_alert_center", tenant_id, limit)
+async def _query_alerts(db: AsyncSession, tenant_id: int, limit: int, *, user: dict):
+    alert_rows = await _fetch_physical_rows(db, "business_alert_center", tenant_id, limit, user=user)
     alerts = []
     for row in alert_rows:
         level = str(row.get("level") or "")
@@ -272,44 +252,30 @@ async def _query_alerts(db: AsyncSession, tenant_id: int, limit: int):
     return {"data": alerts, "total": len(alerts), "tenant_id": tenant_id, "source": "physical_table"}
 
 
-async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str, limit: int):
+async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str, limit: int, *, user: dict):
     form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == program_id))
     if form is None:
         return None
     form_config = form.config or {}
 
-    if form.table_name and str(form.storage_mode or "").lower() in {"physical_table", "business_table"}:
-        rows = [_physical_record_row(row, form) for row in await _fetch_physical_rows(db, str(form.table_name), tenant_id, limit)]
-        total = await _count_table_rows(db, str(form.table_name), tenant_id)
-        source = "physical_table"
-    else:
-        total = await db.scalar(
-            select(func.count(DynamicRecord.id)).where(
-                DynamicRecord.tenant_id == tenant_id,
-                DynamicRecord.form_id == form.id,
-                DynamicRecord.deleted_at.is_(None),
-            )
-        ) or 0
-        records = (
-            await db.execute(
-                select(DynamicRecord)
-                .where(
-                    DynamicRecord.tenant_id == tenant_id,
-                    DynamicRecord.form_id == form.id,
-                    DynamicRecord.deleted_at.is_(None),
-                )
-                .order_by(DynamicRecord.id.desc())
-                .limit(limit)
-            )
-        ).scalars().all()
-        rows = [_dynamic_record_row(record, form) for record in records]
-        source = "dynamic_records"
+    from app.services.records import authorized_records
+    records = await authorized_records(db, user, form)
+    records.sort(key=lambda record: record["id"], reverse=True)
+    total = len(records)
+    all_rows = []
+    for record in records:
+        row = _dynamic_record_row(SimpleNamespace(**record), form)
+        if "_approval" in record:
+            row["_approval"] = record["_approval"]
+        all_rows.append(row)
+    rows = all_rows[:limit]
+    source = "physical_table" if form.table_name and form.storage_mode in {"physical_table", "business_table"} else "dynamic_records"
 
     analytics_design = form_config.get("analyticsDesign")
     if not isinstance(analytics_design, dict):
         analytics_design = form_config.get("analyticsDesignDraft")
-    high = sum(1 for row in rows if row.get("level") in {"高", "critical", "high", "严重"})
-    closed = sum(1 for row in rows if row.get("status") in {"已关闭", "closed", "completed"})
+    high = sum(1 for row in all_rows if row.get("level") in {"高", "critical", "high", "严重"})
+    closed = sum(1 for row in all_rows if row.get("status") in {"已关闭", "closed", "completed"})
     return {
         "metrics": [
             _metric("表单记录", int(total), "blue"),
@@ -321,7 +287,7 @@ async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str,
         "total": int(total),
         "viewConfig": form_config.get("viewConfig"),
         "analyticsDesign": analytics_design if isinstance(analytics_design, dict) else None,
-        "analyticsData": _dynamic_analytics_data(rows, analytics_design, int(total)) if isinstance(analytics_design, dict) else None,
+        "analyticsData": _dynamic_analytics_data(all_rows, analytics_design, int(total)) if isinstance(analytics_design, dict) else None,
         "analyticsDesignState": "draft" if isinstance(form_config.get("analyticsDesignDraft"), dict) else ("published" if isinstance(form_config.get("analyticsDesign"), dict) else None),
         "form": {"id": form.id, "code": form.code, "name": form.name, "kind": form_config.get("assemblyKind")},
         "source": source,
@@ -375,8 +341,8 @@ def _dynamic_record_row(record: DynamicRecord, form: Form) -> dict:
         "formId": form.id,
         "formCode": form.code,
         "_formData": data,
-        "_createdAt": record.created_at.isoformat() if record.created_at else None,
-        "_updatedAt": record.updated_at.isoformat() if record.updated_at else None,
+        "_createdAt": _json_safe_cell(record.created_at),
+        "_updatedAt": _json_safe_cell(record.updated_at),
         "name": data.get("name") or data.get("title") or data.get("subject") or data.get("planNo") or f"{form.name} {record.id}",
         "status": data.get("status") or record.status,
     }

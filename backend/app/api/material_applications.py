@@ -37,24 +37,8 @@ async def _context(db, user, action='view'):
     return form, fields, visible
 
 async def _can_view(db, form, record, user):
-    decision = await evaluate_form_permission(user, form.id, 'view', db, record_data=record['data'])
-    if not decision['allowed']:
-        return False
-    scoped = [m.get('data_scope') for m in decision.get('matched', []) if m.get('effect') == 'allow' and m.get('data_scope')]
-    if decision.get('source') == 'application_form':
-        role_ids = await get_user_role_ids(user, db)
-        bindings = (await db.scalars(select(ApplicationForm).join(ApplicationRole, ApplicationRole.application_id == ApplicationForm.application_id).where(
-            ApplicationForm.tenant_id == form.tenant_id, ApplicationForm.form_id == form.id, ApplicationForm.enabled.is_(True),
-            ApplicationRole.tenant_id == form.tenant_id, ApplicationRole.role_id.in_(role_ids)))).all()
-        scoped += [b.data_scope or 'all' for b in bindings]
-    # Restricted scopes never grant broad access. Applicant and assigned approver are visible.
-    if scoped and 'all' not in scoped and not user.get('is_admin'):
-        inst = await latest_instance(db, form, record['id'])
-        state = json.loads(inst.workflow_state or '{}') if inst else {}
-        assignees = state.get('current_assignee_ids', state.get('current_assignees', []))
-        if record.get('created_by') != current_user_id(user) and current_user_id(user) not in assignees:
-            return False
-    return True
+    from app.services.records import record_allowed
+    return await record_allowed(db, user, form, 'view', record)
 
 async def _record(db, user, record_id, action='view', lock=False):
     form, fields, visible = await _context(db, user, action)
@@ -81,7 +65,9 @@ async def _present(db, form, record, user):
     can_approve = bool(not legacy and status == 'pending' and inst and
         (user.get('is_admin') or current_user_id(user) in ids))
     fields = await _runtime_form_fields(db, form.tenant_id, form.id)
-    visible = await _runtime_visible_field_names(user, form.id, fields, db)
+    from app.services.records import policy_data
+    visible = (await _runtime_visible_field_names(user, form.id, fields, db)) & await allowed_form_fields(
+        user, form.id, 'view', fields, db, record_data=policy_data(record))
     return {**{k:data.get(k) for k in ('request_no','part_no','title','applicant','applied_at') if k in visible},
         'id':record['id'], 'created_by':record.get('created_by'), 'status':status,
         'legacy_status':data.get('status') if legacy else None, 'is_legacy':legacy,
@@ -133,7 +119,8 @@ async def edit_material_application(record_id:int, body:MaterialEdit, db:AsyncSe
     if not presented['can_edit']:
         raise HTTPException(403,'仅申请人或管理员可修改草稿、已驳回申请')
     data=await _body_data(body,db,form,fields,user,'edit')
-    await write_data(db,form,record,data,current_user_id(user))
+    from app.services.records import write_fields
+    await write_fields(db, form, record, data, user=user)
     await audit(db,form,record_id,user,'edit')
     await db.commit()
     return await get_material_application(record_id,db,user)

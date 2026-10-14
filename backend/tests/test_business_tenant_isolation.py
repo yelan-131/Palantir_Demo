@@ -113,6 +113,16 @@ def test_business_module_tenant_isolation_for_data_pipeline_and_dashboards():
                 "deleted_at DATETIME"
                 ")"
             ))
+            # Dashboard data must be registered with a form so schema and
+            # permissions use the same record boundary as UI and AI queries.
+            from app.models.relational import Form, FormField
+            for tenant_id in (tenant_a_id, tenant_b_id):
+                form = Form(tenant_id=tenant_id, name="Quality events", code="quality-events",
+                            storage_mode="physical_table", table_name="business_quality_events")
+                session.add(form)
+                await session.flush()
+                session.add(FormField(tenant_id=tenant_id, form_id=form.id, field_name="title",
+                                      label="Title", field_type="string"))
             await session.execute(
                 text(
                     "INSERT INTO business_quality_events (tenant_id, title, deleted_at) "

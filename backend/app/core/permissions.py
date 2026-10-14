@@ -219,13 +219,17 @@ async def evaluate_form_permission(
             continue
         if not _action_matches(permission.action, action):
             continue
+        # A form-level capability check has no row yet. Conditional grants
+        # allow entering the form; conditional denies are evaluated on rows.
+        if record_data is None and permission.condition_json and permission.effect == "deny":
+            continue
+        if record_data is not None and not condition_matches(permission.condition_json, record_data, user):
+            continue
         field_allowed = _field_rule_allows(permission.field_rules_json, field_name or "", action)
         if field_allowed is False:
             matched.append({"id": permission.id, "effect": "deny", "source": "role_permission", "reason": "field rule deny"})
             continue
         if field_allowed is None and field_name and permission.field_rules_json:
-            continue
-        if not condition_matches(permission.condition_json, record_data or {}, user):
             continue
         matched.append({
             "id": permission.id,
@@ -333,19 +337,22 @@ async def has_form_permission(
     return bool(decision["allowed"])
 
 
-async def allowed_form_fields(user: dict, form_id: int, action: str, fields: list, db: AsyncSession) -> set[str]:
+async def allowed_form_fields(user: dict, form_id: int, action: str, fields: list, db: AsyncSession, *, record_data: Optional[dict] = None, cache: Optional[dict] = None) -> set[str]:
     if user.get("is_admin"):
         return {field.field_name for field in fields if not getattr(field, "archived", False)}
     allowed: set[str] = set()
-    cache: dict = {}
+    denied: set[str] = set()
+    cache = cache if cache is not None else {}
     for field in fields:
         if getattr(field, "archived", False):
             continue
-        decision = await evaluate_form_permission(user, form_id, action, db, field_name=field.field_name, cache=cache)
+        decision = await evaluate_form_permission(user, form_id, action, db, field_name=field.field_name, record_data=record_data, cache=cache)
         if decision["allowed"]:
             allowed.add(field.field_name)
-    if not allowed and (await evaluate_form_permission(user, form_id, action, db, cache=cache))["allowed"]:
-        return {field.field_name for field in fields if not getattr(field, "archived", False)}
+        elif decision.get("reason") == "explicit deny":
+            denied.add(field.field_name)
+    if not allowed and (await evaluate_form_permission(user, form_id, action, db, record_data=record_data, cache=cache))["allowed"]:
+        return {field.field_name for field in fields if not getattr(field, "archived", False)} - denied
     return allowed
 
 

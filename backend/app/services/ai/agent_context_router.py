@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.relational import DynamicRecord, Form, FormField
 
 
 ContextNeed = Literal[
@@ -85,15 +83,41 @@ class AgentContextRouter:
         context: dict[str, Any],
         tenant_id: int,
         limit: int = 8,
+        user: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         need = self.classify(message, context)
         if need not in SEMANTIC_CONTEXT_NEEDS:
             return {"intent": need, "objects": [], "records": [], "relations": []}
 
-        return self._semantic_context_unavailable(
-            need,
-            "No persisted semantic/page-contract context source is available for AI context routing.",
-        )
+        if not user or user.get("tenant_id") != tenant_id:
+            return self._semantic_context_unavailable(need, "Authenticated form context is required.")
+        form_id = context.get("form_id") or context.get("formId")
+        form_code = context.get("form_code") or context.get("formCode")
+        route = str(context.get("route") or "").split("?")[0]
+        if not form_id and not form_code and route.startswith(("/program/", "/dynamic/")):
+            from urllib.parse import unquote
+            slug = unquote(route.split("/", 2)[2])
+            if route.startswith("/dynamic/") and slug.isdigit():
+                form_id = int(slug)
+            else:
+                form_code = slug
+        if not form_id and not form_code:
+            return self._semantic_context_unavailable(need, "No explicit form or page contract was provided.")
+        from app.services.records import resolve_form, list_records, runtime_fields
+        from fastapi import HTTPException
+        try:
+            form = await resolve_form(session, user, form_id=form_id, form_code=form_code)
+            result = await list_records(form.id, session, user, page_size=max(1, min(limit, 100)))
+        except HTTPException as exc:
+            if exc.status_code not in {403, 404}:
+                raise
+            return self._semantic_context_unavailable(need, "Requested form context is unavailable or unauthorized.")
+        visible = {key for row in result["data"] for key in row["data"]}
+        fields = [field for field in await runtime_fields(session, form) if field.field_name in visible]
+        return {"intent": need, "status": "ready", "objects": [{"code": form.code, "name": form.name, "form_id": form.id}],
+            "records": result["data"], "relations": [], "record_count": len(result["data"]), "total": result["total"],
+            "fields": [{"name": field.field_name, "label": field.label, "type": field.field_type} for field in fields],
+            "source": "record_service"}
 
     def _semantic_context_unavailable(self, intent: ContextNeed, reason: str) -> dict[str, Any]:
         return {
@@ -105,78 +129,6 @@ class AgentContextRouter:
             "record_count": 0,
             "reason": reason,
         }
-
-    async def _query_matching_forms(
-        self,
-        session: AsyncSession,
-        objects: list[dict[str, Any]],
-        *,
-        tenant_id: int,
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        if not objects:
-            return []
-        forms = (
-            await session.execute(
-                select(Form).where(Form.tenant_id == tenant_id).order_by(Form.id)
-            )
-        ).scalars().all()
-        output: list[dict[str, Any]] = []
-        for obj in objects:
-            source = str(obj.get("source") or obj.get("code") or obj.get("id") or "").lower()
-            matched_form = next(
-                (
-                    form
-                    for form in forms
-                    if source
-                    and (
-                        source in str(form.name or "").lower()
-                        or source in str(form.table_name or "").lower()
-                        or source in str(form.code or "").lower()
-                    )
-                ),
-                None,
-            )
-            if not matched_form:
-                continue
-            fields = (
-                await session.execute(
-                    select(FormField)
-                    .where(FormField.form_id == matched_form.id, FormField.tenant_id == tenant_id)
-                    .order_by(FormField.sort_order, FormField.id)
-                )
-            ).scalars().all()
-            records = (
-                await session.execute(
-                    select(DynamicRecord)
-                    .where(
-                        DynamicRecord.form_id == matched_form.id,
-                        DynamicRecord.tenant_id == tenant_id,
-                        DynamicRecord.deleted_at.is_(None),
-                    )
-                    .order_by(DynamicRecord.id.desc())
-                    .limit(limit)
-                )
-            ).scalars().all()
-            output.append(
-                {
-                    "object": obj,
-                    "form": {
-                        "id": matched_form.id,
-                        "name": matched_form.name,
-                        "table_name": matched_form.table_name,
-                    },
-                    "fields": [
-                        {"name": field.field_name, "label": field.label, "type": field.field_type}
-                        for field in fields[:12]
-                    ],
-                    "records": [
-                        {"id": record.id, "status": record.status, "data": record.data}
-                        for record in records
-                    ],
-                }
-            )
-        return output
 
 
 agent_context_router = AgentContextRouter()

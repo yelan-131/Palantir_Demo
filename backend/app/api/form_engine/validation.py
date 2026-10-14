@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from datetime import date, datetime
 
 from fastapi import HTTPException
 
@@ -71,14 +72,19 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
             continue
         field = by_name[name]
         field_type = (field.field_type or "string").lower()
-        if field_type in {"number", "decimal", "float"} and not isinstance(value, (int, float)):
+        if field_type in {"number", "decimal", "float"} and (not isinstance(value, (int, float)) or isinstance(value, bool)):
             raise HTTPException(422, f"Field {name} must be a number")
-        if field_type in {"integer", "int"} and not isinstance(value, int):
+        if field_type in {"integer", "int"} and (not isinstance(value, int) or isinstance(value, bool)):
             raise HTTPException(422, f"Field {name} must be an integer")
         if field_type == "boolean" and not isinstance(value, bool):
             raise HTTPException(422, f"Field {name} must be a boolean")
         if field_type in {"date", "datetime"} and not isinstance(value, str):
             raise HTTPException(422, f"Field {name} must be an ISO date string")
+        if field_type in {"date", "datetime"}:
+            try:
+                date.fromisoformat(value) if field_type == "date" else datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise HTTPException(422, f"Field {name} must be an ISO date string") from exc
         if field_type == "code" and not isinstance(value, str):
             raise HTTPException(422, f"Field {name} must be a code string")
         if field_type == "enum":

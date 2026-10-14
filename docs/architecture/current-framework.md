@@ -1,6 +1,6 @@
 # Current Code Framework
 
-Last updated: 2026-05-29
+Last updated: 2026-10-14
 
 This document describes the current code framework at a practical level. For the broader system architecture, read [overview.md](overview.md).
 
@@ -12,7 +12,7 @@ ManuFoundry is currently a manufacturing low-code analytics workbench:
 - The top bar switches between business applications.
 - The left side menu shows "Workspace + current application menu".
 - Business pages are rendered through fixed modules, `/program/:programId`, or `/dynamic/:slug`.
-- Generated `/program/*` pages keep their frontend layout definitions, but key production pages now load metrics and rows from `/api/v1/dashboard/programs/{program_id}` before falling back to local demo rows.
+- Generated `/program/*` pages keep their frontend layout definitions, but key production pages now load metrics and rows from `/api/v1/dashboard/programs/{program_id}` and do not substitute local demo rows for runtime records.
 - System administration manages applications, menu assembly, forms, semantic assets, users, roles, permissions, and tenant administration.
 - AI assistance is exposed through a floating widget rather than a normal side-menu page.
 
@@ -114,7 +114,7 @@ Already present:
 
 Current important rule:
 
-Creating a form field is a metadata operation. It does not execute physical `ALTER TABLE` DDL. Dynamic business records are stored through `dynamic_records.data`.
+Forms support both `dynamic_records.data` JSON storage and form-managed physical tables. Creating a form without an explicit table currently selects physical storage; field changes on physical forms can execute DDL. Runtime fields use the latest published version when one exists.
 
 Still mixed/fallback:
 
@@ -166,3 +166,44 @@ Recent code moves the project closer to a SaaS-shaped demo:
 | New table/migration | `docs/architecture/platform-database.md` or `data-model.md` |
 | Deployment change | `docs/operations/deployment.md` |
 | Test coverage change | `docs/operations/testing.md` |
+
+## Shared Business Record Entry Point (2026-10-14)
+
+`backend/app/services/records.py` is the common record boundary.
+`services/form_runtime.py` owns published field resolution and normalized
+JSON-record payloads. The forms API retains compatibility re-exports.
+
+Connected consumers:
+
+- `/forms/{form_id}/records`: list, detail, create, update and soft delete.
+- AI form queries, analysis, confirmed record drafts and explicit current-page
+  context (`form_id`, `form_code`, `/program/*`, `/dynamic/*`).
+- Configured application dashboards and legacy dashboard metrics resolved
+  through registered forms. Unregistered tables do not bypass authorization.
+- Workflow source records, inbox datasets, generic status transitions, alert
+  disposition and material-application writes. Domain endpoints still check
+  applicant identity, assigned approvers and valid lifecycle transitions.
+
+Both storage paths enforce tenant boundaries, row conditions/data scopes and
+field projection. Business payloads cannot overwrite reserved record metadata.
+Physical JSON and boolean values are normalized to their JSON-record types.
+Hidden values are excluded before user-visible filtering,
+pagination and counts. Dashboard metrics use the full authorized dataset,
+while the returned row list remains limited. Form fields come from the latest
+published snapshot, with draft metadata used only when no published version
+exists. Scope names without implemented semantics fail closed.
+
+Writes reuse form encoding, validation, quotas and workflow/domain protections.
+Generic record audit entries share the business transaction; audit failure
+propagates so the request session can roll back. Workflow-owned transitions
+use internal helpers after workflow authorization, rather than treating
+approvers as editors of all source-record fields.
+
+Administrator lists retain SQL search/filter/pagination paths. Row-scoped
+queries scan in batches of 200 and authorize before pagination/counts; large
+datasets still need SQL policy pushdown. This change does not connect external
+pipelines or materialize ontology mappings into graph data.
+
+Cross-entry-point verification lives in `backend/tests/test_record_service.py`
+and uses isolated SQLite databases for dynamic and physical storage.
+PostgreSQL runtime verification remains a separate deployment check.

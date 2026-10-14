@@ -62,6 +62,20 @@ def _physical_record_payload(row, form, fields: list, *, visible_fields: Optiona
         if not field.archived and (visible_fields is None or field.field_name in visible_fields)
     ]
     data = {name: mapping.get(_physical_column_name(name)) for name in field_names}
+    for field in fields:
+        name = field.field_name
+        value = data.get(name)
+        if name not in data or value is None:
+            continue
+        if str(field.field_type).lower() == "json" and isinstance(value, str):
+            try:
+                data[name] = json.loads(value)
+            except (ValueError, TypeError):
+                pass  # Preserve legacy scalar text rather than inventing data.
+        elif str(field.field_type).lower() == "boolean":
+            data[name] = bool(value)
+        elif str(field.field_type).lower() in {"date", "datetime"} and hasattr(value, "isoformat"):
+            data[name] = value.isoformat()
     workflow = {
         "id": mapping.get("id"),
         "form_id": form.id,
@@ -321,6 +335,8 @@ def _physical_write_payload(fields: list, data: dict, editable_fields: set[str])
 
 
 def _coerce_physical_value(field, value):
+    if value is not None and str(field.field_type or "string").lower() == "json":
+        return json.dumps(value, ensure_ascii=False)
     if value in (None, ""):
         return None
     field_type = str(field.field_type or "string").lower()

@@ -62,40 +62,13 @@ async def decorate(db, form, record, user):
 
 
 async def locked_record(db, form, record_id):
-    from app.api.forms import _uses_physical_form_table, _runtime_form_fields, _physical_record_payload
-    if _uses_physical_form_table(form):
-        from app.api._model_driven_shared import assert_safe_identifier
-        table = str(form.table_name)
-        assert_safe_identifier(table)
-        suffix = ' FOR UPDATE' if db.bind.dialect.name != 'sqlite' else ''
-        row = (await db.execute(text(f'SELECT * FROM {table} WHERE id = :id AND tenant_id = :tenant AND deleted_at IS NULL{suffix}'),
-            {'id': record_id, 'tenant': form.tenant_id})).first()
-        if row is None:
-            raise HTTPException(404, 'Record not found')
-        return _physical_record_payload(row, form, await _runtime_form_fields(db, form.tenant_id, form.id))
-    from app.api.forms import _record_payload
-    row = await db.scalar(select(DynamicRecord).where(DynamicRecord.id == record_id,
-        DynamicRecord.form_id == form.id, DynamicRecord.tenant_id == form.tenant_id,
-        DynamicRecord.deleted_at.is_(None)).with_for_update().execution_options(populate_existing=True))
-    if row is None:
-        raise HTTPException(404, 'Record not found')
-    return _record_payload(row)
+    from app.services.records import read_raw
+    return await read_raw(db, form, record_id, lock=True)
 
 
 async def set_status(db, form, record, status, user):
-    from app.api.forms import _uses_physical_form_table
-    if _uses_physical_form_table(form):
-        from app.api._model_driven_shared import assert_safe_identifier
-        table = str(form.table_name)
-        assert_safe_identifier(table)
-        await db.execute(text(f'UPDATE {table} SET record_status=:status, updated_by=:uid, updated_at=CURRENT_TIMESTAMP WHERE id=:id AND tenant_id=:tenant AND deleted_at IS NULL'),
-            {'status': status, 'uid': current_user_id(user), 'id': record['id'], 'tenant': form.tenant_id})
-    else:
-        row = await db.get(DynamicRecord, record['id'])
-        row.status = status
-        row.updated_by = current_user_id(user)
-    record['status'] = status
-    await db.flush()
+    from app.services.records import set_record_status
+    return await set_record_status(db, form, record, status, user)
 
 
 async def guard_edit(db, form, record, user, requested_status=None):

@@ -731,6 +731,7 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
                     message=body.message,
                     context=body.context or {},
                     tenant_id=current_tenant_id(current_user),
+                    user=current_user,
                 )
             body.context = {
                 **(body.context or {}),

@@ -6,14 +6,12 @@ import re
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_tenant_id, current_user_id
-from app.api._model_driven_shared import assert_safe_identifier
-from app.core.audit import write_audit_log
+from app.api.deps import current_tenant_id
 from app.core.permissions import has_form_permission
-from app.models.relational import DynamicRecord, Form, FormField, FormVersion
+from app.models.relational import Form, FormField
 
 
 SKILL_FORM_CANDIDATES = {
@@ -144,105 +142,18 @@ async def create_dynamic_record_draft_from_agent(
     if not await has_form_permission(user, form.id, "create", session):
         raise HTTPException(status_code=403, detail="Form create permission denied")
 
-    fields = (
-        await session.execute(
-            select(FormField)
-            .where(FormField.form_id == form.id, FormField.tenant_id == tenant_id, FormField.archived.is_(False))
-            .order_by(FormField.sort_order, FormField.id)
-        )
-    ).scalars().all()
-    data: dict[str, Any] = {}
+    from app.services.records import runtime_fields, create_record
+    from app.api.forms import DynamicRecordCreate
+    fields = await runtime_fields(session, form)
+    data = {}
     for field in fields:
+        if field.archived:
+            continue
         value = _pick_payload_value(payload, field)
         if value not in (None, "", [], {}):
             data[field.field_name] = value
-    data["_aiDraft"] = {
-        "skill": skill,
-        "source": "agent_run_confirmation",
-        "evidenceCount": len(evidence or []),
-    }
-    latest_version = await session.scalar(
-        select(FormVersion)
-        .where(FormVersion.tenant_id == tenant_id, FormVersion.form_id == form.id)
-        .order_by(FormVersion.version.desc())
-        .limit(1)
-    )
-    if form.table_name and str(form.storage_mode or "").lower() in {"physical_table", "business_table"}:
-        table_name = str(form.table_name)
-        assert_safe_identifier(table_name)
-        columns = ["tenant_id", "record_status", "created_by", "updated_by"]
-        params: dict[str, Any] = {
-            "tenant_id": tenant_id,
-            "record_status": "draft",
-            "created_by": current_user_id(user),
-            "updated_by": current_user_id(user),
-        }
-        for field in fields:
-            if field.archived:
-                continue
-            column = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", str(field.field_name))
-            column = re.sub(r"[^a-z0-9_]+", "_", column.lower()).strip("_")
-            if not column:
-                continue
-            assert_safe_identifier(column)
-            columns.append(column)
-            params[column] = data.get(field.field_name)
-        result = await session.execute(
-            text(
-                f"INSERT INTO {table_name} ({', '.join(columns)}) "
-                f"VALUES ({', '.join(':' + column for column in columns)}) "
-                "RETURNING id, created_at, updated_at"
-            ),
-            params,
-        )
-        row = result.first()
-        await session.commit()
-        record_id = int(row.id) if row is not None else 0
-        result_payload = {
-            "record_id": record_id,
-            "form_id": form.id,
-            "form_code": form.code,
-            "form_name": form.name,
-            "status": "draft",
-            "data": data,
-        }
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=current_user_id(user),
-            action="create",
-            resource_type="physical_record",
-            resource_id=record_id,
-            new_values={**result_payload, "createdByAgent": True},
-        )
-        return result_payload
-
-    record = DynamicRecord(
-        tenant_id=tenant_id,
-        form_id=form.id,
-        model_id=form.model_id,
-        data=data,
-        schema_version=latest_version.version if latest_version else 1,
-        status="draft",
-        created_by=current_user_id(user),
-        updated_by=current_user_id(user),
-    )
-    session.add(record)
-    await session.commit()
-    await session.refresh(record)
-    result = {
-        "record_id": record.id,
-        "form_id": form.id,
-        "form_code": form.code,
-        "form_name": form.name,
-        "status": record.status,
-        "data": record.data,
-    }
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="create",
-        resource_type="dynamic_record",
-        resource_id=record.id,
-        new_values={**result, "createdByAgent": True},
-    )
-    return result
+    response = await create_record(form.id, DynamicRecordCreate(data=data, status="draft"),
+        session, user, draft=True, source="ai_agent_confirmation")
+    record = response["data"]
+    return {"record_id": record["id"], "form_id": form.id, "form_code": form.code,
+        "form_name": form.name, "status": record["status"], "data": record["data"]}

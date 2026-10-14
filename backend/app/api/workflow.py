@@ -722,31 +722,20 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
                 (form.code == "material-application" and form.id in configured_forms),
         })
 
-    records = (await db.execute(
-        select(DynamicRecord)
-        .where(
-            DynamicRecord.tenant_id == tenant_id,
-            DynamicRecord.form_id.in_(forms_by_id.keys()),
-            DynamicRecord.deleted_at.is_(None),
-        )
-        .order_by(DynamicRecord.updated_at.desc(), DynamicRecord.id.desc())
-    )).scalars().all()
-
-    # Include physical business records so saved drafts appear in my applications.
     from types import SimpleNamespace
     from app.api.form_engine import _uses_physical_form_table
-    from app.api.alerts import _records
+    from app.services.records import authorized_records, runtime_fields
+    records = []
     for form in forms_by_id.values():
-        if _uses_physical_form_table(form):
-            from app.api.dashboard import _table_exists
-            if not form.table_name or not await _table_exists(db, str(form.table_name)):
-                continue
-            for payload in await _records(db, form, fields_by_form.get(form.id, []), None):
-                records.append(SimpleNamespace(**{key: payload.get(key) for key in
-                    ("id", "data", "created_by")}, form_id=form.id,
-                    status=payload.get("data", {}).get("status") if form.code == "material-application" else payload.get("status"),
-                    created_at=datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else None,
-                    updated_at=datetime.fromisoformat(payload["updated_at"]) if payload.get("updated_at") else None))
+        fields_by_form[form.id] = await runtime_fields(db, form)
+        visible_names = await allowed_form_fields(user, form.id, "view", fields_by_form[form.id], db)
+        visible_fields_by_form[form.id] = [field for field in fields_by_form[form.id] if field.field_name in visible_names]
+        for payload in await authorized_records(db, user, form, decorate=False):
+            records.append(SimpleNamespace(id=payload["id"], form_id=form.id, data=payload["data"],
+                created_by=payload.get("created_by"),
+                status=payload.get("data", {}).get("status") if form.code == "material-application" else payload.get("status"),
+                created_at=datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else None,
+                updated_at=datetime.fromisoformat(payload["updated_at"]) if payload.get("updated_at") else None))
     records_by_key = {(record.form_id, record.id): record for record in records}
     records_by_id = {record.id: record for record in records if not _uses_physical_form_table(forms_by_id[record.form_id])}
     items_by_key: dict[str, dict] = {}
@@ -763,8 +752,6 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
             continue
         fields = visible_fields_by_form.get(record.form_id, [])
         data = record.data or {}
-        if not (await evaluate_form_permission(user, form.id, "view", db, record_data=data))["allowed"]:
-            continue
         if record.created_by != current_user_id(user) or data.get("migration_marker"):
             continue
         apps = applications_by_form.get(record.form_id, [])
@@ -879,17 +866,19 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
             linked_record_payload = None
             route_path = None
         if form:
-            decision = await evaluate_form_permission(user, form.id, "view", db, record_data=data)
-            if not decision["allowed"]:
+            from app.services.records import read_raw, record_allowed, project_record
+            source = {"id": variable_record_id, "data": data, "created_by": inst.initiator_id}
+            if isinstance(variable_record_id, int):
+                try:
+                    source = await read_raw(db, form, variable_record_id)
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
+            if not await record_allowed(db, user, form, "view", source):
                 continue
-            scopes = [entry.get("data_scope") for entry in decision.get("matched", [])
-                      if entry.get("effect") == "allow" and entry.get("data_scope")]
-            if scopes and "all" not in scopes and not user.get("is_admin"):
-                uid = current_user_id(user)
-                if uid != inst.initiator_id and (not linked_record or linked_record.created_by != uid) and not any(
-                    approval.approver_id == uid for approval in approvals_by_instance.get(inst.id, [])
-                ):
-                    continue
+            projected = await project_record(db, user, form, {**source, "data": data})
+            data = projected["data"]
+            fields = [field for field in fields_by_form.get(form.id, []) if field.field_name in data]
         views = _personal_workflow_views(inst, approvals_by_instance.get(inst.id, []), user, state,
                                         record_owner=linked_record.created_by if linked_record else None)
         view_status = _workflow_view_status(inst.status)

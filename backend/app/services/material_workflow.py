@@ -25,23 +25,11 @@ def require_transition(record, expected, action):
 
 
 async def write_data(db, form, record, changes, actor_id):
-    from app.api.form_engine import _uses_physical_form_table, _physical_column_name
-    from app.api._model_driven_shared import assert_safe_identifier
-    if _uses_physical_form_table(form):
-        table = str(form.table_name)
-        assert_safe_identifier(table)
-        columns = {key: _physical_column_name(key) for key in changes}
-        for name in columns.values():
-            assert_safe_identifier(name)
-        assignments = ', '.join(f'{column} = :v{idx}' for idx, column in enumerate(columns.values()))
-        values = {f'v{idx}': value for idx, value in enumerate(changes.values())}
-        await db.execute(text(f'UPDATE {table} SET {assignments}, updated_by = :actor, updated_at = CURRENT_TIMESTAMP WHERE id = :id AND tenant_id = :tenant AND deleted_at IS NULL'),
-                         {**values, 'actor': actor_id, 'id': record['id'], 'tenant': form.tenant_id})
-    else:
-        row = await db.get(DynamicRecord, record['id'])
-        row.data = {**row.data, **changes}
-        row.updated_by = actor_id
-    record['data'].update(changes)
+    from app.services.records import write_fields
+    # Material domain endpoints verify applicant/approver transitions before this
+    # internal write. Workflow-owned status fields are not user-editable fields.
+    return await write_fields(db, form, record, changes,
+        user={"uid": actor_id, "tenant_id": form.tenant_id}, system=True)
 
 
 async def audit(db, form, record_id, user, action, **detail):

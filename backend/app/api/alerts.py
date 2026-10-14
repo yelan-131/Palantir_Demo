@@ -52,22 +52,27 @@ async def _context(db, user, action='view'):
     return form, fields, visible
 
 
-async def _records(db, form, fields, visible, record_id=None, lock=False):
-    if _uses_physical_form_table(form):
-        table = str(form.table_name)
-        assert_safe_identifier(table)
-        clause = ' AND id = :id' if record_id is not None else ''
-        locking = ' FOR UPDATE' if lock and DB_TYPE != 'sqlite' else ''
-        result = await db.execute(text(f'SELECT * FROM {table} WHERE tenant_id = :tenant AND deleted_at IS NULL{clause} ORDER BY id DESC{locking}'),
-                                  {'tenant': form.tenant_id, 'id': record_id})
-        return [_physical_record_payload(row, form, fields, visible_fields=visible) for row in result]
-    query = select(DynamicRecord).where(DynamicRecord.tenant_id == form.tenant_id,
-                                       DynamicRecord.form_id == form.id, DynamicRecord.deleted_at.is_(None))
+async def _records(db, form, fields, visible, record_id=None, lock=False, *, user=None):
+    from app.services.records import read_raw, iter_raw, authorized_records, require_record_permission, project_record
     if record_id is not None:
-        query = query.where(DynamicRecord.id == record_id)
-    if lock:
-        query = query.with_for_update()
-    return [_record_payload(row, visible_fields=visible) for row in (await db.scalars(query.order_by(DynamicRecord.id.desc()))).all()]
+        try:
+            record = await read_raw(db, form, record_id, lock=lock)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return []
+            raise
+        if user is not None:
+            await require_record_permission(db, user, form, "view", record)
+            record = await project_record(db, user, form, record, fields)
+        records = [record]
+    elif user is not None:
+        records = await authorized_records(db, user, form, decorate=False)
+    else:
+        records = [record async for record in iter_raw(db, form)]
+    records.sort(key=lambda record: record["id"], reverse=True)
+    if visible is not None:
+        records = [{**record, "data": {key: value for key, value in record["data"].items() if key in visible}} for record in records]
+    return records
 
 
 async def _events(db, form, ids):
@@ -100,7 +105,7 @@ async def list_alerts(q: str = '', status: str | None = None, page: int = Query(
                       page_size: int = Query(20, ge=1, le=200), db: AsyncSession = Depends(get_db),
                       user: dict = Depends(get_current_user)):
     form, fields, visible = await _context(db, user)
-    records = [r for r in await _records(db, form, fields, visible) if not is_material_request(r['data'])]
+    records = [r for r in await _records(db, form, fields, visible, user=user) if not is_material_request(r['data'])]
     events = await _events(db, form, [r['id'] for r in records])
     rows = [_present(r, events.get(r['id'], []), visible) for r in records]
     return filter_alerts(rows, q, status, page, page_size)
@@ -109,7 +114,7 @@ async def list_alerts(q: str = '', status: str | None = None, page: int = Query(
 @router.get('/{alert_id}')
 async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     form, fields, visible = await _context(db, user)
-    records = await _records(db, form, fields, visible, alert_id)
+    records = await _records(db, form, fields, visible, alert_id, user=user)
     if not records or is_material_request(records[0]['data']):
         raise HTTPException(404, '告警不存在')
     events = await _events(db, form, [alert_id])
@@ -138,7 +143,8 @@ async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db), us
     editable = await allowed_form_fields(user, form.id, 'create', fields, db)
     if not set(data) <= editable:
         raise HTTPException(403, '缺少告警登记字段的创建权限')
-    result = await create_dynamic_record(form.id, DynamicRecordCreate(data=data), db, user)
+    from app.services.records import create_record
+    result = await create_record(form.id, DynamicRecordCreate(data=data), db, user, defer_commit=True)
     actor = await db.scalar(select(User).where(User.id == current_user_id(user), User.tenant_id == form.tenant_id))
     detail = {'action': 'create', 'to_status': 'pending', 'actor_name': (actor.display_name or actor.username) if actor else str(current_user_id(user)),
               'created_at': now.isoformat()}
@@ -153,7 +159,7 @@ async def create_alert(body: AlertCreate, db: AsyncSession = Depends(get_db), us
 async def act_on_alert(alert_id: int, body: AlertAction, db: AsyncSession = Depends(get_db),
                        user: dict = Depends(get_current_user)):
     form, fields, visible = await _context(db, user, 'edit')
-    records = await _records(db, form, fields, visible, alert_id, lock=True)
+    records = await _records(db, form, fields, None, alert_id, lock=True)
     if not records or is_material_request(records[0]['data']):
         raise HTTPException(404, '告警不存在')
     record = records[0]
@@ -183,20 +189,12 @@ async def act_on_alert(alert_id: int, body: AlertAction, db: AsyncSession = Depe
         updates['owner'] = owner.display_name or owner.username
     if body.action == 'resolve':
         updates['resolution'] = body.comment.strip()
-    editable = await allowed_form_fields(user, form.id, 'edit', fields, db)
+    editable = await allowed_form_fields(user, form.id, 'edit', fields, db, record_data=record['data'])
     if not set(updates) <= editable:
         raise HTTPException(403, '缺少告警状态、负责人或处置结论的编辑权限')
     actor_name = (actor.display_name or actor.username) if actor else str(user.get('sub') or current_user_id(user))
-    if _uses_physical_form_table(form):
-        table = str(form.table_name)
-        assert_safe_identifier(table)
-        assignments = [f'{_physical_column_name(key)} = :{key}' for key in updates]
-        await db.execute(text(f"UPDATE {table} SET {', '.join(assignments)}, updated_by = :actor, updated_at = CURRENT_TIMESTAMP WHERE id = :id AND tenant_id = :tenant AND deleted_at IS NULL"),
-                         {**updates, 'actor': current_user_id(user), 'id': alert_id, 'tenant': form.tenant_id})
-    else:
-        row = await db.get(DynamicRecord, alert_id)
-        row.data = {**row.data, **updates}
-        row.updated_by = current_user_id(user)
+    from app.services.records import write_fields
+    await write_fields(db, form, record, updates, user=user)
     detail = {'action': body.action, 'from_status': current, 'to_status': target,
               'comment': (body.comment or '').strip(), 'actor_name': actor_name,
               'created_at': datetime.now(timezone.utc).isoformat()}
