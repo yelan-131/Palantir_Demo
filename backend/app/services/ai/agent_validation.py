@@ -159,12 +159,28 @@ class AgentValidationService:
         tool_def = get_tool(tool_name)
         if not tool_def:
             return []
-        schema = tool_def.input_schema or {}
-        required = schema.get("required") if isinstance(schema.get("required"), list) else []
-        issues: list[ValidationIssue] = []
-        for field_name in required:
-            if field_name not in payload or payload.get(field_name) in (None, ""):
-                issues.append(ValidationIssue("error", "required_field_missing", f"{field_name} is required", field=str(field_name), tool=tool_name))
+        from .tool_registry import _normalize_input_schema
+        schema = _normalize_input_schema(tool_def.input_schema or {})
+        issues = []
+        def check(value, spec, path):
+            expected = spec.get("type")
+            validators = {"string": lambda v: isinstance(v, str), "integer": lambda v: isinstance(v, int) and not isinstance(v, bool), "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool), "boolean": lambda v: isinstance(v, bool), "object": lambda v: isinstance(v, dict), "array": lambda v: isinstance(v, list), "null": lambda v: v is None}
+            if expected in validators and not validators[expected](value):
+                issues.append(ValidationIssue("error", "invalid_parameter_type", f"{path or 'payload'} must be {expected}", tool=tool_name))
+                return
+            if "enum" in spec and value not in spec["enum"]:
+                issues.append(ValidationIssue("error", "invalid_parameter_enum", f"{path} has an unsupported value", tool=tool_name))
+            if isinstance(value, dict):
+                for key in spec.get("required", []):
+                    if key not in value or value[key] in (None, ""):
+                        issues.append(ValidationIssue("error", "required_field_missing", f"{path + '.' if path else ''}{key} is required", tool=tool_name))
+                for key, child in spec.get("properties", {}).items():
+                    if key in value:
+                        check(value[key], child, f"{path + '.' if path else ''}{key}")
+            if isinstance(value, list) and spec.get("items"):
+                for index, item in enumerate(value):
+                    check(item, spec["items"], f"{path}[{index}]")
+        check(payload, schema, "")
         return issues
 
     def _apply_rules(

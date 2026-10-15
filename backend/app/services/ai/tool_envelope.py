@@ -21,7 +21,8 @@ from .hooks import register_builtin_hooks
 from .knowledge_ingestion import search_ingested_knowledge
 from .low_code_tools import execute_add_form_field, execute_create_form_definition
 from .semantic_planner import plan_agent_turn_semantic
-from .settings import safety_policy_snapshot
+from .settings import safety_policy_snapshot, settings_snapshot
+from .policies import decide_tool_permission
 from .tenant_context import require_tenant_id
 from .tool_handlers import dispatch_tool_handler
 from .tool_registry import get_tool
@@ -48,6 +49,10 @@ class ToolExecutionEnvelope:
         run_id: str | None = None,
         event_bus: EventBus | None = None,
     ) -> dict[str, Any]:
+        settings = settings if settings is not None else settings_snapshot()
+        denied = await self._check_permission(tool_name, skill_name, current_user or {}, settings, confirmed, event_sink, audit_ai_event, run_id)
+        if denied:
+            return denied
         bus = self._event_bus(settings, event_bus)
         tool_def = get_tool(tool_name)
         side_effect = tool_def.side_effect if tool_def else "read"
@@ -77,6 +82,7 @@ class ToolExecutionEnvelope:
                 "user": current_user or {},
                 "risk_level": risk_level,
                 "side_effect": side_effect,
+                "confirmed": confirmed,
                 "run_id": run_id,
             },
         )
@@ -156,7 +162,7 @@ class ToolExecutionEnvelope:
                 emitted_items=emitted_items,
             )
 
-        if side_effect not in {"read", "analyze"} and not confirmed:
+        if (side_effect not in {"read", "analyze"} or hook_result.action == "ask") and not confirmed:
             return await self._finish(
                 tool_name=tool_name,
                 skill_name=skill_name,
@@ -267,6 +273,10 @@ class ToolExecutionEnvelope:
         run_id: str | None = None,
         event_bus: EventBus | None = None,
     ) -> dict[str, Any]:
+        settings = settings if settings is not None else settings_snapshot()
+        denied = await self._check_permission(tool_name, skill_name, current_user, settings, True, event_sink, audit_ai_event, run_id)
+        if denied:
+            return denied
         bus = self._event_bus(settings, event_bus)
         tool_def = get_tool(tool_name)
         side_effect = tool_def.side_effect if tool_def else "configuration_write"
@@ -294,6 +304,7 @@ class ToolExecutionEnvelope:
                 "user": current_user,
                 "risk_level": risk_level,
                 "side_effect": side_effect,
+                "confirmed": True,
                 "run_id": run_id,
             },
         )
@@ -550,6 +561,22 @@ class ToolExecutionEnvelope:
             "item": item,
             "items": [*(emitted_items or []), item],
         }
+
+    async def _check_permission(self, tool_name, skill_name, user, settings, confirmed, event_sink, audit_ai_event, run_id):
+        decision = decide_tool_permission(user, settings, tool_name, skill_name=skill_name)
+        if decision.allowed and (confirmed or not decision.requires_confirmation):
+            return None
+        tool = get_tool(tool_name)
+        status = "waiting_confirmation" if decision.allowed else "failed"
+        return await self._finish(
+            tool_name=tool_name, skill_name=skill_name,
+            output={"status": status, "message": decision.reason}, status=status,
+            error=None if decision.allowed else decision.reason,
+            started_at=time.perf_counter(), side_effect=tool.side_effect if tool else "read",
+            risk_level=tool.risk_level if tool else "low", event_sink=event_sink,
+            audit_ai_event=audit_ai_event, current_user=user, run_id=run_id,
+            event_bus=self._event_bus(settings, None), emitted_items=[],
+        )
 
     @staticmethod
     def _event_bus(settings: dict[str, Any] | None, event_bus: EventBus | None) -> EventBus:

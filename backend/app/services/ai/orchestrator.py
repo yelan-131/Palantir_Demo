@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .runtime import agent_runtime
+from .harness_runtime import harness_runtime
 from typing import Any, Awaitable, Callable
 
 from .schemas import AgentRequest, AgentResponse
@@ -17,4 +17,4 @@ async def run_agent(
     *,
     event_sink: AgentEventSink | None = None,
 ) -> AgentResponse:
-    return await agent_runtime.run(request, user=user, event_sink=event_sink)
+    return await harness_runtime.run(request, user=user, event_sink=event_sink)

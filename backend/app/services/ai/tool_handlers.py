@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
+from fastapi import HTTPException
 
 from app.core.db import db_session
 from app.models.relational import Application, Form, Role, User, UserRole
@@ -39,10 +40,18 @@ async def _not_implemented(payload: dict[str, Any], context: ToolHandlerContext)
 
 
 async def _knowledge_search(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
+    from app.api.knowledge import _search_knowledge_payload_async
     query = str(payload.get("query") or "")
-    limit = int(payload.get("limit") or 5)
+    rag = (context.settings or {}).get("ragPolicy") or {}
+    limit = max(1, min(int(payload.get("limit") or rag.get("topK", 5)), 20))
     tenant_id = require_tenant_id(context.current_user)
-    results = search_ingested_knowledge(query, tenant_id=tenant_id, limit=limit)
+    results = await _search_knowledge_payload_async(query, limit=limit, document_id=payload.get("document_id"), tenant_id=tenant_id)
+    if not results and payload.get("document_id"):
+        from app.api.knowledge import _document_context_payload_async
+        results = (await _document_context_payload_async(str(payload["document_id"]), tenant_id))[:limit]
+    threshold = float(rag.get("similarityThreshold", 0.15))
+    max_chars = int(rag.get("maxEvidenceChars", 1200))
+    results = [{**row, "content": str(row.get("content") or row.get("chunk_text") or row.get("text") or "")[:max_chars]} for row in results if float(row.get("score", 1)) >= threshold]
     return {"results": results, "result_count": len(results)}
 
 
@@ -129,11 +138,21 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
     return await _not_implemented(payload, context)
 
 
+async def _create_record_draft(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
+    from .dynamic_record_drafts import create_dynamic_record_draft_from_agent
+    async with db_session() as session:
+        result = await create_dynamic_record_draft_from_agent(session, user=context.current_user or {}, skill="forms.create_record_draft", payload=payload)
+        if not result:
+            raise HTTPException(status_code=404, detail="请选择可创建草稿的业务表单")
+        return result
+
+
 TOOL_HANDLERS: dict[str, ToolHandler] = {
     "not_implemented": _not_implemented,
     "knowledge.search": _knowledge_search,
     "forms.query_records": _forms_query_records,
     "forms.get_record": _forms_get_record,
+    "forms.create_dynamic_record_draft": _create_record_draft,
     "forms.create_form_definition": _forms_create_form_definition,
     "forms.add_form_field": _forms_add_form_field,
     "ai.semantic_plan_low_code_form": _semantic_low_code_plan,

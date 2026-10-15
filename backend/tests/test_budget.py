@@ -142,7 +142,7 @@ class TestRuntimeBudgetExhausted:
         We inject a pre-exceeded budget into the state so the budget check fires
         on the very first loop iteration, before any LLM call is made.
         """
-        from app.services.ai.runtime import AgentRuntime
+        from app.services.ai.legacy_runtime import AgentRuntime
         from app.services.ai.schemas import AgentRequest
 
         runtime = AgentRuntime()
@@ -166,18 +166,18 @@ class TestRuntimeBudgetExhausted:
         exceeded_budget = BudgetTracker(max_input_tokens=10, max_output_tokens=10)
         exceeded_budget.accumulate({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150})
 
-        with patch("app.services.ai.runtime.settings_snapshot", return_value={
+        with patch("app.services.ai.legacy_runtime.settings_snapshot", return_value={
             "provider": "glm", "baseUrl": "", "apiKey": "",
             "chatModel": "glm-5.1", "reasoningModel": "glm-5.1",
             "embeddingModel": "embedding-3", "visionModel": "glm-4v-plus",
             "safetyPolicy": {"agentMaxInputTokens": 10, "agentMaxOutputTokens": 10, "maxToolSteps": 5},
         }), \
-        patch("app.services.ai.runtime.safety_policy_snapshot", return_value={
+        patch("app.services.ai.legacy_runtime.safety_policy_snapshot", return_value={
             "agentMaxInputTokens": 10, "agentMaxOutputTokens": 10, "maxToolSteps": 5,
         }), \
-        patch("app.services.ai.runtime.BudgetTracker", return_value=exceeded_budget), \
-        patch("app.services.ai.runtime.preflight_agent_request") as mock_preflight_fn, \
-        patch("app.services.ai.runtime.get_provider") as mock_get_provider:
+        patch("app.services.ai.legacy_runtime.BudgetTracker", return_value=exceeded_budget), \
+        patch("app.services.ai.legacy_runtime.preflight_agent_request") as mock_preflight_fn, \
+        patch("app.services.ai.legacy_runtime.get_provider") as mock_get_provider:
 
             resp = await runtime.run(request, user=user)
 

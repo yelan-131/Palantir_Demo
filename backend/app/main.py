@@ -246,6 +246,8 @@ app.include_router(maintenance.router, prefix="/api/v1/maintenance", tags=["预�
 app.include_router(quality.router, prefix="/api/v1/quality", tags=["质量管理"])
 app.include_router(supply_chain.router, prefix="/api/v1/supply-chain", tags=["供应链"])
 app.include_router(ai_assistant.router, prefix="/api/v1/ai", tags=["AI助手"])
+from app.api.ai_harness import router as ai_harness_router
+app.include_router(ai_harness_router, prefix="/api/v1/ai", tags=["AI Harness"])
 app.include_router(tenant.router, prefix="/api/v1/tenant", tags=["tenant"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["运营总览"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["报表中心"])

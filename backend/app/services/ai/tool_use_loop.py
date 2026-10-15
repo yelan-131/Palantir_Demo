@@ -43,7 +43,8 @@ from .schemas import (
     InterceptResult,
     ToolCall,
 )
-from .settings import safety_policy_snapshot
+from .settings import safety_policy_snapshot, chat_options
+from .policies import decide_ai_permission, decide_tool_permission
 from .tenant_context import require_tenant_id
 from .tenant_profile import TenantProfile, default_tenant_profile
 from .tool_envelope import tool_execution_envelope
@@ -126,13 +127,16 @@ class ToolUseLoopRunner:
         event_sink: AgentEventSink | None = None,
         bus: EventBus | None = None,
     ) -> AgentResponse:
+        permission = decide_ai_permission(user or {}, settings, "qa")
+        if not permission.allowed:
+            return AgentResponse(answer=permission.reason, mode="qa")
         profile = tenant_profile or default_tenant_profile(require_tenant_id(user or request.context))
         policy = safety_policy_snapshot(settings)
         budget = BudgetTracker(
             max_input_tokens=int(policy.get("agentMaxInputTokens") or 100_000),
             max_output_tokens=int(policy.get("agentMaxOutputTokens") or 20_000),
         )
-        max_turns = max(1, min(int(policy.get("maxToolSteps") or 5), 10))
+        max_turns = max(1, min(int(policy.get("maxToolSteps") or 5), 20))
         loop_bus = bus
         if loop_bus is None:
             loop_bus = EventBus()
@@ -145,6 +149,8 @@ class ToolUseLoopRunner:
                 tenant_profile=profile,
                 page_context={"page": request.page, **(request.context or {})},
                 history=_history_from_context(request.context),
+                memory=(request.context or {}).get("memories") or [],
+                knowledge_evidence=(request.context or {}).get("evidence") or [],
                 user_message=request.message,
             )
         ]
@@ -280,13 +286,9 @@ class ToolUseLoopRunner:
             chat_messages = [_message_to_chat(m) for m in messages]
             result = await provider.chat(
                 chat_messages,
-                ChatOptions(
-                    model=config.chat_model,
-                    tools=tools or None,
-                    tool_choice="auto" if tools else None,
-                    max_tokens=1200,
-                    temperature=0.3,
-                ),
+                chat_options(settings, model=config.reasoning_model or config.chat_model).model_copy(update={
+                    "tools": tools or None, "tool_choice": "auto" if tools else None,
+                }),
             )
             budget.accumulate(result.usage)
 
@@ -369,7 +371,12 @@ class ToolUseLoopRunner:
             side_effect = tool_def.side_effect if tool_def else "read"
             risk_level = tool_def.risk_level if tool_def else "low"
 
-            if tool_def and side_effect not in AUTO_EXEC_SIDE_EFFECTS:
+            decision = decide_tool_permission(user, settings, tool_name)
+            if not decision.allowed:
+                messages.append({"role": "tool", "tool_call_id": tool_call.id, "name": tool_name, "content": _tool_result_content({"status": "blocked", "message": decision.reason})})
+                executed.append({"tool": tool_name, "status": "blocked"})
+                continue
+            if tool_def and (side_effect not in AUTO_EXEC_SIDE_EFFECTS or decision.requires_confirmation):
                 # Side-effecting call: never execute inline. The envelope
                 # would refuse it anyway (confirmed=False), but freezing here
                 # gives the user a reviewable confirmation payload instead of

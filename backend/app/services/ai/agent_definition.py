@@ -18,6 +18,8 @@ _RUNTIME_TOOL_REGISTRY: dict[str, dict[str, Any]] | None = None
 def _read_agent_file(name: str) -> str:
     path = AGENT_DIR / name
     if not path.exists():
+        path = Path(__file__).with_name("assets") / name
+    if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
 
@@ -63,6 +65,8 @@ def set_runtime_agent_registry(*, skills: dict[str, dict[str, Any]], tools: dict
 
 def _load_registry_seed(name: str) -> dict[str, dict[str, Any]]:
     path = REGISTRY_SEED_DIR / name
+    if not path.exists():
+        path = Path(__file__).with_name("assets") / name
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))

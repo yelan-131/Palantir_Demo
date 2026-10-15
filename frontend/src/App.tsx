@@ -356,6 +356,12 @@ function findFirstDynamicMenuRoute(items: DynamicMenu[]): string | undefined {
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [loginArrival, setLoginArrival] = useState(() => Boolean(location.state?.loginArrival));
+  useEffect(() => {
+    if (!loginArrival) return;
+    const timer = window.setTimeout(() => setLoginArrival(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [loginArrival]);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const activeArea = navigationAreaForPath(location.pathname);
@@ -593,7 +599,7 @@ function AppContent() {
 
   return (
     <AiWorkbenchProvider>
-    <Layout className={`app-shell tech-white-shell density-${preferences.density}${smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}`}>
+    <Layout className={`app-shell tech-white-shell density-${preferences.density}${smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <ApplicationRail onHome={() => { setRootApplicationId(null); navigate('/'); }} activeKey={railKey} library={library} user={user} onOpen={openLibraryApp} onLogout={() => { logout(); navigate('/login'); }} />
       {smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
       <Sider id="shell-context-menu" width={224} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
@@ -768,6 +774,12 @@ export default function App() {
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
+    if (!restored || isAuthenticated) return;
+    // Warm the home route while the login form is visible, without mounting it.
+    void import('./pages/Workspace').catch(() => undefined);
+  }, [restored, isAuthenticated]);
+
+  useEffect(() => {
     let mounted = true;
     restore().finally(() => {
       if (mounted) setRestored(true);
@@ -781,7 +793,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace state={{ loginArrival: document.documentElement.dataset.loginTransition !== 'active' }} /> : <LoginPage />} />
       <Route path="/*" element={isAuthenticated ? <AppContent /> : <Navigate to="/login" replace />} />
     </Routes>
   );

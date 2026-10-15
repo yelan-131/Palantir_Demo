@@ -29,6 +29,7 @@ class AIProviderConfig(BaseModel):
     embedding_model: str = "embedding-3"
     vision_model: str = "glm-4v-plus"
     timeout_seconds: int = 30
+    retry_count: int = Field(default=2, ge=0, le=3)
 
 
 # ── Tool use protocol types ─────────────────────────────────

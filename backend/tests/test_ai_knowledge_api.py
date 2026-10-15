@@ -285,7 +285,7 @@ def test_ai_settings_persist_lifecycle_hooks_and_rules(admin_client):
     assert safety_policy["validationRules"][0]["field"] == "form.name"
 
 
-def test_deepseek_settings_normalize_incompatible_base_url(admin_client):
+def test_explicit_provider_gateway_is_not_silently_rewritten(admin_client):
     response = admin_client.put(
         "/api/v1/ai/settings",
         json={
@@ -302,7 +302,7 @@ def test_deepseek_settings_normalize_incompatible_base_url(admin_client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["provider"] == "deepseek"
-    assert data["baseUrl"] == "https://api.deepseek.com"
+    assert data["baseUrl"] == "https://open.bigmodel.cn/api/paas/v4"
     assert data["chatModel"] == "deepseek-chat"
 
 
@@ -313,7 +313,20 @@ def test_agent_endpoint_rejects_guest_by_default(client):
     assert response.json()["detail"] == "Missing bearer token"
 
 
-def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_client):
+def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_client, monkeypatch):
+    from app.services.ai.agent_registry import seed_agent_registry_from_files
+    from app.services.ai.harness_runtime import PlatformBridge, tool_alias
+    from app.services.ai.settings import settings_snapshot
+    from app.services.ai.schemas import AgentResponse
+    from app.api import ai_assistant as api
+    _ensure_ai_runtime_schema()
+    asyncio.run(seed_agent_registry_from_files())
+    async def scripted_harness(request, user, **kwargs):
+        bridge = PlatformBridge(user=user, settings=settings_snapshot(), context=request.context, event_sink=kwargs.get("event_sink"))
+        await bridge.call_tool(tool_alias("knowledge.search"), {"query": "CAPA Rule"})
+        await bridge.call_tool(tool_alias("forms.create_dynamic_record_draft"), {"payload": {"category": "quality", "name": "CAPA draft"}})
+        return AgentResponse(answer="请确认草稿", actions=bridge.pending, evidence=bridge.evidence, items=bridge.items, requires_confirmation=True, mode="assisted", risk_level="medium")
+    monkeypatch.setattr(api, "run_agent", scripted_harness)
     upload = ai_user_client.post(
         "/api/v1/knowledge/assets/upload",
         params={"permission_scope": "enterprise", "owner_user_id": "api-tester"},
@@ -343,7 +356,7 @@ def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_clie
         if item.get("type") == "confirmation" and (item.get("payload") or {}).get("confirmation_token")
     )
     actions = confirmation["actions"]
-    assert actions[0]["skill"] == "quality.create_capa_draft"
+    assert actions[0]["skill"] == "forms.create_dynamic_record_draft"
     assert actions[0]["requires_confirmation"] is True
     assert data["run_id"].startswith("run-")
     assert confirmation["confirmation_token"].startswith("confirm-")
@@ -352,7 +365,20 @@ def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_clie
     assert data["evidence"][0]["source_file_name"] == "quality-process.md"
 
 
-def test_agent_endpoint_routes_knowledge_surface_to_rag(ai_user_client):
+def test_agent_endpoint_routes_knowledge_surface_to_rag(ai_user_client, monkeypatch):
+    from app.services.ai.agent_registry import seed_agent_registry_from_files
+    from app.services.ai.harness_runtime import PlatformBridge, tool_alias
+    from app.services.ai.settings import settings_snapshot
+    from app.services.ai.schemas import AgentResponse
+    from app.api import ai_assistant as api
+    _ensure_ai_runtime_schema()
+    asyncio.run(seed_agent_registry_from_files())
+    async def scripted_harness(request, user, **kwargs):
+        assert request.context["surface"] == "knowledge"
+        bridge = PlatformBridge(user=user, settings=settings_snapshot(), context=request.context, event_sink=kwargs.get("event_sink"))
+        await bridge.call_tool(tool_alias("knowledge.search"), {"query": "SOP"})
+        return AgentResponse(answer="知识问答", evidence=bridge.evidence, items=bridge.items)
+    monkeypatch.setattr(api, "run_agent", scripted_harness)
     _ensure_ai_runtime_schema()
     document_id = _upload_markdown_knowledge(ai_user_client)
 
@@ -374,8 +400,8 @@ def test_agent_endpoint_routes_knowledge_surface_to_rag(ai_user_client):
     assert data["evidence"]
     assert any(item["document_id"] == document_id for item in data["evidence"])
     assert any(item["id"] == "step-identity" for item in data["items"])
-    assert any(item["id"] == "step-knowledge-context" for item in data["items"])
-    assert any(item["id"] == "step-knowledge-search" and item["result_count"] >= 1 for item in data["items"])
+    assert data["evidence"]
+    assert any(item.get("type") == "tool_result" for item in data["items"])
 
 
 def test_agent_context_builder_uses_recent_messages_only(ai_user_client, admin_client):
@@ -531,7 +557,13 @@ def test_unified_agent_conversation_persists_messages_and_close(ai_user_client):
     assert closed.json()["data"]["status"] == "closed"
 
 
-def test_skill_tool_and_agent_run_lifecycle(ai_user_client):
+def test_skill_tool_and_agent_run_lifecycle(ai_user_client, monkeypatch):
+    # Historic proposals must remain confirmable after the kernel migration.
+    from app.api import ai_assistant as api
+    from app.services.ai.legacy_runtime import AgentRuntime
+    async def legacy_plan(request, user, **kwargs):
+        return await AgentRuntime().run(request, user=user, **kwargs)
+    monkeypatch.setattr(api, "run_agent", legacy_plan)
     skills = ai_user_client.get("/api/v1/ai/skills")
     assert skills.status_code == 200
     assert any(item["name"] == "quality.create_capa_draft" for item in skills.json()["data"])
@@ -712,7 +744,10 @@ def test_uploaded_knowledge_search_is_tenant_scoped(monkeypatch, tmp_path):
     assert not any(item.get("id") == document_id for item in tenant_two_documents.json()["data"])
 
 
-def test_demo_knowledge_seed_creates_word_excel_pdf_and_searches_database(ai_user_client):
+def test_demo_knowledge_seed_creates_word_excel_pdf_and_searches_database(ai_user_client, monkeypatch, tmp_path):
+    # Demo fixture generation belongs in the test sandbox, not tracked assets.
+    from app.services.ai import demo_knowledge_seed
+    monkeypatch.setattr(demo_knowledge_seed, "ASSET_DIR", tmp_path / "knowledge_assets")
     from app.database import init_db
     from app.services.ai.demo_knowledge_seed import seed_demo_knowledge_assets
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import mimetypes
@@ -147,8 +148,18 @@ class OpenAICompatibleProvider(LLMProvider):
 
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
-                response = await client.post(self._chat_completions_url(), json=payload, headers=headers)
-                response.raise_for_status()
+                for attempt in range(self.config.retry_count + 1):
+                    try:
+                        response = await client.post(self._chat_completions_url(), json=payload, headers=headers)
+                        response.raise_for_status()
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if attempt == self.config.retry_count or exc.response.status_code not in {429, 500, 502, 503, 504}:
+                            raise
+                    except httpx.TransportError:
+                        if attempt == self.config.retry_count:
+                            raise
+                    await asyncio.sleep(min(0.25 * (2 ** attempt), 2))
         except httpx.HTTPStatusError as exc:
             detail = _http_error_detail(exc.response)
             raise ProviderConfigurationError(f"{self.config.provider} request failed: HTTP {exc.response.status_code} {detail}") from exc
@@ -230,8 +241,18 @@ class OpenAICompatibleProvider(LLMProvider):
         }
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
-                response = await client.post(self._chat_completions_url(), json=payload, headers=headers)
-                response.raise_for_status()
+                for attempt in range(self.config.retry_count + 1):
+                    try:
+                        response = await client.post(self._chat_completions_url(), json=payload, headers=headers)
+                        response.raise_for_status()
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if attempt == self.config.retry_count or exc.response.status_code not in {429, 500, 502, 503, 504}:
+                            raise
+                    except httpx.TransportError:
+                        if attempt == self.config.retry_count:
+                            raise
+                    await asyncio.sleep(min(0.25 * (2 ** attempt), 2))
         except httpx.HTTPStatusError as exc:
             detail = _http_error_detail(exc.response)
             raise ProviderConfigurationError(f"{self.config.provider} vision request failed: HTTP {exc.response.status_code} {detail}") from exc

@@ -6,8 +6,14 @@
     "handler_key": "knowledge.search",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"query": "string", "limit": "integer"},
-    "output_schema": {"results": "array", "evidence": "array"},
+    "input_schema": {
+      "query": "string",
+      "limit": "integer"
+    },
+    "output_schema": {
+      "results": "array",
+      "evidence": "array"
+    },
     "permission_check": "rag"
   },
   "knowledge.ingest_document": {
@@ -17,8 +23,14 @@
     "handler_key": "not_implemented",
     "side_effect": "draft_write",
     "risk_level": "medium",
-    "input_schema": {"asset_id": "string", "permission_scope": "string"},
-    "output_schema": {"job_id": "string", "status": "string"},
+    "input_schema": {
+      "asset_id": "string",
+      "permission_scope": "string"
+    },
+    "output_schema": {
+      "job_id": "string",
+      "status": "string"
+    },
     "permission_check": "rag",
     "audit_required": true
   },
@@ -27,8 +39,12 @@
     "title": "Convert to Markdown",
     "description": "Normalize documents, tables, PDFs, and images into Markdown.",
     "handler_key": "not_implemented",
-    "input_schema": {"asset_id": "string"},
-    "output_schema": {"markdown_content": "string"},
+    "input_schema": {
+      "asset_id": "string"
+    },
+    "output_schema": {
+      "markdown_content": "string"
+    },
     "permission_check": "rag"
   },
   "knowledge.chunk_markdown": {
@@ -36,8 +52,12 @@
     "title": "Chunk Markdown",
     "description": "Split Markdown into source-linked retrieval chunks.",
     "handler_key": "not_implemented",
-    "input_schema": {"document_id": "string"},
-    "output_schema": {"chunks": "array"},
+    "input_schema": {
+      "document_id": "string"
+    },
+    "output_schema": {
+      "chunks": "array"
+    },
     "permission_check": "rag"
   },
   "knowledge.embed_chunks": {
@@ -45,8 +65,12 @@
     "title": "Embed chunks",
     "description": "Generate embeddings for searchable chunks.",
     "handler_key": "not_implemented",
-    "input_schema": {"chunk_ids": "array"},
-    "output_schema": {"embedding_count": "integer"},
+    "input_schema": {
+      "chunk_ids": "array"
+    },
+    "output_schema": {
+      "embedding_count": "integer"
+    },
     "permission_check": "rag"
   },
   "knowledge.extract_ontology_candidates": {
@@ -56,8 +80,18 @@
     "handler_key": "not_implemented",
     "side_effect": "draft_write",
     "risk_level": "medium",
-    "input_schema": {"document_id": "string", "domain": "string", "prompt_name": "string"},
-    "output_schema": {"job": "object", "generic_entities": "array", "domain_mappings": "array", "relations": "array", "quality_report": "object"},
+    "input_schema": {
+      "document_id": "string",
+      "domain": "string",
+      "prompt_name": "string"
+    },
+    "output_schema": {
+      "job": "object",
+      "generic_entities": "array",
+      "domain_mappings": "array",
+      "relations": "array",
+      "quality_report": "object"
+    },
     "permission_check": "rag",
     "audit_required": true
   },
@@ -68,8 +102,14 @@
     "handler_key": "not_implemented",
     "side_effect": "draft_write",
     "risk_level": "medium",
-    "input_schema": {"job_id": "string", "approved_result": "object"},
-    "output_schema": {"job": "object", "status": "string"},
+    "input_schema": {
+      "job_id": "string",
+      "approved_result": "object"
+    },
+    "output_schema": {
+      "job": "object",
+      "status": "string"
+    },
     "permission_check": "config",
     "audit_required": true
   },
@@ -80,8 +120,13 @@
     "handler_key": "not_implemented",
     "side_effect": "configuration_write",
     "risk_level": "high",
-    "input_schema": {"job_id": "string"},
-    "output_schema": {"job": "object", "commit": "object"},
+    "input_schema": {
+      "job_id": "string"
+    },
+    "output_schema": {
+      "job": "object",
+      "commit": "object"
+    },
     "permission_check": "config",
     "audit_required": true
   },
@@ -89,11 +134,21 @@
     "name": "forms.create_dynamic_record_draft",
     "title": "Create form draft",
     "description": "Create an internal business record draft without submitting workflow.",
-    "handler_key": "not_implemented",
+    "handler_key": "forms.create_dynamic_record_draft",
     "side_effect": "draft_write",
     "risk_level": "medium",
-    "input_schema": {"form_id": "integer", "form_code": "string", "record.data": "object", "payload": "object"},
-    "output_schema": {"record_id": "integer", "form_id": "integer", "form_code": "string", "status": "draft"},
+    "input_schema": {
+      "form_id": "integer",
+      "form_code": "string",
+      "record.data": "object",
+      "payload": "object"
+    },
+    "output_schema": {
+      "record_id": "integer",
+      "form_id": "integer",
+      "form_code": "string",
+      "status": "draft"
+    },
     "permission_check": "save_draft",
     "audit_required": true
   },
@@ -104,8 +159,19 @@
     "handler_key": "forms.query_records",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"form_id": "integer", "form_code": "string", "limit": "integer", "status": "string", "filters": "array"},
-    "output_schema": {"form": "object", "records": "array", "record_count": "integer", "visible_fields": "array"},
+    "input_schema": {
+      "form_id": "integer",
+      "form_code": "string",
+      "limit": "integer",
+      "status": "string",
+      "filters": "array"
+    },
+    "output_schema": {
+      "form": "object",
+      "records": "array",
+      "record_count": "integer",
+      "visible_fields": "array"
+    },
     "permission_check": "business_query",
     "dry_run_supported": true
   },
@@ -116,8 +182,16 @@
     "handler_key": "forms.get_record",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"form_id": "integer", "form_code": "string", "record_id": "integer"},
-    "output_schema": {"form": "object", "record": "object", "visible_fields": "array"},
+    "input_schema": {
+      "form_id": "integer",
+      "form_code": "string",
+      "record_id": "integer"
+    },
+    "output_schema": {
+      "form": "object",
+      "record": "object",
+      "visible_fields": "array"
+    },
     "permission_check": "business_query",
     "dry_run_supported": true
   },
@@ -128,8 +202,14 @@
     "handler_key": "platform.query",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"subject": "users|roles|org_units", "limit": "integer"},
-    "output_schema": {"items": "array", "count": "integer"},
+    "input_schema": {
+      "subject": "users|roles|org_units",
+      "limit": "integer"
+    },
+    "output_schema": {
+      "items": "array",
+      "count": "integer"
+    },
     "permission_check": "config",
     "dry_run_supported": true
   },
@@ -140,8 +220,14 @@
     "handler_key": "platform.query",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"subject": "applications|menus|routes", "limit": "integer"},
-    "output_schema": {"items": "array", "count": "integer"},
+    "input_schema": {
+      "subject": "applications|menus|routes",
+      "limit": "integer"
+    },
+    "output_schema": {
+      "items": "array",
+      "count": "integer"
+    },
     "permission_check": "config",
     "dry_run_supported": true
   },
@@ -152,8 +238,14 @@
     "handler_key": "platform.query",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"subject": "forms|fields|layouts", "limit": "integer"},
-    "output_schema": {"items": "array", "count": "integer"},
+    "input_schema": {
+      "subject": "forms|fields|layouts",
+      "limit": "integer"
+    },
+    "output_schema": {
+      "items": "array",
+      "count": "integer"
+    },
     "permission_check": "config",
     "dry_run_supported": true
   },
@@ -164,8 +256,17 @@
     "handler_key": "ai.semantic_plan_low_code_form",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"message": "string", "recent_messages": "array", "pending_slots": "object"},
-    "output_schema": {"intent": "qa|action", "skill": "low_code.create_form_definition|null", "operation": "string", "confidence": "number"},
+    "input_schema": {
+      "message": "string",
+      "recent_messages": "array",
+      "pending_slots": "object"
+    },
+    "output_schema": {
+      "intent": "qa|action",
+      "skill": "low_code.create_form_definition|null",
+      "operation": "string",
+      "confidence": "number"
+    },
     "permission_check": "qa",
     "dry_run_supported": true,
     "audit_required": false
@@ -177,8 +278,16 @@
     "handler_key": "forms.create_form_definition",
     "side_effect": "configuration_write",
     "risk_level": "high",
-    "input_schema": {"form": "object", "fields": "array", "menu": "object"},
-    "output_schema": {"form": "object", "fields": "array", "route_path": "string"},
+    "input_schema": {
+      "form": "object",
+      "fields": "array",
+      "menu": "object"
+    },
+    "output_schema": {
+      "form": "object",
+      "fields": "array",
+      "route_path": "string"
+    },
     "permission_check": "config",
     "audit_required": true
   },
@@ -189,8 +298,16 @@
     "handler_key": "forms.add_form_field",
     "side_effect": "configuration_write",
     "risk_level": "high",
-    "input_schema": {"form_id": "integer", "form_code": "string", "fields": "array"},
-    "output_schema": {"form": "object", "fields": "array", "changed_layouts": "array"},
+    "input_schema": {
+      "form_id": "integer",
+      "form_code": "string",
+      "fields": "array"
+    },
+    "output_schema": {
+      "form": "object",
+      "fields": "array",
+      "changed_layouts": "array"
+    },
     "permission_check": "config",
     "audit_required": true
   },
@@ -201,8 +318,14 @@
     "handler_key": "not_implemented",
     "side_effect": "workflow_action",
     "risk_level": "high",
-    "input_schema": {"draft_id": "string", "workflow_key": "string"},
-    "output_schema": {"workflow_id": "string", "status": "string"},
+    "input_schema": {
+      "draft_id": "string",
+      "workflow_key": "string"
+    },
+    "output_schema": {
+      "workflow_id": "string",
+      "status": "string"
+    },
     "permission_check": "workflow",
     "audit_required": true
   },
@@ -213,8 +336,13 @@
     "handler_key": "not_implemented",
     "side_effect": "draft_write",
     "risk_level": "medium",
-    "input_schema": {"target_user_ids": "array", "message": "string"},
-    "output_schema": {"notification_id": "string"},
+    "input_schema": {
+      "target_user_ids": "array",
+      "message": "string"
+    },
+    "output_schema": {
+      "notification_id": "string"
+    },
     "permission_check": "workflow",
     "audit_required": true
   },
@@ -223,8 +351,12 @@
     "title": "Get stock",
     "description": "Read inventory availability and safety stock signals.",
     "handler_key": "not_implemented",
-    "input_schema": {"material_code": "string"},
-    "output_schema": {"stock": "object"},
+    "input_schema": {
+      "material_code": "string"
+    },
+    "output_schema": {
+      "stock": "object"
+    },
     "permission_check": "business_query"
   },
   "quality.get_event": {
@@ -232,8 +364,12 @@
     "title": "Get quality event",
     "description": "Read quality event details for action draft preparation.",
     "handler_key": "not_implemented",
-    "input_schema": {"event_id": "string"},
-    "output_schema": {"quality_event": "object"},
+    "input_schema": {
+      "event_id": "string"
+    },
+    "output_schema": {
+      "quality_event": "object"
+    },
     "permission_check": "business_query"
   },
   "graph.query_impact": {
@@ -241,8 +377,13 @@
     "title": "Query impact graph",
     "description": "Analyze affected objects before suggesting configuration changes.",
     "handler_key": "not_implemented",
-    "input_schema": {"object_type": "string", "object_id": "string"},
-    "output_schema": {"impacts": "array"},
+    "input_schema": {
+      "object_type": "string",
+      "object_id": "string"
+    },
+    "output_schema": {
+      "impacts": "array"
+    },
     "permission_check": "business_query"
   }
 }

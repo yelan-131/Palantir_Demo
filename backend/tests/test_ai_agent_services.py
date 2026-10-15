@@ -41,7 +41,8 @@ async def test_mock_provider_is_rejected_by_schema():
 
 @pytest.mark.asyncio
 async def test_agent_returns_confirmed_draft_skill():
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
     result = await run_agent(AgentRequest(message="生成维修工单草稿"), user=_tenant_user())
@@ -56,7 +57,8 @@ async def test_agent_returns_confirmed_draft_skill():
 
 @pytest.mark.asyncio
 async def test_agent_returns_confirmed_draft_after_guided_requirements():
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
     result = await run_agent(AgentRequest(message="为设备 CNC-17 生成维修工单草稿，主轴振动异常，优先级高，48 小时内处理"), user=_tenant_user())
@@ -72,7 +74,8 @@ async def test_agent_returns_confirmed_draft_after_guided_requirements():
 
 @pytest.mark.asyncio
 async def test_agent_continues_pending_action_slot_state():
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
     first = await run_agent(AgentRequest(message="生成维修工单草稿"), user=_tenant_user())
@@ -93,7 +96,8 @@ async def test_agent_continues_pending_action_slot_state():
 
 @pytest.mark.asyncio
 async def test_low_code_adjustment_updates_confirmation_payload():
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
     first = await run_agent(AgentRequest(
@@ -115,7 +119,8 @@ async def test_low_code_adjustment_updates_confirmation_payload():
 
 @pytest.mark.asyncio
 async def test_generic_draft_payload_uses_action_contract_slots():
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
     result = await run_agent(AgentRequest(
@@ -228,7 +233,7 @@ def test_safety_policy_max_tool_steps_is_mirrored_for_runtime_compatibility():
     assert merged["riskPolicy"]["maxToolSteps"] == 2
 
 
-def test_high_risk_confirm_switch_controls_high_risk_confirmation():
+def test_legacy_switch_cannot_remove_high_risk_confirmation():
     from app.services.ai.policies import decide_ai_permission
 
     settings = {
@@ -245,8 +250,8 @@ def test_high_risk_confirm_switch_controls_high_risk_confirmation():
     )
 
     assert decision.allowed is True
-    assert decision.requires_confirmation is False
-    assert decision.audit_required is False
+    assert decision.requires_confirmation is True
+    assert decision.audit_required is True
 
 
 def test_sensitive_payload_masking_redacts_keys_and_inline_secrets():
@@ -306,8 +311,8 @@ async def test_tool_executor_respects_configured_timeout(monkeypatch):
     monkeypatch.setattr(executor, "_execute_action", slow_execute_action)
 
     run = await executor.execute_confirmed_run(
-        {"run_id": "run-test", "status": "confirmed", "actions": [{"skill": "demo.slow", "payload": {}}]},
-        current_user={"sub": "admin"},
+        {"run_id": "run-test", "status": "confirmed", "actions": [{"skill": "demo.slow", "payload": {"_contract": {"tool": "forms.create_dynamic_record_draft"}}}]},
+        current_user={"sub": "admin", "is_admin": True},
         persist_ai_draft=noop_persist,
         update_ai_draft_status=noop_update,
         audit_ai_event=lambda user, event_type, payload: audit_events.append((event_type, payload)),
@@ -578,7 +583,7 @@ def test_prompt_builder_includes_tenant_context_memory_and_evidence():
 
 
 def test_agent_runtime_routes_social_turns_away_from_rag():
-    from app.services.ai.runtime import AgentRuntime
+    from app.services.ai.legacy_runtime import AgentRuntime
     from app.services.ai.intent_router import route_intent
 
     runtime = AgentRuntime()
@@ -628,7 +633,8 @@ async def test_semantic_planner_cleans_form_name_particle(monkeypatch):
 @pytest.mark.asyncio
 async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
     from app.services.ai import semantic_planner
-    from app.services.ai.orchestrator import run_agent
+    from app.services.ai.legacy_runtime import AgentRuntime
+    run_agent = AgentRuntime().run
     from app.services.ai.schemas import AIProviderConfig, AgentRequest
 
     monkeypatch.setattr(
@@ -676,7 +682,7 @@ async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_knowledge_answer_requires_model_configuration():
-    from app.services.ai.runtime import AgentRuntime
+    from app.services.ai.legacy_runtime import AgentRuntime
     from app.services.ai.schemas import AIProviderConfig
     from app.services.ai.tenant_profile import TenantProfile
 

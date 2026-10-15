@@ -78,7 +78,9 @@ class BuiltinHooks:
 
             if decision == PermissionDecision.DENY:
                 return HookResult(action="abort", reason=reason)
-            return None  # ALLOW or ASK — continue normally
+            if decision == PermissionDecision.ASK and not payload.get("confirmed"):
+                return HookResult(action="ask", reason=reason)
+            return None
 
         return hook
 

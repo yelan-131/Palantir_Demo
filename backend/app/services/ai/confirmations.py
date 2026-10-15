@@ -18,6 +18,11 @@ def _user_key(user: dict[str, Any] | None) -> str:
     return str(user.get("sub") or user.get("username") or user.get("uid") or "unknown")
 
 
+def _store_user_key(user: dict[str, Any] | None) -> str:
+    key = _user_key(user)
+    return f"tenant:{user['tenant_id']}:{key}" if user and user.get("tenant_id") is not None else key
+
+
 def _prune_stale_confirmations(max_entries: int = 2000) -> None:
     """Keep the legacy in-memory dict bounded: drop expired/used tokens first."""
     if len(CONFIRMATIONS) < max_entries:
@@ -90,6 +95,7 @@ def create_confirmation_payload(
         "confirmation_token": token,
         "expires_at": expires_at.isoformat(),
         "user": user_k,
+        "tenant_id": user.get("tenant_id") if user else None,
         "risk_level": risk_level,
         "actions": actions,
         "evidence": evidence or [],
@@ -111,6 +117,8 @@ def verify_confirmation_token(token: str, *, user: dict[str, Any] | None = None)
     if datetime.fromisoformat(record["expires_at"]) < datetime.now():
         record["status"] = "expired"
         raise ValueError("Confirmation token has expired")
+    if user and record.get("tenant_id") != user.get("tenant_id"):
+        raise ValueError("Confirmation token belongs to a different tenant")
     if user and record["user"] != _user_key(user):
         raise ValueError("Confirmation token does not belong to the current user")
     return record
@@ -141,7 +149,7 @@ async def async_create_confirmation_payload(
     store = _get_store()
     user_k = _user_key(user)
     payload: dict[str, Any] = {
-        "user_key": user_k,
+        "user_key": _store_user_key(user),
         "risk_level": risk_level,
         "actions": actions,
         "evidence": evidence or [],
@@ -154,6 +162,7 @@ async def async_create_confirmation_payload(
         "confirmation_token": token,
         "expires_at": result.get("expires_at", ""),
         "user": user_k,
+        "tenant_id": user.get("tenant_id") if user else None,
         "risk_level": risk_level,
         "actions": actions,
         "evidence": evidence or [],
@@ -173,7 +182,7 @@ async def async_verify_confirmation_token(
 ) -> dict[str, Any]:
     """Async variant that delegates to the active ConfirmationStore."""
     store = _get_store()
-    result = await store.verify(token, user_key=_user_key(user))
+    result = await store.verify(token, user_key=_store_user_key(user))
     if not result.get("valid"):
         raise ValueError(result.get("reason", "Confirmation token is invalid"))
     return result["payload"]
@@ -184,7 +193,7 @@ async def async_consume_confirmation_token(
 ) -> dict[str, Any]:
     """Async variant that delegates to the active ConfirmationStore."""
     store = _get_store()
-    result = await store.consume(token, user_key=_user_key(user))
+    result = await store.consume(token, user_key=_store_user_key(user))
     if not result.get("valid"):
         raise ValueError(result.get("reason", "Confirmation token is invalid"))
     # Sync the legacy dict so callers that inspect CONFIRMATIONS see the

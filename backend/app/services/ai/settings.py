@@ -1,9 +1,4 @@
-"""Shared AI settings helpers.
-
-The demo still keeps settings in memory, but all AI entrypoints should read
-through this module so runtime, knowledge chat, and provider tests do not
-import API modules from each other.
-"""
+"""Database-authoritative AI settings with one runtime cache and policy schema."""
 
 from __future__ import annotations
 
@@ -12,6 +7,7 @@ import re
 from typing import Any
 
 from sqlalchemy import select, text
+from urllib.parse import urlparse
 
 from app.core.logging import get_logger
 
@@ -101,10 +97,8 @@ DEFAULT_SAFETY_POLICY: dict[str, Any] = {
     "sensitiveMasking": True,
     "blockSecretMemory": True,
     "highRiskConfirm": True,
-    # "pipeline" keeps the deterministic operation state machine;
-    # "model" / "tool_use" routes requests to the LLM-driven tool_use loop
-    # (requires a configured external provider; falls back to pipeline).
-    "agentLoopMode": "pipeline",
+    # The public runtime always uses the official Harness kernel.
+    "agentLoopMode": "harness",
     "maxToolSteps": 5,
     "toolTimeoutSeconds": 30,
     "persistConfirmations": False,
@@ -139,6 +133,12 @@ DEEPSEEK_DEFAULTS: dict[str, str] = {
 
 AI_SYSTEM_SETTINGS: dict[str, Any] = {
     "aiEnabled": True,
+    "qaEnabled": True,
+    "assistEnabled": True,
+    "temperature": "strict",
+    "maxTokens": 2048,
+    "retryCount": 2,
+    "timeoutSeconds": 30,
     "provider": "glm",
     "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
     "apiKey": "",
@@ -163,6 +163,16 @@ AI_SYSTEM_SETTINGS: dict[str, Any] = {
     "compactionPolicy": DEFAULT_COMPACTION_POLICY,
     "safetyPolicy": DEFAULT_SAFETY_POLICY,
 }
+
+
+try:
+    from app.config import settings as _environment
+    for _key, _env in {"provider": "AI_PROVIDER", "baseUrl": "AI_BASE_URL", "chatModel": "AI_CHAT_MODEL", "reasoningModel": "AI_REASONING_MODEL", "embeddingModel": "AI_EMBEDDING_MODEL", "visionModel": "AI_VISION_MODEL", "timeoutSeconds": "AI_TIMEOUT_SECONDS"}.items():
+        _value = getattr(_environment, _env, None)
+        if _value:
+            AI_SYSTEM_SETTINGS[_key] = _value
+except ImportError:
+    pass
 
 
 def get_ai_settings() -> dict[str, Any]:
@@ -242,30 +252,42 @@ def settings_to_provider_config(settings_data: dict[str, Any] | None = None) -> 
     if runtime_settings is not None:
         env_api_key = getattr(runtime_settings, "AI_API_KEY", "") or getattr(runtime_settings, "OPENAI_API_KEY", "")
         env_base_url = getattr(runtime_settings, "AI_BASE_URL", "")
+        if not getattr(runtime_settings, "AI_API_KEY", "") and getattr(runtime_settings, "OPENAI_API_KEY", "") and getattr(runtime_settings, "AI_PROVIDER", "glm") not in {"openai", "openai-compatible", "azure-openai"}:
+            env_base_url = "https://api.openai.com/v1"
         env_chat_model = getattr(runtime_settings, "AI_CHAT_MODEL", "") or getattr(runtime_settings, "OPENAI_MODEL", "")
         env_reasoning_model = getattr(runtime_settings, "AI_REASONING_MODEL", "")
         env_embedding_model = getattr(runtime_settings, "AI_EMBEDDING_MODEL", "")
         env_vision_model = getattr(runtime_settings, "AI_VISION_MODEL", "")
         env_timeout_seconds = int(getattr(runtime_settings, "AI_TIMEOUT_SECONDS", 30) or 30)
 
+    base_url = data.get("baseUrl") or data.get("base_url") or env_base_url or ""
+    # Environment credentials are scoped to their configured server origin;
+    # switching provider/URL must not send an old secret to a new service.
+    try:
+        target, source = urlparse(base_url), urlparse(env_base_url)
+        env_key_allowed = (target.scheme, target.hostname, target.port) == (source.scheme, source.hostname, source.port)
+    except ValueError:
+        env_key_allowed = False
     return AIProviderConfig(
         provider=data.get("provider") or "glm",
-        base_url=data.get("baseUrl") or data.get("base_url") or env_base_url or "",
-        api_key=data.get("apiKey") or data.get("api_key") or env_api_key,
+        base_url=base_url,
+        api_key=data.get("apiKey") or data.get("api_key") or (env_api_key if env_key_allowed else ""),
         organization=data.get("organization") or "",
         project=data.get("project") or "",
         chat_model=data.get("chatModel") or data.get("chat_model") or env_chat_model or "glm-5.1",
-        reasoning_model=data.get("reasoningModel") or data.get("reasoning_model") or env_reasoning_model or "glm-5.1",
+        reasoning_model=data.get("reasoningModel") or data.get("reasoning_model") or data.get("chatModel") or data.get("chat_model") or env_reasoning_model or "glm-5.1",
         embedding_model=data.get("embeddingModel") or data.get("embedding_model") or env_embedding_model or "embedding-3",
         vision_model=data.get("visionModel") or data.get("vision_model") or env_vision_model or "glm-4v-plus",
         timeout_seconds=int(data.get("timeoutSeconds") or data.get("timeout_seconds") or env_timeout_seconds),
+        retry_count=int(data.get("retryCount", 2)),
     )
 
 
 def mask_settings(settings_data: dict[str, Any]) -> dict[str, Any]:
     masked = {**settings_data}
-    if masked.get("apiKey"):
-        masked["apiKey"] = "********"
+    for key in ("apiKey", "api_key"):
+        if masked.get(key):
+            masked[key] = "********"
     return masked
 
 
@@ -280,26 +302,36 @@ def _normalize_provider_defaults(settings_data: dict[str, Any]) -> dict[str, Any
         settings_data["provider"] = "glm"
         provider = "glm"
     if provider == "deepseek":
-        base_url = str(settings_data.get("baseUrl") or settings_data.get("base_url") or "")
-        if not base_url or "bigmodel.cn" in base_url or "api.openai.com" in base_url:
-            settings_data["baseUrl"] = DEEPSEEK_DEFAULTS["baseUrl"]
-        chat_model = str(settings_data.get("chatModel") or settings_data.get("chat_model") or "")
-        if not chat_model or chat_model.startswith(("glm-", "GLM-", "gpt-")):
-            settings_data["chatModel"] = DEEPSEEK_DEFAULTS["chatModel"]
-        reasoning_model = str(settings_data.get("reasoningModel") or settings_data.get("reasoning_model") or "")
-        if not reasoning_model or reasoning_model.startswith(("glm-", "GLM-", "gpt-")):
-            settings_data["reasoningModel"] = DEEPSEEK_DEFAULTS["reasoningModel"]
+        for key, value in DEEPSEEK_DEFAULTS.items():
+            if not settings_data.get(key):
+                settings_data[key] = value
     return settings_data
 
 
 def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
-    clean_incoming = {**incoming}
+    clean_incoming = deepcopy(incoming)
+    for snake, camel in {"api_key": "apiKey", "base_url": "baseUrl", "chat_model": "chatModel", "reasoning_model": "reasoningModel", "embedding_model": "embeddingModel", "vision_model": "visionModel", "timeout_seconds": "timeoutSeconds"}.items():
+        if snake in clean_incoming:
+            clean_incoming[camel] = clean_incoming.pop(snake)
     if clean_incoming.get("apiKey") == "********" or clean_incoming.get("api_key") == "********":
         clean_incoming.pop("apiKey", None)
         clean_incoming.pop("api_key", None)
 
-    merged = {**(existing or AI_SYSTEM_SETTINGS), **clean_incoming}
+    merged = {**deepcopy(existing if existing is not None else AI_SYSTEM_SETTINGS), **clean_incoming}
+    if "provider" in clean_incoming and clean_incoming["provider"] not in SUPPORTED_PROVIDER_NAMES:
+        raise ValueError("不支持的模型服务商")
+    existing_data = existing if existing is not None else AI_SYSTEM_SETTINGS
+    if clean_incoming.get("provider") == "deepseek" and existing_data.get("provider") != "deepseek":
+        for key, value in DEEPSEEK_DEFAULTS.items():
+            if key not in clean_incoming:
+                merged[key] = value
     merged = _normalize_provider_defaults(merged)
+    existing_data = existing if existing is not None else AI_SYSTEM_SETTINGS
+    if not clean_incoming.get("apiKey") and merged.get("apiKey"):
+        previous_url = urlparse(str(existing_data.get("baseUrl") or ""))
+        next_url = urlparse(str(merged.get("baseUrl") or ""))
+        if (previous_url.scheme, previous_url.netloc.lower()) != (next_url.scheme, next_url.netloc.lower()):
+            merged["apiKey"] = ""
     merged.setdefault("guestAccess", "disabled")
     merged.setdefault("rolePolicies", DEFAULT_ROLE_POLICIES)
     merged.setdefault("riskPolicy", {"low": "allow", "medium": "confirm", "high": "confirm_and_audit", "critical": "blocked"})
@@ -309,12 +341,121 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
     merged["memoryPolicy"] = _merge_nested(DEFAULT_MEMORY_POLICY, merged.get("memoryPolicy"))
     merged["compactionPolicy"] = _merge_nested(DEFAULT_COMPACTION_POLICY, merged.get("compactionPolicy"))
     merged["safetyPolicy"] = _merge_nested(DEFAULT_SAFETY_POLICY, merged.get("safetyPolicy"))
+    for key in ("highRiskConfirm", "sensitiveMasking"):
+        if key in clean_incoming and key not in (clean_incoming.get("safetyPolicy") or {}):
+            merged["safetyPolicy"][key] = clean_incoming[key]
+        merged.pop(key, None)
+    for key in ("ragEnabled", "topK", "similarityThreshold"):
+        target = {"ragEnabled": "enabled"}.get(key, key)
+        if key in clean_incoming and target not in (clean_incoming.get("ragPolicy") or {}):
+            merged["ragPolicy"][target] = clean_incoming[key]
+        merged.pop(key, None)
     if merged["safetyPolicy"].get("maxToolSteps") not in (None, ""):
         merged.setdefault("riskPolicy", {})["maxToolSteps"] = merged["safetyPolicy"].get("maxToolSteps")
+    merged["safetyPolicy"]["agentLoopMode"] = "harness"
+    for deprecated in ("proactiveEnabled", "streaming", "dailyLimit", "userDailyLimit", "knowledgeScopes", "tools", "retentionDays"):
+        merged.pop(deprecated, None)
+    validate_ai_settings(merged)
     return merged
 
 
-async def load_persisted_ai_settings() -> dict[str, Any] | None:
+def validate_ai_settings(data: dict[str, Any]) -> None:
+    for key in ("aiEnabled", "qaEnabled", "assistEnabled", "auditEnabled", "recordToolCalls"):
+        if key in data and not isinstance(data[key], bool):
+            raise ValueError(f"{key} 必须是布尔值")
+    for group in ("memoryPolicy", "ragPolicy", "compactionPolicy"):
+        if "enabled" in (data.get(group) or {}) and not isinstance(data[group]["enabled"], bool):
+            raise ValueError(f"{group}.enabled 必须是布尔值")
+    for key in ("sensitiveMasking", "blockSecretMemory", "highRiskConfirm"):
+        if key in (data.get("safetyPolicy") or {}) and not isinstance(data["safetyPolicy"][key], bool):
+            raise ValueError(f"safetyPolicy.{key} 必须是布尔值")
+    for key in ("domains", "forbiddenActions"):
+        if key in data and (not isinstance(data[key], list) or not all(isinstance(item, str) for item in data[key])):
+            raise ValueError(f"{key} 必须是文本数组")
+    policies = data.get("rolePolicies", [])
+    if not isinstance(policies, list):
+        raise ValueError("rolePolicies 必须是数组")
+    for role in policies:
+        if not isinstance(role, dict) or not isinstance(role.get("role"), str) or not isinstance(role.get("enabled", True), bool):
+            raise ValueError("角色策略格式无效")
+        if role.get("agentMode", "confirm") not in {"off", "readonly", "draft", "confirm", "save_after_confirm"}:
+            raise ValueError("角色执行模式无效")
+        for key in ("capabilities", "domains"):
+            if not isinstance(role.get(key, []), list) or not all(isinstance(item, str) for item in role.get(key, [])):
+                raise ValueError(f"角色的 {key} 必须是文本数组")
+    if data.get("agentMode", "draft") not in {"off", "readonly", "draft", "confirm"}:
+        raise ValueError("Agent 执行模式无效")
+    policy = data.get("safetyPolicy") or {}
+    if policy.get("agentLoopMode", "pipeline") not in {"harness"}:
+        raise ValueError("Agent 推理架构无效")
+    for key, low, high in [("maxTokens", 32, 32768), ("timeoutSeconds", 1, 180), ("retryCount", 0, 3)]:
+        try:
+            number = int(data.get(key, low))
+        except (ValueError, TypeError):
+            raise ValueError(f"{key} 必须是整数") from None
+        if not low <= number <= high:
+            raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
+    for key, low, high in [("maxToolSteps", 1, 20), ("toolTimeoutSeconds", 1, 180)]:
+        try:
+            number = int(policy.get(key, DEFAULT_SAFETY_POLICY[key]))
+        except (ValueError, TypeError):
+            raise ValueError(f"{key} 必须是整数") from None
+        if not low <= number <= high:
+            raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
+    for group, ranges in {
+        "contextPolicy": {"recentMessageLimit": (2, 50), "maxContextTokens": (1000, 200000)},
+        "ragPolicy": {"topK": (1, 20), "maxEvidenceChars": (200, 5000)},
+        "memoryPolicy": {"recallLimit": (0, 20), "retentionDays": (1, 3650)},
+        "compactionPolicy": {"triggerMessageCount": (2, 200), "triggerTokenCount": (1000, 200000)},
+    }.items():
+        for key, (low, high) in ranges.items():
+            value = (data.get(group) or {}).get(key)
+            if value is None:
+                continue
+            try:
+                parsed = int(value)
+            except (ValueError, TypeError):
+                raise ValueError(f"{group}.{key} 必须是整数") from None
+            if not low <= parsed <= high:
+                raise ValueError(f"{group}.{key} 必须在 {low} 到 {high} 之间")
+    try:
+        threshold = float((data.get("ragPolicy") or {}).get("similarityThreshold", 0.15))
+    except (ValueError, TypeError):
+        raise ValueError("相似度阈值必须是 0 到 1 的数字") from None
+    if not 0 <= threshold <= 1:
+        raise ValueError("相似度阈值必须是 0 到 1 的数字")
+    url = data.get("baseUrl") or ""
+    if url and (urlparse(url).scheme not in {"http", "https"} or not urlparse(url).hostname):
+        raise ValueError("Base URL 必须是有效的 HTTP(S) 地址")
+    if data.get("temperature", "strict") not in {"strict", "balanced", "creative"}:
+        raise ValueError("回答风格无效")
+
+
+def chat_options(settings_data: dict[str, Any], *, model: str | None = None):
+    from .schemas import ChatOptions
+    return ChatOptions(model=model, max_tokens=int(settings_data.get("maxTokens", 2048)), temperature={"strict": 0.2, "balanced": 0.5, "creative": 0.8}.get(settings_data.get("temperature"), 0.2))
+
+
+def runtime_status(settings_data: dict[str, Any]) -> dict[str, Any]:
+    config = settings_to_provider_config(settings_data)
+    issues = []
+    if not config.api_key:
+        issues.append("未配置 API Key")
+    host = urlparse(config.base_url).hostname
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        issues.append("回环地址指向后端容器自身；宿主机服务请使用 host.docker.internal")
+    if config.chat_model == "local-disabled":
+        issues.append("当前聊天模型是 local-disabled，无法连接真实模型")
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        sdk_version = version("deepseek-harness-sdk")
+    except PackageNotFoundError:
+        sdk_version = None
+        issues.append("官方 DeepSeek Harness SDK 尚未安装")
+    return {"engine": "deepseek-harness", "sdkVersion": sdk_version, "providerConfigured": bool(config.api_key and config.chat_model and config.chat_model != "local-disabled"), "agentLoopMode": safety_policy_snapshot(settings_data)["agentLoopMode"], "agentMode": settings_data.get("agentMode", "draft"), "issues": issues}
+
+
+async def load_persisted_ai_settings(*, strict: bool = False) -> dict[str, Any] | None:
     try:
         from app.core.db import db_session
         from app.models.relational import SystemSetting
@@ -334,6 +475,8 @@ async def load_persisted_ai_settings() -> dict[str, Any] | None:
             return merged
     except Exception as exc:  # noqa: BLE001 - settings should fall back to env/in-memory
         logger.warning("AI settings DB load failed; using runtime defaults: %s", exc)
+        if strict:
+            raise RuntimeError("AI 设置读取失败，数据库暂不可用") from exc
         return None
 
 

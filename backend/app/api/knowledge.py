@@ -1066,19 +1066,14 @@ async def _generate_knowledge_agent_answer(
     tenant_id: int | None = None,
     memory: list[dict[str, Any]] | None = None,
     intent: str | None = None,
+    user: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     await load_persisted_ai_settings()
-    return await agent_runtime.answer_knowledge(
-        query=query,
-        title=title,
-        evidence=evidence,
-        history=history,
-        tenant_profile=tenant_profile,
-        tenant_id=tenant_id,
-        provider_config=settings_to_provider_config(settings_snapshot()),
-        memory=memory or [],
-        intent=intent,
-    )
+    from app.services.ai.harness_runtime import harness_runtime
+    from app.services.ai.schemas import AgentRequest
+    result = await harness_runtime.run(AgentRequest(message=query, context={"surface": "knowledge", "document_title": title, "evidence": evidence, "memories": memory or [], "recentMessages": [{"role": item.role, "content": item.content} for item in history], "conversation_id": conversation_id} ), user=user)
+    return result.answer, "deepseek-harness", {"mode": "deepseek-harness", "evidence_count": len(evidence), "memory_count": len(memory or [])}
 
 
 def _directory_document_count(directory_id: str, tenant_id: int) -> int:
@@ -1298,6 +1293,16 @@ async def send_agent_message(
     body: KnowledgeAgentMessageBody,
     user: dict = Depends(get_current_user),
 ):
+    await load_persisted_ai_settings()
+    from app.services.ai.policies import decide_ai_permission
+    from app.services.ai.settings import settings_snapshot
+    effective_settings = settings_snapshot()
+    decision = decide_ai_permission(user, effective_settings, "qa")
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason)
+    rag_policy = effective_settings.get("ragPolicy") or {}
+    rag_enabled = rag_policy.get("enabled", True)
+    top_k = max(1, min(int(rag_policy.get("topK", 5)), 20))
     content = body.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Message content cannot be empty")
@@ -1325,15 +1330,15 @@ async def send_agent_message(
             )
         ).scalars().all()
         intent = agent_runtime.classify_knowledge_intent(content)
-        evidence = await _search_knowledge_payload_async(content, limit=5, document_id=conversation.document_id, tenant_id=tenant_id) if intent == "knowledge" else []
-        if intent == "knowledge" and (
+        evidence = await _search_knowledge_payload_async(content, limit=top_k, document_id=conversation.document_id, tenant_id=tenant_id) if intent == "knowledge" and rag_enabled else []
+        if intent == "knowledge" and rag_enabled and (
             not evidence or any(term in content for term in ["document", "content", "contains", "summary", "summarize", "what is", "文档", "内容", "包含", "总结", "概括"])
         ):
             by_id = {item.get("id") or item.get("chunk_id") or item.get("source_location"): item for item in evidence}
             for item in await _document_context_payload_async(conversation.document_id, tenant_id):
                 key = item.get("id") or item.get("chunk_id") or item.get("source_location")
                 by_id.setdefault(key, item)
-            evidence = list(by_id.values())[:5]
+            evidence = list(by_id.values())[:top_k]
         memory_context = await memory_service.retrieve_context(
             session,
             tenant_id=tenant_id,
@@ -1342,8 +1347,8 @@ async def send_agent_message(
             page=conversation.page,
             document_id=conversation.document_id,
             query=content,
-            limit=6,
-        )
+            limit=int((effective_settings.get("memoryPolicy") or {}).get("recallLimit", 5)),
+        ) if (effective_settings.get("memoryPolicy") or {}).get("enabled", False) else []
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         user_message = AIMessage(
             tenant_id=tenant_id,
@@ -1363,6 +1368,8 @@ async def send_agent_message(
             tenant_id=tenant_id,
             memory=memory_context,
             intent=intent,
+            user=user,
+            conversation_id=conversation_id,
         )
         assistant_message = AIMessage(
             tenant_id=tenant_id,
@@ -1494,6 +1501,7 @@ async def upload_knowledge_asset(
     owner_user_id: str = "demo-user",
     user: dict = Depends(get_current_user),
 ):
+    await load_persisted_ai_settings(strict=True)
     tenant_id = current_tenant_id(user)
     content = await file.read()
     result = ingest_asset(
@@ -1726,6 +1734,7 @@ async def save_document_ocr_corrections(document_id: str, body: OcrCorrectionBod
 
 @router.post("/documents/{document_id}/ocr/enhance")
 async def enhance_document_ocr(document_id: str, user: dict = Depends(get_current_user)):
+    await load_persisted_ai_settings(strict=True)
     tenant_id = current_tenant_id(user)
     document = _ingested_document_for_tenant(document_id, tenant_id)
     if not document:

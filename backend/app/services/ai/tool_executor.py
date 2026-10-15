@@ -15,6 +15,7 @@ from .form_analysis import analyze_form_records
 from .form_record_tools import get_form_record
 from .low_code_tools import execute_add_form_field, execute_create_form_definition
 from .skills import get_skill
+from .settings import settings_snapshot
 from .tool_envelope import tool_execution_envelope
 
 
@@ -133,6 +134,12 @@ class AgentToolExecutor:
         audit_ai_event: AuditEvent | None,
         source_draft_id: str,
     ) -> dict[str, Any]:
+        harness_tool = payload.get("_harness_tool")
+        if harness_tool:
+            from .tool_handlers import dispatch_tool_handler
+            result = await dispatch_tool_handler(str(harness_tool), {k: v for k, v in payload.items() if not k.startswith("_")}, current_user=current_user, settings=settings_snapshot())
+            return {"tool": harness_tool, "status": "failed" if result.get("status") in {"not_implemented", "failed", "error"} else "completed", "result": result}
+
         if skill == "low_code.create_form_definition":
             async with db_session() as session:
                 result = await execute_create_form_definition(session, user=current_user, payload=payload)

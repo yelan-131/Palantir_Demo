@@ -1,0 +1,45 @@
+# This platform profile only exposes authenticated business tools through MCP.
+# The official SDK-minimal kernel owns the loop and durable session log.
+- id: llm-deepseek
+  disabled: true
+- id: deepseek-llm-api-extensions
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: pty
+  disabled: true
+- id: sandbox-policy
+  disabled: true
+- insert:
+  - id: platform-llm
+    name: '@deepseek-ai/dsh-llm-pi-ai'
+    config: !!js JSON.parse(process.env.MF_DSH_PROVIDER_CONFIG)
+  - id: platform-tools
+    name: '@deepseek-ai/dsh-mcp-client'
+    disabled: !!js '!process.env.MF_DSH_BRIDGE_TOKEN'
+    config:
+      serverName: platform
+      transport: streamable-http
+      url: !!js process.env.MF_DSH_BRIDGE_URL
+      headers:
+        Authorization: !!js '`Bearer ${process.env.MF_DSH_BRIDGE_TOKEN}`'
+      failOnStartupError: true
+      toolCallTimeoutMs: !!js Number(process.env.MF_DSH_TOOL_TIMEOUT_MS ?? 30000)
+  - id: platform-token-meter
+    name: '@deepseek-ai/dsh-token-meter'
+  - id: platform-compaction
+    name: '@deepseek-ai/dsh-compaction-basic'
+    disabled: !!js process.env.MF_DSH_COMPACTION_ENABLED !== 'true'
+    config:
+      thresholdRatio: 0.8
+      retainRatio: 0.16

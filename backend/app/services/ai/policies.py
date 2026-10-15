@@ -43,10 +43,6 @@ def _role_names(user: dict[str, Any]) -> set[str]:
 
 
 def _risk_action(settings: dict[str, Any], risk_level: str) -> str:
-    safety_policy = settings.get("safetyPolicy") or {}
-    high_risk_confirm = bool(settings.get("highRiskConfirm", True)) and bool(safety_policy.get("highRiskConfirm", True))
-    if risk_level == "high" and not high_risk_confirm:
-        return "allow"
     return (settings.get("riskPolicy") or {}).get(risk_level, "confirm" if risk_level in {"medium", "high"} else "allow")
 
 
@@ -59,10 +55,28 @@ def decide_ai_permission(
     domain: str | None = None,
     risk_level: str = "low",
 ) -> AIPermissionDecision:
+    reason = None
+    if not settings.get("aiEnabled", True):
+        reason = "AI 已关闭"
+    elif settings.get("agentMode", "draft") == "off":
+        reason = "Agent 已关闭"
+    elif capability == "rag" and not (settings.get("ragPolicy") or {}).get("enabled", True):
+        reason = "知识检索已关闭"
+    elif capability in {"qa", "rag", "business_query", "report"} and not settings.get("qaEnabled", True):
+        reason = "问答与查询能力已关闭"
+    elif capability in {"draft", "save_draft", "workflow", "config"} and not settings.get("assistEnabled", True):
+        reason = "辅助操作能力已关闭"
+    elif settings.get("agentMode") == "readonly" and capability in {"draft", "save_draft", "workflow", "config"}:
+        reason = "只读模式不允许生成或执行操作"
+    elif domain and "domains" in settings and domain not in settings["domains"]:
+        reason = "业务域未开放"
+    if reason:
+        return AIPermissionDecision(allowed=False, reason=reason, capability=capability)
+
     if skill and (skill in FORBIDDEN_SKILLS or skill in set(settings.get("forbiddenActions", []))):
         return AIPermissionDecision(allowed=False, reason="Action is disabled by AI safety policy", capability=capability)
 
-    if user.get("is_admin"):
+    if user.get("is_admin") and not settings.get("rolePolicies"):
         action = _risk_action(settings, risk_level)
         return AIPermissionDecision(
             allowed=action != "blocked",
@@ -85,6 +99,9 @@ def decide_ai_permission(
             continue
         policy_domains = set(policy.get("domains", []))
         if domain and policy_domains and domain not in policy_domains:
+            continue
+        role_mode = policy.get("agentMode", "confirm")
+        if role_mode == "off" or (role_mode == "readonly" and capability in {"draft", "save_draft", "workflow", "config"}):
             continue
         action = _risk_action(settings, risk_level)
         return AIPermissionDecision(
@@ -118,3 +135,42 @@ def decide_skill_permission(user: dict[str, Any], settings: dict[str, Any], acti
         domain=skill.domain if skill else None,
         risk_level=action.risk_level,
     )
+
+
+def decide_tool_permission(user: dict[str, Any], settings: dict[str, Any], tool_name: str, *, skill_name: str | None = None) -> AIPermissionDecision:
+    """Mandatory gate shared by planning, both loops and confirmed execution."""
+    from .tool_registry import get_tool
+    from .permission_resolver import PermissionDecision, PermissionResolver, build_default_rules, load_permission_rules
+
+    tool = get_tool(tool_name)
+    if not tool:
+        return AIPermissionDecision(allowed=False, reason="Tool is not registered", capability="qa")
+    skill = get_skill(skill_name) if skill_name else None
+    domain = tool.domain or (skill.domain if skill else None)
+    if not domain and tool.permission_check == "config":
+        domain = "low-code"
+    elif not domain and tool.permission_check == "workflow":
+        domain = "workflow"
+    if domain in {"knowledge", "analysis", "dynamic-form"}:
+        domain = None
+    decision = decide_ai_permission(user, settings, tool.permission_check, skill=skill_name or tool_name, domain=domain, risk_level=tool.risk_level)
+    if not decision.allowed:
+        return decision
+    if tool_name in settings.get("forbiddenActions", []) or tool.handler_key in settings.get("forbiddenActions", []):
+        decision.allowed, decision.reason = False, "Tool is disabled by AI safety policy"
+        return decision
+    if tool.side_effect != "read":
+        modes = [settings.get("agentMode", "draft")]
+        modes.extend(p.get("agentMode", "confirm") for p in settings.get("rolePolicies", []) if p.get("role") in _role_names(user))
+        if "readonly" in modes or "off" in modes or ("draft" in modes and tool.side_effect != "draft_write"):
+            decision.allowed, decision.reason = False, "当前执行模式仅允许只读工具或草稿写入"
+            return decision
+        decision.requires_confirmation = True
+    rules = PermissionResolver(build_default_rules() + load_permission_rules(settings))
+    resolved, reason = rules.resolve(tool_name, user, tool.risk_level, domain)
+    if resolved == PermissionDecision.DENY:
+        decision.allowed, decision.reason = False, reason
+    elif resolved == PermissionDecision.ASK:
+        decision.requires_confirmation = True
+        decision.reason = reason
+    return decision

@@ -1,0 +1,22 @@
+/* Scoped layout for the unified Harness settings; other admin panels are unaffected. */
+.ai-settings-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color, #e6e8eb);
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+}
+.ai-platform-form .ai-policy-toggle-list { grid-template-columns: 1fr; }
+.ai-platform-form .ai-policy-toggle-item > span { white-space: normal; overflow: visible; }
+.ai-platform-form .ai-policy-toggle-item .ant-tag { margin: 0; }
+.ai-platform-form .ai-engine-description { grid-column: 1 / -1; }
+.ai-platform-form .ai-role-policy-row { grid-template-columns: minmax(170px, 1fr) minmax(180px, 1.5fr) auto; }
+.ai-platform-form .ant-table-wrapper { overflow-x: auto; }
+@media (max-width: 980px) {
+  .ai-settings-toolbar { align-items: flex-start; flex-direction: column; }
+  .ai-platform-form .ai-role-policy-row { grid-template-columns: 1fr; }
+}

@@ -22,6 +22,12 @@ AgentItemType = Literal[
 ]
 
 
+def agent_response_status(response: Any) -> str:
+    if any(item.get("type") == "error" and item.get("status") == "failed" for item in response.items):
+        return "failed"
+    return "waiting_confirmation" if response.requires_confirmation else "completed"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

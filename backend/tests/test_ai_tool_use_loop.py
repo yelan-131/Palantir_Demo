@@ -165,7 +165,7 @@ async def test_tool_use_loop_freezes_side_effect_tool(monkeypatch):
     response = await runner.run(
         AgentRequest(message="帮我创建一个表单"),
         user=_user(),
-        settings={"safetyPolicy": {"maxToolSteps": 5}},
+        settings={"agentMode": "confirm", "safetyPolicy": {"maxToolSteps": 5}},
         config=_config(),
     )
 
@@ -274,7 +274,7 @@ async def test_tool_use_loop_stops_when_budget_exceeded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_runtime_dispatches_to_tool_use_loop_when_enabled(monkeypatch):
-    from app.services.ai import runtime as runtime_module
+    from app.services.ai import legacy_runtime as runtime_module
     from app.services.ai import tool_use_loop
     from app.services.ai.schemas import AgentRequest, AgentResponse
 

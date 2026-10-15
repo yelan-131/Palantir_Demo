@@ -19,6 +19,7 @@ import httpx
 
 from app.config import settings
 from app.core.logging import get_logger
+from .settings import settings_snapshot, settings_to_provider_config
 
 logger = get_logger(__name__)
 
@@ -211,26 +212,29 @@ def extract_pdf_text(file_name: str, content: bytes) -> str:
     return "\n".join(parts)
 
 
-def _vision_url() -> str:
-    base_url = (settings.AI_BASE_URL or "").strip()
+def _vision_url(config=None) -> str:
+    config = config or settings_to_provider_config(settings_snapshot())
+    base_url = (config.base_url or "").strip()
     if not base_url:
-        if settings.AI_PROVIDER == "glm":
+        if config.provider == "glm":
             base_url = "https://open.bigmodel.cn/api/paas/v4"
         else:
-            raise RuntimeError(f"{settings.AI_PROVIDER} base URL is not configured")
+            raise RuntimeError(f"{config.provider} base URL is not configured")
     if base_url.endswith("/chat/completions"):
         return base_url
     return urljoin(f"{base_url.rstrip('/')}/", "chat/completions")
 
 
 def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | None:
-    api_key = settings.AI_API_KEY or settings.OPENAI_API_KEY
-    if not api_key:
+    effective = settings_snapshot()
+    config = settings_to_provider_config(effective)
+    api_key = config.api_key
+    if not effective.get("aiEnabled", True) or config.vision_model == "disabled" or not api_key:
         return None
     mime_type = mimetypes.guess_type(file_name)[0] or "image/png"
     image_url = f"data:{mime_type};base64,{base64.b64encode(content).decode('ascii')}"
     payload = {
-        "model": settings.AI_VISION_MODEL,
+        "model": config.vision_model,
         "messages": [
             {
                 "role": "user",
@@ -251,9 +255,9 @@ def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | 
         "stream": False,
     }
     try:
-        with httpx.Client(timeout=settings.AI_TIMEOUT_SECONDS) as client:
+        with httpx.Client(timeout=config.timeout_seconds) as client:
             response = client.post(
-                _vision_url(),
+                _vision_url(config),
                 json=payload,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             )
@@ -261,7 +265,7 @@ def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | 
         data = response.json()
         markdown = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         if markdown:
-            return {"markdown": markdown, "model": data.get("model") or settings.AI_VISION_MODEL, "usage": data.get("usage") or {}}
+            return {"markdown": markdown, "model": data.get("model") or config.vision_model, "usage": data.get("usage") or {}}
     except Exception as exc:  # noqa: BLE001
         logger.warning("Vision OCR enhancement skipped for %s: %s", file_name, exc)
         return {"error": str(exc)}

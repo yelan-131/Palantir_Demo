@@ -13617,3 +13617,18 @@ button {
     justify-content: flex-start;
   }
 }
+
+/* Only the initial arrival from a successful login fades in. */
+.app-shell.login-arrival { animation: workspace-login-arrival 200ms ease-out both; }
+@keyframes workspace-login-arrival { from { opacity: .25; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .app-shell.login-arrival { animation: none; } }
+
+/* Snapshot crossfade keeps a complete page visible throughout the login handoff. */
+html[data-login-transition="active"]::view-transition-group(root) { animation-duration: 260ms; }
+html[data-login-transition="active"]::view-transition-old(root) { animation: login-snapshot-out 260ms cubic-bezier(.22,1,.36,1) both; }
+html[data-login-transition="active"]::view-transition-new(root) { animation: login-snapshot-in 260ms cubic-bezier(.22,1,.36,1) both; }
+@keyframes login-snapshot-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes login-snapshot-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+ html[data-login-transition="active"]::view-transition-old(root), html[data-login-transition="active"]::view-transition-new(root) { animation: none; }
+}

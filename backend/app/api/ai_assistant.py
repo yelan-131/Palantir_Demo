@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, require_admin
 from app.core.db import db_session
@@ -19,6 +19,7 @@ from app.models.relational import AIAgentRun, AIConversation, AIDraft, AIMessage
 from app.services.ai.agent_runs import cancel_agent_run, confirm_agent_run, create_agent_run, get_agent_run
 from app.services.ai.agent_registry import AgentRegistryError, load_agent_registry, save_agent_registry_payload, seed_agent_registry_from_files
 from app.services.ai.agent_items import (
+    agent_response_status,
     confirmation_item,
     extract_actions,
     extract_confirmation_payload,
@@ -45,6 +46,7 @@ from app.services.ai.settings import (
     maybe_mask_sensitive_payload,
     merge_ai_settings,
     record_tool_calls_enabled,
+    runtime_status,
     save_persisted_ai_settings,
     settings_to_provider_config as _settings_to_provider_config,
 )
@@ -96,6 +98,13 @@ class AgentConversationRequest(BaseModel):
 class AgentConversationUpdateRequest(BaseModel):
     title: str | None = None
     status: str | None = None
+
+
+async def _load_effective_ai_settings():
+    try:
+        return await load_persisted_ai_settings(strict=True)
+    except Exception as exc:
+        raise database_unavailable("AI 设置读取失败，请稍后重试") from exc
 
 
 def _roles_for_user(user: dict) -> list[dict]:
@@ -496,8 +505,21 @@ async def _load_persisted_agent_run_for_confirmation(
             except ValueError as exc:
                 if "expired" in str(exc):
                     raise
+        # Claim before executing, so a recovered run cannot be confirmed twice
+        # by concurrent requests or workers after an application restart.
+        claimed = await session.execute(
+            update(AIAgentRun).where(
+                AIAgentRun.tenant_id == tenant_id,
+                AIAgentRun.run_id == run_id,
+                AIAgentRun.status == "waiting_confirmation",
+            ).values(status="confirmed")
+        )
+        if claimed.rowcount != 1:
+            raise ValueError("Agent run has already been confirmed")
+        await session.commit()
         return {
             "run_id": row.run_id,
+            "tenant_id": tenant_id,
             "status": "confirmed",
             "mode": row.mode,
             "message": row.input_message,
@@ -621,7 +643,7 @@ from app.core.db import safe_db_call as _try_db  # noqa: E402
 
 
 async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink=None):
-    await load_persisted_ai_settings()
+    await _load_effective_ai_settings()
     identity_step = {
         "id": "step-identity",
         "type": "identity",
@@ -643,8 +665,7 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
         "audit_required": base_decision.audit_required,
     }
     await _emit_agent_step(event_sink, ai_permission_step)
-    if body.provider_config is None:
-        body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
+    body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
     context = body.context or {}
     context["_current_user"] = current_user
     context["_tenant_id"] = current_tenant_id(current_user)
@@ -719,67 +740,69 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
                     if row.role in {"user", "assistant"}
                 ]
     body.context = context
-    if (body.context or {}).get("surface") == "knowledge":
-        result = await _run_knowledge_agent_surface_with_context(body)
-    else:
-        context_need = agent_context_router.classify(body.message, body.context)
-        semantic_context: dict[str, Any] = {"intent": context_need, "objects": [], "records": [], "relations": []}
-        if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph", "draft_action"}:
-            async with db_session() as session:
-                semantic_context = await agent_context_router.build_semantic_context(
-                    session,
-                    message=body.message,
-                    context=body.context or {},
-                    tenant_id=current_tenant_id(current_user),
-                    user=current_user,
-                )
-            body.context = {
-                **(body.context or {}),
-                "contextNeed": context_need,
-                "semanticContext": semantic_context,
-            }
-        context_intent_step = {
-            "id": "step-context-intent",
+    context_need = agent_context_router.classify(body.message, body.context)
+    semantic_context: dict[str, Any] = {"intent": context_need, "objects": [], "records": [], "relations": []}
+    if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph"}:
+        _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "business_query"))
+    if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph", "draft_action"}:
+        async with db_session() as session:
+            semantic_context = await agent_context_router.build_semantic_context(
+                session,
+                message=body.message,
+                context=body.context or {},
+                tenant_id=current_tenant_id(current_user),
+                user=current_user,
+            )
+        body.context = {
+            **(body.context or {}),
+            "contextNeed": context_need,
+            "semanticContext": semantic_context,
+        }
+    context_intent_step = {
+        "id": "step-context-intent",
+        "type": "context",
+        "status": "completed",
+        "intent": context_need,
+        "semantic_objects": len(semantic_context.get("objects") or []),
+        "semantic_records": semantic_context.get("record_count", 0),
+    }
+    await _emit_agent_step(event_sink, context_intent_step)
+    conversation_id = (body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId")
+    if conversation_id:
+        async with db_session() as session:
+            runtime_context = await context_builder.build(
+                session,
+                request=body,
+                user=current_user,
+                settings=AI_SYSTEM_SETTINGS,
+                conversation_id=str(conversation_id),
+                page=(body.context or {}).get("route") or body.page,
+                document_id=(body.context or {}).get("document_id") or (body.context or {}).get("documentId"),
+                tenant_id=current_tenant_id(current_user),
+                user_key=_user_key(current_user),
+                evidence=[],
+            )
+        context_builder_step = {
+            "id": "step-context-builder",
             "type": "context",
             "status": "completed",
-            "intent": context_need,
-            "semantic_objects": len(semantic_context.get("objects") or []),
-            "semantic_records": semantic_context.get("record_count", 0),
+            "sources": runtime_context.get("context_sources") or {},
+            "semantic_context": runtime_context.get("semantic_context") or {},
         }
-        await _emit_agent_step(event_sink, context_intent_step)
-        result = await run_agent(body, current_user, event_sink=event_sink)
-        result.items.insert(0, from_legacy_step(context_intent_step, run_id=result.run_id))
-        conversation_id = (body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId")
-        if conversation_id:
-            async with db_session() as session:
-                runtime_context = await context_builder.build(
-                    session,
-                    request=body,
-                    user=current_user,
-                    settings=AI_SYSTEM_SETTINGS,
-                    conversation_id=str(conversation_id),
-                    page=(body.context or {}).get("route") or body.page,
-                    document_id=(body.context or {}).get("document_id") or (body.context or {}).get("documentId"),
-                    tenant_id=current_tenant_id(current_user),
-                    user_key=_user_key(current_user),
-                    evidence=result.evidence,
-                )
-            context_builder_step = {
-                "id": "step-context-builder",
-                "type": "context",
-                "status": "completed",
-                "sources": runtime_context.get("context_sources") or {},
-                "semantic_context": runtime_context.get("semantic_context") or {},
-            }
-            result.items.insert(0, from_legacy_step(context_builder_step, run_id=result.run_id))
-            await _emit_agent_step(event_sink, context_builder_step)
+        body.context = {**(body.context or {}), "recentMessages": runtime_context.get("recent_messages") or [], "memories": runtime_context.get("memories") or [], "runtimeContext": runtime_context}
+        await _emit_agent_step(event_sink, context_builder_step)
+    result = await run_agent(body, current_user, event_sink=event_sink)
+    result.items.insert(0, from_legacy_step(context_intent_step, run_id=result.run_id))
+    if conversation_id:
+        result.items.insert(0, from_legacy_step(context_builder_step, run_id=result.run_id))
     result.items = [
         from_legacy_step(identity_step, run_id=result.run_id),
         from_legacy_step(ai_permission_step, run_id=result.run_id),
         *result.items,
     ]
     for action in result.actions:
-        decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
+        from app.services.ai.policies import decide_tool_permission
+        decision = decide_tool_permission(current_user, AI_SYSTEM_SETTINGS, str(action.payload.get("_harness_tool")), skill_name=action.skill) if action.payload.get("_harness_tool") else decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
         _raise_for_ai_decision(decision)
         action.requires_confirmation = action.requires_confirmation or decision.requires_confirmation
         skill_policy_step = {
@@ -808,125 +831,6 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
     return result
 
 
-async def _run_knowledge_agent_surface(body: AgentRequest) -> AgentResponse:
-    from app.api.knowledge import _document_context_payload_async, _generate_knowledge_agent_answer, _search_knowledge_payload_async
-
-    context = body.context or {}
-    document_id = context.get("document_id") or context.get("documentId")
-    tenant_id = require_tenant_id(context)
-    document_title = context.get("document_title") or context.get("documentTitle") or context.get("pageTitle") or "当前知识文档"
-    intent = agent_runtime.classify_knowledge_intent(body.message)
-    evidence = await _search_knowledge_payload_async(body.message, limit=5, document_id=document_id, tenant_id=tenant_id) if intent == "knowledge" else []
-    if intent == "knowledge" and not evidence and document_id:
-        evidence = (await _document_context_payload_async(str(document_id), tenant_id=tenant_id))[:5]
-    answer, model_name, usage = await _generate_knowledge_agent_answer(
-        query=body.message,
-        title=str(document_title),
-        evidence=evidence,
-        history=[],
-        tenant_id=tenant_id,
-        memory=[],
-        intent=intent,
-    )
-    steps = [
-        {
-            "id": "step-knowledge-context",
-            "type": "observe",
-            "status": "completed",
-            "surface": "knowledge",
-            "document_id": document_id,
-            "document_title": document_title,
-        },
-        {
-            "id": "step-knowledge-search",
-            "type": "tool",
-            "tool": "knowledge.search",
-            "status": "skipped" if intent == "general" else "completed",
-            "result_count": len(evidence),
-        },
-        {
-            "id": "step-answer",
-            "type": "respond",
-            "status": "completed" if usage.get("mode") != "ai_provider_failed" else "failed",
-            "model": model_name,
-            "provider": usage.get("provider"),
-            "fallback_reason": usage.get("fallback_reason"),
-        },
-    ]
-    return AgentResponse(answer=answer, evidence=evidence, steps=steps, mode="qa")
-
-
-async def _run_knowledge_agent_surface_with_context(body: AgentRequest) -> AgentResponse:
-    from app.api.knowledge import _document_context_payload_async, _generate_knowledge_agent_answer, _search_knowledge_payload_async
-
-    context = body.context or {}
-    document_id = context.get("document_id") or context.get("documentId")
-    document_title = context.get("document_title") or context.get("documentTitle") or context.get("pageTitle") or "当前知识文档"
-    conversation_id = context.get("conversation_id") or context.get("conversationId")
-    tenant_id = require_tenant_id(context)
-    intent = agent_runtime.classify_knowledge_intent(body.message)
-    rag_policy = AI_SYSTEM_SETTINGS.get("ragPolicy") or {}
-    rag_enabled = rag_policy.get("enabled", True)
-    top_k = int(rag_policy.get("topK") or 5)
-    evidence = await _search_knowledge_payload_async(body.message, limit=top_k, document_id=document_id, tenant_id=tenant_id) if intent == "knowledge" and rag_enabled else []
-    if intent == "knowledge" and not evidence and document_id:
-        evidence = (await _document_context_payload_async(str(document_id), tenant_id=tenant_id))[:top_k]
-    async with db_session() as session:
-        runtime_context = await context_builder.build(
-            session,
-            request=body,
-            user=context.get("_current_user") or {},
-            settings=AI_SYSTEM_SETTINGS,
-            conversation_id=str(conversation_id) if conversation_id else None,
-            page=context.get("route") or body.page,
-            document_id=str(document_id) if document_id else None,
-            tenant_id=tenant_id,
-            user_key=context.get("_user_key"),
-            evidence=evidence,
-        )
-    answer, model_name, usage = await _generate_knowledge_agent_answer(
-        query=body.message,
-        title=str(document_title),
-        evidence=evidence,
-        history=[],
-        tenant_id=tenant_id,
-        memory=runtime_context.get("memories") or [],
-        intent=intent,
-    )
-    steps = [
-        {
-            "id": "step-knowledge-context",
-            "type": "observe",
-            "status": "completed",
-            "surface": "knowledge",
-            "document_id": document_id,
-            "document_title": document_title,
-        },
-        {
-            "id": "step-context-builder",
-            "type": "context",
-            "status": "completed",
-            "sources": runtime_context.get("context_sources") or {},
-        },
-        {
-            "id": "step-knowledge-search",
-            "type": "tool",
-            "tool": "knowledge.search",
-            "status": "skipped" if intent == "general" or not rag_enabled else "completed",
-            "result_count": len(evidence),
-        },
-        {
-            "id": "step-answer",
-            "type": "respond",
-            "status": "completed" if usage.get("mode") != "ai_provider_failed" else "failed",
-            "model": model_name,
-            "provider": usage.get("provider"),
-            "fallback_reason": usage.get("fallback_reason"),
-        },
-    ]
-    return AgentResponse(answer=answer, evidence=evidence, steps=steps, mode="qa")
-
-
 async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current_user: dict) -> dict[str, Any] | None:
     if not audit_enabled(AI_SYSTEM_SETTINGS):
         return None
@@ -952,6 +856,13 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
         safe_answer = str(maybe_mask_sensitive_payload(result.answer, AI_SYSTEM_SETTINGS))
         safe_evidence = maybe_mask_sensitive_payload(result.evidence, AI_SYSTEM_SETTINGS)
         safe_items = maybe_mask_sensitive_payload(result.items, AI_SYSTEM_SETTINGS)
+        # The platform confirmation nonce is an owner-bound UI protocol value,
+        # not a model/provider credential. It must survive transcript recovery.
+        for original, stored in zip(result.items, safe_items):
+            if original.get("type") == "confirmation" and isinstance(stored.get("payload"), dict):
+                nonce = (original.get("payload") or {}).get("confirmation_token")
+                if nonce:
+                    stored["payload"]["confirmation_token"] = nonce
         user_message = AIMessage(
             tenant_id=tenant_id,
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
@@ -977,7 +888,7 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
                 None,
             ),
             usage={"mode": result.mode},
-            status="completed",
+            status=agent_response_status(result),
         )
         run = AIAgentRun(
             tenant_id=tenant_id,
@@ -985,7 +896,7 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
             conversation_id=conversation_id,
             user_message_id=user_message.message_id,
             assistant_message_id=assistant_message.message_id,
-            status="waiting_confirmation" if result.requires_confirmation else "completed",
+            status=agent_response_status(result),
             mode=result.mode,
             input_message=safe_message,
             answer=safe_answer,
@@ -1212,7 +1123,7 @@ async def close_agent_conversation(conversation_id: str, user: dict = Depends(ge
         if not conversation:
             raise HTTPException(status_code=404, detail="Agent conversation not found")
         conversation.status = "closed"
-        await load_persisted_ai_settings()
+        await _load_effective_ai_settings()
         if (AI_SYSTEM_SETTINGS.get("compactionPolicy") or {}).get("compactOnClose", True):
             await memory_service.maybe_compact_conversation(
                 session,
@@ -1264,34 +1175,13 @@ async def delete_ai_memory(memory_id: str, user: dict = Depends(get_current_user
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest):
-    """AI 对话查询 — 自然语言查询制造数据."""
-    intent = detect_intent(body.message)
-
-    handler_map = {
-        "oee": handle_oee_query,
-        "equipment": handle_equipment_query,
-        "production": handle_production_query,
-        "quality": handle_quality_query,
-        "supply": handle_supply_query,
-    }
-
-    handler = handler_map.get(intent)
-    if handler:
-        result = await handler(body.message)
-    else:
-        result = {
-            "answer": "我是当前平台的 AI 助手，可以帮您查询和分析制造数据。您可以问我关于设备健康、OEE、产量、质量、供应链等方面的问题。",
-            "data": None,
-        }
-
+async def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
+    result = await _run_agent_for_user(AgentRequest(message=body.message), _normalize_user(user))
     return {
-        "session_id": body.session_id or f"session-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-        "message": body.message,
-        "intent": intent,
-        "response": result["answer"],
-        "data": result.get("data"),
-        "timestamp": datetime.now().isoformat(),
+        "session_id": body.session_id or result.run_id,
+        "message": body.message, "intent": "agent", "response": result.answer,
+        "data": {"evidence": result.evidence, "actions": [a.model_dump() for a in result.actions]},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -1343,7 +1233,8 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
                 payload.update(persisted)
                 run_id = (persisted.get("run") or {}).get("run_id") or run_id
             yield _sse("answer.completed", payload)
-            yield _sse("run.completed", {"run_id": run_id, "status": "waiting_confirmation" if result.requires_confirmation else "completed"})
+            status = agent_response_status(result)
+            yield _sse("run.failed" if status == "failed" else "run.completed", {"run_id": run_id, "status": status, "detail": result.answer if status == "failed" else None})
         except HTTPException as exc:
             yield _sse("run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code})
         except Exception as exc:  # noqa: BLE001 - stream should report failures as events
@@ -1376,7 +1267,7 @@ async def get_ai_agent_run(run_id: str, user: dict = Depends(get_current_user)):
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
     run = get_agent_run(run_id)
-    if not run:
+    if not run or run.get("created_by") != _user_key(current_user) or run.get("tenant_id") != current_tenant_id(current_user):
         raise HTTPException(status_code=404, detail="Agent run not found")
     return {"data": _public_agent_run(run)}
 
@@ -1388,6 +1279,8 @@ async def _confirm_agent_run_for_user(
     *,
     event_sink=None,
 ) -> dict[str, Any]:
+    await _load_effective_ai_settings()
+    _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa"))
     if not body.confirmed:
         try:
             run = cancel_agent_run(run_id, current_user)
@@ -1400,6 +1293,7 @@ async def _confirm_agent_run_for_user(
             await event_sink("run.cancelled", {"run_id": run_id, "status": "cancelled", "run": run})
         return _public_agent_run(run)
 
+    await load_agent_registry(seed_if_empty=False)
     if not body.confirmation_token:
         raise HTTPException(status_code=400, detail="Confirmation token is required")
     if event_sink:
@@ -1597,8 +1491,8 @@ async def test_provider(body: ProviderTestRequest, user: dict = Depends(require_
 async def get_ai_settings(user: dict = Depends(require_admin)):
     """Return backend-owned AI system settings with secret values masked."""
     current_tenant_id(user)
-    await load_persisted_ai_settings()
-    return {"data": _mask_settings(AI_SYSTEM_SETTINGS)}
+    await _load_effective_ai_settings()
+    return {"data": _mask_settings(AI_SYSTEM_SETTINGS), "runtime": runtime_status(AI_SYSTEM_SETTINGS)}
 
 
 @router.put("/settings")
@@ -1606,21 +1500,41 @@ async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(requi
     """Update backend-owned AI system settings for the demo runtime."""
     current_tenant_id(user)
     try:
-        merged = await save_persisted_ai_settings(body.settings)
-    except Exception:
-        merged = merge_ai_settings(body.settings)
-        AI_SYSTEM_SETTINGS.clear()
-        AI_SYSTEM_SETTINGS.update(merged)
-    return {"data": _mask_settings(AI_SYSTEM_SETTINGS), "ok": True}
+        await save_persisted_ai_settings(body.settings, updated_by=str(current_user_id(user) or user.get("sub") or "admin"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise database_unavailable("AI 设置未保存，数据库暂不可用") from exc
+    return {"data": _mask_settings(AI_SYSTEM_SETTINGS), "runtime": runtime_status(AI_SYSTEM_SETTINGS), "ok": True}
+
 
 
 @router.post("/settings/test")
-async def test_saved_ai_settings(user: dict = Depends(require_admin)):
+async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: dict = Depends(require_admin)):
     """Validate the saved backend AI settings."""
     current_tenant_id(user)
-    await load_persisted_ai_settings()
-    provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
-    return await _test_provider_config(provider_config)
+    await _load_effective_ai_settings()
+    try:
+        candidate = merge_ai_settings(body.settings) if body else AI_SYSTEM_SETTINGS
+        provider_config = _settings_to_provider_config(candidate)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from app.services.ai.harness_runtime import run_sdk
+    if not provider_config.api_key:
+        return {"ok": False, "message": "未配置 API Key", "engine": "deepseek-harness", "provider": provider_config.provider}
+    checked_models = []
+    try:
+        for model in dict.fromkeys([provider_config.chat_model, provider_config.reasoning_model or provider_config.chat_model]):
+            result = await run_sdk(candidate, user, "连接测试：只回复 OK，不调用工具。", "test-" + uuid.uuid4().hex, model=model)
+            if result.finish_reason not in {"completed", "stop", None} or not result.final_response.strip():
+                return {"ok": False, "message": f"模型 {model} 未正常完成回答", "engine": "deepseek-harness", "provider": provider_config.provider, "models": checked_models}
+            checked_models.append(model)
+        return {"ok": True, "message": "官方 Harness 与聊天 / Agent 模型连接测试通过", "engine": "deepseek-harness", "provider": provider_config.provider, "model": provider_config.chat_model, "models": checked_models}
+    except Exception as exc:
+        from app.services.ai.settings import mask_sensitive_text
+        detail = str(exc).replace(provider_config.api_key, "[REDACTED_SECRET]")
+        return {"ok": False, "message": mask_sensitive_text(detail)[:600], "engine": "deepseek-harness", "provider": provider_config.provider, "models": checked_models}
+
 
 
 @router.get("/agent-registry")
@@ -1702,6 +1616,7 @@ async def list_sessions(
 
 
 @router.post("/analyze")
-async def smart_analyze(body: AnalyzeRequest):
+async def smart_analyze(body: AnalyzeRequest, user: dict = Depends(get_current_user)):
     """Legacy analysis endpoint: no static demo insight fallback."""
-    raise seed_data_required("AI analysis must be routed through the migrated Agent runtime or a real analytics service")
+    result = await _run_agent_for_user(AgentRequest(message=body.query, context={"entity_type": body.entity_type, "entity_id": body.entity_id}), _normalize_user(user))
+    return {"query": body.query, "analysis_type": "agent", "response": result.answer, "evidence": result.evidence, "timestamp": datetime.now(timezone.utc).isoformat()}

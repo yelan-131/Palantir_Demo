@@ -23,6 +23,7 @@ class ToolDefinition(BaseModel):
     risk_level: RiskLevel = "low"
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
+    domain: str | None = None
     permission_check: str = "qa"
     dry_run_supported: bool = True
     audit_required: bool = False
@@ -93,12 +94,25 @@ def to_openai_function_brief(tool: ToolDefinition) -> dict[str, Any]:
 
 
 def _normalize_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Normalize tool input_schema to JSON Schema format for OpenAI."""
-    if not schema:
-        return {"type": "object", "properties": {}}
+    """Turn legacy shorthand into valid JSON Schema for MCP and model APIs."""
+    def normalize(value):
+        if isinstance(value, str):
+            if value in {"string", "integer", "number", "boolean", "object", "array", "null"}:
+                return {"type": value, **({"items": {}} if value == "array" else {})}
+            if "|" in value:
+                return {"type": "string", "enum": value.split("|")}
+            return {"type": "string", "description": value}
+        if not isinstance(value, dict):
+            raise ValueError("工具参数必须使用 JSON Schema 或类型名称")
+        result = dict(value)
+        if "properties" in result:
+            result["properties"] = {key: normalize(item) for key, item in result["properties"].items()}
+        if "items" in result:
+            result["items"] = normalize(result["items"])
+        return result
     if schema.get("type") == "object":
-        return schema
-    return {"type": "object", "properties": schema, "required": []}
+        return normalize(schema)
+    return {"type": "object", "properties": {key: normalize(value) for key, value in schema.items() if key != "required"}, "required": schema.get("required", [])}
 
 
 def openai_tools_for_user(
@@ -107,16 +121,12 @@ def openai_tools_for_user(
     surface: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return OpenAI-format tool definitions filtered by user permissions."""
-    from .policies import decide_ai_permission
+    from .policies import decide_tool_permission
     tools = tool_registry()
     result = []
     for tool_def in tools.values():
         capability = tool_def.permission_check or "qa"
-        decision = decide_ai_permission(
-            user, settings, capability,
-            domain=None,
-            risk_level=tool_def.risk_level,
-        )
+        decision = decide_tool_permission(user, settings, tool_def.name)
         if decision.allowed:
             result.append(to_openai_function(tool_def))
     return result
@@ -127,16 +137,12 @@ def openai_tools_brief_for_user(
     settings: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Return brief (Tier 1) tool definitions filtered by user permissions."""
-    from .policies import decide_ai_permission
+    from .policies import decide_tool_permission
     tools = tool_registry()
     result = []
     for tool_def in tools.values():
         capability = tool_def.permission_check or "qa"
-        decision = decide_ai_permission(
-            user, settings, capability,
-            domain=None,
-            risk_level=tool_def.risk_level,
-        )
+        decision = decide_tool_permission(user, settings, tool_def.name)
         if decision.allowed:
             result.append(to_openai_function_brief(tool_def))
     return result

@@ -1,9 +1,36 @@
+"""Legacy proposal/pending-operation compatibility.
+
+Use the historical planner only to create pre-migration action payloads. The
+active application's Harness driver is tested with its real SDK/MCP transport
+in test_harness_integration.py, and settings gates in test_ai_configuration.py.
+"""
 from __future__ import annotations
 
 import asyncio
 import uuid
+import pytest
 
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def legacy_proposals(monkeypatch):
+    from app.api import ai_assistant as api
+    from app.services.ai.legacy_runtime import AgentRuntime
+    from app.services.ai.settings import AI_SYSTEM_SETTINGS, load_persisted_ai_settings
+    from copy import deepcopy
+    previous = deepcopy(AI_SYSTEM_SETTINGS)
+    async def load_settings():
+        result = await load_persisted_ai_settings(strict=True)
+        AI_SYSTEM_SETTINGS["agentMode"] = "confirm"
+        return result
+    monkeypatch.setattr(api, "_load_effective_ai_settings", load_settings)
+    async def legacy_plan(request, user, **kwargs):
+        return await AgentRuntime().run(request, user=user, **kwargs)
+    monkeypatch.setattr(api, "run_agent", legacy_plan)
+    yield
+    AI_SYSTEM_SETTINGS.clear()
+    AI_SYSTEM_SETTINGS.update(previous)
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -144,7 +171,7 @@ def test_agent_conversation_history_restores_run_steps_and_actions():
         assert assistant["run_id"] == response["run_id"]
         assert assistant["requires_confirmation"] is True
         assert _confirmation_payload(response)["confirmation_token"].startswith("confirm-")
-        assert _confirmation_payload(assistant)["confirmation_token"] == "[REDACTED_SECRET]"
+        assert _confirmation_payload(assistant)["confirmation_token"] == _confirmation_payload(response)["confirmation_token"]
         assert _confirmation_actions(assistant)[0]["skill"] == "low_code.create_form_definition"
         assert any(item["id"] == "step-planner" for item in assistant["items"])
 

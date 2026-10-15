@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.relational import AIMessage
+from app.models.relational import AIMessage, AIConversation
 
 from .memory import memory_service
 from .schemas import AgentRequest
@@ -50,7 +50,7 @@ class ContextBuilder:
         memory_limit = int(memory_policy.get("recallLimit") or 5)
         max_evidence_chars = int(rag_policy.get("maxEvidenceChars") or 1200)
 
-        recent_messages = await self._recent_messages(session, conversation_id, recent_limit)
+        recent_messages = await self._recent_messages(session, conversation_id, recent_limit, tenant_id, user_key)
         memories: list[dict[str, Any]] = []
         if memory_policy.get("enabled"):
             memories = await memory_service.retrieve_context(
@@ -99,13 +99,14 @@ class ContextBuilder:
             payload = maybe_mask_sensitive_payload(payload, settings)
         return payload
 
-    async def _recent_messages(self, session: AsyncSession, conversation_id: str | None, limit: int) -> list[dict[str, Any]]:
+    async def _recent_messages(self, session: AsyncSession, conversation_id: str | None, limit: int, tenant_id: int, user_key: str | None) -> list[dict[str, Any]]:
         if not conversation_id:
             return []
         rows = (
             await session.execute(
                 select(AIMessage)
-                .where(AIMessage.conversation_id == conversation_id)
+                .join(AIConversation, (AIConversation.conversation_id == AIMessage.conversation_id) & (AIConversation.tenant_id == AIMessage.tenant_id))
+                .where(AIMessage.conversation_id == conversation_id, AIMessage.tenant_id == tenant_id, AIConversation.user_id == user_key)
                 .order_by(desc(AIMessage.id))
                 .limit(max(1, min(limit, 50)))
             )

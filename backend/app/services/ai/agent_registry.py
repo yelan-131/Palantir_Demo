@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.db import db_session
 from app.models.relational import AIAgentSkillDefinition, AIAgentToolDefinition, SystemSetting
@@ -13,7 +13,7 @@ from app.models.relational import AIAgentSkillDefinition, AIAgentToolDefinition,
 from .agent_definition import _load_registry_seed, set_runtime_agent_registry
 from .skills import SkillDefinition
 from .tool_handlers import list_tool_handler_keys
-from .tool_registry import ToolDefinition
+from .tool_registry import ToolDefinition, _normalize_input_schema
 
 
 AGENT_REGISTRY_SETTINGS_KEY = "ai.agent_registry"
@@ -45,13 +45,27 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
     skill_map = _as_name_map(skills, kind="skill")
     tool_map = _as_name_map(tools, kind="tool")
     allowed_handlers = set(list_tool_handler_keys())
+    baseline_tools = _load_registry_seed("tools.json")
 
     for name, payload in tool_map.items():
         handler_key = str(payload.get("handler_key") or payload.get("handlerKey") or name)
         payload["handler_key"] = handler_key
         if handler_key not in allowed_handlers:
             raise AgentRegistryError(f"Tool {name} references unregistered handler_key {handler_key!r}")
-        ToolDefinition(**payload)
+        baseline = baseline_tools.get(handler_key)
+        if baseline and handler_key != "not_implemented":
+            if payload.get("side_effect", "read") != baseline.get("side_effect", "read"):
+                raise AgentRegistryError(f"Tool {name} cannot change the side effect of handler {handler_key}")
+            if payload.get("permission_check", "qa") != baseline.get("permission_check", "qa"):
+                raise AgentRegistryError(f"Tool {name} cannot weaken the permission of handler {handler_key}")
+            rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+            if rank.get(payload.get("risk_level", "low"), -1) < rank.get(baseline.get("risk_level", "low"), 0):
+                raise AgentRegistryError(f"Tool {name} cannot lower handler risk")
+        try:
+            ToolDefinition(**payload)
+            _normalize_input_schema(payload.get("input_schema") or {})
+        except (ValueError, TypeError) as exc:
+            raise AgentRegistryError(f"Tool {name} has an invalid definition: {exc}") from exc
 
     for name, payload in skill_map.items():
         if payload.get("default_tool") and payload["default_tool"] not in tool_map:
@@ -59,7 +73,10 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
         for tool_name in payload.get("allowed_tools") or []:
             if tool_name not in tool_map:
                 raise AgentRegistryError(f"Skill {name} allowlists unknown tool {tool_name!r}")
-        SkillDefinition(**payload)
+        try:
+            SkillDefinition(**payload)
+        except ValueError as exc:
+            raise AgentRegistryError(f"Skill {name} has an invalid definition: {exc}") from exc
 
     return skill_map, tool_map
 
@@ -98,6 +115,7 @@ async def load_agent_registry(*, seed_if_empty: bool = False) -> dict[str, Any]:
         for row in tool_rows
         if row.enabled
     }
+    skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in tools else None} for name, definition in skills.items()}
     skills, tools = validate_registry_payload(skills, tools)
     set_runtime_agent_registry(skills=skills, tools=tools)
     return {"skills": skills, "tools": tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
@@ -114,6 +132,9 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
             row.name: row
             for row in (await session.execute(select(AIAgentToolDefinition))).scalars().all()
         }
+
+        await session.execute(delete(AIAgentSkillDefinition).where(AIAgentSkillDefinition.name.not_in(list(skills))))
+        await session.execute(delete(AIAgentToolDefinition).where(AIAgentToolDefinition.name.not_in(list(tools))))
 
         for name, definition in skills.items():
             row = skill_rows.get(name)
@@ -145,8 +166,11 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
         await _save_registry_settings(session, updated_by=updated_by, source="database")
         await session.commit()
 
-    set_runtime_agent_registry(skills=skills, tools=tools)
-    return {"skills": skills, "tools": tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
+    active_skills = {name: definition for name, definition in skills.items() if definition.get("enabled", True)}
+    active_tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
+    active_skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in active_tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in active_tools else None} for name, definition in active_skills.items()}
+    set_runtime_agent_registry(skills=active_skills, tools=active_tools)
+    return {"skills": active_skills, "tools": active_tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
 
 
 async def _save_registry_settings(session, *, updated_by: str | None, source: str) -> None:

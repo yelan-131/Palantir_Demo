@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .confirmations import consume_confirmation_token, create_confirmation_payload
-from .agent_items import confirmation_item, extract_confirmation_payload
+from .agent_items import agent_response_status, confirmation_item, extract_confirmation_payload
 from .agent_validation import agent_validation_service
 from .schemas import AgentRequest, AgentResponse
 from .settings import settings_snapshot
@@ -69,7 +69,7 @@ def create_agent_run(request: AgentRequest, response: AgentResponse, user: dict[
         ]
     record = {
         "run_id": run_id,
-        "status": "waiting_confirmation" if response.requires_confirmation else ("failed" if confirmation_validation and not confirmation_validation.valid else "completed"),
+        "status": "failed" if confirmation_validation and not confirmation_validation.valid else agent_response_status(response),
         "mode": response.mode,
         "message": request.message,
         "page": request.page,
@@ -81,6 +81,7 @@ def create_agent_run(request: AgentRequest, response: AgentResponse, user: dict[
         "requires_confirmation": response.requires_confirmation,
         "risk_level": response.risk_level,
         "created_by": _user_key(user),
+        "tenant_id": user.get("tenant_id"),
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
     }
@@ -99,7 +100,7 @@ def cancel_agent_run(run_id: str, user: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Agent run not found")
     if record["status"] in {"confirmed", "completed", "cancelled"}:
         raise ValueError("Agent run cannot be cancelled in its current status")
-    if record["created_by"] != _user_key(user):
+    if record["created_by"] != _user_key(user) or record.get("tenant_id") != user.get("tenant_id"):
         raise ValueError("Agent run belongs to a different user")
     record["status"] = "cancelled"
     record["updated_at"] = datetime.now().isoformat()
@@ -114,12 +115,12 @@ def confirm_agent_run(run_id: str, token: str, user: dict[str, Any]) -> dict[str
         raise ValueError("Cancelled agent runs cannot be confirmed")
     if record["status"] in {"confirmed", "completed"}:
         raise ValueError("Agent run has already been confirmed")
-    if record["created_by"] != _user_key(user):
+    if record["created_by"] != _user_key(user) or record.get("tenant_id") != user.get("tenant_id"):
         raise ValueError("Agent run belongs to a different user")
-    confirmation = consume_confirmation_token(token, user=user)
     expected_token = extract_confirmation_payload(record.get("items")).get("confirmation_token")
     if expected_token and expected_token != token:
         raise ValueError("Confirmation token does not match this agent run")
+    confirmation = consume_confirmation_token(token, user=user)
     record["status"] = "confirmed"
     record["confirmation"] = confirmation
     record["updated_at"] = datetime.now().isoformat()

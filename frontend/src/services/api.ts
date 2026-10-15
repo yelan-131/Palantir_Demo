@@ -640,7 +640,7 @@ export const testAIProvider = (providerConfig: Record<string, unknown>) =>
   api.post('/ai/provider/test', { provider_config: providerConfig });
 export const getAISettings = () => api.get('/ai/settings');
 export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
-export const testSavedAISettings = () => api.post('/ai/settings/test');
+export const testSavedAISettings = (settings?: Record<string, unknown>) => api.post('/ai/settings/test', settings ? { settings } : undefined);
 export const getAIAgentRegistry = () => api.get('/ai/agent-registry');
 export const seedAIAgentRegistry = () => api.post('/ai/agent-registry/seed');
 export const updateAIAgentRegistry = (payload: Record<string, unknown>) => api.put('/ai/agent-registry', payload);

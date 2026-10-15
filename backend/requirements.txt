@@ -16,7 +16,7 @@ neo4j==5.26.0
 redis==5.2.1
 
 # Validation / settings
-pydantic==2.10.4
+pydantic==2.14.1
 pydantic-settings==2.7.1
 
 # Auth
@@ -52,3 +52,6 @@ pytest-asyncio==0.25.0
 # celery==5.4.0            # task queue — currently unused
 # langchain==0.3.14        # AI orchestration — currently unused
 # langchain-openai==0.3.0
+
+# Official Agent kernel, pin SDK and bundled runtime to the same release.
+deepseek-harness-sdk==0.1.5rc1

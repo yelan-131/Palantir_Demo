@@ -21,42 +21,27 @@ def test_ai_timestamp_serialization_marks_database_utc_values():
 
 
 @pytest.mark.asyncio
-async def test_chat_returns_fallback_equipment_response():
-    from app.api.ai_assistant import ChatRequest, chat
-
-    with patch("app.api.ai_assistant._try_db", new_callable=AsyncMock, return_value=None):
-        result = await chat(ChatRequest(message="machine health status", session_id="demo-session"))
-
+async def test_legacy_chat_uses_the_authenticated_harness_and_preserves_response_contract(monkeypatch):
+    from app.api import ai_assistant as api
+    from app.services.ai.schemas import AgentResponse
+    runner = AsyncMock(return_value=AgentResponse(answer="Harness reply", run_id="run-test"))
+    monkeypatch.setattr(api, "_run_agent_for_user", runner)
+    user = {"sub": "tester", "tenant_id": 1, "is_admin": True}
+    result = await api.chat(api.ChatRequest(message="hello", session_id="demo-session"), user)
     assert result["session_id"] == "demo-session"
-    assert result["message"] == "machine health status"
-    assert result["intent"] == "equipment"
-    assert isinstance(result["response"], str)
-    assert result["response"]
-    assert isinstance(result["data"], list)
-    assert result["timestamp"]
+    assert result["intent"] == "agent"
+    assert result["response"] == "Harness reply"
+    runner.assert_awaited_once()
+    assert runner.call_args.args[1]["sub"] == "tester"
 
 
 @pytest.mark.asyncio
-async def test_chat_returns_general_contract_for_unknown_prompt():
-    from app.api.ai_assistant import ChatRequest, chat
-
-    result = await chat(ChatRequest(message="what can you do"))
-
-    assert result["intent"] == "general"
-    assert result["data"] is None
-    assert isinstance(result["response"], str)
-    assert result["timestamp"]
-
-
-@pytest.mark.asyncio
-async def test_smart_analyze_contract():
-    from app.api.ai_assistant import AnalyzeRequest, smart_analyze
-
-    result = await smart_analyze(AnalyzeRequest(query="analyze line risk", entity_type="line", entity_id=1))
-
-    assert result["query"] == "analyze line risk"
-    assert result["analysis_type"] == "trend"
-    assert len(result["insights"]) >= 1
-    assert len(result["recommendations"]) >= 1
-    assert all("confidence" in insight for insight in result["insights"])
-    assert result["timestamp"]
+async def test_smart_analyze_routes_through_authenticated_harness(monkeypatch):
+    from app.api import ai_assistant as api
+    from app.services.ai.schemas import AgentResponse
+    runner = AsyncMock(return_value=AgentResponse(answer="Analysis"))
+    monkeypatch.setattr(api, "_run_agent_for_user", runner)
+    result = await api.smart_analyze(api.AnalyzeRequest(query="analyze risk"), {"sub": "tester", "tenant_id": 1, "is_admin": True})
+    assert result["analysis_type"] == "agent"
+    assert result["response"] == "Analysis"
+    runner.assert_awaited_once()

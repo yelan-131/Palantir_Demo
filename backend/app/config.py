@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.10"
+    APP_VERSION: str = "0.3.11"
     APP_MODE: str = "demo"
     DEBUG: bool = True
 

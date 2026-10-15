@@ -15,6 +15,8 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import {
+  Alert,
+  AutoComplete,
   Avatar,
   Button,
   Card,
@@ -59,6 +61,7 @@ import {
   updateAISettings,
 } from '../../services/api';
 import { formatServerDateTime } from '../../utils/dateTime';
+import './ai-settings.css';
 
 cytoscape.use(dagre);
 
@@ -105,40 +108,10 @@ interface AuditLogRecord {
   timestamp?: string | null;
 }
 
-function normalizeAISettings(settings: Record<string, any>) {
-  const normalized = { ...settings };
-  const provider = String(normalized.provider || '');
-  const supportedProviders = new Set(['glm', 'openai-compatible', 'openai', 'azure-openai', 'deepseek', 'qwen']);
-  if (!provider || !supportedProviders.has(provider)) {
-    Object.assign(normalized, GLM_AI_DEFAULTS);
-  }
-  if (normalized.provider === 'glm') {
-    if (!normalized.baseUrl || String(normalized.baseUrl).includes('api.openai.com')) normalized.baseUrl = GLM_AI_DEFAULTS.baseUrl;
-    if (!normalized.chatModel || String(normalized.chatModel).startsWith('gpt-')) {
-      normalized.chatModel = GLM_AI_DEFAULTS.chatModel;
-    }
-    if (!normalized.reasoningModel || String(normalized.reasoningModel).startsWith('gpt-')) {
-      normalized.reasoningModel = GLM_AI_DEFAULTS.reasoningModel;
-    }
-    if (!normalized.embeddingModel || String(normalized.embeddingModel).startsWith('text-embedding')) {
-      normalized.embeddingModel = GLM_AI_DEFAULTS.embeddingModel;
-    }
-    if (!normalized.visionModel || normalized.visionModel === 'disabled' || String(normalized.visionModel).startsWith('gpt-')) {
-      normalized.visionModel = GLM_AI_DEFAULTS.visionModel;
-    }
-  }
-  if (normalized.provider === 'deepseek') {
-    if (!normalized.baseUrl || String(normalized.baseUrl).includes('bigmodel.cn') || String(normalized.baseUrl).includes('api.openai.com')) {
-      normalized.baseUrl = DEEPSEEK_AI_DEFAULTS.baseUrl;
-    }
-    if (!normalized.chatModel || String(normalized.chatModel).startsWith('glm-') || String(normalized.chatModel).startsWith('GLM-') || String(normalized.chatModel).startsWith('gpt-')) {
-      normalized.chatModel = DEEPSEEK_AI_DEFAULTS.chatModel;
-    }
-    if (!normalized.reasoningModel || String(normalized.reasoningModel).startsWith('glm-') || String(normalized.reasoningModel).startsWith('GLM-') || String(normalized.reasoningModel).startsWith('gpt-')) {
-      normalized.reasoningModel = DEEPSEEK_AI_DEFAULTS.reasoningModel;
-    }
-  }
-  return normalized;
+function normalizeAISettings(settings: Record<string, any>): Record<string, any> {
+  // Presets fill a draft explicitly. Saving never rewrites a custom model ID
+  // or a user-provided gateway URL based on its spelling.
+  return { ...settings, provider: settings.provider || 'glm' };
 }
 
 function normalizeLocalAISettings(settings: Record<string, any>) {
@@ -533,7 +506,7 @@ function AIPlatformPanel() {
 
       <Card size="small" title="知识与工具权限" className="account-panel-card">
         <Form form={form} layout="vertical">
-          <Form.Item name="domains" label="可访问业务域">
+          <Form.Item name="domains" label="业务动作域" extra="限制标注业务域的工具；通用表单数据仍按用户的表单权限读取。">
             <Select
               mode="multiple"
               options={[
@@ -602,6 +575,13 @@ export function AIPlatformPanelV2() {
   const [skillEditor, setSkillEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
   const [toolEditor, setToolEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
   const [registrySaving, setRegistrySaving] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [runtimeStatus, setRuntimeStatus] = useState<Record<string, any>>({});
+  const [connectionResult, setConnectionResult] = useState<{ ok: boolean; message: string } | null>(null);
   const savedSettings = useMemo(() => {
     try {
       return readLocalAISettings();
@@ -669,6 +649,7 @@ export function AIPlatformPanelV2() {
       sensitiveMasking: true,
       blockSecretMemory: true,
       highRiskConfirm: true,
+      agentLoopMode: 'harness',
       maxToolSteps: 5,
       toolTimeoutSeconds: 30,
       enabledHooks: ['enforce_permissions', 'validate_before_confirmation', 'validate_before_tool', 'validate_after_tool', 'audit_tool_use'],
@@ -702,14 +683,17 @@ export function AIPlatformPanelV2() {
                 handlerKeys: registryData.handlerKeys || [],
                 source: registryData.source,
               }
-            : (savedSettings as any).agentRegistry || defaultSettings.agentRegistry;
+            : defaultSettings.agentRegistry;
           const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings, agentRegistry });
           form.setFieldsValue(mergedSettings);
           saveLocalAISettings(mergedSettings);
+          setRuntimeStatus(response.data?.runtime || {});
+          setLoaded(true);
+          setDirty(false);
         }
       } catch {
         if (!cancelled) {
-          form.setFieldsValue(normalizeAISettings({ ...defaultSettings, ...savedSettings }));
+          setLoadError('后端设置加载失败。当前显示本地草稿，请刷新后重试；尚未确认这些配置生效。');
         }
       }
     };
@@ -755,11 +739,11 @@ export function AIPlatformPanelV2() {
     { label: 'Low-code', value: 'low-code' },
   ];
   const hookOptions = [
-    { label: 'Permission gate', value: 'enforce_permissions' },
-    { label: 'Validate before confirmation', value: 'validate_before_confirmation' },
-    { label: 'Validate before tool', value: 'validate_before_tool' },
-    { label: 'Validate after tool', value: 'validate_after_tool' },
-    { label: 'Audit tool use', value: 'audit_tool_use' },
+    { label: '权限检查（始终执行）', value: 'enforce_permissions', disabled: true },
+    { label: '确认前校验', value: 'validate_before_confirmation' },
+    { label: '执行前校验', value: 'validate_before_tool' },
+    { label: '执行后校验', value: 'validate_after_tool' },
+    { label: '记录工具审计', value: 'audit_tool_use' },
     { label: 'Budget exceeded log', value: 'log_budget_exceeded' },
     { label: 'Context compaction log', value: 'log_compaction' },
   ];
@@ -796,6 +780,7 @@ export function AIPlatformPanelV2() {
 
   const updateSafetyRules = (key: 'permissionRules' | 'validationRules', rules: any[]) => {
     form.setFieldsValue({ safetyPolicy: { ...(form.getFieldValue('safetyPolicy') || {}), [key]: rules } });
+    setDirty(true);
   };
 
   const parseJsonField = (value: string | undefined, fallback: Record<string, unknown> = {}) => {
@@ -809,8 +794,6 @@ export function AIPlatformPanelV2() {
 
   const persistAgentRegistry = async (nextRegistry: Record<string, any>) => {
     const nextSettings = { ...form.getFieldsValue(), agentRegistry: nextRegistry };
-    form.setFieldsValue({ agentRegistry: nextRegistry });
-    saveLocalSettings(nextSettings);
     setRegistrySaving(true);
     try {
       const response = await updateAIAgentRegistry({ skills: nextRegistry.skills, tools: nextRegistry.tools });
@@ -823,7 +806,7 @@ export function AIPlatformPanelV2() {
       };
       form.setFieldsValue({ agentRegistry: activated });
       saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
-      message.success('Agent registry activated');
+      message.success('技能与工具注册表已保存并生效');
     } catch (error: any) {
       message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry save failed');
     } finally {
@@ -844,7 +827,7 @@ export function AIPlatformPanelV2() {
       };
       form.setFieldsValue({ agentRegistry: activated });
       saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
-      message.success('Agent registry seed imported');
+      message.success('默认技能与工具已导入');
     } catch (error: any) {
       message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry seed failed');
     } finally {
@@ -938,20 +921,17 @@ export function AIPlatformPanelV2() {
   };
 
   const applyProviderPreset = (provider: string) => {
-    if (provider === 'glm') {
-      const nextSettings = { ...form.getFieldsValue(), ...GLM_AI_DEFAULTS };
-      form.setFieldsValue(nextSettings);
-      saveLocalSettings(nextSettings);
-      return;
-    }
-    if (provider === 'deepseek') {
-      const nextSettings = normalizeAISettings({ ...form.getFieldsValue(), ...DEEPSEEK_AI_DEFAULTS });
-      form.setFieldsValue(nextSettings);
-      saveLocalSettings(nextSettings);
-    }
+    setDirty(true);
+    setConnectionResult(null);
+    const preset = provider === 'glm' ? GLM_AI_DEFAULTS : provider === 'deepseek' ? DEEPSEEK_AI_DEFAULTS : { provider, baseUrl: provider === 'openai' ? 'https://api.openai.com/v1' : '', chatModel: '', reasoningModel: '' };
+    const nextSettings = { ...form.getFieldsValue(true), ...preset, apiKey: '', visionModel: provider === 'glm' ? GLM_AI_DEFAULTS.visionModel : 'disabled' };
+    form.setFieldsValue(nextSettings);
+    saveLocalSettings(nextSettings);
   };
 
   const applyGlmPreset = (preset: 'api' | 'coding') => {
+    setDirty(true);
+    setConnectionResult(null);
     const nextSettings = {
       ...form.getFieldsValue(),
       ...(preset === 'coding' ? GLM_CODING_PLAN_DEFAULTS : GLM_AI_DEFAULTS),
@@ -960,38 +940,55 @@ export function AIPlatformPanelV2() {
     saveLocalSettings(nextSettings);
   };
 
-  const handleSaveToBackend = async () => {
-    const values = normalizeAISettings(form.getFieldsValue());
-    form.setFieldsValue(values);
-    saveLocalSettings(values);
-    try {
-      await updateAISettings(values);
-      message.success('AI 设置已保存到数据库');
-    } catch {
-      message.warning('后端 AI 设置暂不可用，已先保存到本地浏览器');
-    }
+  const collectSettings = async () => {
+    await form.validateFields();
+    const values = normalizeAISettings(form.getFieldsValue(true));
+    delete values.agentRegistry;
+    // Canonical policies replace the legacy duplicate fields.
+    ['ragEnabled', 'topK', 'similarityThreshold', 'highRiskConfirm', 'sensitiveMasking', 'tools', 'knowledgeScopes', 'dailyLimit', 'userDailyLimit', 'retentionDays', 'proactiveEnabled', 'streaming', 'temperature', 'embeddingModel'].forEach(key => delete values[key]);
+    return values;
   };
-
-  const handleTestConnection = async () => {
-    const values = normalizeAISettings(form.getFieldsValue());
-    form.setFieldsValue(values);
-    saveLocalSettings(values);
+  const errorText = (error: any) => {
+    const detail = error?.response?.data?.detail;
+    return typeof detail === 'string' ? detail : detail?.message || error?.message || '请检查配置后重试';
+  };
+  const handleSaveToBackend = async () => {
+    setSaving(true);
     try {
-      await updateAISettings(values);
-      const response = await testSavedAISettings();
-      if (response.data?.ok) {
-        message.success(response.data?.message || 'AI provider configuration accepted');
-      } else {
-        message.warning(response.data?.message || 'AI provider configuration is incomplete');
-      }
-    } catch {
-      message.error('AI provider test failed');
-    }
+      const values = await collectSettings();
+      const response = await updateAISettings(values);
+      const persisted = response.data?.data;
+      form.setFieldsValue(persisted);
+      saveLocalSettings(persisted);
+      setRuntimeStatus(response.data?.runtime || {});
+      setDirty(false);
+      message.success('配置已保存到数据库，后续请求按新配置执行');
+    } catch (error) {
+      message.error(`配置未保存：${errorText(error)}`);
+    } finally { setSaving(false); }
+  };
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setConnectionResult(null);
+    try {
+      const values = await collectSettings();
+      const response = await testSavedAISettings(values);
+      setConnectionResult({ ok: Boolean(response.data?.ok), message: response.data?.message || '连接测试结束' });
+    } catch (error) {
+      setConnectionResult({ ok: false, message: errorText(error) });
+    } finally { setTesting(false); }
   };
 
   return (
     <div className="account-admin-section">
-      <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form">
+      <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={() => { setDirty(true); setConnectionResult(null); }}>
+        <Alert showIcon type={loadError ? 'error' : dirty ? 'warning' : 'info'} message={loadError || (dirty ? '有未保存的配置' : loaded ? '正在使用数据库已保存的配置' : '正在读取后端配置')} description="连接测试只测试当前表单，不保存配置。点击保存后，新请求与待确认操作会重新检查最新策略。" style={{ marginBottom: 16 }} />
+        {(runtimeStatus.issues || []).length > 0 && <Alert type="warning" showIcon message="已保存的模型接入需要检查" description={(runtimeStatus.issues || []).join('；')} style={{ marginBottom: 16 }} />}
+        {connectionResult && <Alert showIcon type={connectionResult.ok ? 'success' : 'error'} message={connectionResult.ok ? '当前表单连接测试通过' : '当前表单连接测试未通过'} description={connectionResult.message} style={{ marginBottom: 16 }} />}
+        <div className="ai-settings-toolbar">
+          <Space wrap><Text strong>官方 DeepSeek Harness</Text><Tag>SDK {runtimeStatus.sdkVersion || '未安装'}</Tag><Text type="secondary">业务权限与写入确认由平台执行</Text></Space>
+          <Space><Button loading={testing} disabled={!loaded || saving} icon={<ApiOutlined />} onClick={handleTestConnection}>测试当前配置</Button><Button loading={saving} disabled={!loaded || testing} type="primary" icon={<RobotOutlined />} onClick={handleSaveToBackend}>保存并生效</Button></Space>
+        </div>
         <div className="ai-platform-console">
           <div className="ai-platform-workbench">
             <aside className="ai-platform-side">
@@ -1002,14 +999,14 @@ export function AIPlatformPanelV2() {
                       <Text strong>服务链路</Text>
                       <Text type="secondary">{currentProvider}</Text>
                     </div>
-                    <Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+                    <Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch aria-label="启用平台 AI" /></Form.Item>
                   </div>
                   <Form.Item name="provider" label="模型服务商">
                     <Select options={[
                       { label: 'GLM', value: 'glm' },
                       { label: 'OpenAI Compatible', value: 'openai-compatible' },
                       { label: 'OpenAI', value: 'openai' },
-                      { label: 'Azure OpenAI', value: 'azure-openai' },
+                      { label: 'Azure OpenAI（专用协议暂未接入）', value: 'azure-openai', disabled: true },
                       { label: 'DeepSeek', value: 'deepseek' },
                       { label: 'Qwen', value: 'qwen' },
                     ]} onChange={applyProviderPreset} />
@@ -1019,10 +1016,10 @@ export function AIPlatformPanelV2() {
                 <div className="ai-connection-section">
                   <div className="ai-connection-section-head">
                     <Text strong>接入凭据</Text>
-                    <Tag color="blue">托管密钥</Tag>
+                    <Tag>后端保存，浏览器不缓存密钥</Tag>
                   </div>
-                  <Form.Item name="baseUrl" label="Base URL"><Input placeholder="https://open.bigmodel.cn/api/paas/v4" /></Form.Item>
-                  <Form.Item name="apiKey" label="API Key"><Input.Password placeholder="由后端密钥库托管；可先为空" /></Form.Item>
+                  <Form.Item name="baseUrl" label="Base URL" rules={[{ required: true, message: '请输入服务地址' }, { validator: (_, value) => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.hostname ? Promise.resolve() : Promise.reject(new Error('请输入有效的 HTTP(S) 地址')); } catch { return Promise.reject(new Error('请输入有效的 HTTP(S) 地址')); } } }]} extra="本机模型服务请使用后端可访问的地址；Docker 中 localhost 指向后端容器自身。"><Input placeholder="https://open.bigmodel.cn/api/paas/v4" /></Form.Item>
+                  <Form.Item name="apiKey" label="API Key" extra="更换服务地址后请重新填写对应服务的密钥。"><Input.Password placeholder="由后端密钥库托管；可先为空" /></Form.Item>
                   <div className="ai-provider-presets">
                     <Button size="small" onClick={() => applyGlmPreset('api')}>GLM 普通 API</Button>
                     <Button size="small" onClick={() => applyGlmPreset('coding')}>GLM Coding Plan</Button>
@@ -1038,7 +1035,7 @@ export function AIPlatformPanelV2() {
                     <span>当前链路</span>
                     <strong>{currentProvider} / {currentChatModel}</strong>
                   </div>
-                  <Text type="secondary">知识 Agent、页面助手、报表生成优先使用。</Text>
+                  <Text type="secondary">聊天模型用于知识问答及连接测试；推理模型用于 Harness 业务 Agent。</Text>
                 </div>
               </Card>
             </aside>
@@ -1052,8 +1049,8 @@ export function AIPlatformPanelV2() {
                       label: '模型编排',
                       children: (
                         <div className="ai-tab-grid">
-                          <Form.Item name="chatModel" label="默认聊天模型">
-                            <Select options={[
+                          <Form.Item name="chatModel" label="默认聊天模型" rules={[{ required: true, message: '请填写聊天模型 ID' }]}>
+                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
                               { label: 'glm-5.1', value: 'glm-5.1' },
                               { label: 'GLM-5.1 / Coding Plan', value: 'GLM-5.1' },
                               { label: 'GLM-4.7 / Coding Plan', value: 'GLM-4.7' },
@@ -1066,8 +1063,8 @@ export function AIPlatformPanelV2() {
                               { label: 'qwen-plus', value: 'qwen-plus' },
                             ]} />
                           </Form.Item>
-                          <Form.Item name="reasoningModel" label="推理 / Agent 模型">
-                            <Select options={[
+                          <Form.Item name="reasoningModel" label="推理 / Agent 模型" extra="留空沿用聊天模型；支持自定义模型 ID。">
+                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
                               { label: 'glm-5.1', value: 'glm-5.1' },
                               { label: 'GLM-5.1 / Coding Plan', value: 'GLM-5.1' },
                               { label: 'GLM-4.7 / Coding Plan', value: 'GLM-4.7' },
@@ -1079,33 +1076,20 @@ export function AIPlatformPanelV2() {
                               { label: 'qwen-max', value: 'qwen-max' },
                             ]} />
                           </Form.Item>
-                          <Form.Item name="embeddingModel" label="向量模型">
-                            <Select options={[
-                              { label: 'embedding-3', value: 'embedding-3' },
-                              { label: 'bge-m3', value: 'bge-m3' },
-                              { label: 'text-embedding-3-small', value: 'text-embedding-3-small' },
-                              { label: 'text-embedding-3-large', value: 'text-embedding-3-large' },
-                            ]} />
-                          </Form.Item>
-                          <Form.Item name="visionModel" label="视觉模型">
-                            <Select options={[
+                          <Form.Item label="远程向量模型（未接入）" extra="当前知识检索使用本地索引。"><Input disabled value="本地知识索引" /></Form.Item>
+                          <Form.Item name="visionModel" label="OCR 增强模型" extra="需服务支持图像输入；填写 disabled 可关闭远程视觉增强。">
+                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
                               { label: 'glm-4v-plus', value: 'glm-4v-plus' },
                               { label: 'gpt-4o', value: 'gpt-4o' },
                               { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
                               { label: '暂不启用', value: 'disabled' },
                             ]} />
                           </Form.Item>
-                          <Form.Item name="temperature" label="回答风格">
-                            <Radio.Group optionType="button" buttonStyle="solid">
-                              <Radio.Button value="strict">严谨</Radio.Button>
-                              <Radio.Button value="balanced">均衡</Radio.Button>
-                              <Radio.Button value="creative">发散</Radio.Button>
-                            </Radio.Group>
-                          </Form.Item>
-                          <Form.Item name="streaming" label="流式输出" valuePropName="checked"><Switch /></Form.Item>
+                          <Text type="secondary">采样参数使用模型适配器默认值；当前官方 SDK 不提供独立的回答风格配置。</Text>
+                          <Text type="secondary">执行事件实时显示；模型回答在生成完成后返回。</Text>
                           <Row gutter={12}>
-                            <Col span={8}><Form.Item name="maxTokens" label="Max Tokens"><Input type="number" min={256} max={16000} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name="timeoutSeconds" label="超时秒数"><Input type="number" min={5} max={180} /></Form.Item></Col>
+                            <Col span={8}><Form.Item name="maxTokens" label="Harness 输出上限（Token）"><Input type="number" min={256} max={16000} /></Form.Item></Col>
+                            <Col span={8}><Form.Item name="timeoutSeconds" label="模型响应超时（秒）"><Input type="number" min={5} max={180} /></Form.Item></Col>
                             <Col span={8}>
                               <Form.Item name="retryCount" label="失败重试">
                                 <Select options={[{ label: '0 次', value: 0 }, { label: '1 次', value: 1 }, { label: '2 次', value: 2 }, { label: '3 次', value: 3 }]} />
@@ -1171,9 +1155,10 @@ export function AIPlatformPanelV2() {
                           <div className="ai-switch-panel">
                             <Form.Item name="qaEnabled" label="问答型 AI" valuePropName="checked"><Switch /></Form.Item>
                             <Form.Item name="assistEnabled" label="辅助型 AI" valuePropName="checked"><Switch /></Form.Item>
-                            <Form.Item name="proactiveEnabled" label="主动型 AI" valuePropName="checked"><Switch /></Form.Item>
+                            <Form.Item label="主动巡检（尚未接入调度）"><Switch disabled checked={false} /></Form.Item>
                           </div>
-                          <Form.Item name="agentMode" label="Agent 执行模式">
+                          <Alert className="ai-engine-description" type="info" showIcon message="Agent 内核：官方 DeepSeek Harness" description={`SDK ${runtimeStatus.sdkVersion || '未安装'}。由 Harness 规划并调用工具；平台后端校验权限、确认和业务规则。`} />
+                          <Form.Item name="agentMode" label="Agent 执行模式" extra="只读禁止操作；草稿模式仅允许草稿写入；确认后执行允许审核后的业务或配置写入。所有写入均需确认。">
                             <Select options={[
                               { label: '关闭', value: 'off' },
                               { label: '只读查询', value: 'readonly' },
@@ -1182,7 +1167,7 @@ export function AIPlatformPanelV2() {
                               { label: '自动执行', value: 'auto', disabled: true },
                             ]} />
                           </Form.Item>
-                          <Form.Item name="domains" label="可访问业务域">
+                          <Form.Item name="domains" label="业务动作域" extra="限制标注业务域的工具；通用表单读取仍按用户的表单权限执行。">
                             <Select mode="multiple" options={[
                               { label: '生产态势', value: 'production' },
                               { label: '质量分析', value: 'quality' },
@@ -1192,22 +1177,13 @@ export function AIPlatformPanelV2() {
                               { label: '低代码配置', value: 'low-code' },
                             ]} />
                           </Form.Item>
-                          <Form.Item name="tools" label="允许调用工具">
-                            <Select mode="multiple" options={[
-                              { label: '查询业务数据', value: 'query' },
-                              { label: '生成报告', value: 'report' },
-                              { label: '生成单据草稿', value: 'draft' },
-                              { label: '发起审批', value: 'workflow' },
-                              { label: '修改配置', value: 'config' },
-                              { label: '创建订单', value: 'order', disabled: true },
-                            ]} />
-                          </Form.Item>
+                          <Text type="secondary">具体可调用工具由能力开关、角色策略、执行模式和工具注册表共同决定。注册表中的工具仍需通过业务权限校验。</Text>
                         </div>
                       ),
                     },
                     {
                       key: 'agent-registry',
-                      label: 'Agent Registry',
+                      label: '技能与工具注册表',
                       children: (
                         <div className="ai-tab-grid">
                           <div className="ai-policy-rule-head">
@@ -1216,8 +1192,8 @@ export function AIPlatformPanelV2() {
                               <Text type="secondary"> DB-backed runtime skills, activated after validation.</Text>
                             </div>
                             <Space size={6}>
-                              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>Seed registry</Button>
-                              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>Add skill</Button>
+                              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>导入默认注册表</Button>
+                              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>添加技能</Button>
                             </Space>
                           </div>
                           <Table
@@ -1255,7 +1231,7 @@ export function AIPlatformPanelV2() {
                               <Text strong>Tools</Text>
                               <Text type="secondary"> Tool names bind only to whitelisted handler keys.</Text>
                             </div>
-                            <Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>Add tool</Button>
+                            <Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>添加工具</Button>
                           </div>
                           <Table
                             size="small"
@@ -1288,7 +1264,7 @@ export function AIPlatformPanelV2() {
                             ]}
                             locale={{ emptyText: 'No tools registered' }}
                           />
-                          <Text type="secondary">Source: {agentRegistry.source || 'database / seed'} / Handlers: {registryHandlerKeys.length}</Text>
+                          <Text type="secondary">注册表单独保存，修改会立即生效。配置来源：{agentRegistry.source || 'database / seed'} / 可用处理器：{registryHandlerKeys.length}</Text>
                         </div>
                       ),
                     },
@@ -1297,29 +1273,18 @@ export function AIPlatformPanelV2() {
                       label: '知识 / RAG',
                       children: (
                         <div className="ai-tab-grid">
-                          <Form.Item name="ragEnabled" label="启用知识库问答" valuePropName="checked"><Switch /></Form.Item>
+
                           <Row gutter={12}>
-                            <Col span={8}><Form.Item name={['ragPolicy', 'enabled']} label="RAG 进入上下文" valuePropName="checked"><Switch /></Form.Item></Col>
+                            <Col span={8}><Form.Item name={['ragPolicy', 'enabled']} label="启用知识检索 / RAG" valuePropName="checked"><Switch /></Form.Item></Col>
                             <Col span={8}><Form.Item name={['ragPolicy', 'topK']} label="证据 Top K"><Input type="number" min={1} max={20} /></Form.Item></Col>
                             <Col span={8}><Form.Item name={['ragPolicy', 'maxEvidenceChars']} label="单条证据最大字符"><Input type="number" min={200} max={5000} /></Form.Item></Col>
                           </Row>
                           <Form.Item name={['ragPolicy', 'similarityThreshold']} label="相似度阈值"><Input /></Form.Item>
-                          <Form.Item name="knowledgeScopes" label="知识范围">
-                            <Select mode="multiple" options={[
-                              { label: '项目文档', value: 'project_docs' },
-                              { label: '业务 SOP', value: 'sop' },
-                              { label: '设备手册', value: 'equipment_manuals' },
-                              { label: '供应商协议', value: 'supplier_contracts' },
-                              { label: 'API 文档', value: 'api_docs' },
-                            ]} />
-                          </Form.Item>
-                          <Row gutter={12}>
-                            <Col span={12}><Form.Item name="topK" label="Top K"><Input type="number" min={1} max={20} /></Form.Item></Col>
-                            <Col span={12}><Form.Item name="similarityThreshold" label="相似度阈值"><Input /></Form.Item></Col>
-                          </Row>
+                          <Text type="secondary">知识检索继承当前用户的租户与文档权限。</Text>
+
                           <div className="ai-model-route">
                             <span>检索链路</span>
-                            <strong>{currentEmbeddingModel}</strong>
+                            <strong>本地知识索引</strong>
                             <span>→</span>
                             <strong>{currentReasoningModel}</strong>
                           </div>
@@ -1335,14 +1300,14 @@ export function AIPlatformPanelV2() {
                             <div className="ai-role-policy-row" key={policy.role}>
                               <div>
                                 <strong>{aiRoleOptions.find((item) => item.value === policy.role)?.label || policy.role}</strong>
-                                <Text type="secondary">{policy.agentMode}</Text>
+                                <Select size="small" value={policy.agentMode === 'save_after_confirm' ? 'confirm' : policy.agentMode} style={{ width: 140 }} options={[{ label: '关闭', value: 'off' }, { label: '只读', value: 'readonly' }, { label: '草稿', value: 'draft' }, { label: '确认后执行', value: 'confirm' }]} onChange={agentMode => { form.setFieldsValue({ rolePolicies: rolePolicies.map((item: any) => item.role === policy.role ? { ...item, agentMode } : item) }); setDirty(true); }} />
                               </div>
                               <Space size={[4, 4]} wrap>
                                 {(policy.capabilities || []).slice(0, 4).map((capability: string) => (
                                   <Tag key={capability}>{aiCapabilityOptions.find((item) => item.value === capability)?.label || capability}</Tag>
                                 ))}
                               </Space>
-                              <Switch checked={policy.enabled} disabled />
+                              <Switch checked={policy.enabled} onChange={enabled => { form.setFieldsValue({ rolePolicies: rolePolicies.map((item: any) => item.role === policy.role ? { ...item, enabled } : item) }); setDirty(true); }} />
                             </div>
                           ))}
                         </div>
@@ -1354,24 +1319,18 @@ export function AIPlatformPanelV2() {
             </main>
 
             <aside className="ai-platform-side">
-              <Card size="small" title="安全、审计与额度" className="account-panel-card ai-policy-card">
+              <Card size="small" title="执行策略与审计" className="account-panel-card ai-policy-card">
                 <div className="ai-policy-section">
                   <div className="ai-policy-section-head">
                     <Text strong>安全护栏</Text>
                     <Tag color="blue">确认 / 脱敏 / 记忆</Tag>
                   </div>
                   <div className="ai-policy-toggle-list">
+
+
                     <div className="ai-policy-toggle-item">
-                      <span>高风险动作二次确认</span>
-                      <Form.Item name="highRiskConfirm" valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
-                    <div className="ai-policy-toggle-item">
-                      <span>敏感字段脱敏</span>
-                      <Form.Item name="sensitiveMasking" valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
-                    <div className="ai-policy-toggle-item">
-                      <span>Agent 高风险确认</span>
-                      <Form.Item name={['safetyPolicy', 'highRiskConfirm']} valuePropName="checked" noStyle><Switch /></Form.Item>
+                      <span>业务与配置写入</span>
+                      <Tag>所有写入必须确认</Tag>
                     </div>
                     <div className="ai-policy-toggle-item">
                       <span>上下文敏感信息脱敏</span>
@@ -1386,7 +1345,7 @@ export function AIPlatformPanelV2() {
                     <Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item>
                     <Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时秒数"><Input type="number" min={5} max={180} /></Form.Item>
                   </div>
-                  <Form.Item name={['safetyPolicy', 'enabledHooks']} label="Agent lifecycle hooks" className="ai-policy-compact-item">
+                  <Form.Item name={['safetyPolicy', 'enabledHooks']} label="平台工具校验与审计" className="ai-policy-compact-item">
                     <Select mode="multiple" options={hookOptions} />
                   </Form.Item>
                   <Form.Item name="forbiddenActions" label="禁止动作清单" className="ai-policy-compact-item">
@@ -1398,8 +1357,8 @@ export function AIPlatformPanelV2() {
                     ]} />
                   </Form.Item>
                   <div className="ai-policy-rule-head">
-                    <Text strong>Permission rules</Text>
-                    <Button size="small" onClick={() => openPermissionRuleEditor(null)}>Add rule</Button>
+                    <Text strong>工具权限规则</Text>
+                    <Button size="small" onClick={() => openPermissionRuleEditor(null)}>添加规则</Button>
                   </div>
                   <Table
                     size="small"
@@ -1422,11 +1381,11 @@ export function AIPlatformPanelV2() {
                         ),
                       },
                     ]}
-                    locale={{ emptyText: 'No custom permission rules' }}
+                    locale={{ emptyText: '尚未设置额外权限规则' }}
                   />
                   <div className="ai-policy-rule-head">
-                    <Text strong>Validation rules</Text>
-                    <Button size="small" onClick={() => openValidationRuleEditor(null)}>Add rule</Button>
+                    <Text strong>工具校验规则</Text>
+                    <Button size="small" onClick={() => openValidationRuleEditor(null)}>添加规则</Button>
                   </div>
                   <Table
                     size="small"
@@ -1449,18 +1408,18 @@ export function AIPlatformPanelV2() {
                         ),
                       },
                     ]}
-                    locale={{ emptyText: 'No custom validation rules' }}
+                    locale={{ emptyText: '尚未设置额外校验规则' }}
                   />
                 </div>
 
                 <div className="ai-policy-section">
                   <div className="ai-policy-section-head">
-                    <Text strong>审计与额度</Text>
-                    <Tag color="green">日志 / 配额</Tag>
+                    <Text strong>审计记录</Text>
+                    <Tag>审计记录</Tag>
                   </div>
                   <div className="ai-policy-toggle-list compact">
                     <div className="ai-policy-toggle-item">
-                      <span>保存对话日志</span>
+                      <span>记录 AI 审计事件</span>
                       <Form.Item name="auditEnabled" valuePropName="checked" noStyle><Switch /></Form.Item>
                     </div>
                     <div className="ai-policy-toggle-item">
@@ -1468,12 +1427,12 @@ export function AIPlatformPanelV2() {
                       <Form.Item name="recordToolCalls" valuePropName="checked" noStyle><Switch /></Form.Item>
                     </div>
                   </div>
-                  <Form.Item name="retentionDays" label="历史保留天数" className="ai-policy-compact-item">
-                    <Select options={[{ label: '30 天', value: 30 }, { label: '90 天', value: 90 }, { label: '180 天', value: 180 }, { label: '365 天', value: 365 }]} />
+                  <Form.Item label="对话历史自动清理（尚未实现）" className="ai-policy-compact-item">
+                    <Select disabled options={[{ label: '30 天', value: 30 }, { label: '90 天', value: 90 }, { label: '180 天', value: 180 }, { label: '365 天', value: 365 }]} />
                   </Form.Item>
                   <div className="ai-policy-field-grid">
-                    <Form.Item name="dailyLimit" label="平台日额度"><Input type="number" min={1} /></Form.Item>
-                    <Form.Item name="userDailyLimit" label="用户日额度"><Input type="number" min={1} /></Form.Item>
+                    <Form.Item label="平台日额度（尚未实现）"><Input disabled placeholder="尚未启用" /></Form.Item>
+                    <Form.Item label="用户日额度（尚未实现）"><Input disabled placeholder="尚未启用" /></Form.Item>
                   </div>
                 </div>
 
@@ -1482,17 +1441,10 @@ export function AIPlatformPanelV2() {
                     <Text type="secondary">开放范围</Text>
                     <Space size={[4, 4]} wrap>{activeDomains.map((domain: string) => <Tag key={domain}>{aiDomainOptions.find((item) => item.value === domain)?.label || domain}</Tag>)}</Space>
                   </div>
-                  <div className="ai-scope-row">
-                    <Text type="secondary">可调用工具</Text>
-                    <Space size={[4, 4]} wrap>{activeTools.map((tool: string) => <Tag color="blue" key={tool}>{tool}</Tag>)}</Space>
-                  </div>
+                  <Text type="secondary">工具以角色权限与执行模式过滤，注册表更新会立即生效。</Text>
                 </div>
 
-                <div className="ai-platform-actions">
-                  <Button icon={<ApiOutlined />} onClick={handleTestConnection}>测试后端 AI</Button>
-                  <Button icon={<ApiOutlined />} onClick={() => message.success('本地连通性检查通过')}>本地检查</Button>
-                  <Button type="primary" icon={<RobotOutlined />} onClick={handleSaveToBackend}>保存 AI 设置</Button>
-                </div>
+
               </Card>
             </aside>
           </div>

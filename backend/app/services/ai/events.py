@@ -138,6 +138,7 @@ class EventBus:
         ``HookResult(action="continue")``.
         """
         current_payload = payload
+        pending_ask = None
         for handler in self._handlers.get(event, []):
             try:
                 result = await handler(event, current_payload)
@@ -153,10 +154,13 @@ class EventBus:
             if result.action == "abort":
                 return result
 
+            if result.action == "ask":
+                pending_ask = result
+
             if result.action == "modify" and result.modified_payload is not None:
                 current_payload = result.modified_payload
 
-        return HookResult(action="continue", modified_payload=current_payload)
+        return pending_ask or HookResult(action="continue", modified_payload=current_payload)
 
 
 # ── Backward-compatible adapter ──────────────────────────────
