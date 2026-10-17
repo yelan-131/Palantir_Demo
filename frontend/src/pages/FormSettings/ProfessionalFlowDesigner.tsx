@@ -40,6 +40,7 @@ export interface FlowAssigneeRule {
   type: AssigneeTargetType;
   value?: string;
   scope?: 'self' | 'children';
+  approvalMode?: ApprovalMode;
 }
 
 export interface FlowExternalAction {
@@ -227,7 +228,7 @@ const externalActionTypeOptions = [
 ];
 
 const approvalModeOptions = [
-  { value: 'single', label: '单人审批' },
+  { value: 'single', label: '单人' },
   { value: 'orSign', label: '或签' },
   { value: 'countersign', label: '会签' },
 ];
@@ -349,10 +350,18 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(element?.closest('input, textarea, [contenteditable="true"], .ant-select, .ant-input-number'));
 }
 
+export function normalizeNodeFieldPermissions(permissions: FlowDesignerNode['fieldPermissions']) {
+  return Object.fromEntries(Object.entries(permissions || {}).map(([key, permission]) => [key, {
+    visible: permission.visible !== false,
+    editable: Boolean(permission.editable),
+    required: Boolean(permission.editable && permission.required),
+  }]));
+}
+
 function makeFieldPermissions(fields: FlowDesignerField[]) {
   return Object.fromEntries(fields.map((field) => [
     field.key,
-    { visible: true, editable: !field.required, required: Boolean(field.required) },
+    { visible: true, editable: !field.required, required: false },
   ]));
 }
 
@@ -368,7 +377,7 @@ function createNode(definition: NodeDefinition, fields: FlowDesignerField[], ind
     y: DEFAULT_NODE_START_Y + index * DEFAULT_NODE_GAP_Y,
     assigneeSource: approvalTaskTypes.has(definition.key) ? 'role' : undefined,
     assigneeValue: approvalTaskTypes.has(definition.key) ? '流程审批人' : undefined,
-    assigneeRules: approvalTaskTypes.has(definition.key) ? [{ id: makeId('assignee'), type: 'role', value: '流程审批人' }] : undefined,
+    assigneeRules: approvalTaskTypes.has(definition.key) ? [{ id: makeId('assignee'), type: 'role', value: '流程审批人', approvalMode: 'single' }] : undefined,
     approvalMode: approvalTaskTypes.has(definition.key) ? 'single' : undefined,
     slaHours: approvalTaskTypes.has(definition.key) ? 24 : undefined,
     notificationEnabled: definition.key !== 'startEvent',
@@ -439,7 +448,11 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
     connectedNodeIds.add(edge.target);
   });
   const orphanNodes = config.nodes.filter((node) => node.executable && node.type !== 'startEvent' && node.type !== 'endEvent' && !connectedNodeIds.has(node.id));
-  const incompleteApprovals = config.nodes.filter((node) => approvalTaskTypes.has(node.type) && !(node.assigneeRules?.length || (node.assigneeSource && node.assigneeValue)));
+  const incompleteApprovals = config.nodes.filter((node) => approvalTaskTypes.has(node.type) && (
+    node.assigneeRules?.length
+      ? node.assigneeRules.some((rule) => !['departmentOwner', 'initiatorManager'].includes(rule.type) && !String(rule.value || '').trim())
+      : !(node.assigneeSource && node.assigneeValue)
+  ));
   const incompleteGateways = config.nodes.filter((node) => node.type === 'exclusiveGateway').filter((node) => {
     const outgoing = config.edges.filter((edge) => edge.source === node.id);
     return outgoing.length < 2 || outgoing.every((edge) => !edge.condition && !edge.isDefault);
@@ -589,11 +602,15 @@ export default function ProfessionalFlowDesigner({
   config,
   fields,
   roles,
+  roleOptions,
+  users = [],
   onChange,
 }: {
   config: FlowDesignerConfig;
   fields: FlowDesignerField[];
   roles: string[];
+  roleOptions?: Array<{ value: string; label: string }>;
+  users?: Array<{ value: string; label: string }>;
   onChange: (config: FlowDesignerConfig) => void;
 }) {
   const [selection, setSelection] = useState<Selection>({ type: 'canvas' });
@@ -1205,25 +1222,17 @@ export default function ProfessionalFlowDesigner({
 
   const updateFieldPermission = (fieldKey: string, key: 'visible' | 'editable' | 'required', value: boolean) => {
     if (!selectedNode) return;
-    patchNode(selectedNode.id, {
-      fieldPermissions: {
-        ...(selectedNode.fieldPermissions || {}),
-        [fieldKey]: {
-          visible: true,
-          editable: false,
-          required: false,
-          ...(selectedNode.fieldPermissions?.[fieldKey] || {}),
-          [key]: value,
-        },
-      },
-    });
+    const next = normalizeNodeFieldPermissions({ [fieldKey]: {
+      visible: true, editable: false, required: false,
+      ...(selectedNode.fieldPermissions?.[fieldKey] || {}), [key]: value,
+    } });
+    patchNode(selectedNode.id, { fieldPermissions: { ...(selectedNode.fieldPermissions || {}), ...next } });
   };
 
   const renderNodeProperties = () => {
     if (!selectedNode) return null;
     const fieldOptions = fields.map((field) => ({ value: field.key, label: field.name }));
     const selectedNodeTypeLabel = getNodeTypeLabel(selectedNode);
-    const selectedNodeTypeDescription = getNodeTypeDescription(selectedNode);
     const assigneeRules = selectedNode.assigneeRules?.length
       ? selectedNode.assigneeRules
       : approvalTaskTypes.has(selectedNode.type) && selectedNode.assigneeSource
@@ -1232,7 +1241,7 @@ export default function ProfessionalFlowDesigner({
     const patchAssigneeRules = (nextRules: FlowAssigneeRule[]) => {
       const firstRule = nextRules[0];
       patchNode(selectedNode.id, {
-        assigneeRules: nextRules,
+        assigneeRules: nextRules.map((rule) => ({ ...rule, approvalMode: rule.approvalMode || selectedNode.approvalMode || 'single' })),
         assigneeSource: firstRule ? (firstRule.type === 'user' ? 'fixed' : firstRule.type as AssigneeSource) : undefined,
         assigneeValue: firstRule?.value,
       });
@@ -1251,12 +1260,16 @@ export default function ProfessionalFlowDesigner({
           />
         );
       }
+      if (rule.type === 'user') {
+        return <Select showSearch optionFilterProp="label" placeholder="选择审批用户" value={rule.value}
+          options={users} onChange={(value) => patchAssigneeRules(assigneeRules.map((item) => item.id === rule.id ? { ...item, value } : item))} />;
+      }
       if (rule.type === 'role') {
         return (
           <Select
             placeholder="选择角色"
             value={rule.value}
-            options={roles.map((role) => ({ value: role, label: role }))}
+            options={roleOptions?.length ? roleOptions : roles.map((role) => ({ value: role, label: role }))}
             onChange={(value) => patchAssigneeRules(assigneeRules.map((item) => (item.id === rule.id ? { ...item, value } : item)))}
           />
         );
@@ -1292,17 +1305,21 @@ export default function ProfessionalFlowDesigner({
               <span className="professional-flow-node-kind-icon">{getNodeIcon(selectedNode)}</span>
               <div>
                 <strong>{selectedNodeTypeLabel}</strong>
-                <small>{selectedNodeTypeDescription}</small>
               </div>
             </div>
           </label>
-          <label><span>标题</span><Input value={selectedNode.label} onChange={(event) => patchNode(selectedNode.id, { label: event.target.value })} /></label>
-          <label><span>业务说明</span><Input value={selectedNode.description} onChange={(event) => patchNode(selectedNode.id, { description: event.target.value })} /></label>
+          <label><span>标题</span><Input aria-label="节点标题" value={selectedNode.label} readOnly /></label>
+          <label><span>业务说明</span><Input aria-label="节点业务说明" value={selectedNode.description} readOnly /></label>
         </section>
 
         {approvalTaskTypes.has(selectedNode.type) && (
           <section>
-            <div className="professional-flow-section-title">处理人规则</div>
+            <div className="professional-flow-section-head">
+              <div className="professional-flow-section-title">处理人规则</div>
+              <Button aria-label="添加处理对象" title="添加处理对象" icon={<PlusOutlined />} size="small" type="text"
+                onClick={() => patchAssigneeRules([...assigneeRules, { id: makeId('assignee'), type: 'role', approvalMode: 'orSign' }])} />
+            </div>
+            <div className="professional-flow-assignee-head"><span>对象类型</span><span>处理对象</span><span>审批方式</span><span /></div>
             <div className="professional-flow-assignee-list">
               {assigneeRules.map((rule) => (
                 <div className="professional-flow-assignee-rule" key={rule.id}>
@@ -1316,6 +1333,9 @@ export default function ProfessionalFlowDesigner({
                     )))}
                   />
                   {renderAssigneeValueControl(rule)}
+                  <Select aria-label={`处理对象 ${assigneeRules.indexOf(rule) + 1} 审批方式`}
+                    value={rule.approvalMode || selectedNode.approvalMode || 'single'} options={approvalModeOptions}
+                    onChange={(approvalMode) => patchAssigneeRules(assigneeRules.map((item) => item.id === rule.id ? { ...item, approvalMode } : item))} />
                   <Button
                     aria-label="删除处理对象"
                     disabled={assigneeRules.length <= 1}
@@ -1326,18 +1346,7 @@ export default function ProfessionalFlowDesigner({
                   />
                 </div>
               ))}
-              <Button
-                size="small"
-                type="dashed"
-                onClick={() => patchAssigneeRules([...assigneeRules, { id: makeId('assignee'), type: 'role' }])}
-              >
-                添加处理对象
-              </Button>
             </div>
-            <label>
-              <span>审批方式</span>
-              <Select value={selectedNode.approvalMode} options={approvalModeOptions} onChange={(value) => patchNode(selectedNode.id, { approvalMode: value })} />
-            </label>
           </section>
         )}
 
@@ -1387,32 +1396,23 @@ export default function ProfessionalFlowDesigner({
           </section>
         )}
 
-        {selectedNode.executable && (
-          <section>
-            <div className="professional-flow-section-title">SLA 与异常</div>
-            <label><span>处理时限(小时)</span><InputNumber min={1} max={720} value={selectedNode.slaHours} onChange={(value) => patchNode(selectedNode.id, { slaHours: Number(value || 0) })} /></label>
-            <label><span>节点通知</span><Switch checked={selectedNode.notificationEnabled} onChange={(checked) => patchNode(selectedNode.id, { notificationEnabled: checked })} /></label>
-            <label><span>失败策略</span><Select value={selectedNode.errorPolicy} options={[{ value: 'manual', label: '人工处理' }, { value: 'retry', label: '自动重试' }, { value: 'skip', label: '跳过继续' }]} onChange={(value) => patchNode(selectedNode.id, { errorPolicy: value })} /></label>
-          </section>
-        )}
-
-        <section>
+        {approvalTaskTypes.has(selectedNode.type) && <section>
           <div className="professional-flow-section-title">节点字段权限</div>
           <div className="professional-flow-field-matrix">
             <div className="professional-flow-field-head"><span>字段</span><span>可见</span><span>可填</span><span>必填</span></div>
             {fields.map((field) => {
-              const permission = selectedNode.fieldPermissions?.[field.key] || { visible: true, editable: false, required: Boolean(field.required) };
+              const permission = normalizeNodeFieldPermissions(selectedNode.fieldPermissions)[field.key] || { visible: true, editable: false, required: false };
               return (
                 <div className="professional-flow-field-row" key={field.key}>
                   <span>{field.name}</span>
-                  <Switch size="small" checked={permission.visible} onChange={(checked) => updateFieldPermission(field.key, 'visible', checked)} />
-                  <Switch size="small" checked={permission.editable} onChange={(checked) => updateFieldPermission(field.key, 'editable', checked)} />
-                  <Switch size="small" checked={permission.required} onChange={(checked) => updateFieldPermission(field.key, 'required', checked)} />
+                  <Switch aria-label={`${field.name}可见`} size="small" checked={permission.visible} onChange={(checked) => updateFieldPermission(field.key, 'visible', checked)} />
+                  <Switch aria-label={`${field.name}可填`} size="small" checked={permission.editable} onChange={(checked) => updateFieldPermission(field.key, 'editable', checked)} />
+                  <Switch aria-label={`${field.name}必填`} size="small" disabled={!permission.editable} checked={permission.required} onChange={(checked) => updateFieldPermission(field.key, 'required', checked)} />
                 </div>
               );
             })}
           </div>
-        </section>
+        </section>}
 
       </div>
     );
@@ -1585,7 +1585,7 @@ export default function ProfessionalFlowDesigner({
             value={nodeSearch}
             onChange={(event) => setNodeSearch(event.target.value)}
           />
-          <small>节点库负责流程编排；字段权限、条件和状态回写在右侧属性中配置。</small>
+          <small>通过审批节点配置审批人、会签/或签与字段权限；保存草稿后统一发布生效。</small>
         </div>
         <div className="professional-flow-node-groups designer-component-library">
           {!!quickNodeItems.length && (

@@ -55,3 +55,4 @@ pytest-asyncio==0.25.0
 
 # Official Agent kernel, pin SDK and bundled runtime to the same release.
 deepseek-harness-sdk==0.1.5rc1
+deepseek-harness-runtime-bin==0.1.5rc1

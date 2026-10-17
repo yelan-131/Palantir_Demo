@@ -339,7 +339,7 @@ body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer, .ant-dropdown, .ant-sel
   font-size: var(--mf-font-body);
   line-height: 1.6;
 }
-.tech-white-shell .app-content :is(.navigation-area-heading, .shell-page-heading, .runtime-page-bar) h3.ant-typography {
+.tech-white-shell .app-content :is(.shell-page-heading, .runtime-page-bar) h3.ant-typography {
   color: var(--mf-text) !important;
   font-size: var(--mf-font-title) !important;
   font-weight: 600;
@@ -540,3 +540,150 @@ body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-se
 .tech-white-shell .app-content .designer-layout-setting :is(.ant-segmented-item-selected, .ant-segmented-thumb) { background: var(--mf-selected); color: var(--mf-text); border-color: var(--mf-border-strong); box-shadow: none; }
 .tech-white-shell .app-content .designer-props label:not(.designer-prop-locked) .ant-input:not(:disabled):not([readonly]),
 .tech-white-shell .app-content .designer-props label:not(.designer-prop-locked) .ant-select:not(.ant-select-disabled):not(.ant-select-status-error):not(.ant-select-status-warning) .ant-select-selector { background: var(--mf-panel) !important; }
+
+/* Emphasis follows the task hierarchy: page, next action, then reference content. */
+.tech-white-shell .app-content .workbench-page-heading { padding: 4px 0 6px; }
+.tech-white-shell .app-content .workbench-page-heading h2.ant-typography { margin: 0 0 6px; font-size: 28px; font-weight: 650; letter-spacing: -.5px; line-height: 1.4; }
+.tech-white-shell .app-content .workbench-page-heading .ant-typography-secondary { font-size: 13px; }
+.tech-white-shell .app-content .todo-center-panel { min-height: 0; padding: 24px; }
+.tech-white-shell .app-content .todo-center-content { grid-template-columns: minmax(0,1fr); margin-top: 20px; }
+.tech-white-shell .app-content .todo-metric-row { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; align-items: stretch; }
+.tech-white-shell .app-content .todo-metric-item { position: relative; min-width: 0; grid-template-columns: 40px minmax(0,1fr); gap: 16px; padding: 24px; border: 1px solid var(--mf-border); border-radius: 10px; background: var(--mf-bg); }
+.tech-white-shell .app-content .todo-metric-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--mf-hover); color: var(--mf-muted); font-size: 22px; }
+.tech-white-shell .app-content .todo-metric-item strong { margin-bottom: 10px; font-size: 13px; color: var(--mf-muted); font-weight: 500; }
+.tech-white-shell .app-content .todo-metric-item em { font-size: 36px; font-weight: 600; letter-spacing: -1px; line-height: 1.2; }
+.tech-white-shell .app-content .todo-metric-arrow { position: absolute; right: 18px; top: 22px; color: var(--mf-muted); font-size: 14px; }
+.tech-white-shell .app-content .todo-metric-item:hover { border-color: var(--mf-border-strong); background: var(--mf-hover); }
+.tech-white-shell .app-content .todo-metric-primary { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+.tech-white-shell .app-content .todo-metric-primary :is(strong,em,.todo-metric-arrow) { color: #fff; }
+.tech-white-shell .app-content .todo-metric-primary small { color: #dbe3ec; }
+.tech-white-shell .app-content .todo-metric-primary .todo-metric-icon { background: rgba(255,255,255,.12); color: #fff; }
+.tech-white-shell .app-content .todo-metric-primary:hover { background: #304359; border-color: #304359; }
+.tech-white-shell .app-content .todo-metric-primary:hover strong { color: #fff; }
+.tech-white-shell .app-content .favorite-center-panel { padding: 24px; }
+.tech-white-shell .app-content .business-form-directory-entry > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--mf-hover); color: var(--mf-muted); font-size: 18px; }
+.tech-white-shell .app-content .business-form-directory-entry { border-color: var(--mf-border); }
+.tech-white-shell .app-content .business-form-directory-entry .ant-tag { color: var(--mf-muted); border-color: var(--mf-border); background: var(--mf-bg); }
+.tech-white-shell .app-content .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous),
+body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+.tech-white-shell .app-content .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover,
+body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover { background: #304359; border-color: #304359; }
+.tech-white-shell .app-menu .ant-menu-item-selected { font-weight: 600; box-shadow: inset 3px 0 0 var(--mf-primary-strong); }
+.tech-white-shell .ant-layout-sider-collapsed .app-menu .ant-menu-item-selected { box-shadow: none; }
+.tech-white-shell .app-content :is(.shell-page-heading,.runtime-page-bar) h3.ant-typography { font-size: 26px !important; font-weight: 650; letter-spacing: -.4px; }
+@media (max-width: 1100px) {
+  .tech-white-shell .app-content .todo-metric-item { padding: 20px 16px; grid-template-columns: minmax(0,1fr); gap: 12px; }
+}
+@media (max-width: 760px) {
+  .tech-white-shell .app-content .todo-metric-row { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .tech-white-shell .app-content .todo-metric-item { grid-template-columns: 40px minmax(0,1fr); padding: 20px; }
+  .tech-white-shell .app-content :is(.todo-center-panel,.favorite-center-panel) { padding: 20px 16px; }
+  .tech-white-shell .app-content .workbench-page-heading h2.ant-typography { font-size: 26px; }
+}
+
+/* Page-level emphasis stays separate from dense editors, nodes and chart labels. */
+.tech-white-shell .app-content :is(.dashboard-command-header,.quality-command-hero) h3.ant-typography,
+.tech-white-shell .app-content .workflow-approval-topbar h3.ant-typography,
+.tech-white-shell .app-content .app-business-title-row h4.ant-typography,
+.tech-white-shell .app-content :is(.alert-center-header,.material-applications-header) h2.ant-typography,
+.tech-white-shell .app-content .workspace-page-header h4.ant-typography {
+  margin: 0 0 6px; font-size: 26px !important; line-height: 1.4; font-weight: 650; letter-spacing: -.4px;
+}
+.tech-white-shell .app-content .workspace-page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 24px; }
+.tech-white-shell .app-content .workspace-page-header h4.ant-typography { margin: 0; }
+.tech-white-shell .app-content :is(.dashboard-command-header,.workflow-approval-topbar,.alert-center-header,.material-applications-header,.app-business-title-row) { margin-bottom: 20px; }
+.tech-white-shell .app-content :is(.page-summary-metrics,.dashboard-kpi-card,.alert-center-stat,.material-applications-stat) .ant-statistic-title { margin-bottom: 12px; font-size: 13px; color: var(--mf-muted); }
+.tech-white-shell .app-content :is(.page-summary-metrics,.dashboard-kpi-card,.alert-center-stat,.material-applications-stat) .ant-statistic-content-value { font-size: 32px; line-height: 1.2; font-weight: 600; letter-spacing: -.8px; font-variant-numeric: tabular-nums; }
+.tech-white-shell .app-content :is(.page-summary-metrics,.dashboard-kpi-card,.alert-center-stat,.material-applications-stat) :is(.ant-statistic-content-prefix,.ant-statistic-content-suffix) { font-size: 14px; font-weight: 400; opacity: .8; letter-spacing: 0; }
+.tech-white-shell .app-content .hierarchy-kpi-primary { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+.tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-title { color: #dbe3ec; }
+.tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-content { color: #fff; }
+.tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-content-value { font-size: 36px; }
+.tech-white-shell .app-content :is(.alert-center-filters,.material-applications-filters) { padding: 16px; background: var(--mf-rail); border: 1px solid var(--mf-border); border-radius: var(--mf-panel-radius); }
+.tech-white-shell .app-content :is(.alert-center-filters,.material-applications-filters) .ant-input-search-button:not(:disabled) { color: var(--mf-text); background: var(--mf-panel); border-color: var(--mf-border-strong); }
+.tech-white-shell .app-content :is(.alert-center-filters,.material-applications-filters) .ant-input-search-button:not(:disabled):hover { background: var(--mf-hover); }
+.tech-white-shell .app-content :is(.dashboard-page,.maintenance-page,.quality-page) > .ant-row > .ant-col > .ant-card .ant-card-head-title { font-size: 16px; }
+.tech-white-shell .app-content .workflow-approval-tabs > .ant-tabs-nav .ant-tabs-tab-active .workflow-approval-tab-label em { font-size: 14px; font-weight: 600; background: var(--mf-primary-strong); color: #fff; }
+.tech-white-shell .app-content :is(.system-admin-page,.app-admin-workspace) > .ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { font-weight: 600; }
+.tech-white-shell .app-content .config-editor-title span { font-size: 16px; font-weight: 600; color: var(--mf-text); }
+.tech-white-shell .app-content .config-editor-title small { font-size: 12px; color: var(--mf-muted); }
+.tech-white-shell .app-content .account-center-head h3 { font-size: 24px; font-weight: 650; }
+.tech-white-shell .app-content .audit-summary-card h3 { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tech-white-shell .app-content .form-designer-actions .ant-btn-primary { font-weight: 600; }
+@media (max-width: 760px) {
+  .tech-white-shell .app-content :is(.dashboard-command-header,.quality-command-hero) h3.ant-typography,
+  .tech-white-shell .app-content .workflow-approval-topbar h3.ant-typography,
+  .tech-white-shell .app-content .app-business-title-row h4.ant-typography,
+  .tech-white-shell .app-content :is(.alert-center-header,.material-applications-header) h2.ant-typography,
+  .tech-white-shell .app-content .workspace-page-header h4.ant-typography { font-size: 24px !important; overflow-wrap: anywhere; }
+  .tech-white-shell .app-content :is(.page-summary-metrics,.dashboard-kpi-card,.alert-center-stat,.material-applications-stat) .ant-statistic-content-value { font-size: 28px; }
+  .tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-content-value { font-size: 32px; }
+}
+/* On business dashboards the shell bar is context; the page's own heading leads. */
+.tech-white-shell .content-surface:has(> :is(.dashboard-page,.maintenance-page,.quality-page)) > .runtime-page-bar { min-height: 48px; padding-block: 10px; background: transparent; border-color: transparent; }
+.tech-white-shell .content-surface:has(> :is(.dashboard-page,.maintenance-page,.quality-page)) > .runtime-page-bar h3.ant-typography { font-size: 14px !important; font-weight: 500; letter-spacing: 0; color: var(--mf-muted) !important; }
+.tech-white-shell .app-content :is(.dashboard-page,.maintenance-page,.quality-page) > .ant-row { margin-inline: 0 !important; }
+.tech-white-shell .app-content .app-business-title-row .ant-btn-primary { width: auto; padding-inline: 14px; font-weight: 600; }
+.tech-white-shell .app-content .app-business-title-row .ant-btn-primary > span:not(.ant-btn-icon):not(.anticon) { display: inline; }
+.tech-white-shell .content-surface:has(> .supply-chain-page) > .runtime-page-bar { min-height: 48px; padding-block: 10px; background: transparent; border-color: transparent; }
+.tech-white-shell .content-surface:has(> .supply-chain-page) > .runtime-page-bar h3.ant-typography { font-size: 14px !important; font-weight: 500; letter-spacing: 0; color: var(--mf-muted) !important; }
+.tech-white-shell .app-content .supply-chain-page > .ant-row { margin-inline: 0 !important; }
+.tech-white-shell .app-content .quality-command-hero h3.ant-typography { font-weight: 650 !important; }
+.tech-white-shell .app-content .quality-command-hero .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+
+/* Overlays lead with the task title, then the record and its actionable fields. */
+body:has(.tech-white-shell) :is(.ant-modal-title,.ant-modal-confirm-title,.ant-drawer-title) { font-size: 20px; line-height: 1.4; font-weight: 650; letter-spacing: -.2px; }
+body:has(.tech-white-shell) :is(.ant-modal-header,.ant-drawer-header) { border-bottom-color: var(--mf-border-strong); }
+body:has(.tech-white-shell) :is(.ant-modal-body,.ant-drawer-body) .ant-form-item-label > label { color: var(--mf-text); font-weight: 500; }
+body:has(.tech-white-shell) :is(.ant-modal-body,.ant-drawer-body) .ant-form-item-label > label.ant-form-item-required { font-weight: 600; }
+body:has(.tech-white-shell) :is(.ant-modal-body,.ant-drawer-body) :is(.ant-form-item-extra,.ant-form-item-explain) { font-size: 12px; line-height: 1.6; }
+body:has(.tech-white-shell) :is(.ant-modal-footer,.ant-drawer-footer) { background: var(--mf-rail); border-top-color: var(--mf-border-strong); }
+body:has(.tech-white-shell) :is(.ant-modal-footer,.ant-drawer-footer) .ant-btn-primary { font-weight: 600; }
+body:has(.tech-white-shell) .ant-modal-confirm .ant-modal-confirm-btns .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous),
+body:has(.tech-white-shell) .designer-rule-modal .ant-modal-footer .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
+body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .form-field-primary .ant-form-item-label > label,
+.tech-white-shell .app-content .form-field-primary .ant-form-item-label > label { font-weight: 600; color: var(--mf-text); }
+body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .form-field-primary .ant-input:not(:disabled):not([readonly]):not(.ant-input-status-error):not(.ant-input-status-warning),
+.tech-white-shell .app-content .report-config-panel .form-field-primary .ant-input:not(:disabled):not([readonly]):not(.ant-input-status-error):not(.ant-input-status-warning) { background: var(--mf-info-bg); }
+body:has(.tech-white-shell) .overlay-record-heading { padding: 16px 0; margin-bottom: 4px; border-bottom: 1px solid var(--mf-border); }
+body:has(.tech-white-shell) .overlay-record-heading h4.ant-typography { margin: 0 0 8px; font-size: 22px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+body:has(.tech-white-shell) .overlay-record-heading > .ant-typography-secondary { font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+body:has(.tech-white-shell) .overlay-key-value { font-size: 14px; font-weight: 600; color: var(--mf-text); overflow-wrap: anywhere; }
+body:has(.tech-white-shell) .overlay-record-key { font-size: 20px; font-weight: 600; color: var(--mf-primary-strong); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+body:has(.tech-white-shell) :is(.alert-center-detail,.material-applications-detail) .ant-descriptions-item-label { color: var(--mf-muted); font-size: 13px; font-weight: 400; }
+body:has(.tech-white-shell) :is(.alert-center-detail-actions,.material-applications-actions) { padding: 16px; border: 1px solid var(--mf-border); border-radius: var(--mf-control-radius); background: var(--mf-rail); }
+body:has(.tech-white-shell) .workflow-approval-detail-head .ant-typography:first-child { font-size: 20px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+body:has(.tech-white-shell) .workflow-business-sheet-label { color: var(--mf-muted); font-size: 13px; }
+body:has(.tech-white-shell) .workflow-business-sheet-value { color: var(--mf-text); font-size: 14px; }
+.tech-white-shell .app-content .form-designer-title h4.ant-typography { font-size: 18px !important; font-weight: 650; }
+.tech-white-shell .app-content .form-designer-right .designer-prop-summary,
+.tech-white-shell .app-content .report-widget-summary { padding: 10px 12px; border: 1px solid var(--mf-border); border-left: 3px solid var(--mf-primary-strong); border-radius: var(--mf-control-radius); background: var(--mf-info-bg); }
+.tech-white-shell .app-content .form-designer-right .designer-prop-summary strong { font-size: 15px; font-weight: 600; }
+.tech-white-shell .app-content .form-designer-right .designer-prop-summary small { font-size: 12px; color: var(--mf-muted); }
+.tech-white-shell .app-content .form-designer-right .designer-prop-section-identity { border-color: var(--mf-border-strong); }
+.tech-white-shell .app-content .form-designer-right .designer-prop-row-key > span { font-weight: 600; color: var(--mf-text); }
+.tech-white-shell .app-content .form-designer-right .designer-prop-row-key { background: var(--mf-info-bg); }
+.tech-white-shell .app-content .canvas-field-active { box-shadow: inset 3px 0 0 var(--mf-primary-strong); }
+.tech-white-shell .app-content .report-editor-title { font-size: 18px; font-weight: 650; }
+.tech-white-shell .app-content .report-widget-summary { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+.tech-white-shell .app-content .report-widget-summary .ant-typography-secondary { font-size: 12px; }
+.tech-white-shell .app-content .report-widget-summary .ant-typography:last-child { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.tech-white-shell .app-content :is(.designer-publish-button,.report-editor-save-button) { font-weight: 600; }
+
+/* The shell owns page identity; content toolbars only carry context and actions. */
+.tech-white-shell .app-content .page-intro { margin: 0 0 16px; color: var(--mf-muted); font-size: 13px; }
+.tech-white-shell .app-content :is(.app-program-header,.ontology-toolbar,.workflow-approval-topbar) { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.tech-white-shell .app-content .workflow-approval-tabs { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.tech-white-shell .app-content :is(.workspace-page-header,.app-business-title-row) { justify-content: flex-end; margin-bottom: 16px; }
+.tech-white-shell .app-content :is(.dashboard-command-header,.workflow-approval-topbar,.alert-center-header,.material-applications-header,.app-program-header,.ontology-toolbar) { gap: 12px 20px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.tech-white-shell .app-content :is(.dashboard-command-header,.workflow-approval-topbar,.alert-center-header,.material-applications-header,.app-program-header,.ontology-toolbar) .ant-typography-secondary { font-size: 13px; line-height: 1.6; }
+
+/* Keep inspector controls readable inside the narrow assembly column. */
+.assembly-property-editor { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.assembly-property-editor .ant-row > .ant-col { flex: 0 0 100%; max-width: 100%; }
+.assembly-property-editor .ant-form-item { margin-bottom: 12px; }
+.assembly-property-editor .ant-select { width: 100%; }
+.assembly-form-card[role="button"] { cursor: pointer; }
+.assembly-form-card[role="button"]:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
+
+.assembly-form-card.is-selected { background: var(--mf-selected); box-shadow: inset 0 0 0 1px var(--mf-border); }

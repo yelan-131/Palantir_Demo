@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, FolderOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import AccountMenu, { type AccountMenuUser } from '../AccountMenu';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
 
@@ -32,6 +32,8 @@ function RailIcon({ name, selected }: { name: string; selected: boolean }) {
     space: <><path d="m7 6 1-2 4 1 1 2 6 1a2 2 0 0 1 1.5 2.4l-1.6 7.2" /><path d="M4.4 8h4l2 2h5a2 2 0 0 1 2 2l-.8 7a2 2 0 0 1-2 1.8H5.3a2 2 0 0 1-2-1.8l-.9-9a2 2 0 0 1 2-2Z" /></>,
     scheduler: <><path d="M12 3.5a8.5 8.5 0 1 1-8.3 6.6M12 7v5l-3 2M3.5 7.5V4h3.5" /></>,
     plugins: <><path d="M16.8 7a7 7 0 1 0 1.7 8.2M16 8a4.4 4.4 0 1 0-3 7.5h2.5" /><path d="m12.5 9.5-2 3.5h8a3.5 3.5 0 0 0 0-7h-2" /></>,
+    data: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7" /></>,
+    workflow: <><path d="M8 4h8v4H8zM4 16h6v4H4zM16 16h6v4h-6zM12 8v4M7 16v-4h12v4" /></>,
     more: <><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none" /></>,
   };
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -39,18 +41,9 @@ function RailIcon({ name, selected }: { name: string; selected: boolean }) {
 
 export const fixedShellApps = [
   { id: 'home', name: '首页', icon: 'HomeOutlined', path: '/' },
-  { id: 'space', name: '空间', icon: 'FolderOutlined', path: '/studio' },
+  { id: 'workflow', name: '流程与待办', icon: 'CheckOutlined', path: '/workflow' },
   { id: 'scheduler', name: '定时任务', icon: 'ClockCircleOutlined', path: '/scheduler' },
-  { id: 'plugins', name: '插件', icon: 'AppstoreOutlined', path: '/plugins' },
   { id: 'more', name: '更多', icon: '', path: '/more' },
-];
-
-const commonApps = [
-  { id: 'data', name: '数据中心', icon: 'DatabaseOutlined', path: '/data-center', description: '数据连接、管道、资产与图谱探索。' },
-  { id: 'reports', name: '分析与报表', icon: 'DashboardOutlined', path: '/studio/reports', description: '查看和维护现有业务报表。' },
-  { id: 'workflow', name: '流程与待办', icon: 'CheckOutlined', path: '/workflow', description: '集中处理申请、审批与业务事项。' },
-  { id: 'knowledge', name: '知识库', icon: 'BookOutlined', path: '/data-center/knowledge', description: '文档、抽取任务与知识资产。', adminOnly: true },
-  { id: 'admin', name: '管理控制台', icon: 'SafetyCertificateOutlined', path: '/admin', description: '组织、权限、平台设置与审计。', adminOnly: true },
 ];
 
 export interface LibraryApp {
@@ -63,12 +56,11 @@ export interface LibraryApp {
   application?: ShellApplication;
 }
 
-export function useApplicationLibrary(applications: ShellApplication[], isAdmin: boolean) {
+export function useApplicationLibrary(applications: ShellApplication[]) {
   const { preferences } = useShellPreferences();
   return useMemo<LibraryApp[]>(() => [
-    ...commonApps.filter(app => !app.adminOnly || isAdmin).map(app => ({ ...app, pinned: false })),
     ...applications.map(app => ({ id: `app:${app.id}`, name: app.name, icon: app.icon, path: app.default_route || '/', description: app.description || app.code, pinned: Boolean(app.is_pinned), application: app })),
-  ].map(app => ({ ...app, name: preferences.appOverrides[app.id]?.label || app.name, icon: preferences.appOverrides[app.id]?.icon || app.icon, pinned: preferences.appOverrides[app.id]?.pinned ?? app.pinned })), [applications, isAdmin, preferences.appOverrides]);
+  ].map(app => ({ ...app, name: preferences.appOverrides[app.id]?.label || app.name, icon: preferences.appOverrides[app.id]?.icon || app.icon, pinned: preferences.appOverrides[app.id]?.pinned ?? app.pinned })), [applications, preferences.appOverrides]);
 }
 
 interface ApplicationRailProps {
@@ -89,16 +81,15 @@ export function ApplicationRail({ activeKey, library, user, onOpen, onLogout, on
   );
   return <nav className="shell-app-rail" aria-label="应用栏">
     <div className="shell-rail-scroll">
-      {fixedShellApps.map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => app.id === 'home' ? onHome() : navigate(app.path)))}
-      <div className="shell-rail-divider" role="separator" />
-      {library.filter(app => app.pinned || app.id === activeKey).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
-      {railButton('add', '自定义应用栏', <PlusOutlined />, () => navigate('/more'))}
+      {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => app.id === 'home' ? onHome() : navigate(app.path)))}
+      {library.filter(app => !fixedShellApps.some(fixed => fixed.id === app.id) && (app.pinned || app.id === activeKey)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
+      {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => navigate(app.path)))}
     </div>
-    <div className="shell-rail-user"><AccountMenu compact user={user} onNavigate={navigate} onLogout={onLogout} /></div>
+    <div className="shell-rail-user"><AccountMenu compact active={activeKey === 'account'} user={user} onNavigate={navigate} onLogout={onLogout} /></div>
   </nav>;
 }
 
-export function ApplicationLibrary({ library, onOpen, isAdmin }: { library: LibraryApp[]; onOpen: (app: LibraryApp) => void; isAdmin: boolean }) {
+export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[]; onOpen: (app: LibraryApp) => void }) {
   const navigate = useNavigate();
   const { preferences, updatePreferences } = useShellPreferences();
   const [editing, setEditing] = useState<LibraryApp>();
@@ -114,7 +105,7 @@ export function ApplicationLibrary({ library, onOpen, isAdmin }: { library: Libr
     setEditing(undefined);
   };
   return <section className="shell-library-page">
-    <header className="shell-page-heading"><div><Typography.Title level={3}>常见应用</Typography.Title><Typography.Text type="secondary">自定义应用名称与图标，将常用入口固定到左侧应用栏。</Typography.Text></div>{isAdmin && <Button icon={<PlusOutlined />} onClick={() => navigate('/studio/applications')}>创建业务应用</Button>}</header>
+    <p className="page-intro">打开应用，或将常用应用固定到左侧导航。</p>
     <Input.Search aria-label="搜索应用" placeholder="搜索应用名称或用途" value={query} onChange={event => setQuery(event.target.value)} allowClear className="shell-library-search" />
     {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon)}</span><Tag>{app.pinned ? '已固定' : '可添加'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '添加到应用栏'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
     <Modal title="自定义应用入口" open={Boolean(editing)} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" destroyOnClose>
@@ -128,8 +119,7 @@ export function ExtensionLibrary({ isAdmin }: { isAdmin: boolean }) {
   const navigate = useNavigate();
   const entries = [
     { name: '数据连接', description: '连接数据库和外部数据源，查看真实连接状态。', path: '/data-center/sources', icon: <ApiOutlined /> },
-    { name: '模板中心', description: '复用现有业务模板构建应用和表单。', path: '/studio/templates', icon: <AppstoreOutlined /> },
-    ...(isAdmin ? [{ name: 'AI 技能与工具', description: '管理已注册的 Agent 技能、工具和平台模型设置。', path: '/admin/ai', icon: <ToolOutlined /> }] : []),
+    ...(isAdmin ? [{ name: 'AI 技能与工具', description: '管理已注册的 Agent 技能、工具和平台模型设置。', path: '/admin/ai?tab=agent-registry', icon: <ToolOutlined /> }] : []),
   ];
-  return <section><header className="shell-page-heading"><div><Typography.Title level={3}>插件与扩展</Typography.Title><Typography.Text type="secondary">集中访问平台现有的连接、模板和扩展能力。</Typography.Text></div></header><Alert type="info" showIcon message="扩展能力沿用平台现有配置" description="此处提供已有模块的管理入口，连接状态与可用能力以对应模块为准。" /><div className="shell-library-grid" style={{ marginTop: 20 }}>{entries.map(entry => <Card key={entry.path}><span className="shell-library-icon">{entry.icon}</span><Typography.Title level={4}>{entry.name}</Typography.Title><Typography.Paragraph type="secondary">{entry.description}</Typography.Paragraph><Button onClick={() => navigate(entry.path)}>进入 →</Button></Card>)}</div></section>;
+  return <section><div className="shell-library-grid">{entries.map(entry => <Card key={entry.path}><span className="shell-library-icon">{entry.icon}</span><Typography.Title level={4}>{entry.name}</Typography.Title><Typography.Paragraph type="secondary">{entry.description}</Typography.Paragraph><Button onClick={() => navigate(entry.path)}>进入 →</Button></Card>)}</div></section>;
 }

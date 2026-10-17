@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShellPageTitle } from '@/components/ShellPageTitle';
 import dayjs from 'dayjs';
 import { AppstoreOutlined, ArrowLeftOutlined, BarChartOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined, ExpandOutlined, FieldTimeOutlined, FileSearchOutlined, LineChartOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, ShopOutlined, ToolOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import { Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Progress, Row, Select, Skeleton, Space, Statistic, Table, Tabs, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
@@ -291,6 +292,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
       viewConfig: programData?.viewConfig || baseProgram.viewConfig,
     };
   }, [baseProgram, programData, programId]);
+  useShellPageTitle(program?.title);
 
   if (programData === undefined || programLoading) {
     return (
@@ -378,24 +380,10 @@ function ProgramHeader({
 }) {
   return (
     <div className="app-program-header">
-      <div className="app-program-title-block">
-        <span className="app-program-icon">{program.icon}</span>
-        <div>
-          <Space size={8} align="center" wrap>
-            <Typography.Title level={3}>{program.title}</Typography.Title>
-            <Tag color={program.kind === 'analysis' ? 'blue' : 'green'}>
-              {program.kind === 'analysis' ? '分析看板' : '业务交互'}
-            </Tag>
-          </Space>
-          <Typography.Text type="secondary">{program.subtitle}</Typography.Text>
-        </div>
-      </div>
+      <Typography.Text type="secondary">{program.subtitle}</Typography.Text>
       <Space wrap>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
-        <Button icon={<DownloadOutlined />}>导出</Button>
-        <Button icon={<ExpandOutlined />}>全屏</Button>
-        <Button icon={<BarChartOutlined />}>切换维度</Button>
-        <Button icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
+        <Button icon={<SettingOutlined />} onClick={onSettings}>表单配置</Button>
       </Space>
     </div>
   );
@@ -723,11 +711,7 @@ function AlertBusinessProgram({
         <div className="alert-business-heading">
           <span className="alert-business-icon"><WarningOutlined /></span>
           <div>
-            <Space size={8} align="center" wrap>
-              <Typography.Title level={4}>告警中心</Typography.Title>
-              <Tag color="green">业务交互</Tag>
-            </Space>
-            <Typography.Text type="secondary">用于告警登记、确认、派工、处理和关闭；不是独立分析看板。</Typography.Text>
+            <Typography.Text type="secondary">跟进告警确认、派工与关闭。</Typography.Text>
           </div>
         </div>
         <div className="alert-business-actions">
@@ -740,11 +724,8 @@ function AlertBusinessProgram({
           <Tooltip title="刷新">
             <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
           </Tooltip>
-          <Tooltip title="导出">
-            <Button aria-label="导出" icon={<DownloadOutlined />}>导出</Button>
-          </Tooltip>
-          <Tooltip title="设置">
-            <Button aria-label="设置" icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
+          <Tooltip title="表单配置">
+            <Button aria-label="表单配置" icon={<SettingOutlined />} onClick={onSettings}>表单配置</Button>
           </Tooltip>
         </div>
       </div>
@@ -1048,7 +1029,7 @@ function renderBusinessCreateField(field: BusinessCreateField) {
       </Form.Item>
     );
   }
-  if (field.field_type === 'text' || field.field_type === 'json') {
+  if (controlType === 'textarea' || field.field_type === 'text' || field.field_type === 'json') {
     return (
       <Form.Item {...commonProps}>
         <Input.TextArea rows={3} disabled={disabled} placeholder={`请输入${field.label}`} />
@@ -1390,13 +1371,12 @@ function BusinessProgram({
       <div className="app-business-page">
       <div className="app-business-content">
         <div className="app-business-title-row">
-          <Typography.Title level={4}>{program.title}</Typography.Title>
           <Space size={8} wrap>
             <Button disabled={runtimeForm?.runtime_permissions?.create === false} type="primary" aria-label={program.id === 'material-application' ? '登记料号申请' : '新增记录'} icon={<PlusOutlined />} loading={runtimeFormLoading} onClick={openCreateModal}>{runtimeForm?.runtime_submission_available ? '填写申请' : '新增'}</Button>
 
             <Button aria-label="刷新记录" icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
-            {program.id !== 'material-application' && <Button icon={<DownloadOutlined />}>导出</Button>}
-            <Button icon={<SettingOutlined />} onClick={onSettings}>设置</Button>
+
+            <Button icon={<SettingOutlined />} onClick={onSettings}>表单配置</Button>
           </Space>
         </div>
         <Form
@@ -1479,7 +1459,6 @@ function BusinessProgram({
             <div className="workflow-detail-head">
               <FileSearchOutlined />
               <div>
-                <Typography.Text strong>{selectedRowTitle}</Typography.Text>
                 <Typography.Text type="secondary">{program.title} · 表单记录</Typography.Text>
               </div>
               {approval && <Tag color={approval.status === 'rejected' ? 'red' : 'blue'}>审批：{approvalStatusLabels[approval.status] || approval.status}</Tag>}

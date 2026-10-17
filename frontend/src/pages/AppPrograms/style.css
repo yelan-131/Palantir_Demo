@@ -300,7 +300,7 @@
 }
 
 .app-business-configured-search {
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   align-items: center;
   gap: 10px 14px;
   padding: 12px;

@@ -741,6 +741,9 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
                 ]
     body.context = context
     context_need = agent_context_router.classify(body.message, body.context)
+    purpose = 'chat' if context_need in {'none', 'ui_page', 'knowledge_rag'} else 'reasoning'
+    body.context = {**(body.context or {}), '_model_purpose': purpose}
+    body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS, purpose=purpose)
     semantic_context: dict[str, Any] = {"intent": context_need, "objects": [], "records": [], "relations": []}
     if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph"}:
         _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "business_query"))
@@ -766,7 +769,9 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
         "semantic_objects": len(semantic_context.get("objects") or []),
         "semantic_records": semantic_context.get("record_count", 0),
     }
-    await _emit_agent_step(event_sink, context_intent_step)
+    show_sources = (AI_SYSTEM_SETTINGS.get("contextPolicy") or {}).get("showContextSources", True)
+    if show_sources:
+        await _emit_agent_step(event_sink, context_intent_step)
     conversation_id = (body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId")
     if conversation_id:
         async with db_session() as session:
@@ -790,10 +795,12 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
             "semantic_context": runtime_context.get("semantic_context") or {},
         }
         body.context = {**(body.context or {}), "recentMessages": runtime_context.get("recent_messages") or [], "memories": runtime_context.get("memories") or [], "runtimeContext": runtime_context}
-        await _emit_agent_step(event_sink, context_builder_step)
+        if show_sources:
+            await _emit_agent_step(event_sink, context_builder_step)
     result = await run_agent(body, current_user, event_sink=event_sink)
-    result.items.insert(0, from_legacy_step(context_intent_step, run_id=result.run_id))
-    if conversation_id:
+    if show_sources:
+        result.items.insert(0, from_legacy_step(context_intent_step, run_id=result.run_id))
+    if conversation_id and show_sources:
         result.items.insert(0, from_legacy_step(context_builder_step, run_id=result.run_id))
     result.items = [
         from_legacy_step(identity_step, run_id=result.run_id),
@@ -1146,6 +1153,7 @@ async def list_ai_memories(
 ):
     current_user = _normalize_user(user)
     user_key = _user_key(current_user)
+    await _load_effective_ai_settings()
     async with db_session() as session:
         rows = await memory_service.list_user_memories(
             session,
@@ -1153,6 +1161,7 @@ async def list_ai_memories(
             user_key=user_key,
             include_candidates=include_candidates,
             limit=limit,
+            settings=AI_SYSTEM_SETTINGS,
         )
         return {"data": rows, "ok": True}
 
@@ -1509,13 +1518,67 @@ async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(requi
 
 
 
+async def _test_catalog_settings(candidate: dict, target: dict, user: dict):
+    from copy import deepcopy
+    from app.services.ai.harness_runtime import run_sdk
+    from app.services.ai.model_catalog import resolve_model_settings
+    purposes = [target['purpose']] if target.get('purpose') else ['chat', 'reasoning']
+    if target.get('serviceId'):
+        service = next((item for item in candidate['modelServices'] if item['id'] == target['serviceId']), None)
+        if not service:
+            raise ValueError('模型服务不存在')
+        mid = target.get('modelId') or service['models'][0]['id']
+        if not any(item['id'] == mid for item in service['models']):
+            raise ValueError('模型不存在')
+        candidate = deepcopy(candidate)
+        candidate['modelAssignments']['chat'] = {'serviceId': service['id'], 'modelId': mid}
+        purposes = ['chat']
+    if any(p not in {'chat', 'reasoning', 'document'} for p in purposes):
+        raise ValueError('不支持的测试用途')
+    checked = []
+    try:
+        for purpose in purposes:
+            effective = resolve_model_settings(candidate, purpose)
+            config = _settings_to_provider_config(effective)
+            if purpose == 'document' and config.vision_model == 'disabled':
+                return {'ok': False, 'message': '文档视觉增强尚未启用'}
+            if not config.api_key:
+                return {'ok': False, 'message': f'{purpose} 用途的服务未配置 API Key'}
+            if purpose == 'document':
+                import base64
+                from app.services.ai.ocr_service import vision_extract_markdown
+                pixel = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
+                result = await asyncio.to_thread(vision_extract_markdown, 'connection-test.png', pixel, settings_data=effective)
+                if not result or not result.get('markdown'):
+                    raise ValueError('视觉模型未返回有效响应')
+            else:
+                result = await run_sdk(candidate, user, '连接测试：只回复 OK，不调用工具。', 'test-' + uuid.uuid4().hex, purpose=purpose)
+                if result.finish_reason not in {'completed', 'stop', None} or not result.final_response.strip():
+                    raise ValueError('模型未正常完成回答')
+            checked.append({'purpose': purpose, 'model': config.chat_model, 'baseUrl': config.base_url})
+        return {'ok': True, 'message': '当前草稿测试通过：' + '；'.join(f"{item['purpose']} → {item['baseUrl']} / {item['model']}" for item in checked), 'routes': checked, 'engine': 'deepseek-harness'}
+    except Exception as exc:
+        detail = str(exc)
+        for service in candidate.get('modelServices', []):
+            if service.get('apiKey'):
+                detail = detail.replace(service['apiKey'], '[REDACTED_SECRET]')
+        from app.services.ai.settings import mask_sensitive_text
+        return {'ok': False, 'message': mask_sensitive_text(detail)[:600], 'routes': checked}
+
+
 @router.post("/settings/test")
 async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: dict = Depends(require_admin)):
     """Validate the saved backend AI settings."""
     current_tenant_id(user)
     await _load_effective_ai_settings()
     try:
-        candidate = merge_ai_settings(body.settings) if body else AI_SYSTEM_SETTINGS
+        supplied = dict(body.settings) if body else {}
+        target = supplied.pop('_testTarget', None) or {}
+        if not isinstance(target, dict):
+            raise ValueError('测试目标必须是对象')
+        candidate = merge_ai_settings(supplied) if body else AI_SYSTEM_SETTINGS
+        if 'modelServices' in candidate:
+            return await _test_catalog_settings(candidate, target, user)
         provider_config = _settings_to_provider_config(candidate)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1529,7 +1592,7 @@ async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: di
             if result.finish_reason not in {"completed", "stop", None} or not result.final_response.strip():
                 return {"ok": False, "message": f"模型 {model} 未正常完成回答", "engine": "deepseek-harness", "provider": provider_config.provider, "models": checked_models}
             checked_models.append(model)
-        return {"ok": True, "message": "官方 Harness 与聊天 / Agent 模型连接测试通过", "engine": "deepseek-harness", "provider": provider_config.provider, "model": provider_config.chat_model, "models": checked_models}
+        return {"ok": True, "message": "官方 Harness 与对话 / 推理模型连接测试通过", "engine": "deepseek-harness", "provider": provider_config.provider, "model": provider_config.chat_model, "models": checked_models}
     except Exception as exc:
         from app.services.ai.settings import mask_sensitive_text
         detail = str(exc).replace(provider_config.api_key, "[REDACTED_SECRET]")
@@ -1542,7 +1605,7 @@ async def get_agent_registry(user: dict = Depends(require_admin)):
     """Return the active database-backed Agent skill/tool registry."""
     current_tenant_id(user)
     try:
-        registry = await load_agent_registry(seed_if_empty=False)
+        registry = await load_agent_registry(seed_if_empty=False, include_disabled=True)
     except AgentRegistryError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "data": registry}

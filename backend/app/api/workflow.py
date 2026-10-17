@@ -331,11 +331,36 @@ async def _resolve_step_approver_ids(
     initiator_id: int | None,
     fallback_user_id: int | None,
     *, allow_fallback: bool = True,
+    approval_groups: list[dict] | None = None,
 ) -> list[int]:
     rules = step.get("assignee_rules")
     if not isinstance(rules, list) or not rules:
         assignee_role = step.get("assignee_role")
         rules = [{"type": "role", "value": assignee_role}] if assignee_role else []
+
+    # Explicit per-object policies opt into grouped approval. Legacy definitions
+    # retain their node-wide policy, including already running instances.
+    if any(isinstance(rule, dict) and ('approvalMode' in rule or 'approval_mode' in rule) for rule in rules):
+        groups = []
+        all_ids: list[int] = []
+        for index, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                raise HTTPException(422, '处理人规则格式无效')
+            mode = rule.get('approvalMode') or rule.get('approval_mode') or step.get('approval_mode') or 'single'
+            if mode not in {'single', 'orSign', 'countersign'}:
+                raise HTTPException(422, '处理对象审批方式无效')
+            legacy_rule = {key: value for key, value in rule.items() if key not in {'approvalMode', 'approval_mode'}}
+            members = await _resolve_step_approver_ids(db, tenant_id, {'assignee_rules': [legacy_rule]},
+                form_data, variables, initiator_id, None, allow_fallback=False)
+            if not members:
+                raise HTTPException(409, f'第 {index + 1} 个处理对象没有有效审批人，请重新配置')
+            if mode == 'single':
+                members = members[:1]
+            groups.append({'id': str(rule.get('id') or index), 'mode': mode, 'user_ids': members})
+            _append_unique_ids(all_ids, members)
+        if approval_groups is not None:
+            approval_groups.extend(groups)
+        return all_ids
 
     approver_ids: list[int] = []
     for rule in rules:
@@ -376,7 +401,11 @@ async def _resolve_step_approver_ids(
     return approver_ids
 
 
-def _set_current_assignees(state: dict, approver_ids: list[int]) -> None:
+def _set_current_assignees(state: dict, approver_ids: list[int], *, approval_groups: list[dict] | None = None) -> None:
+    if approval_groups is not None:
+        state['current_approval_groups'] = approval_groups
+    elif not approver_ids:
+        state.pop('current_approval_groups', None)
     state["current_assignee_ids"] = approver_ids
     state["current_assignee_id"] = approver_ids[0] if approver_ids else None
 
@@ -1307,6 +1336,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
         initiator_id = current_user_id(user)
         form_data = body.form_data or {}
         variables = body.variables or {}
+        approval_groups: list[dict] = []
         approver_ids = await _resolve_step_approver_ids(
             db,
             tenant_id,
@@ -1315,6 +1345,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
             variables,
             initiator_id,
             initiator_id,
+            approval_groups=approval_groups,
         ) if current_step and current_step.get("type") == "approval" else []
 
         # Build workflow state
@@ -1325,7 +1356,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
             "resource_id": body.resource_id,
             "variables": variables,
         }
-        _set_current_assignees(state, approver_ids)
+        _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
 
         inst = WorkflowInstance(
             tenant_id=tenant_id,
@@ -1510,31 +1541,48 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         acting_approval.comment = body.comment
         acting_approval.acted_at = datetime.now()
 
-        # Countersign waits for all users; single/or-sign closes sibling
-        # pending approvals once one user acts.
-        if approval_mode != "countersign":
+        groups = state.get('current_approval_groups') or []
+        if action == 'reject':
             for approval in pending_approvals:
-                if approval is acting_approval:
-                    continue
-                approval.action = "skipped"
-                approval.comment = "同节点其他待办已由他人处理"
-                approval.acted_at = datetime.now()
-
-        if action == "reject":
-            inst.status = "rejected"
-            state["current_node"] = "end"
+                if approval is not acting_approval:
+                    approval.action = 'skipped'
+                    approval.comment = '当前节点已被驳回'
+                    approval.acted_at = datetime.now()
+            inst.status = 'rejected'
+            state['current_node'] = 'end'
             _set_current_assignees(state, [])
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
             await finalize()
-            return {"id": inst.id, "status": "rejected", "current_step": current_step_idx}
+            return {'id': inst.id, 'status': 'rejected', 'current_step': current_step_idx}
 
-        if approval_mode == "countersign":
-            remaining = [approval for approval in pending_approvals if approval.action is None]
-            if remaining:
-                inst.status = "pending"
+        if groups:
+            from app.services.approval_groups import evaluate_approval_groups
+            complete, outstanding = evaluate_approval_groups(groups, [*node_approvals, acting_approval])
+            for approval in pending_approvals:
+                if approval.action is None and approval.approver_id not in outstanding:
+                    approval.action = 'skipped'
+                    approval.comment = '该处理对象已满足审批条件'
+                    approval.acted_at = datetime.now()
+            if not complete:
+                _set_current_assignees(state, outstanding)
                 inst.workflow_state = json.dumps(state, ensure_ascii=False)
                 await finalize()
-                return {"id": inst.id, "status": inst.status, "current_step": current_step_idx, "message": "已通过，等待其他会签人"}
+                return {'id': inst.id, 'status': inst.status, 'current_step': current_step_idx,
+                        'message': '已通过，等待其他处理对象满足审批条件'}
+        elif approval_mode == 'countersign':
+            remaining = [approval for approval in pending_approvals if approval.action is None]
+            if remaining:
+                _set_current_assignees(state, [approval.approver_id for approval in remaining])
+                inst.status = 'pending'
+                inst.workflow_state = json.dumps(state, ensure_ascii=False)
+                await finalize()
+                return {'id': inst.id, 'status': inst.status, 'current_step': current_step_idx, 'message': '已通过，等待其他会签人'}
+        else:
+            for approval in pending_approvals:
+                if approval is not acting_approval:
+                    approval.action = 'skipped'
+                    approval.comment = '同节点其他待办已由他人处理'
+                    approval.acted_at = datetime.now()
 
         # Approve: move to next step
         next_step_idx = _find_next_actionable_step(steps, current_step_idx)
@@ -1546,6 +1594,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
 
             # Create new approval record for next step
             if next_step.get("type") == "approval":
+                next_approval_groups: list[dict] = []
                 approver_ids = await _resolve_step_approver_ids(
                     db,
                     tenant_id,
@@ -1556,11 +1605,12 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                     acting_user_id,
                     allow_fallback=not (config.get("domainCode") == "material-application-approval"
                                         or str(config.get("domainCode") or "").startswith("form-approval:")),
+                    approval_groups=next_approval_groups,
                 )
                 if not approver_ids and (config.get("domainCode") == "material-application-approval"
                                           or str(config.get("domainCode") or "").startswith("form-approval:")):
                     raise HTTPException(409, "下一审批步骤没有有效审批人，请管理员恢复审批人后重试")
-                _set_current_assignees(state, approver_ids)
+                _set_current_assignees(state, approver_ids, approval_groups=next_approval_groups)
                 for approver_id in approver_ids:
                     db.add(WorkflowApproval(
                         instance_id=inst.id,

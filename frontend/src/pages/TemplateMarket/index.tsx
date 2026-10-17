@@ -101,7 +101,6 @@ export default function TemplateMarket() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
-          <Typography.Title level={4} style={{ margin: 0 }}>模板市场</Typography.Title>
           <Tag color="blue">{templates.length} 个模板</Tag>
         </Space>
       </div>

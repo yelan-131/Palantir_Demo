@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -15,7 +16,6 @@ import {
   Space,
   Switch,
   Table,
-  Tabs,
   Tag,
   Typography,
   message,
@@ -351,9 +351,8 @@ export default function RoleManagement() {
     <div className="role-management-console">
       <div className="role-management-toolbar">
         <div>
-          <Typography.Title level={5} style={{ margin: 0 }}>角色管理</Typography.Title>
           <Typography.Text type="secondary">
-            按角色分配应用、表单、字段、数据范围和操作权限，共 {roles.length} 个角色 / {permissionCount} 条权限规则
+            {roles.length} 个角色 · {permissionCount} 条权限规则
           </Typography.Text>
         </div>
         <Space>
@@ -457,7 +456,7 @@ export default function RoleManagement() {
         width="min(560px, calc(100vw - 180px))"
         extra={<Button type="primary" onClick={savePermissions}>保存</Button>}
       >
-        <Tabs
+        <SettingsTabs
           items={[
             {
               key: 'rules',
@@ -888,7 +887,7 @@ function RolePreviewPanel({
         </Space>
       </div>
 
-      <Tabs
+      <SettingsTabs
         className="role-preview-tabs"
         activeKey={activeTab}
         onChange={setActiveTab}

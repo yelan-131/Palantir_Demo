@@ -40,7 +40,6 @@ import {
 } from '@/services/api';
 import { formatServerDateTime } from '@/utils/dateTime';
 
-const { Title } = Typography;
 const { Option } = Select;
 
 interface DataSource {
@@ -310,15 +309,14 @@ export default function DataSourcePage() {
   ];
 
   return (
-    <div>
-      <Title level={4}>数据源管理</Title>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
+    <div className="data-source-page">
+      <Row className="page-summary-metrics" gutter={[16, 16]} style={{ marginBottom: 16, marginInline: 0 }}>
+        <Col xs={12} md={6}>
+          <Card className="hierarchy-kpi-primary">
             <Statistic title="数据源总数" value={dataSources.length} prefix={<DatabaseOutlined />} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="已连接"
@@ -328,7 +326,7 @@ export default function DataSourcePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="同步中"
@@ -338,12 +336,12 @@ export default function DataSourcePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="异常"
               value={errorCount}
-              valueStyle={{ color: errorCount > 0 ? '#ff4d4f' : '#8c8c8c' }}
+              valueStyle={{ color: errorCount > 0 ? 'var(--mf-danger)' : 'var(--mf-muted)' }}
               prefix={<CloseCircleOutlined />}
             />
           </Card>

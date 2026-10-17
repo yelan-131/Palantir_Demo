@@ -433,16 +433,6 @@ button {
   min-height: 0;
 }
 
-.navigation-area-heading {
-  padding: 4px 0 16px;
-  border-bottom: 1px solid var(--mf-border);
-  margin-bottom: 20px;
-}
-
-.navigation-area-heading h3.ant-typography {
-  margin: 6px 0 0;
-}
-
 .app-menu .ant-menu-item,
 .app-menu .ant-menu-submenu-title {
   color: #34444e !important;
@@ -6689,6 +6679,7 @@ button {
 .assembly-menu-card .ant-card-body,
 .assembly-property-card .ant-card-body {
   flex: 1;
+  min-height: 0;
   padding: 12px;
   overflow: auto;
 }
@@ -6702,10 +6693,28 @@ button {
   display: flex;
 }
 
+.app-admin-workspace:has(> .app-assembly-workspace) { height: 100%; }
+
 .assembly-grid {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 250px 250px 350px minmax(320px, 1fr);
+  gap: 16px;
   flex: 1;
+  min-width: 1218px;
   min-height: 0;
 }
+
+.assembly-grid > .ant-col {
+  min-height: 0;
+  min-width: 0;
+  width: auto;
+  max-width: none;
+}
+
+.assembly-property-editor { border: 0; padding: 0; margin: 0; min-width: 0; }
+.assembly-field-summary { margin: 16px 0; }
+.assembly-field-summary > .ant-typography { display: block; margin-bottom: 8px; }
 
 .assembly-grid > .ant-col > .ant-card {
   width: 100%;
@@ -13632,3 +13641,8 @@ html[data-login-transition="active"]::view-transition-new(root) { animation: log
 @media (prefers-reduced-motion: reduce) {
  html[data-login-transition="active"]::view-transition-old(root), html[data-login-transition="active"]::view-transition-new(root) { animation: none; }
 }
+
+/* Keep the form/board heading readable in its fixed 250px column. */
+.assembly-grid > .ant-col:nth-child(2) .ant-card-head { padding-inline: 12px; }
+.assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-tag { margin-inline-end: 0; font-size: 11px; padding-inline: 4px; }
+.assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-btn { width: 24px; padding: 0; }

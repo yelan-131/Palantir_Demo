@@ -1,4 +1,4 @@
-import { Tabs } from 'antd';
+import SettingsTabs from '@/components/SettingsTabs';
 import AppMenuManagement from './AppMenuManagement';
 import IdentityAccessManagement from './IdentityAccessManagement';
 import ReferenceDataManagement from './ReferenceDataManagement';
@@ -6,7 +6,7 @@ import SemanticAssetCenter from './SemanticAssetCenter';
 
 export default function SystemAdmin() {
   return (
-    <Tabs
+    <SettingsTabs
       className="system-admin-page"
       defaultActiveKey="app-menu"
       items={[

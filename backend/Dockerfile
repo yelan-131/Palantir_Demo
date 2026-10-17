@@ -8,12 +8,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN pip install \
-      --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
-      --trusted-host pypi.tuna.tsinghua.edu.cn \
+      --index-url ${PIP_INDEX_URL} \
       --timeout 120 \
       --retries 5 \
       -r requirements.txt
+
+# Fail the build if the official SDK or its platform binary is absent/mismatched.
+RUN python -c "from importlib.metadata import version; from deepseek_harness import DeepSeekHarness; assert version('deepseek-harness-sdk') == version('deepseek-harness-runtime-bin') == '0.1.5rc1'"
 
 COPY . .
 

@@ -1,4 +1,4 @@
-.material-applications { padding: 24px; max-width: 1600px; margin: 0 auto; }
+.material-applications { max-width: 1600px; margin: 0 auto; }
 .material-applications-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .material-applications-header h2 { margin: 0 0 6px !important; }
 .material-applications-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }

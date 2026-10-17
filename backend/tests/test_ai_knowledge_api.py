@@ -245,7 +245,8 @@ def test_saved_ai_settings_default_to_glm_and_can_test_provider(admin_client):
     assert data["apiKey"] in {"", "********"}
     assert data["contextPolicy"]["recentMessageLimit"] == 10
     assert data["memoryPolicy"]["enabled"] is False
-    assert data["compactionPolicy"]["enabled"] is True
+    assert data["compactionPolicy"]["enabled"] is False
+    assert data["harnessPolicy"]["compaction"]["enabled"] is True
     assert data["ragPolicy"]["topK"] == 5
     assert data["safetyPolicy"]["blockSecretMemory"] is True
 
@@ -476,7 +477,7 @@ def test_agent_business_question_routes_to_semantic_context(ai_user_client):
     assert semantic_context["record_count"] == 0
 
 
-def test_memory_compaction_and_user_delete(ai_user_client, admin_client):
+def test_memory_retired_and_historical_user_delete_still_supported(ai_user_client, admin_client):
     _ensure_ai_runtime_schema()
 
     settings = admin_client.put(
@@ -503,8 +504,19 @@ def test_memory_compaction_and_user_delete(ai_user_client, admin_client):
     memories = ai_user_client.get("/api/v1/ai/memories")
     assert memories.status_code == 200
     payload = memories.json()["data"]
-    assert payload
-    assert payload[0]["status"] == "active"
+    assert payload == []
+    assert settings.json()['data']['memoryPolicy']['enabled'] is False
+    assert settings.json()['data']['compactionPolicy']['enabled'] is False
+    # Seed a historical entry to verify retirement does not remove user ownership/deletion.
+    async def seed_history():
+        from app.core.db import db_session
+        from app.models.relational import AIMemoryEntry
+        async with db_session() as session:
+            session.add(AIMemoryEntry(memory_id='historical-retired-memory', tenant_id=1, user_key='qe_wang', key='history', summary='historical', value={}, status='active'))
+            await session.commit()
+    asyncio.run(seed_history())
+    payload = ai_user_client.get('/api/v1/ai/memories').json()['data']
+    assert payload and payload[0]['memory_id'] == 'historical-retired-memory'
 
     deleted = ai_user_client.delete(f"/api/v1/ai/memories/{payload[0]['memory_id']}")
     assert deleted.status_code == 200

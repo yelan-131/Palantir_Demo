@@ -31,6 +31,12 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
     settings.update({'aiEnabled': True, 'qaEnabled': True, 'assistEnabled': True, 'agentMode': 'confirm', 'apiKey': 'local-test-key', 'chatModel': 'test-model', 'reasoningModel': 'test-model', 'timeoutSeconds': 5, 'retryCount': 0, 'maxTokens': 512})
     settings.pop('domains', None)
     settings['compactionPolicy'] = {'enabled': confirmation == 'write'}
+    settings['harnessPolicy'] = {
+        'reasoning_effort': 'low', 'contextWindow': 16000,
+        'initialize_timeout_seconds': 12, 'request_timeout_seconds': 20,
+        'streamIdleTimeoutMs': 4000,
+        'compaction': {'enabled': confirmation == 'write', 'thresholdRatio': .72, 'retainRatio': .12},
+    }
     settings['safetyPolicy']['permissionRules'] = [{'action': 'ask', 'tool': 'forms.query_records'}] if confirmation is True else []
     calls = []
     handler = AsyncMock(return_value={'records': [{'id': 7}], 'record_count': 1, 'form': {'name': '测试'}})
@@ -80,6 +86,7 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         assert len(calls) == 2
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512
+        assert calls[0]['reasoning_effort'] == 'low'
         assert all('bash' not in t['function']['name'] and 'shell' not in t['function']['name'] for t in calls[0]['tools'])
         settings['maxTokens'] = 384
         resumed = await mod.run_sdk(settings, user, '平台恢复的历史：助手已读取 1 条记录。继续上次的对话', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')

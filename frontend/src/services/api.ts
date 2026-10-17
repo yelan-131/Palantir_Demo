@@ -646,8 +646,8 @@ export const seedAIAgentRegistry = () => api.post('/ai/agent-registry/seed');
 export const updateAIAgentRegistry = (payload: Record<string, unknown>) => api.put('/ai/agent-registry', payload);
 
 // Reports
-export const listReports = (params?: Record<string, unknown>) => api.get('/reports', { params });
-export const createReport = (data: Record<string, unknown>) => api.post('/reports', data);
+export const listReports = (params?: Record<string, unknown>) => api.get('/reports/', { params });
+export const createReport = (data: Record<string, unknown>) => api.post('/reports/', data);
 export const getReport = (id: number) => api.get(`/reports/${id}`);
 export const updateReport = (id: number, data: Record<string, unknown>) => api.put(`/reports/${id}`, data);
 export const deleteReport = (id: number) => api.delete(`/reports/${id}`);
@@ -921,8 +921,8 @@ export const deleteNotification = (id: number) =>
   api.delete(`/notifications/${id}`);
 
 // Rules Engine (Phase 3)
-export const listRules = (params?: Record<string, unknown>) => api.get('/rules', { params });
-export const createRule = (data: Record<string, unknown>) => api.post('/rules', data);
+export const listRules = (params?: Record<string, unknown>) => api.get('/rules/', { params });
+export const createRule = (data: Record<string, unknown>) => api.post('/rules/', data);
 export const updateRule = (id: number, data: Record<string, unknown>) => api.put(`/rules/${id}`, data);
 export const deleteRule = (id: number) => api.delete(`/rules/${id}`);
 export const validateRule = (id: number) => api.post(`/rules/${id}/validate`);
@@ -1103,6 +1103,8 @@ export const deletePlatformForm = (id: number | string) =>
   api.delete(`/forms/${id}`);
 export const previewPlatformFormPublish = (id: number | string) =>
   api.get(`/forms/${id}/publish/preview`);
+export const copyPlatformForm = (id: number | string, data: { name: string; code: string }) =>
+  api.post(`/forms/${id}/copy`, data);
 export const publishPlatformForm = (id: number | string) =>
   api.post(`/forms/${id}/publish`);
 export const listPlatformFormVersions = (id: number | string) =>

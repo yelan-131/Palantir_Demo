@@ -1,3 +1,5 @@
+import SettingsTabs from '@/components/SettingsTabs';
+import { useShellPageTitle } from '@/components/ShellPageTitle';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertOutlined,
@@ -5,8 +7,8 @@ import {
   ArrowLeftOutlined,
   BarChartOutlined,
   CalendarOutlined,
-  CheckSquareOutlined,
   CheckCircleOutlined,
+  CheckSquareOutlined,
   CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -36,9 +38,10 @@ import {
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
+  adminListUsers,
   adminListOrgUnits,
   adminListRoles,
   createPlatformForm,
@@ -66,6 +69,8 @@ import {
   type PlatformFormPublishReport,
 } from '@/services/api';
 import {
+  getViewTabs,
+  updateActiveView,
   controlTypeForField,
   defaultOperatorForControl,
   makeDefaultViewConfig,
@@ -81,12 +86,13 @@ import {
 } from '@/utils/viewConfig';
 import ProfessionalFlowDesigner, {
   createDefaultFlowConfig,
+  normalizeNodeFieldPermissions,
   validateFlowDesignerConfig,
   type FlowDesignerConfig,
   type FlowDesignerEdge,
   type FlowDesignerNode,
 } from './ProfessionalFlowDesigner';
-import FormApprovalSettings from '@/components/FormApprovalSettings';
+import ViewTabsEditor from './ViewTabsEditor';
 import './style.css';
 
 type DesignerTab = 'form' | 'dataset' | 'dashboard' | 'filter' | 'style' | 'flow' | 'approval' | 'permission';
@@ -230,6 +236,11 @@ interface EncodingSegment {
 }
 
 interface EncodingRule {
+  id?: string;
+  name?: string;
+  priority?: number;
+  conditions?: ControlRuleCondition[];
+  rules?: EncodingRule[];
   enabled: boolean;
   template: string;
   dependencies: string[];
@@ -1083,6 +1094,12 @@ function makeEncodingRule(field?: DesignerField): EncodingRule {
   };
 }
 
+function getEncodingRules(rule?: EncodingRule): EncodingRule[] {
+  if (!rule) return [];
+  if (Array.isArray(rule.rules)) return rule.rules;
+  return [{ ...rule, id: 'default-rule', name: '默认编码规则', conditions: [] }];
+}
+
 function makeEncodingSegment(type: EncodingSegmentType = 'fixed', fields: DesignerField[] = []): EncodingSegment {
   const firstSourceField = fields.find((field) => !isEncodingField(field));
   const base: EncodingSegment = {
@@ -1158,11 +1175,12 @@ function getEncodingSegmentTypeLabel(type: EncodingSegmentType) {
 }
 
 function renderDateSample(pattern?: string) {
-  if (pattern === 'YYYYMMDD') return '20260602';
-  if (pattern === 'YYYY') return '2026';
-  if (pattern === 'MMDD') return '0602';
   if (pattern === 'none') return '';
-  return '2606';
+  const now = new Date();
+  return (pattern || 'YYMM').replace(/YYYY|YY|MM|DD/g, (token) => ({
+    YYYY: String(now.getFullYear()), YY: String(now.getFullYear()).slice(-2),
+    MM: String(now.getMonth() + 1).padStart(2, '0'), DD: String(now.getDate()).padStart(2, '0'),
+  }[token] || token));
 }
 
 function fitSegmentSample(value: string, length: number, padding?: EncodingPadding) {
@@ -1335,8 +1353,7 @@ async function resolvePlatformFormForConfig(configId: string) {
 const tabs = [
   { key: 'form', label: '表单设计', icon: <FormOutlined /> },
   { key: 'filter', label: '数据筛选', icon: <SearchOutlined /> },
-  { key: 'flow', label: '流程设计', icon: <UserSwitchOutlined /> },
-  { key: 'approval', label: '审批设置', icon: <CheckSquareOutlined /> },
+  { key: 'flow', label: '流程与审批', icon: <UserSwitchOutlined /> },
   { key: 'permission', label: '权限设计', icon: <LockOutlined /> },
 ];
 
@@ -1680,7 +1697,6 @@ function inferFieldControlType(field?: DesignerField) {
 
 function getEffectiveControlTypeForControl(control?: LayoutControl, field?: DesignerField) {
   if (!control) return '';
-  if (control.source === 'field' && isEncodingField(field)) return 'code';
   if (control.controlType === 'field') return inferFieldControlType(field);
   return control.controlType;
 }
@@ -1920,6 +1936,29 @@ function normalizeProfessionalFlowConfig(
   source: Partial<FlowDesignerConfig> & Record<string, unknown>,
   fallback: FlowDesignerConfig,
 ): FlowDesignerConfig {
+  // The former approval-settings editor persisted linear steps. Convert them
+  // in memory; the published definition is retained until a new graph is published.
+  if ((!Array.isArray(source.nodes) || !source.nodes.length) && Array.isArray(source.steps)) {
+    const steps = source.steps as Array<Record<string, any>>;
+    if (steps.some((step) => !['start', 'end', 'approval'].includes(step.type))) {
+      throw new Error('当前旧流程包含无法转换的节点，请先迁移流程定义');
+    }
+    const nodes = steps.map((step, index) => ({
+      id: String(step.node_id || `legacy-${index}`),
+      type: step.type === 'start' ? 'startEvent' : step.type === 'end' ? 'endEvent' : 'userTask',
+      label: !step.name || /^[?\s]+$/.test(step.name) ? (step.type === 'start' ? '提交' : step.type === 'end' ? '结束' : '审批') : String(step.name), x: 360, y: 140 + index * 120,
+      approvalMode: step.approval_mode || 'single',
+      assigneeRules: (step.assignee_rules || (step.assignee_role ? [{ type: 'role', value: step.assignee_role }] : [])).flatMap((rule: any, ruleIndex: number) =>
+        (Array.isArray(rule.value) ? rule.value : [rule.value]).map((value: unknown, valueIndex: number) => ({
+          id: `legacy-${index}-${ruleIndex}-${valueIndex}`, type: rule.type, value: value == null ? undefined : String(value),
+        }))),
+    }));
+    const { steps: _steps, ...rest } = source;
+    source = { ...rest, nodes: nodes as FlowDesignerNode[], edges: nodes.slice(1).map((node, index) => ({
+      id: `legacy-edge-${index}`, source: nodes[index].id, target: node.id,
+      sourceSide: 'bottom', targetSide: 'top', label: '', priority: index,
+    })) };
+  }
   const categoryByType = (type: string): FlowDesignerNode['category'] => {
     if (type.includes('Gateway')) return 'gateway';
     if (type.includes('Task')) return 'task';
@@ -1969,7 +2008,7 @@ function normalizeProfessionalFlowConfig(
         retryTimes: node.retryTimes ?? fallbackNode?.retryTimes,
         externalAction: node.externalAction || fallbackNode?.externalAction,
         bpmnType: node.bpmnType || bpmnByType[type] || fallbackNode?.bpmnType,
-        fieldPermissions: node.fieldPermissions || fallbackNode?.fieldPermissions,
+        fieldPermissions: normalizeNodeFieldPermissions(node.fieldPermissions || fallbackNode?.fieldPermissions),
       } satisfies FlowDesignerNode;
     });
   if (shouldShiftLegacyDefaultWorkflow(nodes)) {
@@ -2103,12 +2142,16 @@ function makeWorkflowFormConfig(config: DesignerConfig) {
 function makeWorkflowConfigPayload(flowConfig: FlowDesignerConfig, form: PlatformForm, config: DesignerConfig) {
   return {
     ...flowConfig,
+    nodes: flowConfig.nodes.map((node) => ({ ...node, fieldPermissions: normalizeNodeFieldPermissions(node.fieldPermissions), assigneeRules: node.assigneeRules?.map((rule) => ({
+      ...rule, approvalMode: rule.approvalMode || node.approvalMode || 'single',
+    })) })),
+    steps: undefined,
     formId: form.id,
     formCode: form.code,
     formName: config.name,
     savedAt: new Date().toISOString(),
     fieldPermissions: Object.fromEntries(
-      flowConfig.nodes.map((node) => [node.id, node.fieldPermissions || {}]),
+      flowConfig.nodes.map((node) => [node.id, normalizeNodeFieldPermissions(node.fieldPermissions)]),
     ),
   };
 }
@@ -2381,10 +2424,15 @@ export default function FormSettingsPage() {
       description: databaseMeta?.description || staticBaseConfig.description,
     };
   }, [databaseFieldsByForm, databaseMetaByForm, staticBaseConfig]);
+  useShellPageTitle(`${baseConfig.name}配置`);
   const [activeTab, setActiveTab] = useState<DesignerTab>(() => (staticBaseConfig.kind === 'analysis' ? 'dashboard' : 'form'));
   const [componentPanel, setComponentPanel] = useState<ComponentPanel>('components');
   const [version, setVersion] = useState('v1');
-  const [viewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
+  const [storedViewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
+  const [activeViewTabId, setActiveViewTabId] = useState('default');
+  const activeViewTab = getViewTabs(storedViewConfig).find((tab) => tab.id === activeViewTabId) || getViewTabs(storedViewConfig)[0];
+  const viewConfig: ViewConfig = { ...storedViewConfig, filters: activeViewTab.filters, table: activeViewTab.table };
+  const [identityUsers, setIdentityUsers] = useState<Array<{ id: number; username: string; label: string }>>([]);
   const [analyticsDesign, setAnalyticsDesign] = useState<AnalyticsDesign>(() => makeDefaultAnalyticsDesign(baseConfig));
   const [selectedAnalyticsWidgetId, setSelectedAnalyticsWidgetId] = useState('');
   const [expandedViewRow, setExpandedViewRow] = useState<string>('filter-0');
@@ -2400,6 +2448,7 @@ export default function FormSettingsPage() {
   const [future, setFuture] = useState<LayoutControl[][]>([]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [flowLoadError, setFlowLoadError] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>('create');
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('desktop');
@@ -2446,6 +2495,7 @@ export default function FormSettingsPage() {
       .filter((item): item is ComponentDefinition => Boolean(item)),
     [commonControlKeys, componentGroups],
   );
+  const [encodingSettingsDraft, setEncodingSettingsDraft] = useState<EncodingRule | null>(null);
   const [workflowMeta, setWorkflowMeta] = useState<WorkflowDesignerMeta>({});
   const [isPersistingFlow, setPersistingFlow] = useState(false);
   const [isPersistingPermissions, setPersistingPermissions] = useState(false);
@@ -2550,7 +2600,7 @@ export default function FormSettingsPage() {
   const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
 
   useEffect(() => {
-    const requestedTab = searchParams.get('tab') as DesignerTab | null;
+    const requestedTab = (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
     if (!requestedTab) return;
     if (designerTabs.some((item) => item.key === requestedTab) && activeTab !== requestedTab) {
       setActiveTab(requestedTab);
@@ -2564,6 +2614,13 @@ export default function FormSettingsPage() {
       setSelectedControlId('');
     }
   }, [activeTab, designerTabs]);
+
+  useEffect(() => {
+    adminListUsers().then((response) => setIdentityUsers((response.data?.data || [])
+      .filter((user: any) => user.is_active !== false)
+      .map((user: any) => ({ id: Number(user.id), username: String(user.username), label: `${user.display_name || user.username} (${user.username})` }))))
+      .catch(() => message.warning('用户列表加载失败，暂时无法选择绑定用户，请刷新重试'));
+  }, []);
 
   useEffect(() => {
     Promise.all([adminListRoles(), adminListOrgUnits()])
@@ -2598,7 +2655,7 @@ export default function FormSettingsPage() {
 
   useEffect(() => {
     const nextControls = baseConfig.fields.map(makeFieldControl);
-    const requestedTab = searchParams.get('tab') as DesignerTab | null;
+    const requestedTab = (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
     const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : tabs;
     const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
     const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
@@ -2660,6 +2717,7 @@ export default function FormSettingsPage() {
     let cancelled = false;
     const loadPersistedFlow = async () => {
       setResolvingPlatformConfig(true);
+      setFlowLoadError('');
       try {
         const formDetail = await resolvePlatformFormForConfig(staticBaseConfig.id);
         if (!formDetail || cancelled) return;
@@ -2681,6 +2739,16 @@ export default function FormSettingsPage() {
           },
         }));
         setPlatformForm(formDetail);
+        const savedControls = formDetail.config?.formDesignerControls as LayoutControl[] | undefined;
+        if (Array.isArray(savedControls)) {
+          const knownFields = new Set(databaseFields.map((field) => field.key));
+          const restoredControls = savedControls.filter((control) => control && typeof control.id === 'string'
+            && typeof control.controlType === 'string' && ['field', 'component'].includes(control.source)
+            && (control.source !== 'field' || knownFields.has(String(control.fieldKey))))
+            .map((control) => ({ ...control, rules: normalizeControlRules(control.rules) }));
+          setLayoutControls(restoredControls);
+          setSelectedControlId(restoredControls[0]?.id || '');
+        }
         const storedAnalyticsDesign = getStoredAnalyticsDesign(formDetail, {
           ...baseConfig,
           kind: inferFormDesignerKind(formDetail),
@@ -2722,17 +2790,28 @@ export default function FormSettingsPage() {
         }
         const meta = getWorkflowDesignerMeta(formDetail);
         setWorkflowMeta(meta);
-        const workflowId = meta.draftWorkflowId || meta.publishedWorkflowId;
+        let workflowId = meta.draftWorkflowId || meta.publishedWorkflowId;
+        let boundTrigger: WorkflowBindingPayload | undefined;
+        if (!workflowId) {
+          const bindingsResponse = await listWorkflowBindings(formDetail.id);
+          const bindings = (bindingsResponse.data?.data || []) as WorkflowBindingPayload[];
+          boundTrigger = bindings.find((binding) => binding.enabled && ['submit', 'manual_submit'].includes(binding.trigger_action));
+          workflowId = boundTrigger?.workflow_id;
+        }
         if (!workflowId) return;
         const definitionResponse = await wfGetDefinition(workflowId);
         if (cancelled) return;
         const definition = definitionResponse.data as WorkflowDefinitionPayload;
-        if (definition.config?.nodes && definition.config?.edges) {
+        if (definition.config && (definition.config.nodes || definition.config.steps)) {
           const defaultFlow = makeProfessionalFlowConfig(baseConfig);
           const nextConfig = normalizeProfessionalFlowConfig({
             ...definition.config,
             version: definition.version ? `v${definition.version}` : String(definition.config.version || defaultFlow.version),
           }, defaultFlow);
+          if (boundTrigger) {
+            nextConfig.triggerBindings = nextConfig.triggerBindings.map((binding) => binding.action === 'submit'
+              ? { ...binding, action: boundTrigger!.trigger_action, enabled: true } : binding);
+          }
           setProfessionalFlowConfig(nextConfig);
           setVersion(nextConfig.version);
           setHasUnsavedChanges(false);
@@ -2740,7 +2819,8 @@ export default function FormSettingsPage() {
       } catch (error) {
         console.warn('workflow designer load failed', error);
         if (!cancelled) {
-          message.warning('未能加载后端流程草稿，当前使用本地默认配置');
+          setFlowLoadError('已有流程加载失败，请刷新重试；为避免覆盖原流程，暂时禁止保存和发布。');
+          message.error('已有流程加载失败，请刷新后重试');
         }
       } finally {
         if (!cancelled) setResolvingPlatformConfig(false);
@@ -2811,8 +2891,8 @@ export default function FormSettingsPage() {
     ? selectedControl?.encodingRule || makeEncodingRule(selectedField)
     : undefined;
   const selectedEncodingSegments = useMemo(
-    () => getEncodingSegments(selectedEncodingRule),
-    [selectedEncodingRule],
+    () => getEncodingSegments(encodingSettingsDraft || selectedEncodingRule),
+    [selectedEncodingRule, encodingSettingsDraft],
   );
   const normalizedLibrarySearch = librarySearch.trim().toLowerCase();
   const matchesLibrarySearch = (text: string) => !normalizedLibrarySearch || text.toLowerCase().includes(normalizedLibrarySearch);
@@ -2878,8 +2958,11 @@ export default function FormSettingsPage() {
     const missingRequired = baseConfig.fields.filter((field) => field.required && !canvasFieldKeys.has(field.key));
     const enumWithoutSource = baseConfig.fields.filter((field) => field.type.includes('下拉') && !field.optionSource);
     const relationWithoutSource = baseConfig.fields.filter((field) => field.type.includes('关联') && !field.optionSource);
-    const enabledFilters = viewConfig.filters.filter((filter) => filter.enabled);
-    const enabledColumns = viewConfig.table.columns.filter((column) => column.enabled);
+    const viewTabs = getViewTabs(storedViewConfig);
+    const enabledFilters = viewTabs.flatMap((tab) => tab.filters.filter((filter) => filter.enabled));
+    const enabledColumns = viewTabs.flatMap((tab) => tab.table.columns.filter((column) => column.enabled));
+    const emptyTabs = viewTabs.filter((tab) => !tab.table.columns.some((column) => column.enabled));
+    const unboundTabs = viewTabs.filter((tab) => tab.audience.mode === 'restricted' && !tab.audience.roleIds.length && !tab.audience.userIds.length && !tab.audience.orgIds.length);
     const flowValidation = validateFlowDesignerConfig(professionalFlowConfig);
     const flowErrors = flowValidation.filter((item) => item.level === 'error');
     const flowWarnings = flowValidation.filter((item) => item.level === 'warning');
@@ -2919,9 +3002,14 @@ export default function FormSettingsPage() {
         detail: enabledFilters.length ? `已启用 ${enabledFilters.length} 个运行页筛选条件。` : '建议至少启用一个运行页筛选条件。',
       },
       {
-        level: enabledColumns.length ? 'suggestion' : 'error',
+        level: emptyTabs.length ? 'error' : 'suggestion',
         title: '数据展示列',
-        detail: enabledColumns.length ? `已启用 ${enabledColumns.length} 个表格展示列。` : '运行页表格至少需要一个展示列。',
+        detail: emptyTabs.length ? `以下 Tab 至少需要一个展示列：${emptyTabs.map((tab) => tab.name).join('、')}` : `所有 ${viewTabs.length} 个 Tab 均已配置展示列。`,
+      },
+      {
+        level: unboundTabs.length ? 'error' : 'suggestion',
+        title: 'Tab 可见范围',
+        detail: unboundTabs.length ? `以下 Tab 尚未绑定角色、用户或组织：${unboundTabs.map((tab) => tab.name).join('、')}` : '所有 Tab 均已配置可见范围。',
       },
       {
         level: invalidViewFields.length ? 'error' : 'suggestion',
@@ -3214,9 +3302,9 @@ export default function FormSettingsPage() {
   const renderControlIdentityProperties = () => {
     if (!selectedControl) return null;
     return (
-      <section className="designer-prop-section">
+      <section className="designer-prop-section designer-prop-section-identity">
         <strong className="designer-prop-section-title">控件身份</strong>
-        <label>
+        <label className="designer-prop-row-key">
           <span>控件名称</span>
           <Input
             value={selectedControl.name}
@@ -3226,9 +3314,8 @@ export default function FormSettingsPage() {
         <label>
           <span>控件类型</span>
           <Select
-            disabled={isEncodingField(selectedField)}
             value={selectedEffectiveControlType}
-            options={controlTypeOptions}
+            options={isEncodingField(selectedField) ? controlTypeOptions.filter((option) => ['code', 'text', 'textarea', 'readonly-text'].includes(String(option.value))) : controlTypeOptions}
             onChange={(controlType) => {
               const nextWidth = controlType === 'textarea' || controlType === 'upload' ? 'full' : selectedControl.width;
               updateSelectedControl({
@@ -3247,12 +3334,6 @@ export default function FormSettingsPage() {
           <span>字段类型</span>
           <Input value={getFieldStorageTypeLabel(selectedField)} disabled suffix="数据库字段" />
         </label>
-        {selectedControlUsesEncoding && (
-          <label className="designer-prop-locked">
-            <span>业务特性</span>
-            <Input value="编码" disabled suffix="控件能力" />
-          </label>
-        )}
       </section>
     );
   };
@@ -3334,67 +3415,30 @@ export default function FormSettingsPage() {
     if (!selectedControlUsesEncoding || !selectedEncodingRule) return null;
     return (
       <section className="designer-prop-section designer-prop-section-primary">
-        <strong className="designer-prop-section-title">编码规则</strong>
-        <label>
-          <span>生成方式</span>
-          <Select
-            value={selectedEncodingRule.generationMode || 'auto'}
-            options={encodingGenerationModeOptions}
-            onChange={(generationMode) => updateSelectedEncodingRule({
-              generationMode,
-              allowManualOverride: generationMode === 'autoEditable' || generationMode === 'manual',
-            })}
-          />
-        </label>
-        <label>
-          <span>生成时机</span>
-          <Select
-            value={selectedEncodingRule.generationTiming || 'create'}
-            options={encodingGenerationTimingOptions}
-            onChange={(generationTiming) => updateSelectedEncodingRule({ generationTiming })}
-          />
-        </label>
-        <label>
-          <span>唯一范围</span>
-          <Select
-            value={selectedEncodingRule.uniquenessScope || 'form'}
-            options={encodingUniquenessScopeOptions}
-            onChange={(uniquenessScope) => updateSelectedEncodingRule({ uniquenessScope, unique: uniquenessScope !== 'dependency' || selectedEncodingSegments.length > 0 })}
-          />
-        </label>
-        <div className="designer-prop-row-wide encoding-segment-list">
-          <Button
-            block
-            icon={<PlusOutlined />}
-            onClick={() => openEncodingSegmentEditor()}
-            size="small"
-          >
-            新增编码段
-          </Button>
-          {selectedEncodingSegments.map((segment, index) => (
-            <div className="encoding-segment-card" key={segment.id}>
-              <button
-                className="encoding-segment-main"
-                onClick={() => openEncodingSegmentEditor(segment, index)}
-                type="button"
-              >
-                <strong>{segment.name || getEncodingSegmentTypeLabel(segment.type)}</strong>
-                <small>
-                  {getEncodingSegmentTypeLabel(segment.type)} · {segment.length || 0} 位 · 示例 {renderEncodingSegmentSample(segment, baseConfig.fields) || '-'}
-                </small>
+        <strong className="designer-prop-section-title">
+          <span>编码规则</span>
+          <Button className="encoding-heading-add" aria-label="新增编码规则" title="新增编码规则"
+            icon={<PlusOutlined />} onClick={() => setEncodingSettingsDraft({ ...makeEncodingRule(selectedField),
+              id: `rule-${crypto.randomUUID()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] })} size="small" type="text" />
+        </strong>
+        {getEncodingRules(selectedEncodingRule).map((rule, index) => (
+          <label key={rule.id || index}>
+            <span title={rule.name}>{rule.name || `编码规则 ${index + 1}`}</span>
+            <div className="designer-rule-toggle">
+
+              <Button className="designer-rule-config-button" aria-label={`设置编码规则：${rule.name}`}
+                title="设置编码规则" icon={<SettingOutlined />} size="small" type="text"
+                onClick={() => setEncodingSettingsDraft({ ...structuredClone(rule), priority: index + 1 })} />
+              <button type="button" role="switch" aria-label={`启用编码规则：${rule.name}`} aria-checked={rule.enabled !== false}
+                className={`designer-rule-check ${rule.enabled !== false ? 'designer-rule-check-on' : ''}`}
+                title={rule.enabled !== false ? '已启用' : '已停用'}
+                onClick={(event) => { event.preventDefault(); event.stopPropagation(); updateSelectedEncodingRule({ enabled: true,
+                  rules: getEncodingRules(selectedEncodingRule).map((item, i) => i === index ? { ...item, enabled: item.enabled === false } : item) }); }}>
+                <span className="designer-rule-check-box" aria-hidden="true" />
               </button>
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => removeEncodingSegment(index)}
-                size="small"
-                type="text"
-              />
             </div>
-          ))}
-        </div>
-        <label><span>组成说明</span><Input value={getEncodingComposition(selectedEncodingRule, baseConfig.fields)} readOnly /></label>
-        <label><span>编码示例</span><Input value={renderEncodingSample(selectedEncodingRule, baseConfig.fields)} readOnly /></label>
+          </label>
+        ))}
       </section>
     );
   };
@@ -3404,7 +3448,7 @@ export default function FormSettingsPage() {
     return (
       <section className="designer-prop-section">
         <strong className="designer-prop-section-title">布局</strong>
-        <label className="designer-prop-row-wide">
+        <label>
           <span>控件宽度</span>
           <div className="designer-width-picker">
             {controlWidthOptions.map((option) => (
@@ -3511,7 +3555,7 @@ export default function FormSettingsPage() {
   const markUnsaved = () => setHasUnsavedChanges(true);
 
   const updateViewConfig = (updater: (current: ViewConfig) => ViewConfig) => {
-    setViewConfig((current) => updater(current));
+    setViewConfig((current) => updateActiveView(current, activeViewTab.id, updater));
     markUnsaved();
   };
 
@@ -3667,8 +3711,8 @@ export default function FormSettingsPage() {
       config: {
         workflowDesigner: {},
         source: 'form-settings',
-        viewConfig,
-        viewConfigDraft: viewConfig,
+        viewConfig: storedViewConfig,
+        viewConfigDraft: storedViewConfig,
         viewConfigMeta: {
           draftVersion: 1,
           publishedVersion: 1,
@@ -3841,6 +3885,7 @@ export default function FormSettingsPage() {
           ...currentConfig,
           viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
+          formDesignerControls: layoutControls,
           viewConfigMeta: nextMeta,
         }
       : {
@@ -3848,6 +3893,7 @@ export default function FormSettingsPage() {
           viewConfig: nextViewConfig,
           viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
+          formDesignerControls: layoutControls,
           viewConfigMeta: nextMeta,
         };
     const response = await updatePlatformForm(form.id, { config: nextConfig });
@@ -3946,13 +3992,14 @@ export default function FormSettingsPage() {
   };
 
   const saveDraft = async () => {
+    if (flowLoadError) { message.error(flowLoadError); return; }
     if (isPersistingFlow) return;
     setPersistingFlow(true);
     try {
       const form = await ensurePlatformForm();
       await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
-        await updateFormViewConfig(form, viewConfig, 'draft');
+        await updateFormViewConfig(form, storedViewConfig, 'draft');
         const updatedForm = await updateFormAnalyticsDesign(form, analyticsDesign, 'draft');
         const meta = ((updatedForm.config || {}).analyticsDesignMeta || {}) as Record<string, unknown>;
         setVersion(`v${Number(meta.draftVersion || 1)}`);
@@ -3960,7 +4007,7 @@ export default function FormSettingsPage() {
         message.success('BI 看板草稿已保存，数据集、指标、画布和联动配置不会影响已发布页面');
         return;
       }
-      const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
+      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
       const meta = getWorkflowDesignerMeta(formWithView);
       const saved = await saveWorkflowDefinition('draft', formWithView, meta.draftWorkflowId);
       await updateFormWorkflowMeta(formWithView, { ...meta, draftWorkflowId: saved.id });
@@ -3976,19 +4023,20 @@ export default function FormSettingsPage() {
   };
 
   const publishConfig = async () => {
+    if (flowLoadError) { message.error(flowLoadError); return; }
     if (isPersistingFlow) return;
     setPersistingFlow(true);
     try {
       const form = await ensurePlatformForm();
       await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
-        const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
+        const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
         await updateFormAnalyticsDesign(formWithView, analyticsDesign, 'draft');
         setServerPublishReport(null);
         setPublishCheckOpen(true);
         return;
       }
-      const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
+      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
       const response = await previewPlatformFormPublish(formWithView.id);
       setServerPublishReport(response.data?.data as PlatformFormPublishReport);
       setPublishCheckOpen(true);
@@ -4001,6 +4049,7 @@ export default function FormSettingsPage() {
   };
 
   const confirmPublish = async () => {
+    if (flowLoadError) { message.error(flowLoadError); return; }
     if (publishErrorCount > 0) {
       message.error('请先处理发布确认中的阻断项');
       return;
@@ -4011,9 +4060,9 @@ export default function FormSettingsPage() {
       const form = await ensurePlatformForm();
       await syncFieldDefaultValues(form);
       if (isAnalysisDesigner) {
-        const formWithViewDraft = await updateFormViewConfig(form, viewConfig, 'draft');
+        const formWithViewDraft = await updateFormViewConfig(form, storedViewConfig, 'draft');
         const formWithAnalyticsDraft = await updateFormAnalyticsDesign(formWithViewDraft, analyticsDesign, 'draft');
-        const formWithViewPublished = await updateFormViewConfig(formWithAnalyticsDraft, viewConfig, 'published');
+        const formWithViewPublished = await updateFormViewConfig(formWithAnalyticsDraft, storedViewConfig, 'published');
         const updatedForm = await updateFormAnalyticsDesign(formWithViewPublished, analyticsDesign, 'published');
         const formVersionResponse = await publishPlatformForm(updatedForm.id);
         const schemaVersion = Number(formVersionResponse.data?.data?.version || ((updatedForm.config || {}).analyticsDesignMeta as any)?.publishedVersion || 1);
@@ -4024,9 +4073,9 @@ export default function FormSettingsPage() {
         message.success('BI 看板配置已发布，运行页会读取新的数据集、指标、图表和联动配置');
         return;
       }
-      const formWithView = await updateFormViewConfig(form, viewConfig, 'draft');
+      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
       const meta = getWorkflowDesignerMeta(formWithView);
-      const saved = await saveWorkflowDefinition('published', formWithView, meta.draftWorkflowId || meta.publishedWorkflowId);
+      const saved = await saveWorkflowDefinition('published', formWithView, meta.draftWorkflowId);
       const publishedAt = new Date().toISOString();
       const updatedForm = await updateFormWorkflowMeta(formWithView, {
         ...meta,
@@ -4332,13 +4381,14 @@ export default function FormSettingsPage() {
         .filter(Boolean) as string[],
     ));
     const sequenceSegment = segments.find((segment) => segment.type === 'sequence');
-    updateSelectedEncodingRule({
+    setEncodingSettingsDraft((current) => current ? ({
+      ...current,
       segments,
       dependencies,
       sequenceLength: sequenceSegment?.length || selectedEncodingRule?.sequenceLength || 3,
       resetCycle: sequenceSegment?.resetCycle || selectedEncodingRule?.resetCycle || 'month',
       regenerateOnDependencyChange: segments.some((segment) => segment.regenerateOnChange),
-    });
+    }) : current);
   };
 
   const openEncodingSegmentEditor = (segment?: EncodingSegment, index?: number) => {
@@ -5009,6 +5059,11 @@ export default function FormSettingsPage() {
 
   const renderDataViewDesigner = () => (
     <div className="data-view-designer">
+      <ViewTabsEditor config={storedViewConfig} activeId={activeViewTab.id} onSelect={(id) => { setActiveViewTabId(id); setExpandedViewRow(''); }}
+        onChange={(next) => { setViewConfig(next); markUnsaved(); }}
+        roles={identityRoleRecords.map((role) => ({ value: role.id, label: role.label }))}
+        users={identityUsers.map((user) => ({ value: user.id, label: user.label }))}
+        organizations={permissionOrgUnits.map((org) => ({ value: org.id, label: org.name }))} />
       <section className="view-config-section">
         <div className="view-config-section-head">
           <div><strong>筛选区</strong><span>配置查询条件、操作符、默认值和常用/高级位置。</span></div>
@@ -5319,7 +5374,7 @@ export default function FormSettingsPage() {
                 { type: 'rank-table' as const, name: '排行表', desc: '展示 Top N 排名' },
                 { type: 'detail-table' as const, name: '明细表', desc: '承接下钻和跳转' },
               ].map((item) => (
-                <button className="designer-component analytics-control-item" data-desc={item.desc} key={item.type} type="button" onClick={() => addAnalyticsWidget(item.type)}>
+                <button className="designer-component analytics-control-item" data-desc={item.desc} title={`${item.name} / ${item.desc}`} key={item.type} type="button" onClick={() => addAnalyticsWidget(item.type)}>
                   <span>{item.name}</span>
                 </button>
               ))}
@@ -5610,10 +5665,9 @@ export default function FormSettingsPage() {
     <div className="form-designer-page">
       <header className="form-designer-toolbar">
         <div className="form-designer-title">
-          <Typography.Title level={4}>{baseConfig.name}配置</Typography.Title>
           <span className="designer-title-meta">{baseConfig.status}</span>
         </div>
-        <Tabs
+        <SettingsTabs
           className="form-designer-tabs"
           activeKey={activeTab}
           onChange={(key) => {
@@ -5636,8 +5690,8 @@ export default function FormSettingsPage() {
           >
             {version} 当前草稿
           </Button>
-          {activeTab !== 'approval' && <Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />}
-          {activeTab !== 'approval' && <Button size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>}
+          {<Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />}
+          {<Button className="designer-publish-button" size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>}
         </Space>
       </header>
 
@@ -5877,7 +5931,6 @@ export default function FormSettingsPage() {
             </div>
           )}
 
-          {activeTabKey === 'approval' && <FormApprovalSettings formId={platformForm?.id} />}
 
           {activeTabKey === 'flow' && (
             <ProfessionalFlowDesigner
@@ -5889,6 +5942,8 @@ export default function FormSettingsPage() {
                 required: field.required,
               }))}
               roles={permissionRoles}
+              roleOptions={identityRoleRecords.map((role) => ({ value: role.name, label: role.label }))}
+              users={identityUsers.map((user) => ({ value: String(user.id), label: user.label }))}
               onChange={(nextConfig) => {
                 setProfessionalFlowConfig(nextConfig);
                 markUnsaved();
@@ -6188,18 +6243,6 @@ export default function FormSettingsPage() {
             <strong>属性</strong>
             <span>当前：{selectedControl ? '控件' : selectedField ? '字段' : '画布'}</span>
           </div>
-          <div className="designer-prop-summary">
-            <span className="designer-prop-summary-badge">{selectedControl ? '控件' : selectedField ? '字段' : '画布'}</span>
-            <strong>{selectedControl?.name || selectedField?.name || baseConfig.name}</strong>
-            <small>
-              {selectedControl
-                ? `${selectedEffectiveControlType} · ${controlWidthLabel(selectedControl.width)}`
-                : selectedField
-                  ? `${selectedField.type} · ${selectedField.locked ? '锁定字段' : '可配置字段'}`
-                  : `${baseConfig.dataSource} · ${baseConfig.primaryKey}`}
-            </small>
-          </div>
-
           {selectedControl ? (
             <div className="designer-props">
               {renderControlIdentityProperties()}
@@ -6234,6 +6277,66 @@ export default function FormSettingsPage() {
         </aside>
         )}
       </section>
+
+      <Modal centered className="encoding-segment-modal" title="编码规则设置" open={Boolean(encodingSettingsDraft)}
+        onCancel={() => setEncodingSettingsDraft(null)} okText="保存规则" cancelText="取消" width={760}
+        onOk={() => {
+          if (!encodingSettingsDraft || !encodingSettingsDraft.name?.trim()) { message.warning('请填写规则名称'); return; }
+          if (!selectedEncodingSegments.length) { message.warning('请添加编码段'); return; }
+          if ((encodingSettingsDraft.conditions || []).some((c) => !c.sourceField || (!['isEmpty', 'notEmpty'].includes(c.operator || '') && !c.value?.trim()))) {
+            message.warning('请完整填写触发条件'); return;
+          }
+          const rules = [...getEncodingRules(selectedEncodingRule)];
+          if (rules.some((r) => r.id !== encodingSettingsDraft.id && r.name?.trim() === encodingSettingsDraft.name?.trim())) {
+            message.warning('规则名称不能重复'); return;
+          }
+          const { priority, ...savedRule } = encodingSettingsDraft;
+          const nextRules = rules.filter((r) => r.id !== savedRule.id);
+          nextRules.splice(Math.max(0, Math.min(nextRules.length, (priority || 1) - 1)), 0, savedRule);
+          updateSelectedEncodingRule({ rules: nextRules }); setEncodingSettingsDraft(null);
+        }}>
+        {encodingSettingsDraft && <div className="encoding-rule-dialog">
+          <div className="encoding-settings-form">
+            <label><span>规则名称</span><Input aria-label="编码规则名称" value={encodingSettingsDraft.name}
+              onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, name: e.target.value })} /></label>
+            <label><span>匹配顺序</span><InputNumber aria-label="编码规则匹配顺序" min={1}
+              max={getEncodingRules(selectedEncodingRule).length + (getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) ? 0 : 1)}
+              value={encodingSettingsDraft.priority || 1} onChange={(priority) => setEncodingSettingsDraft({ ...encodingSettingsDraft, priority: Number(priority || 1) })} /></label>
+            {getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) && <label><span>删除规则</span>
+              <Button danger size="small" disabled={getEncodingRules(selectedEncodingRule).length <= 1} icon={<DeleteOutlined />}
+                onClick={() => { updateSelectedEncodingRule({ rules: getEncodingRules(selectedEncodingRule).filter((r) => r.id !== encodingSettingsDraft.id) }); setEncodingSettingsDraft(null); }}>删除当前规则</Button></label>}
+          </div>
+          <div className="encoding-dialog-heading"><strong>触发条件</strong><Button size="small" type="text" icon={<PlusOutlined />} onClick={() =>
+            setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: [...(encodingSettingsDraft.conditions || []), { sourceField: assignmentTargetFieldOptions[0]?.value, operator: 'eq', value: '' }] })}>添加条件</Button></div>
+          <p className="encoding-dialog-help">规则从上到下匹配，采用第一条满足条件的规则；本规则的条件需全部满足，未添加条件时始终匹配。新规则默认排在首位，可通过“匹配顺序”调整优先级。</p>
+          {(encodingSettingsDraft.conditions || []).map((condition, index) => <div className="encoding-condition-row" key={index}>
+            <Select aria-label={`条件字段 ${index + 1}`} value={condition.sourceField} options={assignmentTargetFieldOptions}
+              onChange={(sourceField) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, sourceField } : c) })} />
+            <Select aria-label={`条件运算符 ${index + 1}`} value={condition.operator} options={[
+              {value:'eq',label:'等于'}, {value:'ne',label:'不等于'}, {value:'contains',label:'包含'},
+              {value:'gte',label:'大于等于'}, {value:'lte',label:'小于等于'}, {value:'isEmpty',label:'为空'}, {value:'notEmpty',label:'不为空'}]}
+              onChange={(operator) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, operator } : c) })} />
+            <Input aria-label={`条件值 ${index + 1}`} disabled={['isEmpty','notEmpty'].includes(condition.operator || '')} value={condition.value}
+              onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, value: e.target.value } : c) })} />
+            <Button aria-label={`删除条件 ${index + 1}`} type="text" danger icon={<DeleteOutlined />} onClick={() => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.filter((_, i) => i !== index) })} />
+          </div>)}
+          <div className="encoding-dialog-heading"><strong>编码组成</strong><Button size="small" type="text" icon={<PlusOutlined />} onClick={() => openEncodingSegmentEditor()}>添加编码段</Button></div>
+          {selectedEncodingSegments.map((segment, index) => <div className="encoding-composition-row" key={segment.id}>
+            <span>{index + 1}. {segment.name}</span><span>{getEncodingSegmentTypeLabel(segment.type)} · {segment.length} 位</span>
+            <Button size="small" disabled={index === 0} onClick={() => { const next = [...selectedEncodingSegments]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; syncEncodingSegments(next); }}>上移</Button>
+            <Button size="small" type="text" aria-label={`设置编码段：${segment.name}`} icon={<SettingOutlined />} onClick={() => openEncodingSegmentEditor(segment,index)} />
+            <Button size="small" type="text" danger aria-label={`删除编码段：${segment.name}`} icon={<DeleteOutlined />} onClick={() => removeEncodingSegment(index)} />
+          </div>)}
+          <div className="encoding-dialog-heading"><strong>生成设置</strong></div>
+          <div className="encoding-settings-form">
+            <label><span>生成方式</span><Select aria-label="编码生成方式" value={encodingSettingsDraft.generationMode || 'auto'} options={encodingGenerationModeOptions}
+              onChange={(generationMode) => setEncodingSettingsDraft({ ...encodingSettingsDraft, generationMode,
+                allowManualOverride: generationMode === 'autoEditable' || generationMode === 'manual' })} /></label>
+            <label><span>组成说明</span><Input value={getEncodingComposition(encodingSettingsDraft, baseConfig.fields)} readOnly /></label>
+            <label><span>编码示例</span><Input value={renderEncodingSample(encodingSettingsDraft, baseConfig.fields)} readOnly /></label>
+          </div>
+        </div>}
+      </Modal>
 
       <Modal
         centered

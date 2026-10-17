@@ -321,17 +321,15 @@ export default function PipelinePage() {
   ];
 
   return (
-    <div>
-      <Title level={4}>数据管线</Title>
-
+    <div className="pipeline-page">
       {/* Stats */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
+      <Row className="page-summary-metrics" gutter={[16,16]} style={{ marginBottom: 16, marginInline: 0 }}>
+        <Col xs={12} md={6}>
+          <Card className="hierarchy-kpi-primary">
             <Statistic title="管线总数" value={pipelines.length} prefix={<BranchesOutlined />} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="活跃管线"
@@ -341,7 +339,7 @@ export default function PipelinePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="运行中"
@@ -351,12 +349,12 @@ export default function PipelinePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="异常"
               value={errorCount}
-              valueStyle={{ color: errorCount > 0 ? '#ff4d4f' : '#8c8c8c' }}
+              valueStyle={{ color: errorCount > 0 ? 'var(--mf-danger)' : 'var(--mf-muted)' }}
               prefix={<CloseCircleOutlined />}
             />
           </Card>

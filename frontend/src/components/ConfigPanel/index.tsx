@@ -76,11 +76,11 @@ export default function ConfigPanel({ widget, onChange }: Props) {
   const modelFields = selectedModel?.fields || [];
 
   return (
-    <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
-      <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>属性配置</Typography.Text>
+    <div className="report-config-panel" style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+      <div className="report-widget-summary"><Typography.Text type="secondary">当前组件</Typography.Text><Typography.Text strong>{widget.title || widget.type}</Typography.Text></div>
 
       <Form layout="vertical" size="small">
-        <Form.Item label="标题">
+        <Form.Item className="form-field-primary" label="标题">
           <Input value={widget.title} onChange={(e) => handleFieldChange('title', e.target.value)} />
         </Form.Item>
 
@@ -105,7 +105,7 @@ export default function ConfigPanel({ widget, onChange }: Props) {
           <>
             <Divider orientation="left" plain style={{ margin: '8px 0', fontSize: 12 }}>字段绑定</Divider>
 
-            <Form.Item label="绑定模型">
+            <Form.Item className="form-field-primary" label="绑定模型">
               <Select
                 showSearch
                 allowClear

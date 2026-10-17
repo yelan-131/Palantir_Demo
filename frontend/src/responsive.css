@@ -14,31 +14,48 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
 .tech-white-shell .app-content .ant-table:not(.ant-table-fixed-header) table { min-width: 640px; }
 .tech-white-shell .app-content :is(.app-business-content, .dynamic-business-content) { min-width: 0; }
 .tech-white-shell .report-editor-main { min-height: 0; }
+.tech-white-shell .navigation-area-page:has(> .report-page-editor) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tech-white-shell .navigation-area-page > .report-page-editor { flex: 1 1 0; }
+
+@media (max-width: 760px) {
+  .tech-white-shell .shell-without-context-menu .app-header > .shell-page-title { grid-column: 1 / 3; }
+}
 .tech-white-shell .report-editor-palette { flex: 0 0 180px; }
 .tech-white-shell .report-editor-properties { flex: 0 0 260px; }
 .tech-white-shell .report-page-editor-editing .report-editor-canvas { min-width: 600px; }
-.tech-white-shell .report-editor-toolbar { flex-wrap: wrap; gap: 12px; }
+.tech-white-shell .report-editor-toolbar { flex: 0 0 auto; flex-wrap: wrap; gap: 12px; }
+.tech-white-shell .report-editor-toolbar > .ant-space { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.tech-white-shell .report-editor-toolbar .ant-typography { overflow-wrap: anywhere; }
+.tech-white-shell .app-content .form-designer-left:not(.professional-flow-library) { overflow-y: auto; }
+/* These controls already expose descriptions through their native title. */
+.tech-white-shell .app-content :is(.form-designer-left, .analytics-board-left) .designer-component::after { display: none; }
 
 @media (max-width: 1440px) {
   .tech-white-shell .app-header { padding-inline: 16px; gap: 12px; grid-template-columns: minmax(110px, 1fr) minmax(220px, 360px) 36px; }
   .tech-white-shell .app-content { padding: 16px; }
   .tech-white-shell .shell-page-heading { flex-wrap: wrap; gap: 12px; }
   .tech-white-shell .app-content .content-surface:has(.form-designer-page) { overflow: auto; min-height: 0; }
-  .tech-white-shell .app-content .form-designer-page { min-width: 1084px; min-height: 560px; height: 100%; overflow: hidden; }
-  .tech-white-shell .app-content .form-designer-toolbar { display: grid; grid-template-columns: minmax(190px,260px) minmax(360px,1fr) max-content; align-items: center; }
+  .tech-white-shell .app-content .form-designer-page { min-width: 1084px; min-height: 0; height: 100%; overflow: hidden; }
+  .tech-white-shell .app-content .form-designer-toolbar { flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; }
   .tech-white-shell .app-content .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) { grid-template-columns: 240px minmax(540px,1fr) 280px; overflow: hidden; }
   .tech-white-shell .app-content :is(.form-designer-shell-no-left, .form-designer-shell-permission, .form-designer-shell-flow) { grid-template-columns: minmax(0,1fr); overflow: hidden; }
   .tech-white-shell .app-content .form-designer-right { grid-column: auto; }
   .tech-white-shell .app-content :is(.form-designer-left, .form-designer-right, .form-designer-canvas) { height: 100%; min-height: 0; }
   .tech-white-shell .app-content .professional-flow-designer { min-width: 1084px; grid-template-columns: 240px minmax(540px,1fr) 280px; }
   .tech-white-shell .app-content .professional-flow-properties { grid-column: auto; }
-  .tech-white-shell .report-page-editor { min-height: 560px; }
-  .tech-white-shell .app-content .app-assembly-workspace { min-width: 1100px; }
-  .tech-white-shell .app-content .assembly-grid { flex-wrap: nowrap; }
-  .tech-white-shell .app-content .assembly-grid > .ant-col:nth-child(-n+2) { flex: 0 0 20.8333%; max-width: 20.8333%; }
-  .tech-white-shell .app-content .assembly-grid > .ant-col:nth-child(n+3) { flex: 0 0 29.1667%; max-width: 29.1667%; }
+  .tech-white-shell .app-content .analytics-board-workbench { min-width: 1084px; grid-template-columns: 240px minmax(540px,1fr) 280px; }
+  .tech-white-shell .app-content :is(.analytics-board-middle, .analytics-board-right) { grid-column: auto; }
+  .tech-white-shell .app-content .app-assembly-workspace { min-width: 1218px; }
   .tech-white-shell .app-content :is(.alert-center, .material-applications) { padding: 0; }
 }
+
+@media (max-width: 1200px) {
+  .tech-white-shell .app-content .alert-business-page { height: auto; overflow: visible; }
+  .tech-white-shell .app-content .alert-business-body { grid-template-columns: minmax(0,1fr); }
+  .tech-white-shell .app-content .alert-business-record-panel { overflow: visible; }
+  .tech-white-shell .app-content .alert-business-table-panel { min-width: 0; }
+}
+
 @media (max-width: 760px) {
   .tech-white-shell .shell-context-menu.ant-layout-sider-collapsed { visibility: hidden; pointer-events: none; }
   .tech-white-shell.shell-menu-overlay-open .shell-context-menu { position: fixed; left: 52px; top: 0; bottom: 0; z-index: 30; box-shadow: 8px 0 24px rgba(32,35,38,.12); visibility: visible; pointer-events: auto; }
@@ -58,4 +75,76 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell .app-content .shell-library-grid { grid-template-columns: 1fr; }
   .tech-white-shell .ai-workbench-panel.ai-chat-panel { right: 12px; bottom: 76px; width: min(460px,calc(100vw - 76px)); max-width: calc(100vw - 76px); }
   .tech-white-shell .ai-edge-toggle { right: 16px; bottom: 16px; }
+}
+
+/* Portaled overlays must fit the viewport independently of the workspace. */
+@media (max-width: 900px), (max-height: 720px) {
+  body:has(.tech-white-shell) .ant-modal-root .ant-modal-wrap { padding: 12px 0; }
+  body:has(.tech-white-shell) .ant-modal { max-width: calc(100vw - 24px); }
+  body:has(.tech-white-shell) .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 24px);
+    padding: 16px;
+    overflow: hidden;
+  }
+  body:has(.tech-white-shell) .ant-modal-header {
+    flex: 0 0 auto;
+    padding-bottom: 12px;
+    padding-right: 28px;
+    margin-bottom: 12px;
+  }
+  body:has(.tech-white-shell) .ant-modal-title { overflow-wrap: anywhere; }
+  body:has(.tech-white-shell) .ant-modal-close { top: 10px; inset-inline-end: 10px; }
+  body:has(.tech-white-shell) .ant-modal-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  body:has(.tech-white-shell) .ant-modal-body .app-business-create-form > .ant-row { margin-inline: 0 !important; }
+  body:has(.tech-white-shell) .ant-modal-footer {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+  body:has(.tech-white-shell) .ant-modal-footer > .ant-btn + .ant-btn { margin-inline-start: 0; }
+  body:has(.tech-white-shell) :is(.ant-modal-footer, .ant-drawer-extra, .ant-drawer-footer) .ant-space { flex-wrap: wrap; }
+  body:has(.tech-white-shell) .designer-rule-modal .ant-modal-content { padding: 0; }
+  body:has(.tech-white-shell) .designer-rule-modal .ant-modal-header { padding: 16px 44px 12px 16px; margin: 0; }
+  body:has(.tech-white-shell) .designer-rule-modal .ant-modal-body { padding: 16px; }
+  body:has(.tech-white-shell) .designer-rule-modal .ant-modal-footer { padding: 12px 16px; margin: 0; }
+  body:has(.tech-white-shell) .designer-rule-group-list { padding: 12px; overflow-x: auto; }
+  body:has(.tech-white-shell) .designer-rule-condition-row { min-width: 480px; }
+  body:has(.tech-white-shell) :is(.ant-drawer-left, .ant-drawer-right) .ant-drawer-content-wrapper { max-width: calc(100vw - 12px); }
+  body:has(.tech-white-shell) .ant-drawer-header { flex: 0 0 auto; flex-wrap: wrap; gap: 8px; padding: 16px; }
+  body:has(.tech-white-shell) .ant-drawer-header-title { min-width: 0; }
+  body:has(.tech-white-shell) .ant-drawer-title { overflow-wrap: anywhere; }
+  body:has(.tech-white-shell) .ant-drawer-close { flex-shrink: 0; }
+  body:has(.tech-white-shell) .ant-drawer-extra { max-width: 100%; }
+  body:has(.tech-white-shell) .ant-drawer-body { min-height: 0; padding: 16px; overscroll-behavior: contain; }
+  body:has(.tech-white-shell) .ant-drawer-footer { flex: 0 0 auto; padding: 12px 16px; }
+  body:has(.tech-white-shell) .workflow-approval-drawer .workflow-detail-approval-actions { margin: 0 -16px -16px; padding: 12px 16px; gap: 8px; flex-wrap: wrap; }
+  body:has(.tech-white-shell) .workflow-approval-drawer .workflow-opinion-form { margin-inline: -16px; padding: 12px 16px; max-height: min(180px,30dvh); overflow-y: auto; }
+  body:has(.tech-white-shell) :is(.ant-modal-body, .ant-drawer-body) .ant-table-content { overflow-x: auto; }
+  .tech-white-shell .ai-workbench-panel.ai-chat-panel {
+    height: min(680px, calc(100dvh - 100px));
+    max-height: calc(100dvh - 100px);
+    bottom: 76px;
+  }
+  .tech-white-shell .ai-chat-header { min-width: 0; gap: 4px; }
+  .tech-white-shell .ai-chat-body { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  .tech-white-shell :is(.ai-chat-input, .ai-chat-footer, .ai-chat-context, .ai-chat-actions) { flex-shrink: 0; }
+  .tech-white-shell :is(.ai-confirm-actions, .ai-chat-actions, .ai-chat-footer) { flex-wrap: wrap; }
+  .tech-white-shell .ai-chat-bubble { min-width: 0; overflow-wrap: anywhere; }
+  .tech-white-shell .ai-chat-bubble pre { max-width: 100%; overflow-x: auto; }
+  body:has(.tech-white-shell) .ai-session-history { max-height: calc(100dvh - 112px); grid-template-rows: auto minmax(0,1fr); }
+  body:has(.tech-white-shell) .ai-session-history-list { min-height: 0; overscroll-behavior: contain; }
+}
+@media (max-width: 480px) {
+  .tech-white-shell .ai-workbench-panel.ai-chat-panel { right: 8px; bottom: 72px; width: calc(100vw - 68px); max-width: calc(100vw - 68px); }
+  .tech-white-shell .ai-agent-title-actions { gap: 0 !important; }
+  .tech-white-shell .ai-agent-title-actions .ant-btn { width: 28px; }
+  .tech-white-shell .ai-confirm-review-head { grid-template-columns: minmax(0,1fr); }
+  .tech-white-shell .ai-skill-action-head { grid-template-columns: 30px minmax(0,1fr); }
+  .tech-white-shell .ai-skill-action-head > .ant-tag { grid-column: 2; justify-self: start; }
 }

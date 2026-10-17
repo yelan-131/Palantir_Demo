@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   BellOutlined,
+  ArrowRightOutlined,
   CheckCircleOutlined,
-  FileDoneOutlined,
   FormOutlined,
   SendOutlined,
 } from '@ant-design/icons';
@@ -89,33 +89,30 @@ export default function WorkspacePage() {
             <div className="simple-workbench-head">
               <div>
                 <Typography.Title level={4}>待办中心</Typography.Title>
-                <Typography.Text type="secondary">汇总流程单据，统一处理</Typography.Text>
               </div>
               <Button type="link" onClick={loadWorkbench}>刷新</Button>
             </div>
 
             <div className="todo-center-content">
               <div className="todo-metric-row">
-                {todoMetrics.map((item) => (
-                  <button className="todo-metric-item" key={item.label} onClick={() => navigate(item.path)}>
+                {todoMetrics.map((item, index) => (
+                  <button className={`todo-metric-item${index === 0 ? ' todo-metric-primary' : ''}`} key={item.label} onClick={() => navigate(item.path)}>
                     <span className="todo-metric-icon">{item.icon}</span>
                     <span>
                       <strong>{item.label}</strong>
                       <em>{item.value}</em>
                       <small>{item.suffix}</small>
                     </span>
+                    <ArrowRightOutlined className="todo-metric-arrow" aria-hidden="true" />
                   </button>
                 ))}
-              </div>
-              <div className="todo-center-illustration" aria-hidden="true">
-                <FileDoneOutlined />
               </div>
             </div>
           </section>
 
           <section className="simple-workbench-panel favorite-center-panel">
             <Typography.Title level={4}>业务表单</Typography.Title>
-            <Typography.Paragraph type="secondary">从对应业务表单填写并发起申请，审批任务统一进入流程与待办。</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">选择表单发起申请，审批任务进入“流程与待办”。</Typography.Paragraph>
             {formError ? <Alert type="error" message="业务表单加载失败" action={<Button onClick={loadWorkbench}>重试</Button>} /> : forms.length ? <div className="business-form-directory">
               {forms.map((form) => <button className="business-form-directory-entry" key={form.id} onClick={() => navigate(form.route_path || '/program/' + encodeURIComponent(form.code))}>
                 <span><FormOutlined /></span>

@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import useAISettingsNotification from './useAISettingsNotification';
+import SettingsTabs from '@/components/SettingsTabs';
 import { useSearchParams } from 'react-router-dom';
+import { ServiceCatalogPanel, PurposeModelsPanel, NativeCompactionPanel, AIStatusSummary, type TestTarget } from './AIConfigurationPanels';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
   AppstoreOutlined,
@@ -11,7 +14,6 @@ import {
   NodeIndexOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
-  SkinOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import {
@@ -33,17 +35,18 @@ import {
   Select,
   Space,
   Switch,
-  Tabs,
   Tag,
   Table,
+  Tabs,
   Typography,
   Col,
+  Collapse,
   message,
 } from 'antd';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 import { useAuthStore } from '../../stores/authStore';
-import ThemePalette from '../../components/ThemePalette';
+import WorkspacePreferences from './WorkspacePreferences';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
 import {
   adminListUsers,
@@ -62,6 +65,7 @@ import {
 } from '../../services/api';
 import { formatServerDateTime } from '../../utils/dateTime';
 import './ai-settings.css';
+import AISettingsWorkspace from './AISettingsWorkspace';
 
 cytoscape.use(dagre);
 
@@ -117,6 +121,9 @@ function normalizeAISettings(settings: Record<string, any>): Record<string, any>
 function normalizeLocalAISettings(settings: Record<string, any>) {
   const localSettings = normalizeAISettings(settings);
   delete localSettings.apiKey;
+  delete localSettings.api_key;
+  delete localSettings.modelServices;
+  delete localSettings.modelAssignments;
   return localSettings;
 }
 
@@ -145,22 +152,16 @@ function saveLocalAISettings(settings: Record<string, unknown>) {
 
 export default function AccountCenter({ currentApplication }: AccountCenterProps) {
   const user = useAuthStore((s) => s.user);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeSection = searchParams.get('section') || 'account';
+  const [accountParams, setAccountParams] = useSearchParams();
+  const accountTab = accountParams.get('tab') === 'preferences' || (!accountParams.has('tab') && accountParams.get('section') === 'preferences') ? 'preferences' : 'account';
   const roles = user?.roles?.length ? user.roles.map((role: any) => role.label || role.name).join(' / ') : '-';
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
-  const accountDefaultSubTab = activeSection === 'preferences' ? 'preferences' : 'profile';
-  const normalizedSection = 'account';
-  const items = [{
-    key: 'account', label: '个人资料与偏好',
-    children: <AccountProfilePanel user={user} roleLabel={roleLabel} roles={roles} currentApplication={currentApplication} defaultActiveKey={accountDefaultSubTab} />,
-  }];
 
   return (
-    <div className="account-center-page">
+    <div className="account-center-page account-preferences-active account-settings-unified">
       <div className="account-center-head">
         <Space size={16} align="center">
-          <Avatar size={56} icon={<UserOutlined />} style={{ backgroundColor: 'var(--mf-primary)' }} />
+          <Avatar size={32} icon={<UserOutlined />} style={{ backgroundColor: 'var(--mf-primary)' }} />
           <div>
             <Title level={3}>{user?.display_name || '系统管理员'}</Title>
             <Text type="secondary">{user?.email || user?.username || 'admin@manufoundry.local'}</Text>
@@ -169,62 +170,19 @@ export default function AccountCenter({ currentApplication }: AccountCenterProps
         <Tag color={user?.is_admin ? 'gold' : 'blue'}>{roleLabel}</Tag>
       </div>
 
-      <Tabs
-        className="account-center-tabs"
-        activeKey={normalizedSection}
-        items={items}
-        onChange={(key) => setSearchParams({ section: key })}
-      />
+      <div className="account-center-tabs">
+        <SettingsTabs
+          className="account-settings-tabs"
+          key={`${user?.tenant_id ?? 'default'}:${user?.id ?? 'anonymous'}`}
+          activeKey={accountTab}
+          onChange={tab => { const next = new URLSearchParams(accountParams); next.delete('section'); next.set('tab', tab); setAccountParams(next); }}
+          items={[
+            { key: 'account', label: '身份与安全', forceRender: true, children: <AccountSecurityPanel user={user} roleLabel={roleLabel} roles={roles} currentApplication={currentApplication} /> },
+            { key: 'preferences', label: '工作偏好', forceRender: true, children: <WorkspacePreferences /> },
+          ]}
+        />
+      </div>
     </div>
-  );
-}
-
-function AccountProfilePanel({
-  user,
-  roleLabel,
-  roles,
-  currentApplication,
-  defaultActiveKey,
-}: {
-  user: any;
-  roleLabel: string;
-  roles: string;
-  currentApplication?: CurrentApplication | null;
-  defaultActiveKey: string;
-}) {
-  const [activeSubTab, setActiveSubTab] = useState(defaultActiveKey);
-
-  useEffect(() => {
-    setActiveSubTab(defaultActiveKey);
-  }, [defaultActiveKey]);
-
-  return (
-    <Tabs
-      className="account-profile-subtabs"
-      activeKey={activeSubTab}
-      onChange={setActiveSubTab}
-      items={[
-        {
-          key: 'profile',
-          label: '身份与安全',
-          icon: <UserOutlined />,
-          children: (
-            <AccountSecurityPanel
-              user={user}
-              roleLabel={roleLabel}
-              roles={roles}
-              currentApplication={currentApplication}
-            />
-          ),
-        },
-        {
-          key: 'preferences',
-          label: '工作偏好',
-          icon: <SkinOutlined />,
-          children: <PreferencePanel />,
-        },
-      ]}
-    />
   );
 }
 
@@ -240,124 +198,38 @@ function AccountSecurityPanel({
   currentApplication?: CurrentApplication | null;
 }) {
   return (
-    <div className="account-center-grid two-columns">
-      <Card title="身份信息" className="account-panel-card">
-        <Descriptions column={1} size="small" bordered>
-          <Descriptions.Item label="账号">{user?.username || '-'}</Descriptions.Item>
-          <Descriptions.Item label="邮箱">{user?.email || '-'}</Descriptions.Item>
-          <Descriptions.Item label="账号类型">{roleLabel}</Descriptions.Item>
-          <Descriptions.Item label="角色">{roles}</Descriptions.Item>
-          <Descriptions.Item label="当前应用">{currentApplication?.name || '-'}</Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      <Card title="安全设置" className="account-panel-card">
-        <Form layout="vertical" autoComplete="off">
-          <Form.Item label="当前密码" name="currentPassword">
-            <Input.Password
-              autoComplete="new-password"
-              placeholder="请输入当前密码"
-            />
-          </Form.Item>
-          <Form.Item label="新密码" name="newPassword">
-            <Input.Password
-              autoComplete="new-password"
-              placeholder="请输入新密码"
-            />
-          </Form.Item>
-          <Form.Item label="登录保护" valuePropName="checked">
-            <Switch defaultChecked /> <Text type="secondary"> 异地登录提醒</Text>
-          </Form.Item>
-          <Button type="primary" icon={<KeyOutlined />} onClick={() => message.success('账号安全设置已保存')}>
-            保存安全设置
-          </Button>
-        </Form>
-      </Card>
-    </div>
-  );
-}
-
-function PreferencePanel() {
-  const [form] = Form.useForm();
-  const { preferences, updatePreferences } = useShellPreferences();
-
-  useEffect(() => {
-    form.setFieldsValue(preferences);
-  }, [form, preferences]);
-
-  return (
-    <div className="account-center-grid two-columns">
-      <Card title="界面偏好" className="account-panel-card">
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={preferences}
-        >
-          <Form.Item name="density" label="显示密度">
-            <Radio.Group optionType="button" buttonStyle="solid">
-              <Radio.Button value="compact">紧凑</Radio.Button>
-              <Radio.Button value="standard">标准</Radio.Button>
-              <Radio.Button value="relaxed">宽松</Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item
-            name="theme"
-            label="主题模式"
-            extra={<span style={{ color: 'var(--shell-text-secondary, #6b7280)' }}>柔和灰白界面，适合长时间办公；应用栏、菜单栏与工作区保持清晰分层。</span>}
-          >
-            <Radio.Group>
-              <Radio value="tech-white">科技灰白</Radio>
-              <Radio value="dark" disabled>深色（规划中）</Radio>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item name="aiBubbleVisible" label="右下角 AI 助手气泡" valuePropName="checked">
-            <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
-          </Form.Item>
-          <Form.Item name="sidebar" label="默认侧边栏">
-            <Radio.Group>
-              <Radio value="expanded">展开</Radio>
-              <Radio value="collapsed">折叠</Radio>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item name="home" label="默认首页">
-            <Select
-              options={[
-                { label: '我的工作台', value: 'workspace' },
-                { label: '当前应用默认页', value: 'current-app' },
-                { label: '系统管理', value: 'system-admin' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="language" label="语言">
-            <Select
-              options={[
-                { label: '中文', value: 'zh-CN' },
-                { label: 'English（规划中）', value: 'en-US', disabled: true },
-              ]}
-            />
-          </Form.Item>
-          <Button
-            type="primary"
-            icon={<SkinOutlined />}
-            onClick={() => {
-              updatePreferences(form.getFieldsValue());
-              message.success('工作偏好已保存');
-            }}
-          >
-            保存工作偏好
-          </Button>
-        </Form>
-      </Card>
-
-      <Card title="通知偏好" className="account-panel-card">
-        <Space direction="vertical" size={18} className="account-switch-list">
-          <span><Switch defaultChecked /> <BellOutlined /> 待办与审批提醒</span>
-          <span><Switch defaultChecked /> <SafetyCertificateOutlined /> 风险与质量预警</span>
-          <span><Switch /> <ApiOutlined /> 数据任务运行结果</span>
-        </Space>
-      </Card>
-      <ThemePalette />
-    </div>
+    <section className="account-security-workspace" aria-label="身份与安全">
+      <div className="account-security-scroll">
+        <header className="account-security-page-heading">
+          <Title level={2}>身份与安全</Title>
+          <Text type="secondary">查看账号资料，管理登录密码与提醒偏好。</Text>
+        </header>
+        <div className="account-security-layout">
+          <section className="account-security-card account-identity-card" aria-label="账号信息">
+            <header className="account-security-card-heading"><span className="account-security-section-icon"><UserOutlined /></span><div><Title level={3}>账号信息</Title><Text type="secondary">当前账号的身份与使用范围</Text></div><Tag>只读资料</Tag></header>
+            <div className="account-identity-overview"><span>登录账号</span><strong>{user?.username || '-'}</strong><Text type="secondary">{user?.email || '未设置邮箱'}</Text></div>
+            <dl className="account-identity-details">
+              <div><dt>账号</dt><dd>{user?.username || '-'}</dd></div>
+              <div><dt>邮箱</dt><dd>{user?.email || '-'}</dd></div>
+              <div><dt>账号类型</dt><dd>{roleLabel}</dd></div>
+              <div><dt>角色</dt><dd>{roles}</dd></div>
+              <div><dt>当前应用</dt><dd>{currentApplication?.name || '-'}</dd></div>
+            </dl>
+          </section>
+          <section className="account-security-card account-login-card" aria-label="安全设置">
+            <header className="account-security-card-heading"><span className="account-security-section-icon"><KeyOutlined /></span><div><Title level={3}>安全设置</Title><Text type="secondary">登录密码与账号提醒</Text></div></header>
+            <Form layout="vertical" autoComplete="off" className="account-security-form">
+              <div className="account-security-form-fields">
+                <Form.Item label="当前密码" name="currentPassword"><Input.Password autoComplete="new-password" placeholder="请输入当前密码" /></Form.Item>
+                <Form.Item label="新密码" name="newPassword"><Input.Password autoComplete="new-password" placeholder="请输入新密码" /></Form.Item>
+                <div className="account-security-protection"><div><strong>登录保护</strong><p>异地登录提醒</p></div><Form.Item label="异地登录提醒" className="account-security-protection-switch" valuePropName="checked"><Switch aria-label="异地登录提醒" defaultChecked /></Form.Item></div>
+              </div>
+              <footer className="account-security-actions"><p>密码修改与登录保护尚未接入账号服务，当前操作不会更新安全配置。</p><Button type="primary" icon={<KeyOutlined />} onClick={() => message.info('安全配置尚未接入账号服务，未修改密码或登录保护')}>保存安全设置</Button></footer>
+            </Form>
+          </section>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -565,6 +437,7 @@ function AIPlatformPanel() {
 }
 
 export function AIPlatformPanelV2() {
+  const { notify, contextHolder: aiNoticeHolder } = useAISettingsNotification();
   const [form] = Form.useForm();
   const [permissionRuleForm] = Form.useForm();
   const [validationRuleForm] = Form.useForm();
@@ -579,6 +452,15 @@ export function AIPlatformPanelV2() {
   const [testing, setTesting] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [aiParams, setAIParams] = useSearchParams();
+  const requestedSection = aiParams.get('tab') || 'connection';
+  const activeSettingsSection = ['connection', 'models', 'agent-registry', 'safety'].includes(requestedSection) ? requestedSection : 'connection';
+  const setActiveSettingsSection = (section: string) => setAIParams(previous => {
+    const next = new URLSearchParams(previous);
+    next.set('tab', section);
+    return next;
+  });
+  const [persistedSettings, setPersistedSettings] = useState<Record<string, any> | null>(null);
   const [loadError, setLoadError] = useState('');
   const [runtimeStatus, setRuntimeStatus] = useState<Record<string, any>>({});
   const [connectionResult, setConnectionResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -629,6 +511,7 @@ export function AIPlatformPanelV2() {
     retentionDays: 90,
     dailyLimit: 1000,
     userDailyLimit: 100,
+    harnessPolicy: { reasoning_effort: null, initialize_timeout_seconds: 30, request_timeout_seconds: null, streamIdleTimeoutMs: null, contextWindow: null, compaction: { enabled: true, thresholdRatio: 0.8, retainRatio: 0.16 } },
     contextPolicy: { recentMessageLimit: 10, maxContextTokens: 12000, showContextSources: true },
     ragPolicy: { enabled: true, topK: 5, maxEvidenceChars: 1200, similarityThreshold: 0.15 },
     memoryPolicy: {
@@ -688,6 +571,7 @@ export function AIPlatformPanelV2() {
           form.setFieldsValue(mergedSettings);
           saveLocalAISettings(mergedSettings);
           setRuntimeStatus(response.data?.runtime || {});
+          setPersistedSettings(mergedSettings);
           setLoaded(true);
           setDirty(false);
         }
@@ -710,33 +594,33 @@ export function AIPlatformPanelV2() {
   };
 
   const aiRoleOptions = [
-    { label: 'Admin', value: 'admin' },
-    { label: 'Production manager', value: 'production_manager' },
-    { label: 'Quality engineer', value: 'quality_engineer' },
-    { label: 'Maintenance manager', value: 'maintenance_manager' },
-    { label: 'Supply chain manager', value: 'supply_chain_manager' },
-    { label: 'Operator', value: 'operator' },
-    { label: 'Viewer', value: 'viewer' },
+    { label: '管理员', value: 'admin' },
+    { label: '生产经理', value: 'production_manager' },
+    { label: '质量工程师', value: 'quality_engineer' },
+    { label: '维护经理', value: 'maintenance_manager' },
+    { label: '供应链经理', value: 'supply_chain_manager' },
+    { label: '操作员', value: 'operator' },
+    { label: '只读用户', value: 'viewer' },
   ];
 
   const aiCapabilityOptions = [
-    { label: 'Page Q&A', value: 'qa' },
-    { label: 'Knowledge RAG', value: 'rag' },
-    { label: 'Business query', value: 'business_query' },
-    { label: 'Report summary', value: 'report' },
-    { label: 'Generate draft', value: 'draft' },
-    { label: 'Save draft after confirm', value: 'save_draft' },
-    { label: 'Start workflow', value: 'workflow' },
-    { label: 'Config assistant', value: 'config' },
+    { label: '页面问答', value: 'qa' },
+    { label: '知识检索', value: 'rag' },
+    { label: '业务查询', value: 'business_query' },
+    { label: '报告摘要', value: 'report' },
+    { label: '生成草稿', value: 'draft' },
+    { label: '确认后保存草稿', value: 'save_draft' },
+    { label: '发起流程', value: 'workflow' },
+    { label: '配置辅助', value: 'config' },
   ];
 
   const aiDomainOptions = [
-    { label: 'Production', value: 'production' },
-    { label: 'Quality', value: 'quality' },
-    { label: 'Maintenance', value: 'maintenance' },
-    { label: 'Supply chain', value: 'supply-chain' },
-    { label: 'Workflow', value: 'workflow' },
-    { label: 'Low-code', value: 'low-code' },
+    { label: '生产', value: 'production' },
+    { label: '质量', value: 'quality' },
+    { label: '设备维护', value: 'maintenance' },
+    { label: '供应链', value: 'supply-chain' },
+    { label: '工作流', value: 'workflow' },
+    { label: '低代码', value: 'low-code' },
   ];
   const hookOptions = [
     { label: '权限检查（始终执行）', value: 'enforce_permissions', disabled: true },
@@ -744,28 +628,21 @@ export function AIPlatformPanelV2() {
     { label: '执行前校验', value: 'validate_before_tool' },
     { label: '执行后校验', value: 'validate_after_tool' },
     { label: '记录工具审计', value: 'audit_tool_use' },
-    { label: 'Budget exceeded log', value: 'log_budget_exceeded' },
-    { label: 'Context compaction log', value: 'log_compaction' },
   ];
   const validationPhaseOptions = [
-    { label: 'Before confirmation', value: 'pre_confirmation' },
-    { label: 'Before tool', value: 'pre_tool' },
-    { label: 'After tool', value: 'post_tool' },
+    { label: '确认前', value: 'pre_confirmation' },
+    { label: '执行前', value: 'pre_tool' },
+    { label: '执行后', value: 'post_tool' },
   ];
   const validationRuleTypeOptions = [
-    { label: 'Field required', value: 'field_required' },
-    { label: 'Field equals', value: 'field_equals' },
-    { label: 'Minimum number', value: 'min_number' },
-    { label: 'Maximum number', value: 'max_number' },
-    { label: 'Non-empty result', value: 'non_empty_result' },
+    { label: '字段必填', value: 'field_required' },
+    { label: '字段等于', value: 'field_equals' },
+    { label: '数值下限', value: 'min_number' },
+    { label: '数值上限', value: 'max_number' },
+    { label: '结果非空', value: 'non_empty_result' },
   ];
-  const watchedSettings = Form.useWatch([], form) || {};
-  const currentProvider = watchedSettings.provider || defaultSettings.provider;
-  const currentChatModel = watchedSettings.chatModel || defaultSettings.chatModel;
-  const currentReasoningModel = watchedSettings.reasoningModel || defaultSettings.reasoningModel;
-  const currentEmbeddingModel = watchedSettings.embeddingModel || defaultSettings.embeddingModel;
+  const watchedSettings = Form.useWatch([], { form, preserve: true }) || {};
   const activeDomains = watchedSettings.domains || defaultSettings.domains;
-  const activeTools = watchedSettings.tools || defaultSettings.tools;
   const rolePolicies = watchedSettings.rolePolicies || defaultSettings.rolePolicies;
   const safetyPolicy = watchedSettings.safetyPolicy || defaultSettings.safetyPolicy;
   const permissionRules = Array.isArray(safetyPolicy.permissionRules) ? safetyPolicy.permissionRules : [];
@@ -792,8 +669,7 @@ export function AIPlatformPanelV2() {
     }
   };
 
-  const persistAgentRegistry = async (nextRegistry: Record<string, any>) => {
-    const nextSettings = { ...form.getFieldsValue(), agentRegistry: nextRegistry };
+  const persistAgentRegistry = async (nextRegistry: Record<string, any>, successTitle = '注册表已更新') => {
     setRegistrySaving(true);
     try {
       const response = await updateAIAgentRegistry({ skills: nextRegistry.skills, tools: nextRegistry.tools });
@@ -805,13 +681,28 @@ export function AIPlatformPanelV2() {
         source: data?.source || 'database',
       };
       form.setFieldsValue({ agentRegistry: activated });
-      saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
-      message.success('技能与工具注册表已保存并生效');
+      saveLocalSettings({ ...form.getFieldsValue(true), agentRegistry: activated });
+      notify('success', successTitle);
+      return true;
     } catch (error: any) {
-      message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry save failed');
+      notify('error', '注册表更新失败', errorText(error));
+      return false;
     } finally {
       setRegistrySaving(false);
     }
+  };
+
+  const changeRegistryItem = async (kind: 'skills' | 'tools', name: string, action: 'toggle' | 'delete') => {
+    if (registrySaving) return;
+    const rows = kind === 'skills' ? registrySkills : registryTools;
+    const item = rows.find((row: any) => row.name === name);
+    if (!item) return;
+    if (action === 'delete' && item.enabled !== false) {
+      notify('warning', '暂不能删除', '请先成功停用此项，再删除');
+      return;
+    }
+    const next = action === 'delete' ? rows.filter((row: any) => row.name !== name) : rows.map((row: any) => row.name === name ? { ...row, enabled: row.enabled === false } : row);
+    await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: registryTools, [kind]: next }, `${action === 'delete' ? '已删除' : item.enabled === false ? '已启用' : '已停用'} ${name}`);
   };
 
   const seedAgentRegistry = async () => {
@@ -826,10 +717,10 @@ export function AIPlatformPanelV2() {
         source: data?.source || 'database',
       };
       form.setFieldsValue({ agentRegistry: activated });
-      saveLocalSettings({ ...form.getFieldsValue(), agentRegistry: activated });
-      message.success('默认技能与工具已导入');
+      saveLocalSettings({ ...form.getFieldsValue(true), agentRegistry: activated });
+      notify('success', '默认技能与工具已导入');
     } catch (error: any) {
-      message.error(error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Agent registry seed failed');
+      notify('error', '导入失败', errorText(error));
     } finally {
       setRegistrySaving(false);
     }
@@ -837,7 +728,7 @@ export function AIPlatformPanelV2() {
 
   const openSkillEditor = (index: number | null) => {
     const source = index === null
-      ? { enabled: true, capability_level: 'assisted', risk_level: 'medium', confirmation_policy: 'confirm_token', allowed_tools: [], required_permissions: [] }
+      ? { enabled: false, capability_level: 'assisted', risk_level: 'medium', confirmation_policy: 'confirm_token', allowed_tools: [], required_permissions: [] }
       : registrySkills[index];
     skillForm.setFieldsValue(source);
     setSkillEditor({ open: true, index });
@@ -849,13 +740,12 @@ export function AIPlatformPanelV2() {
     const item = { ...values, enabled: values.enabled !== false };
     if (skillEditor.index === null) next.push(item);
     else next[skillEditor.index] = item;
-    setSkillEditor({ open: false, index: null });
-    await persistAgentRegistry({ ...agentRegistry, skills: next, tools: registryTools });
+    if (await persistAgentRegistry({ ...agentRegistry, skills: next, tools: registryTools })) setSkillEditor({ open: false, index: null });
   };
 
   const openToolEditor = (index: number | null) => {
     const source = index === null
-      ? { enabled: true, handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low', permission_check: 'qa', dry_run_supported: true, audit_required: false, input_schema_json: '{}', output_schema_json: '{}' }
+      ? { enabled: false, handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low', permission_check: 'qa', dry_run_supported: true, audit_required: false, input_schema_json: '{}', output_schema_json: '{}' }
       : {
           ...registryTools[index],
           input_schema_json: JSON.stringify(registryTools[index]?.input_schema || {}, null, 2),
@@ -873,7 +763,7 @@ export function AIPlatformPanelV2() {
       inputSchema = parseJsonField(values.input_schema_json);
       outputSchema = parseJsonField(values.output_schema_json);
     } catch {
-      message.error('Input/output schema must be valid JSON');
+      notify('error', '配置格式有误', '输入和输出 Schema 必须是有效的 JSON');
       return;
     }
     const { input_schema_json, output_schema_json, ...rest } = values;
@@ -883,8 +773,7 @@ export function AIPlatformPanelV2() {
     const item = { ...rest, enabled: rest.enabled !== false, input_schema: inputSchema, output_schema: outputSchema };
     if (toolEditor.index === null) next.push(item);
     else next[toolEditor.index] = item;
-    setToolEditor({ open: false, index: null });
-    await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: next });
+    if (await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: next })) setToolEditor({ open: false, index: null });
   };
 
   const openPermissionRuleEditor = (index: number | null) => {
@@ -915,33 +804,38 @@ export function AIPlatformPanelV2() {
     setValidationRuleEditor({ open: false, index: null });
   };
 
-  const handleSave = () => {
-    saveLocalSettings(form.getFieldsValue());
-    message.success('AI 设置已保存到本地浏览器');
-  };
-
   const applyProviderPreset = (provider: string) => {
     setDirty(true);
     setConnectionResult(null);
     const preset = provider === 'glm' ? GLM_AI_DEFAULTS : provider === 'deepseek' ? DEEPSEEK_AI_DEFAULTS : { provider, baseUrl: provider === 'openai' ? 'https://api.openai.com/v1' : '', chatModel: '', reasoningModel: '' };
-    const nextSettings = { ...form.getFieldsValue(true), ...preset, apiKey: '', visionModel: provider === 'glm' ? GLM_AI_DEFAULTS.visionModel : 'disabled' };
+    const nextSettings = { ...form.getFieldsValue(true), ...preset, apiKey: '', organization: '', project: '', visionModel: provider === 'glm' ? GLM_AI_DEFAULTS.visionModel : 'disabled' };
     form.setFieldsValue(nextSettings);
     saveLocalSettings(nextSettings);
   };
 
   const applyGlmPreset = (preset: 'api' | 'coding') => {
+    const target = preset === 'coding' ? GLM_CODING_PLAN_DEFAULTS : GLM_AI_DEFAULTS;
+    if (form.getFieldValue('provider') === 'glm' && form.getFieldValue('baseUrl') === target.baseUrl) return;
     setDirty(true);
     setConnectionResult(null);
     const nextSettings = {
-      ...form.getFieldsValue(),
+      ...form.getFieldsValue(true),
       ...(preset === 'coding' ? GLM_CODING_PLAN_DEFAULTS : GLM_AI_DEFAULTS),
+      apiKey: '',
     };
     form.setFieldsValue(nextSettings);
     saveLocalSettings(nextSettings);
   };
 
   const collectSettings = async () => {
-    await form.validateFields();
+    try {
+      await form.validateFields();
+    } catch (error: any) {
+      const field = error?.errorFields?.[0]?.name?.[0];
+      if (['provider', 'baseUrl', 'apiKey', 'modelServices'].includes(field)) setActiveSettingsSection('connection');
+      else if (['chatModel', 'reasoningModel', 'visionModel', 'modelAssignments'].includes(field)) setActiveSettingsSection('models');
+      throw error;
+    }
     const values = normalizeAISettings(form.getFieldsValue(true));
     delete values.agentRegistry;
     // Canonical policies replace the legacy duplicate fields.
@@ -949,6 +843,8 @@ export function AIPlatformPanelV2() {
     return values;
   };
   const errorText = (error: any) => {
+    const fieldError = error?.errorFields?.[0]?.errors?.[0];
+    if (fieldError) return fieldError;
     const detail = error?.response?.data?.detail;
     return typeof detail === 'string' ? detail : detail?.message || error?.message || '请检查配置后重试';
   };
@@ -959,372 +855,118 @@ export function AIPlatformPanelV2() {
       const response = await updateAISettings(values);
       const persisted = response.data?.data;
       form.setFieldsValue(persisted);
+      setPersistedSettings({ ...form.getFieldsValue(true), ...persisted });
       saveLocalSettings(persisted);
       setRuntimeStatus(response.data?.runtime || {});
       setDirty(false);
-      message.success('配置已保存到数据库，后续请求按新配置执行');
+      if ((response.data?.runtime?.issues || []).length) notify('warning', '配置已保存', '模型接入尚未就绪，请检查配置并测试连接');
+      else notify('success', '配置已保存', '后续请求使用新配置，可通过连接测试验证模型服务');
     } catch (error) {
-      message.error(`配置未保存：${errorText(error)}`);
+      notify('error', '配置未保存', errorText(error));
     } finally { setSaving(false); }
   };
-  const handleTestConnection = async () => {
+  const handleTestConnection = async (target?: TestTarget) => {
     setTesting(true);
     setConnectionResult(null);
     try {
       const values = await collectSettings();
-      const response = await testSavedAISettings(values);
+      const response = await testSavedAISettings({ ...values, _testTarget: target });
       setConnectionResult({ ok: Boolean(response.data?.ok), message: response.data?.message || '连接测试结束' });
     } catch (error) {
       setConnectionResult({ ok: false, message: errorText(error) });
     } finally { setTesting(false); }
   };
 
-  return (
-    <div className="account-admin-section">
-      <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={() => { setDirty(true); setConnectionResult(null); }}>
-        <Alert showIcon type={loadError ? 'error' : dirty ? 'warning' : 'info'} message={loadError || (dirty ? '有未保存的配置' : loaded ? '正在使用数据库已保存的配置' : '正在读取后端配置')} description="连接测试只测试当前表单，不保存配置。点击保存后，新请求与待确认操作会重新检查最新策略。" style={{ marginBottom: 16 }} />
-        {(runtimeStatus.issues || []).length > 0 && <Alert type="warning" showIcon message="已保存的模型接入需要检查" description={(runtimeStatus.issues || []).join('；')} style={{ marginBottom: 16 }} />}
-        {connectionResult && <Alert showIcon type={connectionResult.ok ? 'success' : 'error'} message={connectionResult.ok ? '当前表单连接测试通过' : '当前表单连接测试未通过'} description={connectionResult.message} style={{ marginBottom: 16 }} />}
-        <div className="ai-settings-toolbar">
-          <Space wrap><Text strong>官方 DeepSeek Harness</Text><Tag>SDK {runtimeStatus.sdkVersion || '未安装'}</Tag><Text type="secondary">业务权限与写入确认由平台执行</Text></Space>
-          <Space><Button loading={testing} disabled={!loaded || saving} icon={<ApiOutlined />} onClick={handleTestConnection}>测试当前配置</Button><Button loading={saving} disabled={!loaded || testing} type="primary" icon={<RobotOutlined />} onClick={handleSaveToBackend}>保存并生效</Button></Space>
+  const advancedSections = [
+    {
+      key: 'agent-registry',
+      label: '技能与工具注册表',
+      children: (
+        <div className="ai-registry-workspace"><SettingsTabs className="ai-registry-tabs" defaultActiveKey="skills" items={[{ key: 'skills', label: `技能 (${registrySkills.length})`, children: <Card title="技能注册表" extra={<Space size={6}>
+              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>导入默认注册表</Button>
+              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>添加技能</Button>
+            </Space>}>
+          <Table
+            size="small"
+            pagination={false}
+            scroll={{ x: 760, y: 440 }}
+            rowKey={(record: any) => record.name || record.title}
+            dataSource={registrySkills}
+            columns={[
+              { title: '状态', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? '已停用' : '已启用'}</Tag> },
+              { title: '名称', dataIndex: 'name', ellipsis: true },
+              { title: '默认工具', dataIndex: 'default_tool', ellipsis: true },
+              { title: '风险', dataIndex: 'risk_level', width: 90 },
+              {
+                title: '',
+                width: 200,
+                render: (_, record, index) => (
+                  <Space size={4}>
+                    <Button size="small" disabled={registrySaving} onClick={() => openSkillEditor(index)}>编辑</Button>
+                    <Button size="small" disabled={registrySaving} onClick={() => changeRegistryItem('skills', record.name, 'toggle')}>{record.enabled === false ? '启用' : '停用'}</Button>
+                    <Button
+                      size="small"
+                      danger
+                      loading={registrySaving}
+                      disabled={registrySaving || record.enabled !== false}
+                      title={record.enabled !== false ? '请先成功停用后再删除' : undefined}
+                      onClick={() => changeRegistryItem('skills', record.name, 'delete')}
+                    >
+                      删除
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+            locale={{ emptyText: '尚未注册技能' }}
+          />
+          </Card> }, { key: 'tools', label: `工具 (${registryTools.length})`, children: <Card title="工具注册表" extra={<Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>添加工具</Button>}>
+          <Table
+            size="small"
+            pagination={false}
+            scroll={{ x: 760, y: 440 }}
+            rowKey={(record: any) => record.name || record.title}
+            dataSource={registryTools}
+            columns={[
+              { title: '状态', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? '已停用' : '已启用'}</Tag> },
+              { title: '名称', dataIndex: 'name', ellipsis: true },
+              { title: '处理器', dataIndex: 'handler_key', ellipsis: true },
+              { title: '操作类型', dataIndex: 'side_effect', width: 130 },
+              { title: '风险', dataIndex: 'risk_level', width: 90 },
+              {
+                title: '',
+                width: 200,
+                render: (_, record, index) => (
+                  <Space size={4}>
+                    <Button size="small" disabled={registrySaving} onClick={() => openToolEditor(index)}>编辑</Button>
+                    <Button size="small" disabled={registrySaving} onClick={() => changeRegistryItem('tools', record.name, 'toggle')}>{record.enabled === false ? '启用' : '停用'}</Button>
+                    <Button
+                      size="small"
+                      danger
+                      loading={registrySaving}
+                      disabled={registrySaving || record.enabled !== false}
+                      title={record.enabled !== false ? '请先成功停用后再删除' : undefined}
+                      onClick={() => changeRegistryItem('tools', record.name, 'delete')}
+                    >
+                      删除
+                    </Button>
+                  </Space>
+                ),
+              },
+            ]}
+            locale={{ emptyText: '尚未注册工具' }}
+          />
+          </Card> }]} />
+          <p className="ai-settings-quiet-note">注册表修改后立即生效 · 可用处理器 {registryHandlerKeys.length} 个</p>
         </div>
-        <div className="ai-platform-console">
-          <div className="ai-platform-workbench">
-            <aside className="ai-platform-side">
-              <Card size="small" title="模型服务接入" className="account-panel-card ai-connection-card">
-                <div className="ai-connection-section">
-                  <div className="ai-connection-head">
-                    <div>
-                      <Text strong>服务链路</Text>
-                      <Text type="secondary">{currentProvider}</Text>
-                    </div>
-                    <Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch aria-label="启用平台 AI" /></Form.Item>
-                  </div>
-                  <Form.Item name="provider" label="模型服务商">
-                    <Select options={[
-                      { label: 'GLM', value: 'glm' },
-                      { label: 'OpenAI Compatible', value: 'openai-compatible' },
-                      { label: 'OpenAI', value: 'openai' },
-                      { label: 'Azure OpenAI（专用协议暂未接入）', value: 'azure-openai', disabled: true },
-                      { label: 'DeepSeek', value: 'deepseek' },
-                      { label: 'Qwen', value: 'qwen' },
-                    ]} onChange={applyProviderPreset} />
-                  </Form.Item>
-                </div>
-
-                <div className="ai-connection-section">
-                  <div className="ai-connection-section-head">
-                    <Text strong>接入凭据</Text>
-                    <Tag>后端保存，浏览器不缓存密钥</Tag>
-                  </div>
-                  <Form.Item name="baseUrl" label="Base URL" rules={[{ required: true, message: '请输入服务地址' }, { validator: (_, value) => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.hostname ? Promise.resolve() : Promise.reject(new Error('请输入有效的 HTTP(S) 地址')); } catch { return Promise.reject(new Error('请输入有效的 HTTP(S) 地址')); } } }]} extra="本机模型服务请使用后端可访问的地址；Docker 中 localhost 指向后端容器自身。"><Input placeholder="https://open.bigmodel.cn/api/paas/v4" /></Form.Item>
-                  <Form.Item name="apiKey" label="API Key" extra="更换服务地址后请重新填写对应服务的密钥。"><Input.Password placeholder="由后端密钥库托管；可先为空" /></Form.Item>
-                  <div className="ai-provider-presets">
-                    <Button size="small" onClick={() => applyGlmPreset('api')}>GLM 普通 API</Button>
-                    <Button size="small" onClick={() => applyGlmPreset('coding')}>GLM Coding Plan</Button>
-                  </div>
-                  <div className="ai-connection-field-grid">
-                    <Form.Item name="organization" label="Organization"><Input placeholder="可选" /></Form.Item>
-                    <Form.Item name="project" label="Project"><Input placeholder="可选" /></Form.Item>
-                  </div>
-                </div>
-
-                <div className="ai-provider-summary">
-                  <div>
-                    <span>当前链路</span>
-                    <strong>{currentProvider} / {currentChatModel}</strong>
-                  </div>
-                  <Text type="secondary">聊天模型用于知识问答及连接测试；推理模型用于 Harness 业务 Agent。</Text>
-                </div>
-              </Card>
-            </aside>
-
-            <main className="ai-platform-main">
-              <Card size="small" className="account-panel-card ai-orchestration-card">
-                <Tabs
-                  items={[
-                    {
-                      key: 'models',
-                      label: '模型编排',
-                      children: (
-                        <div className="ai-tab-grid">
-                          <Form.Item name="chatModel" label="默认聊天模型" rules={[{ required: true, message: '请填写聊天模型 ID' }]}>
-                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
-                              { label: 'glm-5.1', value: 'glm-5.1' },
-                              { label: 'GLM-5.1 / Coding Plan', value: 'GLM-5.1' },
-                              { label: 'GLM-4.7 / Coding Plan', value: 'GLM-4.7' },
-                              { label: 'GLM-4.5-air / Coding Plan', value: 'GLM-4.5-air' },
-                              { label: 'glm-4-flash', value: 'glm-4-flash' },
-                              { label: 'glm-4-plus', value: 'glm-4-plus' },
-                              { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
-                              { label: 'gpt-4o', value: 'gpt-4o' },
-                              { label: 'deepseek-chat', value: 'deepseek-chat' },
-                              { label: 'qwen-plus', value: 'qwen-plus' },
-                            ]} />
-                          </Form.Item>
-                          <Form.Item name="reasoningModel" label="推理 / Agent 模型" extra="留空沿用聊天模型；支持自定义模型 ID。">
-                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
-                              { label: 'glm-5.1', value: 'glm-5.1' },
-                              { label: 'GLM-5.1 / Coding Plan', value: 'GLM-5.1' },
-                              { label: 'GLM-4.7 / Coding Plan', value: 'GLM-4.7' },
-                              { label: 'GLM-4.5-air / Coding Plan', value: 'GLM-4.5-air' },
-                              { label: 'glm-4-plus', value: 'glm-4-plus' },
-                              { label: 'glm-4v-plus', value: 'glm-4v-plus' },
-                              { label: 'gpt-4o', value: 'gpt-4o' },
-                              { label: 'deepseek-reasoner', value: 'deepseek-reasoner' },
-                              { label: 'qwen-max', value: 'qwen-max' },
-                            ]} />
-                          </Form.Item>
-                          <Form.Item label="远程向量模型（未接入）" extra="当前知识检索使用本地索引。"><Input disabled value="本地知识索引" /></Form.Item>
-                          <Form.Item name="visionModel" label="OCR 增强模型" extra="需服务支持图像输入；填写 disabled 可关闭远程视觉增强。">
-                            <AutoComplete placeholder="填写服务端支持的模型 ID" options={[
-                              { label: 'glm-4v-plus', value: 'glm-4v-plus' },
-                              { label: 'gpt-4o', value: 'gpt-4o' },
-                              { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
-                              { label: '暂不启用', value: 'disabled' },
-                            ]} />
-                          </Form.Item>
-                          <Text type="secondary">采样参数使用模型适配器默认值；当前官方 SDK 不提供独立的回答风格配置。</Text>
-                          <Text type="secondary">执行事件实时显示；模型回答在生成完成后返回。</Text>
-                          <Row gutter={12}>
-                            <Col span={8}><Form.Item name="maxTokens" label="Harness 输出上限（Token）"><Input type="number" min={256} max={16000} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name="timeoutSeconds" label="模型响应超时（秒）"><Input type="number" min={5} max={180} /></Form.Item></Col>
-                            <Col span={8}>
-                              <Form.Item name="retryCount" label="失败重试">
-                                <Select options={[{ label: '0 次', value: 0 }, { label: '1 次', value: 1 }, { label: '2 次', value: 2 }, { label: '3 次', value: 3 }]} />
-                              </Form.Item>
-                            </Col>
-                          </Row>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'context',
-                      label: '上下文预算',
-                      children: (
-                        <div className="ai-tab-grid">
-                          <Row gutter={12}>
-                            <Col span={8}><Form.Item name={['contextPolicy', 'recentMessageLimit']} label="最近消息条数"><Input type="number" min={2} max={50} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['contextPolicy', 'maxContextTokens']} label="最大上下文 Token"><Input type="number" min={1000} max={200000} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['contextPolicy', 'showContextSources']} label="显示上下文来源" valuePropName="checked"><Switch /></Form.Item></Col>
-                          </Row>
-                          <div className="ai-model-route">
-                            <span>模型调用只读取最近消息、相关记忆和检索证据，完整 transcript 仅用于审计与回放。</span>
-                          </div>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'memory',
-                      label: '记忆与压缩',
-                      children: (
-                        <div className="ai-tab-grid">
-                          <div className="ai-switch-panel">
-                            <Form.Item name={['memoryPolicy', 'enabled']} label="启用长期记忆" valuePropName="checked"><Switch /></Form.Item>
-                            <Form.Item name={['compactionPolicy', 'enabled']} label="启用会话压缩" valuePropName="checked"><Switch /></Form.Item>
-                            <Form.Item name={['compactionPolicy', 'compactOnClose']} label="关闭窗口时压缩" valuePropName="checked"><Switch /></Form.Item>
-                          </div>
-                          <Row gutter={12}>
-                            <Col span={8}><Form.Item name={['memoryPolicy', 'recallLimit']} label="记忆召回条数"><Input type="number" min={0} max={20} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['memoryPolicy', 'retentionDays']} label="记忆保留天数"><Input type="number" min={1} max={3650} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['memoryPolicy', 'defaultVisibility']} label="默认可见性"><Select options={[{ label: 'private', value: 'private' }, { label: 'team', value: 'team' }, { label: 'tenant', value: 'tenant' }]} /></Form.Item></Col>
-                          </Row>
-                          <Row gutter={12}>
-                            <Col span={8}><Form.Item name={['compactionPolicy', 'triggerMessageCount']} label="压缩触发消息数"><Input type="number" min={2} max={200} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['compactionPolicy', 'triggerTokenCount']} label="压缩触发 Token"><Input type="number" min={1000} max={200000} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['compactionPolicy', 'summaryDetail']} label="摘要粒度"><Select options={[{ label: '简洁', value: 'compact' }, { label: '标准', value: 'standard' }, { label: '详细', value: 'detailed' }]} /></Form.Item></Col>
-                          </Row>
-                          <Form.Item name={['memoryPolicy', 'allowedTypes']} label="允许记忆类型">
-                            <Select mode="multiple" options={[
-                              { label: 'summary', value: 'summary' },
-                              { label: 'fact', value: 'fact' },
-                              { label: 'preference', value: 'preference' },
-                              { label: 'task_state', value: 'task_state' },
-                              { label: 'decision', value: 'decision' },
-                            ]} />
-                          </Form.Item>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'capabilities',
-                      label: '能力与工具',
-                      children: (
-                        <div className="ai-tab-grid">
-                          <div className="ai-switch-panel">
-                            <Form.Item name="qaEnabled" label="问答型 AI" valuePropName="checked"><Switch /></Form.Item>
-                            <Form.Item name="assistEnabled" label="辅助型 AI" valuePropName="checked"><Switch /></Form.Item>
-                            <Form.Item label="主动巡检（尚未接入调度）"><Switch disabled checked={false} /></Form.Item>
-                          </div>
-                          <Alert className="ai-engine-description" type="info" showIcon message="Agent 内核：官方 DeepSeek Harness" description={`SDK ${runtimeStatus.sdkVersion || '未安装'}。由 Harness 规划并调用工具；平台后端校验权限、确认和业务规则。`} />
-                          <Form.Item name="agentMode" label="Agent 执行模式" extra="只读禁止操作；草稿模式仅允许草稿写入；确认后执行允许审核后的业务或配置写入。所有写入均需确认。">
-                            <Select options={[
-                              { label: '关闭', value: 'off' },
-                              { label: '只读查询', value: 'readonly' },
-                              { label: '仅生成草稿', value: 'draft' },
-                              { label: '确认后执行', value: 'confirm' },
-                              { label: '自动执行', value: 'auto', disabled: true },
-                            ]} />
-                          </Form.Item>
-                          <Form.Item name="domains" label="业务动作域" extra="限制标注业务域的工具；通用表单读取仍按用户的表单权限执行。">
-                            <Select mode="multiple" options={[
-                              { label: '生产态势', value: 'production' },
-                              { label: '质量分析', value: 'quality' },
-                              { label: '设备维护', value: 'maintenance' },
-                              { label: '供应链风险', value: 'supply-chain' },
-                              { label: '工作流审批', value: 'workflow' },
-                              { label: '低代码配置', value: 'low-code' },
-                            ]} />
-                          </Form.Item>
-                          <Text type="secondary">具体可调用工具由能力开关、角色策略、执行模式和工具注册表共同决定。注册表中的工具仍需通过业务权限校验。</Text>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'agent-registry',
-                      label: '技能与工具注册表',
-                      children: (
-                        <div className="ai-tab-grid">
-                          <div className="ai-policy-rule-head">
-                            <div>
-                              <Text strong>Skills</Text>
-                              <Text type="secondary"> DB-backed runtime skills, activated after validation.</Text>
-                            </div>
-                            <Space size={6}>
-                              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>导入默认注册表</Button>
-                              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>添加技能</Button>
-                            </Space>
-                          </div>
-                          <Table
-                            size="small"
-                            pagination={false}
-                            rowKey={(record: any) => record.name || record.title}
-                            dataSource={registrySkills}
-                            columns={[
-                              { title: 'Enabled', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? 'off' : 'on'}</Tag> },
-                              { title: 'Name', dataIndex: 'name', ellipsis: true },
-                              { title: 'Default tool', dataIndex: 'default_tool', ellipsis: true },
-                              { title: 'Risk', dataIndex: 'risk_level', width: 90 },
-                              {
-                                title: '',
-                                width: 130,
-                                render: (_, __, index) => (
-                                  <Space size={4}>
-                                    <Button size="small" onClick={() => openSkillEditor(index)}>Edit</Button>
-                                    <Button
-                                      size="small"
-                                      danger
-                                      loading={registrySaving}
-                                      onClick={() => persistAgentRegistry({ ...agentRegistry, skills: registrySkills.filter((_: any, itemIndex: number) => itemIndex !== index), tools: registryTools })}
-                                    >
-                                      Delete
-                                    </Button>
-                                  </Space>
-                                ),
-                              },
-                            ]}
-                            locale={{ emptyText: 'No skills registered' }}
-                          />
-                          <div className="ai-policy-rule-head">
-                            <div>
-                              <Text strong>Tools</Text>
-                              <Text type="secondary"> Tool names bind only to whitelisted handler keys.</Text>
-                            </div>
-                            <Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>添加工具</Button>
-                          </div>
-                          <Table
-                            size="small"
-                            pagination={false}
-                            rowKey={(record: any) => record.name || record.title}
-                            dataSource={registryTools}
-                            columns={[
-                              { title: 'Enabled', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? 'off' : 'on'}</Tag> },
-                              { title: 'Name', dataIndex: 'name', ellipsis: true },
-                              { title: 'Handler', dataIndex: 'handler_key', ellipsis: true },
-                              { title: 'Side effect', dataIndex: 'side_effect', width: 130 },
-                              { title: 'Risk', dataIndex: 'risk_level', width: 90 },
-                              {
-                                title: '',
-                                width: 130,
-                                render: (_, __, index) => (
-                                  <Space size={4}>
-                                    <Button size="small" onClick={() => openToolEditor(index)}>Edit</Button>
-                                    <Button
-                                      size="small"
-                                      danger
-                                      loading={registrySaving}
-                                      onClick={() => persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: registryTools.filter((_: any, itemIndex: number) => itemIndex !== index) })}
-                                    >
-                                      Delete
-                                    </Button>
-                                  </Space>
-                                ),
-                              },
-                            ]}
-                            locale={{ emptyText: 'No tools registered' }}
-                          />
-                          <Text type="secondary">注册表单独保存，修改会立即生效。配置来源：{agentRegistry.source || 'database / seed'} / 可用处理器：{registryHandlerKeys.length}</Text>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'knowledge',
-                      label: '知识 / RAG',
-                      children: (
-                        <div className="ai-tab-grid">
-
-                          <Row gutter={12}>
-                            <Col span={8}><Form.Item name={['ragPolicy', 'enabled']} label="启用知识检索 / RAG" valuePropName="checked"><Switch /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['ragPolicy', 'topK']} label="证据 Top K"><Input type="number" min={1} max={20} /></Form.Item></Col>
-                            <Col span={8}><Form.Item name={['ragPolicy', 'maxEvidenceChars']} label="单条证据最大字符"><Input type="number" min={200} max={5000} /></Form.Item></Col>
-                          </Row>
-                          <Form.Item name={['ragPolicy', 'similarityThreshold']} label="相似度阈值"><Input /></Form.Item>
-                          <Text type="secondary">知识检索继承当前用户的租户与文档权限。</Text>
-
-                          <div className="ai-model-route">
-                            <span>检索链路</span>
-                            <strong>本地知识索引</strong>
-                            <span>→</span>
-                            <strong>{currentReasoningModel}</strong>
-                          </div>
-                        </div>
-                      ),
-                    },
-                    {
-                      key: 'roles',
-                      label: '角色策略',
-                      children: (
-                        <div className="ai-role-policy-list">
-                          {rolePolicies.map((policy: any) => (
-                            <div className="ai-role-policy-row" key={policy.role}>
-                              <div>
-                                <strong>{aiRoleOptions.find((item) => item.value === policy.role)?.label || policy.role}</strong>
-                                <Select size="small" value={policy.agentMode === 'save_after_confirm' ? 'confirm' : policy.agentMode} style={{ width: 140 }} options={[{ label: '关闭', value: 'off' }, { label: '只读', value: 'readonly' }, { label: '草稿', value: 'draft' }, { label: '确认后执行', value: 'confirm' }]} onChange={agentMode => { form.setFieldsValue({ rolePolicies: rolePolicies.map((item: any) => item.role === policy.role ? { ...item, agentMode } : item) }); setDirty(true); }} />
-                              </div>
-                              <Space size={[4, 4]} wrap>
-                                {(policy.capabilities || []).slice(0, 4).map((capability: string) => (
-                                  <Tag key={capability}>{aiCapabilityOptions.find((item) => item.value === capability)?.label || capability}</Tag>
-                                ))}
-                              </Space>
-                              <Switch checked={policy.enabled} onChange={enabled => { form.setFieldsValue({ rolePolicies: rolePolicies.map((item: any) => item.role === policy.role ? { ...item, enabled } : item) }); setDirty(true); }} />
-                            </div>
-                          ))}
-                        </div>
-                      ),
-                    },
-                  ]}
-                />
-              </Card>
-            </main>
-
-            <aside className="ai-platform-side">
-              <Card size="small" title="执行策略与审计" className="account-panel-card ai-policy-card">
-                <div className="ai-policy-section">
-                  <div className="ai-policy-section-head">
-                    <Text strong>安全护栏</Text>
-                    <Tag color="blue">确认 / 脱敏 / 记忆</Tag>
-                  </div>
+      ),
+    },
+  ];
+  const settingsSections = [
+    { key: 'connection', children: <ServiceCatalogPanel form={form} values={watchedSettings} onChange={() => { setDirty(true); setConnectionResult(null); }} onTest={handleTestConnection} testing={testing} /> },
+    { key: 'models', children: <PurposeModelsPanel values={watchedSettings} onTest={handleTestConnection} testing={testing} /> },
+    ...advancedSections.filter(section => section.key === 'agent-registry'),
+    { key: 'safety', children: <div className="ai-settings-safety"><AIStatusSummary items={[{ label: '执行模式', value: ({ off: '关闭', readonly: '只读查询', draft: '仅生成草稿', confirm: '确认后执行' } as Record<string, string>)[watchedSettings.agentMode] || '未配置' }, { label: '会话压缩', value: watchedSettings.harnessPolicy?.compaction?.enabled ? '启用' : '关闭' }, { label: '写入策略', value: '操作前确认' }]} /><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={5} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>                <Card title="安全护栏" className="settings-section">
                   <div className="ai-policy-toggle-list">
 
 
@@ -1336,15 +978,10 @@ export function AIPlatformPanelV2() {
                       <span>上下文敏感信息脱敏</span>
                       <Form.Item name={['safetyPolicy', 'sensitiveMasking']} valuePropName="checked" noStyle><Switch /></Form.Item>
                     </div>
-                    <div className="ai-policy-toggle-item">
-                      <span>禁止密钥写入记忆</span>
-                      <Form.Item name={['safetyPolicy', 'blockSecretMemory']} valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
+
                   </div>
-                  <div className="ai-policy-field-grid">
-                    <Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item>
-                    <Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时秒数"><Input type="number" min={5} max={180} /></Form.Item>
-                  </div>
+
+                  <Collapse ghost items={[{ key: 'advanced-rules', label: '高级工具规则', children: <>
                   <Form.Item name={['safetyPolicy', 'enabledHooks']} label="平台工具校验与审计" className="ai-policy-compact-item">
                     <Select mode="multiple" options={hookOptions} />
                   </Form.Item>
@@ -1353,7 +990,8 @@ export function AIPlatformPanelV2() {
                       { label: '自动下单', value: 'auto_order' },
                       { label: '删除数据', value: 'delete_data' },
                       { label: '修改权限', value: 'change_permission' },
-                      { label: '发布配置', value: 'publish_config' },
+                      { label: '所有配置写入', value: 'publish_config' },
+                      ...registryToolOptions,
                     ]} />
                   </Form.Item>
                   <div className="ai-policy-rule-head">
@@ -1366,17 +1004,17 @@ export function AIPlatformPanelV2() {
                     rowKey={(_, index) => `permission-${index}`}
                     dataSource={permissionRules}
                     columns={[
-                      { title: 'Action', dataIndex: 'action', width: 90, render: (value) => <Tag color={value === 'deny' ? 'red' : value === 'ask' ? 'gold' : 'green'}>{String(value || 'ask')}</Tag> },
-                      { title: 'Tool', dataIndex: 'tool', ellipsis: true },
-                      { title: 'Role', dataIndex: 'role', ellipsis: true },
-                      { title: 'Risk', dataIndex: 'riskThreshold', width: 90 },
+                      { title: '策略', dataIndex: 'action', width: 90, render: (value) => <Tag color={value === 'deny' ? 'red' : value === 'ask' ? 'gold' : 'green'}>{String(value || 'ask')}</Tag> },
+                      { title: '工具', dataIndex: 'tool', ellipsis: true },
+                      { title: '角色', dataIndex: 'role', ellipsis: true },
+                      { title: '风险', dataIndex: 'riskThreshold', width: 90 },
                       {
                         title: '',
                         width: 120,
                         render: (_, __, index) => (
                           <Space size={4}>
-                            <Button size="small" onClick={() => openPermissionRuleEditor(index)}>Edit</Button>
-                            <Button size="small" danger onClick={() => updateSafetyRules('permissionRules', permissionRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>Delete</Button>
+                            <Button size="small" onClick={() => openPermissionRuleEditor(index)}>编辑</Button>
+                            <Button size="small" danger onClick={() => updateSafetyRules('permissionRules', permissionRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
                           </Space>
                         ),
                       },
@@ -1393,30 +1031,26 @@ export function AIPlatformPanelV2() {
                     rowKey={(_, index) => `validation-${index}`}
                     dataSource={validationRules}
                     columns={[
-                      { title: 'Phase', dataIndex: 'phase', width: 130 },
-                      { title: 'Tool', dataIndex: 'tool', ellipsis: true },
-                      { title: 'Severity', dataIndex: 'severity', width: 90, render: (value) => <Tag color={value === 'error' ? 'red' : 'gold'}>{String(value || 'warning')}</Tag> },
-                      { title: 'Rule', dataIndex: 'ruleType', width: 140 },
+                      { title: '阶段', dataIndex: 'phase', width: 130 },
+                      { title: '工具', dataIndex: 'tool', ellipsis: true },
+                      { title: '级别', dataIndex: 'severity', width: 90, render: (value) => <Tag color={value === 'error' ? 'red' : 'gold'}>{String(value || 'warning')}</Tag> },
+                      { title: '规则', dataIndex: 'ruleType', width: 140 },
                       {
                         title: '',
                         width: 120,
                         render: (_, __, index) => (
                           <Space size={4}>
-                            <Button size="small" onClick={() => openValidationRuleEditor(index)}>Edit</Button>
-                            <Button size="small" danger onClick={() => updateSafetyRules('validationRules', validationRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>Delete</Button>
+                            <Button size="small" onClick={() => openValidationRuleEditor(index)}>编辑</Button>
+                            <Button size="small" danger onClick={() => updateSafetyRules('validationRules', validationRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
                           </Space>
                         ),
                       },
                     ]}
                     locale={{ emptyText: '尚未设置额外校验规则' }}
-                  />
-                </div>
+                  />                  </> }]} />
+                </Card>
 
-                <div className="ai-policy-section">
-                  <div className="ai-policy-section-head">
-                    <Text strong>审计记录</Text>
-                    <Tag>审计记录</Tag>
-                  </div>
+                <Card title="审计记录" className="settings-section">
                   <div className="ai-policy-toggle-list compact">
                     <div className="ai-policy-toggle-item">
                       <span>记录 AI 审计事件</span>
@@ -1427,138 +1061,152 @@ export function AIPlatformPanelV2() {
                       <Form.Item name="recordToolCalls" valuePropName="checked" noStyle><Switch /></Form.Item>
                     </div>
                   </div>
-                  <Form.Item label="对话历史自动清理（尚未实现）" className="ai-policy-compact-item">
-                    <Select disabled options={[{ label: '30 天', value: 30 }, { label: '90 天', value: 90 }, { label: '180 天', value: 180 }, { label: '365 天', value: 365 }]} />
-                  </Form.Item>
-                  <div className="ai-policy-field-grid">
-                    <Form.Item label="平台日额度（尚未实现）"><Input disabled placeholder="尚未启用" /></Form.Item>
-                    <Form.Item label="用户日额度（尚未实现）"><Input disabled placeholder="尚未启用" /></Form.Item>
-                  </div>
-                </div>
+                  <div className="ai-settings-quiet-note">执行记录统一在“审计与日志”中查看。</div>
+                </Card>
 
-                <div className="ai-scope-preview">
-                  <div className="ai-scope-row">
-                    <Text type="secondary">开放范围</Text>
-                    <Space size={[4, 4]} wrap>{activeDomains.map((domain: string) => <Tag key={domain}>{aiDomainOptions.find((item) => item.value === domain)?.label || domain}</Tag>)}</Space>
-                  </div>
-                  <Text type="secondary">工具以角色权限与执行模式过滤，注册表更新会立即生效。</Text>
-                </div>
+                <div className="ai-settings-quiet-note">可调用工具由工具启用状态、角色权限、业务权限与本页执行规则共同约束。</div>
 
 
-              </Card>
-            </aside>
-          </div>
-        </div>
+</div> },
+  ];
+  const resetDraft = () => {
+    if (!persistedSettings) return;
+    form.setFieldsValue({ ...persistedSettings, agentRegistry: form.getFieldValue('agentRegistry') });
+    saveLocalSettings(persistedSettings);
+    setDirty(false);
+    setConnectionResult(null);
+  };
+  const onDraftChange = (changed: Record<string, any>, values: Record<string, any>) => {
+    if (changed.modelServices && persistedSettings?.modelServices) {
+      const services = values.modelServices || [];
+      let cleared = false;
+      const next = services.map((service: any) => {
+        const previous = persistedSettings.modelServices.find((item: any) => item.id === service.id);
+        if (service.apiKey === '********' && previous && previous.baseUrl !== service.baseUrl) { cleared = true; return { ...service, apiKey: '' }; }
+        return service;
+      });
+      if (cleared) form.setFieldsValue({ modelServices: next });
+    }
+    setDirty(true);
+    setConnectionResult(null);
+  };
+
+  return (
+    <div className="account-admin-section ai-settings-page">
+      {aiNoticeHolder}
+      <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={onDraftChange}>
+        <AISettingsWorkspace sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} onSave={handleSaveToBackend} onTest={handleTestConnection} onReset={resetDraft} onDismissTest={() => setConnectionResult(null)} />
       </Form>
       <Modal
-        title={permissionRuleEditor.index === null ? 'Add permission rule' : 'Edit permission rule'}
+        title={permissionRuleEditor.index === null ? '添加工具权限规则' : '编辑工具权限规则'}
         open={permissionRuleEditor.open}
         onOk={savePermissionRule}
         onCancel={() => setPermissionRuleEditor({ open: false, index: null })}
         destroyOnHidden
       >
         <Form form={permissionRuleForm} layout="vertical">
-          <Form.Item name="action" label="Action" rules={[{ required: true }]}>
-            <Select options={[{ label: 'Allow', value: 'allow' }, { label: 'Ask confirmation', value: 'ask' }, { label: 'Deny', value: 'deny' }]} />
+          <Form.Item name="action" label="处理策略" rules={[{ required: true }]}>
+            <Select options={[{ label: '允许', value: 'allow' }, { label: '请求确认', value: 'ask' }, { label: '禁止', value: 'deny' }]} />
           </Form.Item>
-          <Form.Item name="tool" label="Tool pattern" rules={[{ required: true }]}>
+          <Form.Item name="tool" label="工具匹配表达式" rules={[{ required: true }]}>
             <Input placeholder="forms.*" />
           </Form.Item>
-          <Form.Item name="role" label="Role pattern">
+          <Form.Item name="role" label="角色匹配表达式">
             <Input placeholder="admin / viewer / *" />
           </Form.Item>
-          <Form.Item name="riskThreshold" label="Risk threshold">
-            <Select allowClear options={[{ label: 'Low', value: 'low' }, { label: 'Medium', value: 'medium' }, { label: 'High', value: 'high' }, { label: 'Critical', value: 'critical' }]} />
+          <Form.Item name="riskThreshold" label="风险阈值">
+            <Select allowClear options={[{ label: '低', value: 'low' }, { label: '中', value: 'medium' }, { label: '高', value: 'high' }, { label: '严重', value: 'critical' }]} />
           </Form.Item>
-          <Form.Item name="reason" label="Reason">
+          <Form.Item name="reason" label="说明">
             <Input />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={validationRuleEditor.index === null ? 'Add validation rule' : 'Edit validation rule'}
+        title={validationRuleEditor.index === null ? '添加校验规则' : '编辑校验规则'}
         open={validationRuleEditor.open}
         onOk={saveValidationRule}
         onCancel={() => setValidationRuleEditor({ open: false, index: null })}
         destroyOnHidden
       >
         <Form form={validationRuleForm} layout="vertical">
-          <Form.Item name="phase" label="Phase" rules={[{ required: true }]}>
+          <Form.Item name="phase" label="校验阶段" rules={[{ required: true }]}>
             <Select options={validationPhaseOptions} />
           </Form.Item>
-          <Form.Item name="tool" label="Tool pattern" rules={[{ required: true }]}>
+          <Form.Item name="tool" label="工具匹配表达式" rules={[{ required: true }]}>
             <Input placeholder="forms.create_form_definition" />
           </Form.Item>
-          <Form.Item name="severity" label="Severity" rules={[{ required: true }]}>
-            <Select options={[{ label: 'Warning', value: 'warning' }, { label: 'Error', value: 'error' }]} />
+          <Form.Item name="severity" label="校验级别" rules={[{ required: true }]}>
+            <Select options={[{ label: '警告', value: 'warning' }, { label: '错误', value: 'error' }]} />
           </Form.Item>
-          <Form.Item name="ruleType" label="Rule type" rules={[{ required: true }]}>
+          <Form.Item name="ruleType" label="规则类型" rules={[{ required: true }]}>
             <Select options={validationRuleTypeOptions} />
           </Form.Item>
-          <Form.Item name="field" label="Field path">
+          <Form.Item name="field" label="字段路径">
             <Input placeholder="form.name" />
           </Form.Item>
-          <Form.Item name="value" label="Value / threshold">
+          <Form.Item name="value" label="值 / 阈值">
             <Input />
           </Form.Item>
-          <Form.Item name="message" label="Message">
+          <Form.Item name="message" label="提示信息">
             <Input />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={skillEditor.index === null ? 'Add agent skill' : 'Edit agent skill'}
+        title={skillEditor.index === null ? '添加技能' : '编辑技能'}
         open={skillEditor.open}
         onOk={saveSkill}
+        confirmLoading={registrySaving}
         onCancel={() => setSkillEditor({ open: false, index: null })}
         destroyOnHidden
       >
         <Form form={skillForm} layout="vertical">
-          <Form.Item name="enabled" label="Enabled" valuePropName="checked">
+          <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch />
           </Form.Item>
-          <Form.Item name="name" label="Skill name" rules={[{ required: true }]}>
+          <Form.Item name="name" label="技能标识" rules={[{ required: true }]}>
             <Input placeholder="low_code_form_builder" />
           </Form.Item>
-          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+          <Form.Item name="title" label="显示名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="description" label="Description">
+          <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} />
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="capability_level" label="Capability level">
+              <Form.Item name="capability_level" label="能力级别">
                 <Select options={[
-                  { label: 'Readonly', value: 'readonly' },
-                  { label: 'Assisted', value: 'assisted' },
-                  { label: 'Autonomous', value: 'autonomous' },
+                  { label: '只读', value: 'readonly' },
+                  { label: '辅助', value: 'assisted' },
+                  { label: '自主', value: 'autonomous' },
                 ]} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="risk_level" label="Risk level">
+              <Form.Item name="risk_level" label="风险等级">
                 <Select options={[
-                  { label: 'Low', value: 'low' },
-                  { label: 'Medium', value: 'medium' },
-                  { label: 'High', value: 'high' },
-                  { label: 'Critical', value: 'critical' },
+                  { label: '低', value: 'low' },
+                  { label: '中', value: 'medium' },
+                  { label: '高', value: 'high' },
+                  { label: '严重', value: 'critical' },
                 ]} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="default_tool" label="Default tool">
+          <Form.Item name="default_tool" label="默认工具">
             <Select allowClear showSearch options={registryToolOptions} />
           </Form.Item>
-          <Form.Item name="allowed_tools" label="Allowed tools">
+          <Form.Item name="allowed_tools" label="允许使用的工具">
             <Select mode="multiple" showSearch options={registryToolOptions} />
           </Form.Item>
-          <Form.Item name="required_permissions" label="Required permissions">
+          <Form.Item name="required_permissions" label="所需权限">
             <Select mode="tags" />
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="confirmation_policy" label="Confirmation policy">
+              <Form.Item name="confirmation_policy" label="确认策略">
                 <Select options={[
                   { label: 'None', value: 'none' },
                   { label: 'Confirm token', value: 'confirm_token' },
@@ -1568,7 +1216,7 @@ export function AIPlatformPanelV2() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="permission_capability" label="Permission capability">
+              <Form.Item name="permission_capability" label="所需能力">
                 <Select allowClear options={aiCapabilityOptions} />
               </Form.Item>
             </Col>
@@ -1579,78 +1227,79 @@ export function AIPlatformPanelV2() {
         </Form>
       </Modal>
       <Modal
-        title={toolEditor.index === null ? 'Add agent tool' : 'Edit agent tool'}
+        title={toolEditor.index === null ? '添加工具' : '编辑工具'}
         open={toolEditor.open}
         onOk={saveTool}
+        confirmLoading={registrySaving}
         onCancel={() => setToolEditor({ open: false, index: null })}
         destroyOnHidden
         width={720}
       >
         <Form form={toolForm} layout="vertical">
-          <Form.Item name="enabled" label="Enabled" valuePropName="checked">
+          <Form.Item name="enabled" label="启用" valuePropName="checked">
             <Switch />
           </Form.Item>
-          <Form.Item name="name" label="Tool name" rules={[{ required: true }]}>
+          <Form.Item name="name" label="工具标识" rules={[{ required: true }]}>
             <Input placeholder="forms.query_records" />
           </Form.Item>
-          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+          <Form.Item name="title" label="显示名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="description" label="Description">
+          <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} />
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="handler_key" label="Handler key" rules={[{ required: true }]}>
+              <Form.Item name="handler_key" label="业务处理器" rules={[{ required: true }]}>
                 <Select showSearch options={registryHandlerOptions} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="side_effect" label="Side effect">
+              <Form.Item name="side_effect" label="操作类型">
                 <Select options={[
-                  { label: 'Read', value: 'read' },
-                  { label: 'Analyze', value: 'analyze' },
-                  { label: 'Draft write', value: 'draft_write' },
-                  { label: 'Configuration write', value: 'configuration_write' },
-                  { label: 'Workflow action', value: 'workflow_action' },
-                  { label: 'External write', value: 'external_write' },
+                  { label: '读取', value: 'read' },
+                  { label: '分析', value: 'analyze' },
+                  { label: '草稿写入', value: 'draft_write' },
+                  { label: '配置写入', value: 'configuration_write' },
+                  { label: '流程操作', value: 'workflow_action' },
+                  { label: '外部写入', value: 'external_write' },
                 ]} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="risk_level" label="Risk level">
+              <Form.Item name="risk_level" label="风险等级">
                 <Select options={[
-                  { label: 'Low', value: 'low' },
-                  { label: 'Medium', value: 'medium' },
-                  { label: 'High', value: 'high' },
-                  { label: 'Critical', value: 'critical' },
+                  { label: '低', value: 'low' },
+                  { label: '中', value: 'medium' },
+                  { label: '高', value: 'high' },
+                  { label: '严重', value: 'critical' },
                 ]} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="permission_check" label="Permission capability">
+              <Form.Item name="permission_check" label="所需能力">
                 <Select allowClear options={aiCapabilityOptions} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="dry_run_supported" label="Dry run supported" valuePropName="checked">
+              <Form.Item name="dry_run_supported" label="支持预演" valuePropName="checked">
                 <Switch />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="audit_required" label="Audit required" valuePropName="checked">
+              <Form.Item name="audit_required" label="必须审计" valuePropName="checked">
                 <Switch />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="input_schema_json" label="Input schema JSON">
+          <Form.Item name="input_schema_json" label="输入结构 JSON">
             <Input.TextArea rows={6} />
           </Form.Item>
-          <Form.Item name="output_schema_json" label="Output schema JSON">
+          <Form.Item name="output_schema_json" label="输出结构 JSON">
             <Input.TextArea rows={6} />
           </Form.Item>
         </Form>

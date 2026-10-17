@@ -1,6 +1,6 @@
 # DeepSeek Harness runtime
 
-Updated: 2026-10-14
+Updated: 2026-10-17
 
 New application requests use the official `deepseek-harness-sdk==0.1.5rc1`
 Python SDK and its matching bundled runtime. The SDK drives the real Node/Cordis
@@ -12,7 +12,7 @@ its historical planner.
 ```text
 Authenticated UI / API
   → persisted platform AI settings + current role policy
-  → owned conversation history / memory / page context
+  → owned conversation history / page context
   → official DeepSeek Harness SDK-minimal kernel
   → llm-pi-ai provider adapter
   → request-scoped platform MCP bridge
@@ -75,19 +75,61 @@ from the platform's user-facing transcript and tool audit rows.
 - `apiKey=********` preserves the saved credential. Snake-case credential
   aliases normalize to the masked canonical field. The browser cache excludes
   credentials.
-- Connection tests boot the same official SDK/profile/provider used by the
-  Agent, but test the current form
-  and both distinct chat/Agent models without saving it. A missing key returns a
-  failed test, not a successful “local check”.
-- Chat model is used for knowledge chat. Reasoning model
-  is used for business Agent runs; connection tests cover both. Output limit, provider idle timeout and
-  retry count are passed to the real Harness adapter.
-- Context-window policy is passed to the model adapter and Harness automatic
-  compaction. Platform memory/summary policies continue to apply to the
-  database transcript.
+- Database credentials use authenticated Fernet encryption, with a key derived
+  from `AI_SETTINGS_ENCRYPTION_KEY` or the existing stable `SECRET_KEY`. Keep
+  that server secret backed up separately from the database. Changing it without
+  re-encrypting credentials prevents decryption. Legacy plaintext is migrated on
+  read. An empty key clears the stored credential (an eligible environment key
+  can still apply); cross-origin destination changes never reuse a saved key.
+- Partial policy updates preserve other saved fields. The source-visibility
+  switch controls context-source stream events and recorded response items.
+- The UI has four horizontal tabs: model services, model purposes, tools/skills,
+  and execution/safety. Services are custom-first; there are no provider preset
+  cards or separate platform memory/capability pages.
+- `modelServices[]` stores a stable id, display name, base URL, encrypted API key,
+  optional organization/project headers, request timeout/retries, and a model
+  catalog. Each model declares id, display name, input types, output limit,
+  context capacity and optional reasoning effort. The current runtime adapter
+  supports OpenAI Chat Completions; unsupported protocols are not advertised.
+- `modelAssignments` references `{serviceId, modelId}` for `chat`, `reasoning`,
+  and `document`. Reasoning can inherit chat; a null document reference disables
+  remote vision. Document selection requires image input. Dangling references
+  and duplicate service/model ids are rejected instead of falling back silently.
+- `model_catalog.resolve_model_settings` resolves the request before invoking
+  the official SDK or OCR client. The existing server context classifier selects
+  chat for conversation/page/knowledge questions and reasoning for business
+  analysis/action preparation. A service credential never falls back to another
+  service or environment key. Changing its URL clears a masked saved credential.
+- Legacy single-service settings are presented as a `default` service with
+  equivalent purpose assignments, and converted when the catalog is saved.
+  Masked updates preserve secrets only for the same service id and URL.
+  API descriptors redact every key; browser draft caches exclude the catalog.
+- Per-service/per-purpose tests use the current draft without saving. Chat and
+  reasoning tests boot the real official SDK; document tests send an image through
+  the same OCR client. Successful tests identify the model and destination.
+- Per-model output limits/context capacity/reasoning effort and per-service
+  retry/idle timeout reach the pinned native adapter. SDK process initialization
+  and request deadlines remain global. Blank reasoning effort uses the model's
+  own behavior; the provider must support an explicitly selected level.
+- Platform memory collection, recall, database summary generation and background
+  memory deletion are retired, including callers passing old enabled flags.
+  Historical entries remain available for explicit owner-scoped review/deletion.
+  Conversation history, knowledge indexes and audit records are retained.
+- Native DSH `compaction-basic` remains configurable with enabled,
+  `thresholdRatio` and `retainRatio`. Retired `compactionPolicy` flags cannot
+  override `harnessPolicy.compaction`; explicit native settings are preserved.
+- Tool availability still requires registry activation, current role/business
+  authorization and the unified execution rules. Existing restrictions are
+  preserved during migration; removing a UI category does not grant permission.
+- Input budget uses a conservative UTF-8 estimate rather than a vendor tokenizer;
+  oversized fixed inputs are rejected and dynamic context is bounded after
+  reserving model output capacity. No native shell/filesystem permissions or
+  automatic business writes are exposed.
+- Forbidden-action categories are matched to tool/handler names; the
+  configuration-write category blocks all `configuration_write` tools.
 - Remote embedding selection is disabled because ingestion currently uses
-  its local index. OCR enhancement reads the same saved provider/vision-model
-  settings, respects `aiEnabled`, and supports `visionModel=disabled`.
+  its local index. OCR enhancement resolves the independent document-purpose service and model,
+  respects `aiEnabled`, and supports disabling that purpose.
 - RAG enable/top-K/evidence length/threshold are enforced by the real knowledge
   search handler. A disabled RAG policy excludes knowledge search tools.
 - Registry changes are transactional and activate after commit. Removed rows
@@ -108,8 +150,10 @@ retaining its private database network.
 
 ## Deployment and validation
 
-Install `backend/requirements.txt`, which pins the official SDK and compatible
-Pydantic version. Rebuild the backend image for other environments; installing
+Install `backend/requirements.txt`, which pins both the official SDK and native
+runtime to `0.1.5rc1` and a compatible Pydantic version. The Docker build verifies
+both installed versions and SDK import; the default index is official PyPI
+(`PIP_INDEX_URL` build argument can select an approved mirror). Rebuild the backend image for other environments; installing
 only frontend assets is insufficient.
 
 Before a backend-only build, refresh packaged platform instructions and seed

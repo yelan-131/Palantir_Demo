@@ -145,12 +145,11 @@ export default function Scheduler() {
   ));
 
   return (
-    <div style={{ padding: 24, maxWidth: 1600, margin: '0 auto' }}>
+    <div>
       {messageContext}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
         <div>
-          <Typography.Title level={3} style={{ margin: '0 0 6px' }}>定时任务</Typography.Title>
-          <Typography.Text type="secondary">管理报表、数据同步和清理任务的配置与状态。</Typography.Text>
+          <Typography.Text type="secondary">配置报表、同步与清理任务。</Typography.Text>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>刷新</Button>

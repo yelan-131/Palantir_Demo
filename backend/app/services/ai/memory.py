@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import delete, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.relational import AIAgentRun, AIConversation, AIMemoryEntry, AIMessage
@@ -30,6 +30,14 @@ SECRET_MARKERS = ("api_key", "apikey", "password", "passwd", "secret", "token", 
 
 
 class MemoryService:
+    @staticmethod
+    def retention_cutoff(settings: dict[str, Any]) -> datetime:
+        return datetime.utcnow() - timedelta(days=int((settings.get("memoryPolicy") or {}).get("retentionDays", 90)))
+
+    async def purge_expired(self, session: AsyncSession, settings: dict[str, Any]) -> None:
+        """Platform memory is retired; existing entries remain available for explicit review."""
+        return None
+
     def contains_secret(self, text: str) -> bool:
         normalized = text.lower()
         return any(marker in normalized for marker in SECRET_MARKERS)
@@ -46,43 +54,9 @@ class MemoryService:
         tenant_id: int | None = None,
         user_key: str | None = None,
         status: str = "candidate",
-    ) -> AIMemoryEntry:
-        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
-        summary = assistant_message.content[:500]
-        value = {
-            "last_user_message": user_message.content,
-            "last_answer": assistant_message.content,
-            "evidence_count": len(evidence),
-            "source_message_ids": [user_message.message_id, assistant_message.message_id],
-        }
-        memory = AIMemoryEntry(
-            memory_id=f"mem-{uuid.uuid4().hex[:12]}",
-            conversation_id=conversation.conversation_id,
-            scope="conversation",
-            key="last_agent_turn",
-            value=value,
-            summary=summary,
-            status=status,
-        )
-        self.apply_optional_runtime_fields(
-            memory,
-            tenant_id=tenant_id,
-            user_key=user_key or conversation.user_id,
-            page=conversation.page,
-            document_id=conversation.document_id,
-            run_id=run.run_id,
-            user_message_id=user_message.message_id,
-            assistant_message_id=assistant_message.message_id,
-            memory_type="turn_summary",
-            content=summary,
-            confidence=0.7,
-            importance_score=0.4,
-            visibility="private",
-            sensitivity="normal",
-            content_hash=_content_hash(summary),
-        )
-        session.add(memory)
-        return memory
+    ) -> AIMemoryEntry | None:
+        """Platform memory is retired; existing entries remain available for explicit review."""
+        return None
 
     async def compact_conversation(
         self,
@@ -93,69 +67,8 @@ class MemoryService:
         user_key: str | None = None,
         settings: dict[str, Any] | None = None,
     ) -> AIMemoryEntry | None:
-        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
-        compaction_policy = (settings or {}).get("compactionPolicy") or {}
-        memory_policy = (settings or {}).get("memoryPolicy") or {}
-        safety_policy = (settings or {}).get("safetyPolicy") or {}
-        if not compaction_policy.get("enabled", True):
-            return None
-
-        rows = (
-            await session.execute(
-                select(AIMessage)
-                .where(AIMessage.conversation_id == conversation.conversation_id)
-                .order_by(AIMessage.id)
-            )
-        ).scalars().all()
-        if not rows:
-            return None
-
-        last_compacted = (conversation.metadata_json or {}).get("last_compacted_message_id")
-        if last_compacted:
-            rows = self._after_message(rows, str(last_compacted))
-        if len(rows) < 2:
-            return None
-
-        transcript = "\n".join(f"{row.role}: {row.content}" for row in rows)
-        if safety_policy.get("blockSecretMemory", True) and self.contains_secret(transcript):
-            return None
-
-        summary = self._local_compaction_summary(transcript, compaction_policy.get("summaryDetail") or "standard")
-        memory = AIMemoryEntry(
-            memory_id=f"mem-{uuid.uuid4().hex[:12]}",
-            conversation_id=conversation.conversation_id,
-            scope="conversation",
-            key="conversation_compaction",
-            value={
-                "summary": summary,
-                "source_message_ids": [row.message_id for row in rows],
-                "message_count": len(rows),
-            },
-            summary=summary,
-            status="active" if memory_policy.get("enabled") else "candidate",
-        )
-        self.apply_optional_runtime_fields(
-            memory,
-            tenant_id=tenant_id,
-            user_key=user_key or conversation.user_id,
-            page=conversation.page,
-            document_id=conversation.document_id,
-            memory_type="summary",
-            content=summary,
-            confidence=0.8,
-            importance_score=0.5,
-            visibility=memory_policy.get("defaultVisibility") or "private",
-            sensitivity="normal",
-            content_hash=_content_hash(summary),
-        )
-        conversation.metadata_json = {
-            **(conversation.metadata_json or {}),
-            "last_compacted_message_id": rows[-1].message_id,
-            "last_compacted_at": datetime.now().isoformat(),
-            "memory_version": int((conversation.metadata_json or {}).get("memory_version") or 0) + 1,
-        }
-        session.add(memory)
-        return memory
+        """Platform memory is retired; existing entries remain available for explicit review."""
+        return None
 
     async def maybe_compact_conversation(
         self,
@@ -167,29 +80,8 @@ class MemoryService:
         settings: dict[str, Any] | None = None,
         force: bool = False,
     ) -> AIMemoryEntry | None:
-        tenant_id = require_tenant_id({"tenant_id": tenant_id or getattr(conversation, "tenant_id", None)})
-        policy = (settings or {}).get("compactionPolicy") or {}
-        if not policy.get("enabled", True):
-            return None
-        rows = (
-            await session.execute(
-                select(AIMessage.message_id, AIMessage.content)
-                .where(AIMessage.conversation_id == conversation.conversation_id)
-                .order_by(AIMessage.id)
-            )
-        ).all()
-        trigger_count = int(policy.get("triggerMessageCount") or 20)
-        trigger_tokens = int(policy.get("triggerTokenCount") or 12000)
-        estimated_tokens = sum(max(1, len(row.content or "") // 4) for row in rows)
-        if not force and len(rows) < trigger_count and estimated_tokens < trigger_tokens:
-            return None
-        return await self.compact_conversation(
-            session,
-            conversation=conversation,
-            tenant_id=tenant_id,
-            user_key=user_key,
-            settings=settings,
-        )
+        """Platform memory is retired; existing entries remain available for explicit review."""
+        return None
 
     async def list_user_memories(
         self,
@@ -199,9 +91,13 @@ class MemoryService:
         user_key: str,
         include_candidates: bool = True,
         limit: int = 50,
+        settings: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         tenant_id = require_tenant_id({"tenant_id": tenant_id})
         stmt = select(AIMemoryEntry)
+        from .settings import settings_snapshot
+        effective = settings if settings is not None else settings_snapshot()
+        stmt = stmt.where(AIMemoryEntry.created_at > self.retention_cutoff(effective), or_(AIMemoryEntry.expires_at.is_(None), AIMemoryEntry.expires_at > datetime.utcnow()))
         if hasattr(AIMemoryEntry, "tenant_id"):
             stmt = stmt.where(AIMemoryEntry.tenant_id == tenant_id)
         if hasattr(AIMemoryEntry, "user_key"):
@@ -257,22 +153,10 @@ class MemoryService:
         document_id: str | None = None,
         query: str | None = None,
         limit: int = 8,
+        settings: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        tenant_id = require_tenant_id({"tenant_id": tenant_id})
-        stmt = select(AIMemoryEntry).where(AIMemoryEntry.status == "active")
-        if conversation_id:
-            stmt = stmt.where(AIMemoryEntry.conversation_id == conversation_id)
-        if hasattr(AIMemoryEntry, "tenant_id"):
-            stmt = stmt.where(AIMemoryEntry.tenant_id == tenant_id)
-        if user_key and hasattr(AIMemoryEntry, "user_key"):
-            stmt = stmt.where(or_(AIMemoryEntry.user_key == user_key, AIMemoryEntry.user_key.is_(None)))
-        if page and hasattr(AIMemoryEntry, "page"):
-            stmt = stmt.where(or_(AIMemoryEntry.page == page, AIMemoryEntry.page.is_(None)))
-        if document_id and hasattr(AIMemoryEntry, "document_id"):
-            stmt = stmt.where(or_(AIMemoryEntry.document_id == document_id, AIMemoryEntry.document_id.is_(None)))
-        stmt = stmt.order_by(desc(AIMemoryEntry.updated_at)).limit(max(1, min(limit, 20)))
-        rows = (await session.execute(stmt)).scalars().all()
-        return [self.serialize(row) for row in rows]
+        """Platform memory is retired; existing entries remain available for explicit review."""
+        return []
 
     def build_prompt_context(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [

@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -13,7 +14,6 @@ import {
   Select,
   Space,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -342,8 +342,7 @@ export default function TenantManagement() {
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>
         <div>
-          <Typography.Title level={5} style={{ margin: 0 }}>租户运营后台</Typography.Title>
-          <Typography.Text type="secondary">租户状态、域名、限额、用量、邀请历史、用户安全和审计摘要。</Typography.Text>
+          <Typography.Text type="secondary">管理租户状态、邮箱域名与资源配额。</Typography.Text>
         </div>
         <Space>
           <Tooltip title="刷新">
@@ -417,7 +416,7 @@ export default function TenantManagement() {
         extra={<Button icon={<ReloadOutlined />} loading={detailLoading} onClick={() => selectedTenantId && loadDetail(selectedTenantId)} />}
       >
         {detail && (
-          <Tabs
+          <SettingsTabs
             items={[
               { key: 'overview', label: '概览', children: <OverviewTab tenant={detail} onEdit={() => fillEditForm(detail)} /> },
               { key: 'config', label: '配置与限额', children: <ConfigTab tenant={detail} onEdit={() => fillEditForm(detail)} /> },

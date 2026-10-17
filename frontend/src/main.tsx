@@ -9,6 +9,7 @@ import './index.css';
 import './shell.css';
 import './workspace.css';
 import './responsive.css';
+import './pages/AccountCenter/preferences.css';
 import { TECH_WHITE_PALETTE as colors, TECH_WHITE_GEOMETRY as geometry, TECH_WHITE_TYPOGRAPHY as typography, SHELL_COLOR_VARIABLES } from './theme/techWhite';
 
 for (const [name, value] of Object.entries(SHELL_COLOR_VARIABLES)) {

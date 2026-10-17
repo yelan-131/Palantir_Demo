@@ -91,10 +91,10 @@ def load_seed_registry() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str,
 
 async def seed_agent_registry_from_files(*, updated_by: str | None = None) -> dict[str, Any]:
     skills, tools = load_seed_registry()
-    return await save_agent_registry_payload({"skills": skills, "tools": tools}, updated_by=updated_by or "seed")
+    return await save_agent_registry_payload({"skills": skills, "tools": tools}, updated_by=updated_by or "seed", seed_import=True)
 
 
-async def load_agent_registry(*, seed_if_empty: bool = False) -> dict[str, Any]:
+async def load_agent_registry(*, seed_if_empty: bool = False, include_disabled: bool = False) -> dict[str, Any]:
     async with db_session() as session:
         skill_rows = (await session.execute(select(AIAgentSkillDefinition).order_by(AIAgentSkillDefinition.name))).scalars().all()
         tool_rows = (await session.execute(select(AIAgentToolDefinition).order_by(AIAgentToolDefinition.name))).scalars().all()
@@ -106,22 +106,48 @@ async def load_agent_registry(*, seed_if_empty: bool = False) -> dict[str, Any]:
         raise AgentRegistryError(detail)
 
     skills = {
-        row.name: {**(row.definition or {}), "name": row.name}
+        row.name: {**(row.definition or {}), "name": row.name, "enabled": row.enabled}
         for row in skill_rows
-        if row.enabled
     }
     tools = {
-        row.name: {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key}
+        row.name: {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key, "enabled": row.enabled}
         for row in tool_rows
-        if row.enabled
     }
+    all_skills, all_tools = skills, tools
+    skills = {name: definition for name, definition in skills.items() if definition.get("enabled", True)}
+    tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
     skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in tools else None} for name, definition in skills.items()}
     skills, tools = validate_registry_payload(skills, tools)
     set_runtime_agent_registry(skills=skills, tools=tools)
-    return {"skills": skills, "tools": tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
+    return {"skills": all_skills if include_disabled else skills, "tools": all_tools if include_disabled else tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
 
 
-async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: str | None = None) -> dict[str, Any]:
+def _validate_registry_transition(skills, tools, previous_skills, previous_tools, *, seed_import=False):
+    """Deletion requires a persisted disabled state; activation validates dependencies."""
+    for kind, current, previous in (("技能", skills, previous_skills), ("工具", tools, previous_tools)):
+        for name, old in previous.items():
+            if name not in current and old.get("enabled", True):
+                raise AgentRegistryError(f"请先成功停用{kind} {name}，再删除")
+        for name, definition in current.items():
+            if seed_import or not definition.get("enabled", True):
+                continue
+            old = previous.get(name)
+            if old and old.get("enabled", True) and {**definition, "enabled": definition.get("enabled", True)} == old:
+                continue
+            if kind == "工具":
+                if definition.get("handler_key") == "not_implemented":
+                    raise AgentRegistryError(f"无法启用工具 {name}：尚未绑定已实现的处理器")
+            else:
+                dependencies = set(definition.get("allowed_tools") or [])
+                if definition.get("default_tool"):
+                    dependencies.add(definition["default_tool"])
+                for dependency in sorted(dependencies):
+                    tool = tools.get(dependency)
+                    if not tool or not tool.get("enabled", True) or tool.get("handler_key") == "not_implemented":
+                        raise AgentRegistryError(f"无法启用技能 {name}：工具 {dependency} 未启用或处理器未实现")
+
+
+async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: str | None = None, seed_import: bool = False) -> dict[str, Any]:
     skills, tools = validate_registry_payload(payload.get("skills"), payload.get("tools"))
     async with db_session() as session:
         skill_rows = {
@@ -132,6 +158,13 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
             row.name: row
             for row in (await session.execute(select(AIAgentToolDefinition))).scalars().all()
         }
+
+        _validate_registry_transition(
+            skills, tools,
+            {name: {**(row.definition or {}), "enabled": row.enabled} for name, row in skill_rows.items()},
+            {name: {**(row.definition or {}), "enabled": row.enabled} for name, row in tool_rows.items()},
+            seed_import=seed_import,
+        )
 
         await session.execute(delete(AIAgentSkillDefinition).where(AIAgentSkillDefinition.name.not_in(list(skills))))
         await session.execute(delete(AIAgentToolDefinition).where(AIAgentToolDefinition.name.not_in(list(tools))))
@@ -170,7 +203,7 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
     active_tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
     active_skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in active_tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in active_tools else None} for name, definition in active_skills.items()}
     set_runtime_agent_registry(skills=active_skills, tools=active_tools)
-    return {"skills": active_skills, "tools": active_tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
+    return {"skills": skills, "tools": tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
 
 
 async def _save_registry_settings(session, *, updated_by: str | None, source: str) -> None:

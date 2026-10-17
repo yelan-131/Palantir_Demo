@@ -734,7 +734,7 @@ async def test_load_tenant_profile_uses_session_tenant_with_safe_fallback():
 
 
 @pytest.mark.asyncio
-async def test_memory_service_append_turn_memory_populates_extended_fields():
+async def test_retired_memory_service_does_not_append_turn_memory():
     from app.models.relational import AIAgentRun, AIConversation, AIMessage
     from app.services.ai.memory import MemoryService
 
@@ -783,24 +783,8 @@ async def test_memory_service_append_turn_memory_populates_extended_fields():
         status="active",
     )
 
-    assert session.added == [memory]
-    assert memory.memory_id.startswith("mem-")
-    assert memory.tenant_id == 9
-    assert memory.user_key == "operator-9"
-    assert memory.page == "quality"
-    assert memory.document_id == "doc-1"
-    assert memory.run_id == "run-1"
-    assert memory.user_message_id == "msg-user"
-    assert memory.assistant_message_id == "msg-assistant"
-    assert memory.memory_type == "turn_summary"
-    assert memory.content == "Open a CAPA draft and attach evidence."
-    assert memory.confidence == 0.7
-    assert memory.importance_score == 0.4
-    assert memory.visibility == "private"
-    assert memory.sensitivity == "normal"
-    assert len(memory.content_hash) == 64
-    assert memory.value["evidence_count"] == 1
-    assert memory.status == "active"
+    assert memory is None
+    assert session.added == []
 
 
 def test_memory_service_serializes_prompt_context_and_markdown():

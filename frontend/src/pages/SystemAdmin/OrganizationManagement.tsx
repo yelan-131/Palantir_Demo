@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -15,7 +16,6 @@ import {
   Select,
   Space,
   Table,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -399,9 +399,8 @@ export default function OrganizationManagement() {
     <div className="org-management-console">
       <div className="org-management-toolbar">
         <div>
-          <Typography.Title level={5} style={{ margin: 0 }}>组织管理</Typography.Title>
           <Typography.Text type="secondary">
-            组织用于表达工厂、部门、班组等数据范围来源，用户在用户管理中归属到这里。
+            维护工厂、部门与班组层级，成员归属在“用户管理”中设置。
           </Typography.Text>
         </div>
         <Space wrap>
@@ -645,7 +644,7 @@ function OrgPreviewPanel({
         </Space>
       </div>
 
-      <Tabs
+      <SettingsTabs
         className="org-preview-tabs"
         activeKey={activeTab}
         onChange={setActiveTab}

@@ -2119,7 +2119,7 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
                 },
                 {
                   key: 'mapping',
-                  label: '语义映射',
+                  label: '当前表映射',
                   children: (
                     <Space direction="vertical" size={12} style={{ width: '100%' }}>
                       <Alert showIcon type="info" message="AI 已根据字段名、样例值和业务域生成候选本体映射，确认后可进入对象与关系中心。" />
@@ -2888,8 +2888,7 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
         <main className="ontology-main">
           <section className="ontology-toolbar">
             <div>
-              <Typography.Title level={4}>对象与关系中心</Typography.Title>
-              <Typography.Text type="secondary">从数据资产中心和知识中心进入的候选，需要审核后才能成为正式企业对象模型。</Typography.Text>
+              <Typography.Text type="secondary">候选对象须审核后发布为正式模型。</Typography.Text>
             </div>
             <Space wrap>
               <Button icon={<ReloadOutlined />} onClick={refreshOntologyGovernance}>刷新</Button>
@@ -3188,7 +3187,7 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
           <Button icon={<ReloadOutlined />} onClick={load}>重新读取</Button>
         </Space>
       </section>
-      <Tabs
+      {view === 'ontology' ? ontologyView : <Tabs
         activeKey={semanticCenterTab}
         onChange={(key) => {
           setSemanticCenterTab(key as SemanticAssetCenterView);
@@ -3197,9 +3196,9 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
         items={[
           { key: 'data', label: '数据资产', children: dataAssetView },
           { key: 'mapping', label: '语义映射', children: semanticMappingView },
-          { key: 'ontology', label: '对象与关系', children: ontologyView },
+          ...(!view ? [{ key: 'ontology', label: '对象与关系', children: ontologyView }] : []),
         ]}
-      />
+      />}
     </div>
   );
 }
@@ -4009,22 +4008,9 @@ export function KnowledgeCenter() {
         children: typeNodes,
       };
     });
-    const rootKey = `space:${spaces[0]?.id ?? 'manufacturing'}`;
-    expandedKeys.unshift(rootKey);
-    const treeData: DataNode[] = visibleDocuments.length
-      ? [{
-        key: rootKey,
-        title: (
-          <div className="knowledge-tree-node root">
-            <span className="knowledge-tree-node-title"><ApartmentOutlined /><strong>{spaces[0]?.name ?? '制造业知识库'}</strong></span>
-            <Tag color="processing">{visibleDocuments.length}</Tag>
-          </div>
-        ),
-        children: sourceNodes,
-      }]
-      : [];
+    const treeData: DataNode[] = visibleDocuments.length ? sourceNodes : [];
     return { data: treeData, expandedKeys };
-  }, [selectedDocumentId, sourceLabelById, spaces, visibleDocuments]);
+  }, [selectedDocumentId, sourceLabelById, visibleDocuments]);
   const selectedDocument = visibleDocuments.find((item: any) => (item.id ?? item.document_id) === selectedDocumentId) ?? visibleDocuments[0];
   const selectedTitle = (selectedDocument as any)?.title ?? (selectedDocument as any)?.document_title ?? (selectedDocument as any)?.file_name ?? '暂无知识文档';
   const selectedSummary = (selectedDocument as any)?.summary ?? (selectedDocument ? `来源文件：${(selectedDocument as any)?.source_file_name ?? (selectedDocument as any)?.file_name ?? '数据库文档'}` : '上传或完成种子数据后，知识库目录会按数据库内容自动刷新。');
@@ -4512,7 +4498,7 @@ export function KnowledgeCenter() {
     <div className="knowledge-center">
       <div className="knowledge-workbench unified-knowledge-workbench">
         <aside className="knowledge-left-panel">
-          <Card className="knowledge-panel-card knowledge-library-card" title="知识库目录" extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadKnowledge}>刷新</Button>}>
+          <Card className="knowledge-panel-card knowledge-library-card" title={spaces[0]?.name || '文档目录'} extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadKnowledge}>刷新</Button>}>
             <div className="knowledge-tree-tools">
               <Input
                 placeholder="搜索文档、标签或实体"
@@ -4746,7 +4732,7 @@ export function KnowledgeCenter() {
                 },
                 {
                   key: 'extract',
-                  label: 'Extraction results',
+                  label: '抽取结果',
                   children: (
                     <Space className="knowledge-extract-stack" direction="vertical" size={10} style={{ width: '100%' }}>
                       <Alert
@@ -4768,7 +4754,7 @@ export function KnowledgeCenter() {
                 },
                 {
                   key: 'publish',
-                  label: 'Publish list',
+                  label: '发布清单',
                   children: (
                     <div className="knowledge-publish-stack">
                       <div className="knowledge-publish-list">
@@ -4797,7 +4783,7 @@ export function KnowledgeCenter() {
                 },
                 {
                   key: 'meta',
-                  label: 'Attributes',
+                  label: '文档属性',
                   children: (
                     <div className="knowledge-meta-stack">
                       <div className="knowledge-note-properties">

@@ -19,14 +19,11 @@ import {
   CheckOutlined,
   DashboardOutlined,
   DatabaseOutlined,
-  DownloadOutlined,
   DownOutlined,
   HomeOutlined,
   LeftOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  PlusOutlined,
-  ReloadOutlined,
   RightOutlined,
   SafetyCertificateOutlined,
   ShopOutlined,
@@ -37,8 +34,9 @@ import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
 import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
+import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
 import NotificationCenter from './components/NotificationCenter';
-import { LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath, visibleNavigationEntries } from './config/navigation';
+import { LEGACY_ROUTES, PERSONAL_SETTINGS_ENTRIES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath, visibleNavigationEntries } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
   getCurrentRelease,
@@ -52,10 +50,6 @@ const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => 
 const SchedulerPage = lazy(() => import('./pages/Scheduler'));
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
 const AlertCenterPage = lazy(() => import('./pages/AlertCenter'));
-const DashboardPage = lazy(() => import('./pages/Dashboard'));
-const MaintenancePage = lazy(() => import('./pages/Maintenance'));
-const QualityPage = lazy(() => import('./pages/Quality'));
-const SupplyChainPage = lazy(() => import('./pages/SupplyChain'));
 const DynamicPage = lazy(() => import('./pages/DynamicPage'));
 const AppProgramPage = lazy(() => import('./pages/AppPrograms'));
 const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
@@ -146,6 +140,9 @@ function releaseRecordCategories(record: ReleaseRecord) {
 }
 
 const runtimeRouteAliasMap: Record<string, string> = {
+  '/dashboard': '/program/production-overview',
+  '/maintenance': '/program/device-health',
+  '/quality': '/program/quality-overview',
   '/dynamic/equipment-inspection': '/program/equipment-inspection',
   '/dynamic/inventory-impact': '/program/inventory-impact',
   '/dynamic/supplier-scorecard': '/program/supplier-scorecard',
@@ -159,10 +156,10 @@ function normalizeRuntimeRoute(routePath?: string): string {
 
 const businessMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/', icon: <HomeOutlined />, label: '\u6211\u7684\u5de5\u4f5c\u53f0' },
-  { key: '/dashboard', icon: <DashboardOutlined />, label: '\u751f\u4ea7\u6001\u52bf' },
-  { key: '/maintenance', icon: <ToolOutlined />, label: '\u8bbe\u5907\u7ef4\u62a4' },
-  { key: '/quality', icon: <SafetyCertificateOutlined />, label: '\u8d28\u91cf\u5206\u6790' },
-  { key: '/supply-chain', icon: <ShopOutlined />, label: '\u4f9b\u5e94\u94fe\u98ce\u9669' },
+  { key: normalizeRuntimeRoute('/dashboard'), icon: <DashboardOutlined />, label: '\u751f\u4ea7\u6001\u52bf' },
+  { key: normalizeRuntimeRoute('/maintenance'), icon: <ToolOutlined />, label: '\u8bbe\u5907\u7ef4\u62a4' },
+  { key: normalizeRuntimeRoute('/quality'), icon: <SafetyCertificateOutlined />, label: '\u8d28\u91cf\u5206\u6790' },
+  { key: normalizeRuntimeRoute('/supply-chain'), icon: <ShopOutlined />, label: '\u4f9b\u5e94\u94fe\u98ce\u9669' },
 ];
 
 const workspaceMenuItem: NonNullable<MenuProps['items']>[number] = {
@@ -421,16 +418,24 @@ function AppContent() {
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseRecordIndex, setReleaseRecordIndex] = useState(0);
-  const library = useApplicationLibrary(applications, isAdmin);
+  const library = useApplicationLibrary(applications);
   const isApplicationWorkspace = activeArea === 'business' && (location.pathname === '/' && rootApplicationId === currentApplication?.id || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
   const activeLibraryEntry = library.filter(app => !app.application && app.pinned).find(app => location.pathname === app.path || app.path === '/data-center' && location.pathname.startsWith('/data-center/') || app.path === '/admin' && location.pathname.startsWith('/admin/'));
-  const railKey = location.pathname === '/more' ? 'more' : location.pathname === '/scheduler' ? 'scheduler' : location.pathname === '/plugins' ? 'plugins' : activeLibraryEntry?.id || (activeArea !== 'business' ? 'space' : isApplicationWorkspace && currentApplication ? `app:${currentApplication.id}` : 'home');
-  const sidebarTitle = location.pathname === '/more' ? '更多' : location.pathname === '/scheduler' ? '定时任务' : location.pathname === '/plugins' ? '插件' : activeLibraryEntry?.name || (activeArea !== 'business' ? '空间' : isApplicationWorkspace && currentApplication ? library.find(app => app.id === `app:${currentApplication.id}`)?.name || currentApplication.name : '首页');
+  const isAccountPage = location.pathname === '/account-center';
+  const railKey = isAccountPage || activeArea === 'admin' || activeArea === 'studio' || activeArea === 'data' || activeArea === 'plugins' ? 'account'
+    : location.pathname === '/more' ? 'more'
+    : location.pathname === '/workflow' ? 'workflow'
+    : location.pathname === '/scheduler' ? 'scheduler'
+    : activeLibraryEntry?.id || (isApplicationWorkspace && currentApplication ? `app:${currentApplication.id}` : 'home');
+  const sidebarTitle = isAccountPage || activeArea === 'plugins' ? '个人设置' : activeArea !== 'business' ? activeAreaInfo.label
+    : location.pathname === '/more' ? '应用中心'
+    : isApplicationWorkspace && currentApplication ? library.find(app => app.id === `app:${currentApplication.id}`)?.name || currentApplication.name : '工作台';
+  const showContextMenu = !['/more', '/workflow', '/scheduler'].includes(location.pathname);
 
 
 
   useEffect(() => {
-    listApplications()
+    const loadApplications = () => listApplications()
       .then((res) => {
         const apps: ApplicationInfo[] = res.data?.data || [];
         setApplications(apps);
@@ -450,6 +455,9 @@ function AppContent() {
         setCurrentApplication(null);
         setDynamicMenus([]);
       });
+    loadApplications();
+    window.addEventListener('applications-changed', loadApplications);
+    return () => window.removeEventListener('applications-changed', loadApplications);
   }, []);
 
   useEffect(() => {
@@ -527,45 +535,39 @@ function AppContent() {
   };
 
   const allMenuItems = useMemo<MenuProps['items']>(() => {
-    if (location.pathname === '/more') return [{ key: '/more', icon: <AppstoreOutlined />, label: '常见应用' }];
-    if (location.pathname === '/scheduler') return [{ key: '/scheduler', icon: <CheckOutlined />, label: '定时任务管理' }];
-    if (location.pathname === '/plugins') return [{ key: '/plugins', icon: <AppstoreOutlined />, label: '插件与扩展' }];
+    if (location.pathname === '/more') return [{ key: '/more', icon: <AppstoreOutlined />, label: '应用中心' }];
+    if (activeArea === 'data') return ['数据接入', '数据治理', '数据探索'].map(group => ({ key: group, type: 'group' as const, label: group, children: visibleNavigationEntries('data', isAdmin).filter(entry => entry.group === group).map(entry => ({ key: entry.path, label: entry.label, icon: collapsed ? <DatabaseOutlined /> : undefined })) })).filter(group => group.children.length);
+    if (isAccountPage || activeArea === 'plugins') return [
+      { key: 'personal-settings', type: 'group' as const, label: '个人设置', children: PERSONAL_SETTINGS_ENTRIES.map(entry => ({ key: entry.path, label: entry.label })) },
+      { key: 'application-settings', type: 'group' as const, label: '应用配置', children: visibleNavigationEntries('studio', isAdmin).map(entry => ({ key: entry.path, label: entry.label })) },
+    ];
     if (activeArea !== 'business') {
-      const contextArea = activeLibraryEntry?.id === 'data' || activeLibraryEntry?.id === 'knowledge' ? 'data' : activeLibraryEntry?.id === 'admin' ? 'admin' : activeLibraryEntry?.id === 'reports' ? 'studio' : undefined;
-      return NAVIGATION_AREAS.filter(area => area.key !== 'business' && (!contextArea || area.key === contextArea) && (!('adminOnly' in area) || isAdmin)).map(area => ({
-        key: area.key, type: 'group' as const, label: area.label,
-        children: visibleNavigationEntries(area.key, isAdmin).map(entry => ({ key: entry.path, label: entry.label, icon: collapsed ? <AppstoreOutlined /> : undefined })),
+      return visibleNavigationEntries(activeArea, isAdmin).map(entry => ({
+        key: entry.path, label: entry.label, icon: collapsed ? <AppstoreOutlined /> : undefined,
       }));
     }
     if (!isApplicationWorkspace) {
-      const appLinks = applications.map(app => ({ key: `application:${app.id}`, icon: iconFor(app.icon), label: library.find(entry => entry.id === `app:${app.id}`)?.name || app.name }));
+      const appLinks = applications.filter(app => !library.some(entry => entry.application?.id === app.id && entry.pinned)).map(app => ({ key: `application:${app.id}`, icon: iconFor(app.icon), label: library.find(entry => entry.id === `app:${app.id}`)?.name || app.name }));
       return [
-        { key: 'personal', type: 'group' as const, label: '工作空间', children: [workspaceMenuItem, { key: '/workflow', icon: <CheckOutlined />, label: '工作内容与待办' }] },
-        { key: 'business-apps', type: 'group' as const, label: '业务应用', children: appLinks.length ? appLinks : businessMenuItems.filter(item => item?.key !== '/') },
-        ...(location.pathname === '/account-center' ? [{ key: '/account-center', label: '个人账号与设置' }] : []),
+        { key: 'personal', type: 'group' as const, label: '工作空间', children: [workspaceMenuItem] },
+        ...(appLinks.length ? [{ key: 'business-apps', type: 'group' as const, label: '更多业务应用', children: appLinks }] : []),
       ];
     }
     const appItems = dynamicMenus?.length ? unwrapApplicationMenuRoot(dynamicMenus) : [];
     return appItems?.length ? appItems : businessMenuItems;
-  }, [activeArea, dynamicMenus, isAdmin, isApplicationWorkspace, applications, library, activeLibraryEntry, location.pathname, collapsed]);
+  }, [activeArea, dynamicMenus, isAdmin, isApplicationWorkspace, applications, library, activeLibraryEntry, location.pathname, collapsed, isAccountPage]);
 
   const openMenuKeys = useMemo(() => {
     return (allMenuItems || [])
       .map((item) => (item && 'key' in item ? String(item.key) : ''))
       .filter(Boolean);
   }, [allMenuItems]);
-  const selectedKey = location.pathname.startsWith('/form-settings/') ? '/studio/applications' : normalizeRuntimeRoute(location.pathname) || location.pathname;
+  const selectedKey = isAccountPage ? '/account-center' : location.pathname.startsWith('/form-settings/') ? '/studio/applications' : normalizeRuntimeRoute(location.pathname) || location.pathname;
   const currentMenuTitle = useMemo(() => {
     const path = findMenuLabelPath(allMenuItems, selectedKey);
     return path?.length ? path[path.length - 1] : undefined;
   }, [allMenuItems, selectedKey]);
-  const showRuntimePageBar =
-    activeArea === 'business'
-    && !location.pathname.startsWith('/program/')
-    && !location.pathname.startsWith('/dynamic/')
-    && !location.pathname.startsWith('/form-settings/')
-    && !['/', '/workflow', '/system-admin', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname);
-  const runtimeTitle = location.pathname === '/more' ? '常见应用' : location.pathname === '/scheduler' ? '定时任务' : location.pathname === '/plugins' ? '插件与扩展' : location.pathname.startsWith('/form-settings/') ? '页面设计' : areaEntry?.label || currentMenuTitle || (location.pathname === '/account-center' ? '个人账号' : activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
+  const runtimeTitle = isAccountPage ? '账号设置' : location.pathname === '/more' ? '应用中心' : location.pathname === '/scheduler' ? '定时任务' : location.pathname === '/plugins' ? '插件与扩展' : location.pathname.startsWith('/form-settings/') ? '页面设计' : areaEntry?.label || currentMenuTitle || (isAccountPage ? (new URLSearchParams(location.search).get('section') === 'preferences' ? '设置与偏好' : '个人账号') : activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
   const releaseRecords = normalizeReleaseRecords(releaseInfo);
   const activeReleaseIndex = releaseRecords.length
     ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
@@ -598,21 +600,22 @@ function AppContent() {
 
 
   return (
+    <ShellPageTitleProvider fallback={runtimeTitle}>
     <AiWorkbenchProvider>
-    <Layout className={`app-shell tech-white-shell density-${preferences.density}${smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
+    <Layout className={`app-shell tech-white-shell density-${preferences.density}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <ApplicationRail onHome={() => { setRootApplicationId(null); navigate('/'); }} activeKey={railKey} library={library} user={user} onOpen={openLibraryApp} onLogout={() => { logout(); navigate('/login'); }} />
-      {smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
-      <Sider id="shell-context-menu" width={224} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
+      {showContextMenu && smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
+      {showContextMenu && <Sider id="shell-context-menu" width={224} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
         <div className="shell-menu-heading">
           {!collapsed && <Typography.Text strong ellipsis>{sidebarTitle}</Typography.Text>}
           <Tooltip title={collapsed ? '展开菜单栏' : '折叠菜单栏'}><Button type="text" aria-label={collapsed ? '展开菜单栏' : '折叠菜单栏'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /></Tooltip>
         </div>
         <Menu key={`menu-${railKey}-${currentApplication?.id || 'default'}-${openMenuKeys.join('|')}-${collapsed}`} className="app-menu" mode="inline" inlineCollapsed={collapsed} selectedKeys={[selectedKey]} defaultOpenKeys={collapsed ? [] : openMenuKeys} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) navigate(String(key)); }} />
-      </Sider>
-      <Layout className="shell-workspace-layout" {...(smallViewport && !collapsed ? { inert: '' } : {})}>
+      </Sider>}
+      <Layout className={`shell-workspace-layout${showContextMenu ? '' : ' shell-without-context-menu'}`} {...(showContextMenu && smallViewport && !collapsed ? { inert: '' } : {})}>
         <Header className="app-header">
-          <Button className="shell-mobile-menu-toggle" type="text" aria-label="打开菜单栏" aria-controls="shell-context-menu" aria-expanded={!collapsed} icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} />
-          <Typography.Text className="shell-page-title" ellipsis title={runtimeTitle}>{runtimeTitle}</Typography.Text>
+          {showContextMenu && <Button className="shell-mobile-menu-toggle" type="text" aria-label="打开菜单栏" aria-controls="shell-context-menu" aria-expanded={!collapsed} icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} />}
+          <ShellPageTitle />
 
           <GlobalSearch />
           <Space className="shell-header-actions" size={12} align="center">
@@ -623,30 +626,18 @@ function AppContent() {
 
         <Content className="app-content">
           <div className="content-surface">
-            {showRuntimePageBar && (
-              <div className="runtime-page-bar">
-                <div>
-                  <Typography.Title level={3}>{runtimeTitle}</Typography.Title>
-                </div>
-                <Space wrap>
-                  <Button icon={<PlusOutlined />}>{'\u65b0\u589e'}</Button>
-                  <Button icon={<ReloadOutlined />}>{'\u5237\u65b0'}</Button>
-                  <Button icon={<DownloadOutlined />}>{'\u5bfc\u51fa'}</Button>
-                </Space>
-              </div>
-            )}
             <ErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/" element={<WorkspacePage />} />
-                  <Route path="/more" element={<ApplicationLibrary library={library} onOpen={openLibraryApp} isAdmin={isAdmin} />} />
+                  <Route path="/more" element={<ApplicationLibrary library={library} onOpen={openLibraryApp} />} />
                   <Route path="/scheduler" element={<SchedulerPage />} />
                   <Route path="/plugins" element={<ExtensionLibrary isAdmin={isAdmin} />} />
-                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/dashboard" element={<Navigate to={normalizeRuntimeRoute('/dashboard') + location.search} replace />} />
 
-                  <Route path="/maintenance" element={<MaintenancePage />} />
-                  <Route path="/quality" element={<QualityPage />} />
-                  <Route path="/supply-chain" element={<SupplyChainPage />} />
+                  <Route path="/maintenance" element={<Navigate to={normalizeRuntimeRoute('/maintenance') + location.search} replace />} />
+                  <Route path="/quality" element={<Navigate to={normalizeRuntimeRoute('/quality') + location.search} replace />} />
+                  <Route path="/supply-chain" element={<Navigate to={normalizeRuntimeRoute('/supply-chain') + location.search} replace />} />
                   <Route path="/ai-assistant" element={<Navigate to="/" replace />} />
                   <Route path="/account-center" element={<AccountEntry currentApplication={currentApplication} />} />
 
@@ -766,6 +757,7 @@ function AppContent() {
       </Modal>
     </Layout>
     </AiWorkbenchProvider>
+    </ShellPageTitleProvider>
   );
 }
 

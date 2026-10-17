@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Result, Typography } from 'antd';
+import { Button, Result } from 'antd';
 import { useAuthStore } from '../../stores/authStore';
 import { LEGACY_ACCOUNT_SECTIONS, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath, visibleNavigationEntries } from '../../config/navigation';
 
@@ -67,11 +67,7 @@ export default function NavigationAreaPage() {
     case '/admin/ai': content = <AISettings />; break;
     case '/admin/audit': content = <Audit />; break;
   }
-  return <section className="navigation-area-page">
-    <header className="navigation-area-heading">
-      <Typography.Text type="secondary">{areaInfo.label}</Typography.Text>
-      <Typography.Title level={3}>{entry.label}</Typography.Title>
-    </header>
+  return <section className="navigation-area-page" aria-label={entry.label}>
     {content}
   </section>;
 }

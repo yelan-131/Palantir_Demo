@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useShellPageTitle } from '@/components/ShellPageTitle';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
-  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline,
+  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline, Tabs,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined,
@@ -91,7 +92,7 @@ function normalizeRuntimeViewConfig(config: unknown, fields: FieldDef[]): ViewCo
   const sourceColumns = Array.isArray(table.columns) ? table.columns : [];
   const fieldByName = new Map(fields.map((field) => [field.field_name, field]));
   const columns = sourceColumns
-    .filter((column): column is Record<string, any> => isRecord(column) && Boolean(column.fieldName))
+    .filter((column): column is Record<string, any> => isRecord(column) && fieldByName.has(String(column.fieldName)))
     .map((column, index) => {
       const field = fieldByName.get(String(column.fieldName));
       return {
@@ -111,7 +112,7 @@ function normalizeRuntimeViewConfig(config: unknown, fields: FieldDef[]): ViewCo
 
   const sourceFilters = Array.isArray(config.filters) ? config.filters : [];
   const filters = sourceFilters
-    .filter((filter): filter is Record<string, any> => isRecord(filter) && Boolean(filter.fieldName))
+    .filter((filter): filter is Record<string, any> => isRecord(filter) && fieldByName.has(String(filter.fieldName)))
     .map((filter, index) => {
       const field = fieldByName.get(String(filter.fieldName));
       return {
@@ -357,6 +358,7 @@ export default function DynamicPage() {
   const navigate = useNavigate();
   const aliasProgramRoute = slug ? dynamicProgramRouteAliases[slug] : undefined;
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
+  useShellPageTitle(pageConfig?.title);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [mutationFields, setMutationFields] = useState<FieldDef[]>([]);
@@ -379,10 +381,25 @@ export default function DynamicPage() {
   const [schemaLoading, setSchemaLoading] = useState(false);
   const usesDraftLifecycle = Boolean(platformForm?.runtime_submission_available && (!editingRecord || editingRecord._approval));
 
+  const requestIdRef = useRef(0);
+  const [selectedViewTab, setSelectedViewTab] = useState('');
+  const runtimeViewTabs = pageConfig?.config?.viewConfig?.tabs;
+  const activeViewTab = runtimeViewTabs?.find((tab) => tab.id === selectedViewTab) || runtimeViewTabs?.[0];
   const viewConfig = useMemo(
-    () => normalizeRuntimeViewConfig(pageConfig?.config?.viewConfig, fields),
-    [fields, pageConfig?.config?.viewConfig],
+    () => normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields),
+    [fields, activeViewTab, pageConfig?.config?.viewConfig],
   );
+  const switchViewTab = (id: string) => {
+    requestIdRef.current += 1;
+    setSelectedViewTab(id);
+    setPage(1);
+    setSearch('');
+    setFilterValues({});
+    setSortState({});
+    setData([]);
+    setTotal(0);
+    filterForm.resetFields();
+  };
 
   const activeFilters = useMemo(() => viewConfig ? sortByOrder(viewConfig.filters).filter((filter) => filter.enabled) : [], [viewConfig]);
   const tableConfigColumns = useMemo(() => viewConfig ? sortByOrder(viewConfig.table.columns).filter((column) => column.enabled) : [], [viewConfig]);
@@ -396,6 +413,7 @@ export default function DynamicPage() {
 
   const loadData = useCallback(async () => {
     if (!slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
       const res = await listPlatformDynamicRecords(platformForm.id, {
@@ -403,14 +421,15 @@ export default function DynamicPage() {
         page_size: viewConfig.table.pageSize,
         search: search || undefined,
         filters: structuredFilters.length ? JSON.stringify(structuredFilters) : undefined,
-        sort_field: sortState.field,
-        sort_order: sortState.order,
+        sort_field: sortState.field || viewConfig.table.defaultSort?.fieldName,
+        sort_order: sortState.order || (viewConfig.table.defaultSort ? (viewConfig.table.defaultSort.order === 'ascend' ? 'asc' : 'desc') : undefined),
       });
+      if (requestId !== requestIdRef.current) return;
       const records = unwrapApiList<any>(res);
       setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval })));
       setTotal(res.data?.total ?? records.length);
     } catch { message.error('加载数据失败'); }
-    finally { setLoading(false); }
+    finally { if (requestId === requestIdRef.current) setLoading(false); }
   }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters]);
 
   useEffect(() => {
@@ -456,7 +475,10 @@ export default function DynamicPage() {
               formFieldNames: getPublishedFormFieldNames(dbForm.config, runtimeFields),
             },
           });
-          if (!publishedViewConfig) {
+          if (Array.isArray(publishedViewConfig?.tabs) && !publishedViewConfig.tabs.length) {
+            setConfigError('当前账号没有可见的数据视图，请联系管理员配置 Tab 的角色、用户或组织绑定。');
+            setLoading(false);
+          } else if (!publishedViewConfig) {
             setConfigError('当前表单还没有发布的数据视图配置，请进入表单设置发布后再使用。');
             setLoading(false);
           }
@@ -703,12 +725,11 @@ export default function DynamicPage() {
         <div className="app-business-content dynamic-business-content">
           <div className="app-business-title-row dynamic-business-title-row">
             <Space size={10} align="center" wrap>
-              <Typography.Title level={4}>{pageConfig?.title || '动态表单'}</Typography.Title>
               <Tag color="warning">缺少视图配置</Tag>
             </Space>
             {platformForm ? (
-              <Tooltip title="设置">
-                <Button aria-label="设置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
+              <Tooltip title="表单配置">
+                <Button aria-label="表单配置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
               </Tooltip>
             ) : null}
           </div>
@@ -731,31 +752,26 @@ export default function DynamicPage() {
     <div className="app-business-page dynamic-business-page">
       <div className="app-business-content dynamic-business-content">
       <div className="app-business-title-row dynamic-business-title-row">
-        <Space size={10} align="center" wrap>
-          <Typography.Title level={4}>{pageConfig.title}</Typography.Title>
-          <Tag color="processing">业务表单</Tag>
-        </Space>
         <Space size={8} wrap>
           {canRunAction('create') && (
             <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
-              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
+              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal}>{platformForm?.runtime_submission_available ? '填写申请' : '新增'}</Button>
             </Tooltip>
           )}
           <Tooltip title="刷新">
             <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} onClick={loadData} />
           </Tooltip>
-          <Tooltip title="导出">
-            <Button aria-label="导出" icon={<DownloadOutlined />} />
-          </Tooltip>
           {platformForm ? (
-            <Tooltip title="设置">
-              <Button aria-label="设置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
+            <Tooltip title="表单配置">
+              <Button aria-label="表单配置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
             </Tooltip>
           ) : null}
         </Space>
       </div>
 
-      <Form
+      {runtimeViewTabs && runtimeViewTabs.length > 0 && <Tabs activeKey={activeViewTab?.id} onChange={switchViewTab}
+        items={runtimeViewTabs.map((tab) => ({ key: tab.id, label: tab.name }))} />}
+      <Form key={activeViewTab?.id || 'default'}
         className="app-business-search-grid app-business-configured-search dynamic-business-filter"
         form={filterForm}
         colon={false}

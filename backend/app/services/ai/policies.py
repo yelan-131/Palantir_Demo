@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from fnmatch import fnmatchcase
 
 from .schemas import AIPermissionDecision, SkillAction
 from .skills import get_skill
@@ -14,6 +15,20 @@ FORBIDDEN_SKILLS = {
     "data.delete_record",
     "supply.auto_order",
 }
+
+
+def action_is_forbidden(settings: dict[str, Any], name: str, *, side_effect: str | None = None) -> bool:
+    categories = {
+        "auto_order": ("*.auto_order", "*.create_purchase_order"),
+        "delete_data": ("*.delete_*", "*.delete", "*.remove_record"),
+        "change_permission": ("*.change_permission*", "*.grant_permission*", "*.revoke_permission*"),
+    }
+    for action in settings.get("forbiddenActions", []):
+        if action == name or any(fnmatchcase(name, pattern) for pattern in categories.get(action, ())):
+            return True
+        if action == "publish_config" and side_effect == "configuration_write":
+            return True
+    return False
 
 def apply_policy(action: SkillAction) -> SkillAction:
     if action.skill in FORBIDDEN_SKILLS:
@@ -73,7 +88,7 @@ def decide_ai_permission(
     if reason:
         return AIPermissionDecision(allowed=False, reason=reason, capability=capability)
 
-    if skill and (skill in FORBIDDEN_SKILLS or skill in set(settings.get("forbiddenActions", []))):
+    if skill and (skill in FORBIDDEN_SKILLS or action_is_forbidden(settings, skill)):
         return AIPermissionDecision(allowed=False, reason="Action is disabled by AI safety policy", capability=capability)
 
     if user.get("is_admin") and not settings.get("rolePolicies"):
@@ -156,7 +171,7 @@ def decide_tool_permission(user: dict[str, Any], settings: dict[str, Any], tool_
     decision = decide_ai_permission(user, settings, tool.permission_check, skill=skill_name or tool_name, domain=domain, risk_level=tool.risk_level)
     if not decision.allowed:
         return decision
-    if tool_name in settings.get("forbiddenActions", []) or tool.handler_key in settings.get("forbiddenActions", []):
+    if action_is_forbidden(settings, tool_name, side_effect=tool.side_effect) or action_is_forbidden(settings, tool.handler_key, side_effect=tool.side_effect):
         decision.allowed, decision.reason = False, "Tool is disabled by AI safety policy"
         return decision
     if tool.side_effect != "read":

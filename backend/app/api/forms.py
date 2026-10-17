@@ -126,6 +126,11 @@ class FormUpdate(BaseModel):
     config: Optional[dict] = None
 
 
+class FormCopy(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    code: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
+
+
 class ApplicationFormUpsert(BaseModel):
     form_id: int
     alias: Optional[str] = None
@@ -543,6 +548,23 @@ def _form_layout_field_names(config: Optional[dict]) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+async def _scope_runtime_view_tabs(payload: dict, user: dict, db: AsyncSession, scope: str) -> dict:
+    if scope != 'list':
+        return payload
+    from app.core.permissions import get_user_org_ids
+    from app.services.form_view_tabs import runtime_view_config
+
+    result = copy.deepcopy(payload)
+    config = result.get('config') or {}
+    view = config.get('viewConfig')
+    roles = await get_user_role_ids(user, db) if isinstance(view, dict) and view.get('tabs') else []
+    orgs = await get_user_org_ids(user, db) if isinstance(view, dict) and view.get('tabs') else []
+    config['viewConfig'] = runtime_view_config(view, user_id=user.get('uid'), role_ids=roles, org_ids=orgs,
+        is_admin=bool(user.get('is_admin')), visible_fields={field['field_name'] for field in result.get('fields', [])})
+    result['config'] = config
+    return result
+
+
 def _scoped_form_payload(payload: dict, scope: str) -> dict:
     scope = scope or "designer"
     if scope == "designer":
@@ -551,9 +573,14 @@ def _scoped_form_payload(payload: dict, scope: str) -> dict:
     fields = [field for field in (scoped.get("fields") or []) if not field.get("archived")]
     config = scoped.get("config") if isinstance(scoped.get("config"), dict) else {}
     if scope == "list":
+        view = config.get('viewConfig') or {}
+        views = view.get('tabs') if isinstance(view.get('tabs'), list) else [view]
+        referenced_names = {item.get('fieldName') for current in views for item in [
+            *(current.get('filters') or []), *((current.get('table') or {}).get('columns') or [])
+        ] if isinstance(item, dict)}
         scoped["fields"] = [
             field for field in fields
-            if field.get("visible_in_list") or field.get("searchable") or field.get("sortable")
+            if field.get("visible_in_list") or field.get("searchable") or field.get("sortable") or field.get("field_name") in referenced_names
         ]
         scoped["config"] = {
             "viewConfig": config.get("viewConfig"),
@@ -721,6 +748,7 @@ async def _start_form_workflows(
                     raise HTTPException(409, f"审批节点 {step.get('name', '')} 没有有效审批人，请重新配置")
             if not current_step or current_step.get("type") != "approval":
                 raise HTTPException(409, "审批流程没有有效审批节点")
+        approval_groups: list[dict] = []
         approver_ids = await _resolve_step_approver_ids(
             db,
             tenant_id,
@@ -730,6 +758,7 @@ async def _start_form_workflows(
             initiator_id,
             initiator_id,
             allow_fallback=not managed,
+            approval_groups=approval_groups,
         ) if current_step and current_step.get("type") == "approval" else []
         state = {
             "current_node": current_step.get("node_id", current_step.get("name", "start")) if current_step else "end",
@@ -738,7 +767,7 @@ async def _start_form_workflows(
             "resource_id": record_payload.get("id"),
             "variables": variables,
         }
-        _set_current_assignees(state, approver_ids)
+        _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
         title = _workflow_instance_title(form, record_payload, binding.config)
         instance = WorkflowInstance(
             tenant_id=tenant_id,
@@ -848,9 +877,19 @@ async def _form_snapshot(db: AsyncSession, tenant_id: int, form) -> dict:
     bindings = (await db.execute(
         select(WorkflowBinding).where(WorkflowBinding.form_id == form.id, WorkflowBinding.tenant_id == tenant_id).order_by(WorkflowBinding.id)
     )).scalars().all()
+    field_payloads = [_field_payload(field) for field in fields]
+    # Designer changes stay in the draft until this snapshot is published.
+    controls = (form.config or {}).get("formDesignerControls") or []
+    rules_by_field = {control.get("fieldKey"): control["encodingRule"] for control in controls
+                      if isinstance(control, dict) and isinstance(control.get("encodingRule"), dict)}
+    for field_payload in field_payloads:
+        rule = rules_by_field.get(field_payload.get("field_name"))
+        if rule is not None:
+            field_payload["encoding_rule"] = rule
+            field_payload["ui_config"] = {**(field_payload.get("ui_config") or {}), "encodingRule": rule}
     return {
         "form": _form_payload(form),
-        "fields": [_field_payload(field) for field in fields],
+        "fields": field_payloads,
         "layouts": [_layout_payload(layout) for layout in layouts],
         "actions": [_action_payload(action) for action in actions],
         "permissions": [_permission_payload(permission) for permission in permissions],
@@ -1447,6 +1486,60 @@ async def create_form(
     return {"data": _form_payload(form)}
 
 
+@router.post("/{form_id}/copy")
+async def copy_form(
+    form_id: int,
+    body: FormCopy,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    """Copy design metadata atomically; business records and versions stay separate."""
+    from app.models.relational import Form, FormField, FormLayout, FormAction, FormPermission
+
+    tenant_id = current_tenant_id(user)
+    source = await db.get(Form, form_id)
+    if not source or source.tenant_id != tenant_id:
+        raise HTTPException(404, "Form not found")
+    if await db.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == body.code)):
+        raise HTTPException(409, "Form code already exists")
+    config = copy.deepcopy(source.config or {})
+    config.pop("publishedSchemaVersion", None)
+    config.pop("publishedAt", None)
+    if config.get("viewConfigMeta"):
+        config["viewConfigMeta"] = {"status": "draft"}
+    target = Form(
+        tenant_id=tenant_id, name=body.name, code=body.code,
+        description=source.description, model_id=source.model_id,
+        storage_mode="physical_table", status="draft", owner_id=_uid(user), config=config,
+        table_name=_physical_table_name_for_form(tenant_id, body.code, config),
+    )
+    db.add(target)
+    await db.flush()
+    copied_fields = []
+    for model in (FormField, FormLayout, FormAction, FormPermission):
+        rows = (await db.scalars(select(model).where(
+            model.tenant_id == tenant_id, model.form_id == form_id,
+        ))).all()
+        for row in rows:
+            values = {column.name: copy.deepcopy(getattr(row, column.name))
+                      for column in model.__table__.columns
+                      if column.name not in {"id", "form_id", "created_at", "updated_at"}}
+            cloned = model(form_id=target.id, **values)
+            db.add(cloned)
+            if model is FormField:
+                copied_fields.append(cloned)
+    await db.flush()
+    await _ensure_physical_form_table(db, target, copied_fields)
+    await db.commit()
+    await db.refresh(target)
+    await write_audit_log(
+        tenant_id=tenant_id, user_id=current_user_id(user), action="create",
+        resource_type="form", resource_id=target.id,
+        new_values={"copied_from": form_id, "code": body.code},
+    )
+    return {"data": _form_payload(target, fields=copied_fields)}
+
+
 @router.get("/applications/{application_id}/forms")
 async def list_application_form_bindings(
     application_id: int,
@@ -1825,12 +1918,12 @@ async def get_form(
             payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
             payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
             payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, payload.get("fields") or [], db)
-            return {"data": _scoped_form_payload(payload, scope)}
+            return {"data": _scoped_form_payload(await _scope_runtime_view_tabs(payload, user, db, scope), scope)}
     payload = _form_payload(form, fields=fields, applications=applications)
     payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
     payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
     payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, fields, db)
-    return {"data": _scoped_form_payload(payload, scope)}
+    return {"data": _scoped_form_payload(await _scope_runtime_view_tabs(payload, user, db, scope), scope)}
 
 
 @router.put("/{form_id}")

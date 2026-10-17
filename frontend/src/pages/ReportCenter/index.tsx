@@ -3,7 +3,7 @@ import { TECH_WHITE_PALETTE, TECH_WHITE_GEOMETRY } from '../../theme/techWhite';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Button, Modal, Input, Select, Tag, Empty,
-  Space, Spin, message, Dropdown, Typography, Popconfirm,
+  Space, Spin, message, Dropdown, Popconfirm,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
@@ -140,7 +140,6 @@ export default function ReportCenter() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
-          <Typography.Title level={4} style={{ margin: 0 }}>报表中心</Typography.Title>
           <Select
             allowClear
             placeholder="按分类筛选"

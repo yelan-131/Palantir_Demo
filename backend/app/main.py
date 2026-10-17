@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -18,6 +19,21 @@ settings.validate_runtime()
 METRICS = {"requests_total": 0, "errors_total": 0, "route_counts": {}, "route_errors": {}, "route_latency_ms": {}}
 
 
+async def cleanup_ai_memories():
+    from app.core.db import db_session
+    from app.services.ai.memory import memory_service
+    from app.services.ai.settings import load_persisted_ai_settings, settings_snapshot
+    while True:
+        try:
+            await load_persisted_ai_settings(strict=True)
+            async with db_session() as session:
+                await memory_service.purge_expired(session, settings_snapshot())
+                await session.commit()
+        except Exception:
+            logger.warning("AI memory retention cleanup failed; will retry")
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Auto-init DB (SQLite fallback only)
@@ -31,7 +47,13 @@ async def lifespan(app: FastAPI):
             logger.warning("Agent registry not loaded: %s", exc)
     except Exception as exc:
         logger.warning("DB init skipped: %s", exc)
-    yield
+    memory_cleanup = asyncio.create_task(cleanup_ai_memories())
+    try:
+        yield
+    finally:
+        memory_cleanup.cancel()
+        with suppress(asyncio.CancelledError):
+            await memory_cleanup
     try:
         from app.database import close_connections
         await close_connections()

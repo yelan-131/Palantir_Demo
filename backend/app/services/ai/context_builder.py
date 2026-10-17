@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from copy import deepcopy
+import json
+import math
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +19,27 @@ from .tenant_context import require_tenant_id
 
 
 def estimate_tokens(value: Any) -> int:
-    text = value if isinstance(value, str) else str(value or "")
-    return max(1, len(text) // 4)
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    # Conservative cross-provider estimate; UTF-8 accounts for Chinese content.
+    return max(1, math.ceil(len(text.encode("utf-8")) / 2))
+
+
+def fit_context_to_budget(payload: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Bound the whole serialized context, including semantic/client fields."""
+    trimmed = deepcopy(payload)
+    while trimmed and estimate_tokens(trimmed) > budget:
+        key = max(trimmed, key=lambda k: estimate_tokens({k: trimmed[k]}))
+        value = trimmed[key]
+        if isinstance(value, list) and len(value) > 1:
+            trimmed[key] = value[1:]
+        elif isinstance(value, str) and len(value) > 32:
+            trimmed[key] = value[:len(value) // 2]
+        elif isinstance(value, dict) and len(value) > 1:
+            largest = max(value, key=lambda k: estimate_tokens({k: value[k]}))
+            trimmed[key] = {k: v for k, v in value.items() if k != largest}
+        else:
+            trimmed.pop(key)
+    return trimmed
 
 
 def trim_text(text: str, max_chars: int) -> str:
@@ -47,12 +69,12 @@ class ContextBuilder:
         rag_policy = settings.get("ragPolicy") or {}
         recent_limit = int(context_policy.get("recentMessageLimit") or 10)
         max_context_tokens = int(context_policy.get("maxContextTokens") or 12000)
-        memory_limit = int(memory_policy.get("recallLimit") or 5)
+        memory_limit = int(memory_policy.get("recallLimit", 5))
         max_evidence_chars = int(rag_policy.get("maxEvidenceChars") or 1200)
 
         recent_messages = await self._recent_messages(session, conversation_id, recent_limit, tenant_id, user_key)
         memories: list[dict[str, Any]] = []
-        if memory_policy.get("enabled"):
+        if memory_policy.get("enabled") and memory_limit > 0:
             memories = await memory_service.retrieve_context(
                 session,
                 tenant_id=tenant_id,
@@ -62,6 +84,7 @@ class ContextBuilder:
                 document_id=document_id,
                 query=request.message,
                 limit=memory_limit,
+                settings=settings,
             )
 
         trimmed_evidence = [
@@ -117,7 +140,7 @@ class ContextBuilder:
         ]
 
     def _trim_to_budget(self, payload: dict[str, Any], max_tokens: int) -> dict[str, Any]:
-        trimmed = {**payload}
+        trimmed = deepcopy(payload)
         while estimate_tokens(trimmed) > max_tokens and trimmed.get("memories"):
             trimmed["memories"] = trimmed["memories"][1:]
         while estimate_tokens(trimmed) > max_tokens and trimmed.get("recent_messages"):
@@ -133,7 +156,7 @@ class ContextBuilder:
             "estimated_tokens": trimmed["estimated_tokens"],
             "trimmed": True,
         }
-        return trimmed
+        return fit_context_to_budget(trimmed, max_tokens)
 
 
 context_builder = ContextBuilder()

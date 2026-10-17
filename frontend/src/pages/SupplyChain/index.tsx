@@ -36,7 +36,7 @@ import {
   getSupplyChainAnalytics,
 } from '@/services/api';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface Supplier {
   id: number;
@@ -438,12 +438,11 @@ export default function SupplyChainPage() {
   ];
 
   return (
-    <div>
-      <Title level={4}>供应链协同</Title>
+    <div className="supply-chain-page">
 
       {/* Overview Stats */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+      <Row className="page-summary-metrics" gutter={[16, 16]} style={{ marginBottom: 16, marginInline: 0 }}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="供应商总数"
@@ -457,7 +456,7 @@ export default function SupplyChainPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="库存短缺"
@@ -467,7 +466,7 @@ export default function SupplyChainPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="在途物流"
@@ -477,7 +476,7 @@ export default function SupplyChainPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card>
             <Statistic
               title="高风险项"

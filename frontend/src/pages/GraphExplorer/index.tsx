@@ -40,7 +40,7 @@ import {
 
 cytoscape.use(dagre);
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface GraphNode {
   id: number;
@@ -399,7 +399,6 @@ export default function GraphExplorerPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-        <Title level={4} style={{ margin: 0 }}>关系图谱</Title>
         <Button icon={<SafetyCertificateOutlined />} onClick={() => navigate('/program/quality-event')}>
           进入质量异常影响分析
         </Button>

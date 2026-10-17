@@ -25,16 +25,17 @@ interface SearchItem {
 const areaIcons: Record<NavigationArea, React.ReactNode> = {
   business: <DashboardOutlined />,
   studio: <AppstoreOutlined />,
+  plugins: <AppstoreOutlined />,
   data: <DatabaseOutlined />,
   admin: <SettingOutlined />,
 };
 
 const BUSINESS_ITEMS = [
   { key: '/program/material-application', label: '料号申请表单', icon: <AppstoreOutlined /> },
-  { key: '/dashboard', label: '生产态势', icon: <DashboardOutlined /> },
-  { key: '/maintenance', label: '设备维护', icon: <ToolOutlined /> },
-  { key: '/quality', label: '质量分析', icon: <SafetyCertificateOutlined /> },
-  { key: '/supply-chain', label: '供应链风险', icon: <ShopOutlined /> },
+  { key: '/program/production-overview', label: '生产态势', icon: <DashboardOutlined /> },
+  { key: '/program/device-health', label: '预测性维护', icon: <ToolOutlined /> },
+  { key: '/program/quality-overview', label: '质量分析', icon: <SafetyCertificateOutlined /> },
+  { key: '/program/supply-overview', label: '供应链风险', icon: <ShopOutlined /> },
 ];
 
 export default function GlobalSearch() {
@@ -84,9 +85,8 @@ export default function GlobalSearch() {
     return [...areaHome, ...entries, ...businessItems];
   });
   searchItems.push(
-    { key: '/scheduler', label: '定时任务', icon: <DashboardOutlined />, category: '工作空间' },
-    { key: '/plugins', label: '插件与扩展', icon: <AppstoreOutlined />, category: '工作空间' },
-    { key: '/more', label: '常见应用', icon: <AppstoreOutlined />, category: '工作空间' },
+    { key: '/account-center', label: '账号设置', icon: <SettingOutlined />, category: '个人设置' },
+    { key: '/more', label: '应用中心', icon: <AppstoreOutlined />, category: '工作空间' },
   );
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = normalizedQuery

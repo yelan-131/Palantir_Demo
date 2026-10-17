@@ -22,7 +22,6 @@ import {
   CheckCircleOutlined,
   WarningOutlined,
   CloseCircleOutlined,
-  ToolOutlined,
   PlusOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
@@ -39,7 +38,7 @@ import {
 import { formatServerDateTime } from '@/utils/dateTime';
 import { exportCSV } from '@/utils/csvExport';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 // ── Types ──────────────────────────────────────────────────────────
 interface Summary {
@@ -429,7 +428,7 @@ export default function MaintenancePage() {
     return (
       <div>
         <Skeleton.Input active style={{ width: 200, marginBottom: 20 }} />
-        <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Row className="page-summary-metrics" gutter={[16,16]} style={{ marginBottom: 24, marginInline: 0 }}>
           {[1,2,3,4].map(i => (
             <Col span={6} key={i}><Card size="small"><Skeleton active paragraph={false} /></Card></Col>
           ))}
@@ -445,28 +444,25 @@ export default function MaintenancePage() {
   }
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 20 }}>
-        <ToolOutlined style={{ marginRight: 8 }} />
-        预测性维护
+    <div className="maintenance-page">
+      <header className="workspace-page-header">
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          style={{ float: 'right', marginTop: 4 }}
           onClick={() => setWfModalOpen(true)}
         >
           提交维修申请
         </Button>
-      </Title>
+      </header>
 
       {/* ── Summary Cards ── */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={6}>
+      <Row className="page-summary-metrics" gutter={[16,16]} style={{ marginBottom: 24, marginInline: 0 }}>
+        <Col xs={12} md={6}>
           <Card size="small">
             <Statistic title="设备总数" value={summary?.total ?? 0} suffix="台" />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card size="small">
             <Statistic
               title="健康"
@@ -477,7 +473,7 @@ export default function MaintenancePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card size="small">
             <Statistic
               title="预警"
@@ -488,7 +484,7 @@ export default function MaintenancePage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} md={6}>
           <Card size="small">
             <Statistic
               title="故障"

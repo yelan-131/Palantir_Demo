@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ApartmentOutlined,
@@ -6,7 +7,7 @@ import {
   ProfileOutlined,
   TagsOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Col, Empty, Form, Input, Modal, Row, Segmented, Space, Table, Tabs, Tag, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, Form, Input, Modal, Row, Segmented, Space, Table, Tag, Typography, message } from 'antd';
 import { getReferenceData, saveReferenceData } from '@/services/api';
 
 type DictionaryItem = {
@@ -174,9 +175,8 @@ export default function ReferenceDataManagement() {
         <Row gutter={[16, 16]} align="middle">
           <Col flex="auto">
             <Space direction="vertical" size={2}>
-              <Typography.Title level={4} style={{ margin: 0 }}>数据字典与基础档案</Typography.Title>
               <Typography.Text type="secondary">
-                前端只展示后台返回的参考数据；新增内容会保存到数据库，不再使用浏览器本地样例。
+                维护可复用的字典条目与基础档案。
               </Typography.Text>
             </Space>
           </Col>
@@ -237,7 +237,7 @@ export default function ReferenceDataManagement() {
               {selectedMaster ? (
                 <>
                   <Typography.Paragraph type="secondary">{selectedMaster.description}</Typography.Paragraph>
-                  <Tabs
+                  <SettingsTabs
                     items={[
                       {
                         key: 'fields',

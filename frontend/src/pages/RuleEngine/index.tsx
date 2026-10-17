@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Button, Modal, Form, Input, Select, InputNumber,
-  Switch, Tag, Space, Empty, Spin, message, Typography, Popconfirm,
+  Switch, Tag, Space, Empty, Spin, message, Popconfirm,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { listRules, createRule, updateRule, deleteRule, validateRule } from '@/services/api';
 import { listModels } from '@/services/api';
 
@@ -225,10 +225,6 @@ export default function RuleEngine() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            <ThunderboltOutlined style={{ marginRight: 8, color: '#722ed1' }} />
-            规则引擎
-          </Typography.Title>
           <Select
             allowClear
             placeholder="按模型筛选"

@@ -14,6 +14,7 @@ from app.api.form_engine.encoding import (
     _is_encoding_field,
     _render_code_template,
     _sequence_period_key,
+    _select_encoding_rule,
 )
 from app.api.form_engine.naming import _physical_column_name, _uses_physical_form_table
 from app.api.form_engine.physical import _sql_current_timestamp
@@ -30,8 +31,8 @@ async def _max_dynamic_code_sequence(db: AsyncSession, tenant_id: int, form_id: 
             DynamicRecord.form_id == form_id,
         )
     )).scalars().all()
-    prefix = str(rule.get("prefix") or "").strip()
-    date_token = _sequence_period_key(rule)
+    prefix = "" if rule.get("segments") else str(rule.get("prefix") or "").strip()
+    date_token = "" if rule.get("segments") else _sequence_period_key(rule)
     max_sequence = 0
     for data in rows:
         if not isinstance(data, dict):
@@ -55,8 +56,8 @@ async def _max_physical_code_sequence(db: AsyncSession, tenant_id: int, form, fi
         text(f"SELECT {column_name} FROM {table_name} WHERE tenant_id = :tenant_id"),
         {"tenant_id": tenant_id},
     )).all()
-    prefix = str(rule.get("prefix") or "").strip()
-    date_token = _sequence_period_key(rule)
+    prefix = "" if rule.get("segments") else str(rule.get("prefix") or "").strip()
+    date_token = "" if rule.get("segments") else _sequence_period_key(rule)
     max_sequence = 0
     for row in rows:
         value = str(row[0] or "")
@@ -157,7 +158,7 @@ async def _apply_record_encoding_rules(db: AsyncSession, tenant_id: int, form, f
     for field in fields:
         if getattr(field, "archived", False) or not _is_encoding_field(field):
             continue
-        rule = _encoding_rule_for_field(field)
+        rule = _select_encoding_rule(_encoding_rule_for_field(field), payload)
         if rule.get("enabled") is False:
             continue
         field_name = field.field_name
@@ -167,9 +168,13 @@ async def _apply_record_encoding_rules(db: AsyncSession, tenant_id: int, form, f
             if await _code_value_exists(db, tenant_id, form, field_name, current_value):
                 raise HTTPException(409, f"Duplicate code for field {field_name}: {current_value}")
             continue
+        if rule.get("generationMode") == "manual":
+            if current_value in (None, ""):
+                raise HTTPException(422, f"请填写手工编码字段 {field_name}")
+            continue
         for _ in range(_CODE_ALLOCATION_MAX_ATTEMPTS):
             sequence = await _allocate_code_sequence(db, tenant_id, form, field_name, rule)
-            candidate = _render_code_template(rule, sequence)
+            candidate = _render_code_template(rule, sequence, payload)
             # Manual overrides may have squatted on a generated value; skip past them.
             if not await _code_value_exists(db, tenant_id, form, field_name, candidate):
                 payload[field_name] = candidate

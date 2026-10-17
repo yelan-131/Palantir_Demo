@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Key, ReactNode } from 'react';
 import {
@@ -23,7 +24,6 @@ import {
   Space,
   Switch,
   Table,
-  Tabs,
   Tag,
   Typography,
   Upload,
@@ -268,7 +268,6 @@ export default function UserManagement() {
     <div className="user-management-console">
       <div className="user-management-toolbar">
         <div>
-          <Typography.Title level={5} style={{ margin: 0 }}>用户管理</Typography.Title>
           <Typography.Text type="secondary">账号、角色、组织、SSO 绑定、MFA 状态和会话治理。</Typography.Text>
         </div>
         <Space>
@@ -646,7 +645,7 @@ function UserPreviewPanel({
         </Space>
       </div>
       <Form form={inlineForm} layout="vertical" component={false}>
-        <Tabs className="user-preview-tabs" activeKey={activeTab} onChange={setActiveTab} items={tabs} />
+        <SettingsTabs className="user-preview-tabs" activeKey={activeTab} onChange={setActiveTab} items={tabs} />
       </Form>
     </aside>
   );

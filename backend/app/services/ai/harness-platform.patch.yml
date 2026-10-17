@@ -41,5 +41,5 @@
     name: '@deepseek-ai/dsh-compaction-basic'
     disabled: !!js process.env.MF_DSH_COMPACTION_ENABLED !== 'true'
     config:
-      thresholdRatio: 0.8
-      retainRatio: 0.16
+      thresholdRatio: !!js Number(process.env.MF_DSH_COMPACTION_THRESHOLD_RATIO ?? 0.8)
+      retainRatio: !!js Number(process.env.MF_DSH_COMPACTION_RETAIN_RATIO ?? 0.16)

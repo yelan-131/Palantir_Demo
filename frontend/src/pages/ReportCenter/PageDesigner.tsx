@@ -119,7 +119,7 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
   const selectedWidget = config.widgets.find((w) => w.id === selectedId) || null;
 
   return (
-    <div className={`report-page-editor${isEditing ? ' report-page-editor-editing' : ''}`} style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', background: TECH_WHITE_PALETTE.surface, border: `1px solid ${TECH_WHITE_PALETTE.border}`, borderRadius: TECH_WHITE_GEOMETRY.panelRadius, overflow: 'hidden' }}>
+    <div className={`report-page-editor${isEditing ? ' report-page-editor-editing' : ''}`} style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', background: TECH_WHITE_PALETTE.surface, border: `1px solid ${TECH_WHITE_PALETTE.border}`, borderRadius: TECH_WHITE_GEOMETRY.panelRadius, overflow: 'hidden' }}>
       {/* Toolbar */}
       <div className="report-editor-toolbar" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -127,7 +127,7 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
       }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-          <Typography.Text strong>{report.name}</Typography.Text>
+          <Typography.Text className="report-editor-title" strong>{report.name}</Typography.Text>
         </Space>
         <Space>
           {!readOnly && (
@@ -144,7 +144,7 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
               >
                 {showPreview ? '编辑模式' : '预览模式'}
               </Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
+              <Button className="report-editor-save-button" type="primary" icon={<SaveOutlined />} onClick={handleSave}>
                 保存
               </Button>
             </>
@@ -176,7 +176,7 @@ export default function PageDesigner({ report, onSave, onBack, readOnly }: Props
 
         {/* Right panel: config */}
         {isEditing && (
-          <div className="report-editor-properties" style={{ width: 260, borderLeft: `1px solid ${TECH_WHITE_PALETTE.border}`, overflow: 'auto', background: TECH_WHITE_PALETTE.rail }}>
+          <div className="report-editor-properties" style={{ width: 260, borderLeft: `1px solid ${TECH_WHITE_PALETTE.border}`, overflow: 'hidden', background: TECH_WHITE_PALETTE.rail }}>
             <ConfigPanel widget={selectedWidget} onChange={handleWidgetChange} />
           </div>
         )}

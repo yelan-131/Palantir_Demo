@@ -16,7 +16,6 @@ import {
 } from 'antd';
 import {
   CheckCircleOutlined,
-  DashboardOutlined,
   ExperimentOutlined,
   FileTextOutlined,
   HeartOutlined,
@@ -257,21 +256,10 @@ export default function DashboardPage() {
   return (
     <div className="dashboard-page">
       <div className="app-program-header dashboard-command-header">
-        <div className="app-program-title-block">
-          <span className="app-program-icon"><DashboardOutlined /></span>
-          <div>
-            <Space size={8} align="center" wrap>
-              <Typography.Title level={3}>生产运营看板</Typography.Title>
-              <Tag color="blue">实时运营</Tag>
-            </Space>
-            <Typography.Text type="secondary">
-              产线、设备、工单、质量和告警的统一生产态势视图。
-            </Typography.Text>
-          </div>
-        </div>
+        <Typography.Text type="secondary">产线、设备、工单与质量概览</Typography.Text>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={fetchAllData}>刷新</Button>
-          <Button icon={<SettingOutlined />} onClick={() => navigate('/form-settings/production-overview')}>配置</Button>
+          <Button icon={<SettingOutlined />} onClick={() => navigate('/form-settings/production-overview')}>表单配置</Button>
         </Space>
       </div>
 
@@ -287,7 +275,7 @@ export default function DashboardPage() {
           </Card>
         </Col>
         <Col xs={24} sm={12} xl={4}>
-          <Card className="dashboard-kpi-card" size="small">
+          <Card className="dashboard-kpi-card hierarchy-kpi-primary" size="small">
             <Statistic title="设备利用率" value={percent(overview?.equipment.utilization_rate)} suffix="%" precision={1} prefix={<CheckCircleOutlined />} />
           </Card>
         </Col>

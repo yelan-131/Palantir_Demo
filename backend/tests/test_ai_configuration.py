@@ -149,6 +149,9 @@ async def test_registry_deletion_and_disabling_survive_reload(monkeypatch):
     try:
         skills, tools = load_seed_registry()
         original_skills, original_tools = deepcopy(skills), deepcopy(tools)
+        await save_agent_registry_payload({'skills': skills, 'tools': tools}, seed_import=True)
+        skills['low_code.create_form_definition']['enabled'] = False
+        tools['forms.create_form_definition']['enabled'] = False
         await save_agent_registry_payload({'skills': skills, 'tools': tools})
         skills.pop('low_code.create_form_definition')
         for skill in skills.values():
@@ -158,12 +161,14 @@ async def test_registry_deletion_and_disabling_survive_reload(monkeypatch):
         tools.pop('forms.create_form_definition')
         tools['forms.get_record']['enabled'] = False
         await save_agent_registry_payload({'skills': skills, 'tools': tools})
+        management = await load_agent_registry(include_disabled=True)
+        assert management['tools']['forms.get_record']['enabled'] is False
         reloaded = await load_agent_registry()
         assert 'forms.create_form_definition' not in reloaded['tools']
         assert 'forms.get_record' not in reloaded['tools']
         assert 'low_code.create_form_definition' not in reloaded['skills']
     finally:
-        await save_agent_registry_payload({'skills': original_skills, 'tools': original_tools})
+        await save_agent_registry_payload({'skills': original_skills, 'tools': original_tools}, seed_import=True)
         agent_definition._RUNTIME_SKILL_REGISTRY = previous_skills
         agent_definition._RUNTIME_TOOL_REGISTRY = previous_tools
         agent_definition.load_skill_registry.cache_clear()

@@ -15,6 +15,7 @@ import { createRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { wfApproveOrReject, wfListBusinessItems } from '@/services/api';
 import { APPROVAL_NOTIFICATIONS_CHANGED } from '@/components/NotificationCenter';
+import { WORKFLOW_VIEWS, normalizedWorkflowView as normalizedView } from '@/config/navigation';
 import { formatServerDateTime } from '@/utils/dateTime';
 
 export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned' | 'rejected';
@@ -97,18 +98,7 @@ const statusMeta: Record<string, { label: string; color: string; icon: JSX.Eleme
 
 statusMeta.rejected = { label: '已驳回', color: 'error', icon: <RollbackOutlined />, description: '审批已拒绝' };
 
-const approvalTabs: Array<{ key: WorkflowViewTab; label: string }> = [
-  { key: 'pending', label: '待审批' },
-  { key: 'initiated', label: '我发起的' },
-  { key: 'processed', label: '我已处理的' },
-];
-
-function normalizedView(tab: string | null): WorkflowViewTab {
-  if (tab === 'pending' || tab === 'initiated' || tab === 'processed') return tab;
-  if (tab === 'done' || tab === 'rejected') return 'processed';
-  if (tab) return 'initiated';
-  return 'pending';
-}
+const approvalTabs = WORKFLOW_VIEWS;
 
 function actionLabel(action?: string | null) {
   return ({ approve: '审批通过', reject: '驳回申请', return: '退回申请', cancel: '取消申请' } as Record<string, string>)[action || ''] || action || '等待处理';
@@ -540,14 +530,13 @@ export default function WorkflowPage() {
 
       <section className="workflow-approval-topbar">
         <div>
-          <Typography.Title level={3}>流程与待办</Typography.Title>
           <Typography.Text type="secondary">
-            统一处理各业务表单的审批任务，追踪我的申请与处理记录。新申请请从对应业务表单发起。
+            新申请请从对应业务表单发起。
           </Typography.Text>
         </div>
         <Space>
           <Button icon={<HistoryOutlined />} onClick={loadItems}>刷新</Button>
-          <Button type="primary" icon={<FormOutlined />} onClick={() => navigate('/')}>返回工作台</Button>
+          <Button icon={<FormOutlined />} onClick={() => navigate('/')}>返回工作台</Button>
         </Space>
       </section>
 
@@ -614,7 +603,7 @@ export default function WorkflowPage() {
       <Drawer
         className="workflow-detail-drawer workflow-approval-drawer"
         title={selectedItem?.title || '流程详情'}
-        width="min(560px, calc(100vw - 180px))"
+        width="min(560px, calc(100vw - 12px))"
         placement="right"
         open={detailOpen}
         onClose={closeWorkflowDetail}

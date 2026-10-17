@@ -1,3 +1,4 @@
+import SettingsTabs from '@/components/SettingsTabs';
 import { useEffect, useState } from 'react';
 import {
   AuditOutlined,
@@ -7,7 +8,7 @@ import {
   TeamOutlined,
   UserSwitchOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Form, Input, InputNumber, Space, Statistic, Switch, Tabs, Typography, message } from 'antd';
+import { Button, Card, Form, Input, InputNumber, Space, Statistic, Switch, Typography, message } from 'antd';
 import { adminGetIamSettings, adminUpdateIamSettings } from '@/services/api';
 import OrganizationManagement from './OrganizationManagement';
 import RoleManagement from './RoleManagement';
@@ -28,7 +29,7 @@ export default function IdentityAccessManagement({ defaultActiveKey = 'overview'
 
   return (
     <div className="identity-access-workspace">
-      <Tabs
+      <SettingsTabs
         className="identity-access-tabs"
         activeKey={activeKey}
         onChange={(key) => {

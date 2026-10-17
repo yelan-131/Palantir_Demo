@@ -1434,7 +1434,7 @@ async def send_agent_message(
         conversation.last_message = content
         conversation.metadata_json = {**(conversation.metadata_json or {}), "last_run_id": run_id}
 
-        session.add_all([user_message, assistant_message, run, tool_call, memory])
+        session.add_all([user_message, assistant_message, run, tool_call] + ([memory] if memory is not None else []))
         await session.commit()
         await session.refresh(conversation)
         await session.refresh(user_message)

@@ -48,9 +48,41 @@ export interface ViewTableConfig {
   rowActions: string[];
 }
 
+export interface ViewAudience {
+  mode: 'everyone' | 'restricted';
+  roleIds: number[];
+  userIds: number[];
+  orgIds: number[];
+}
+
+export interface ViewTabConfig {
+  id: string;
+  name: string;
+  audience: ViewAudience;
+  filters: ViewFilterConfig[];
+  table: ViewTableConfig;
+}
+
+export function getViewTabs(config: ViewConfig): ViewTabConfig[] {
+  return config.tabs?.length ? config.tabs : [{
+    id: 'default', name: '默认视图',
+    audience: { mode: 'everyone', roleIds: [], userIds: [], orgIds: [] },
+    filters: config.filters, table: config.table,
+  }];
+}
+
+export function updateActiveView(config: ViewConfig, id: string, update: (view: ViewConfig) => ViewConfig): ViewConfig {
+  const tab = getViewTabs(config).find((item) => item.id === id) || getViewTabs(config)[0];
+  const next = update({ filters: tab.filters, table: tab.table });
+  if (!config.tabs?.length) return { ...config, ...next };
+  const tabs = config.tabs.map((item) => item.id === tab.id ? { ...item, filters: next.filters, table: next.table } : item);
+  return { ...config, filters: tabs[0].filters, table: tabs[0].table, tabs };
+}
+
 export interface ViewConfig {
   filters: ViewFilterConfig[];
   table: ViewTableConfig;
+  tabs?: ViewTabConfig[];
 }
 
 export function controlTypeForField(fieldType = ''): ViewControlType {
@@ -131,8 +163,18 @@ export function normalizeViewConfig(config: unknown, fields: ViewFieldLike[], fi
   const fallback = makeDefaultViewConfig(fields, filterFieldNames);
   if (!config || typeof config !== 'object') return fallback;
   const source = config as Partial<ViewConfig>;
+  const tabs = Array.isArray(source.tabs) ? source.tabs.filter((tab) => tab && typeof tab.id === 'string' && tab.id && typeof tab.name === 'string').map((tab) => {
+    const view = normalizeViewConfig({ filters: tab.filters, table: tab.table }, fields, filterFieldNames);
+    return { ...tab, ...view, audience: {
+      mode: tab.audience?.mode === 'everyone' ? 'everyone' as const : 'restricted' as const,
+      roleIds: Array.isArray(tab.audience?.roleIds) ? tab.audience.roleIds : [],
+      userIds: Array.isArray(tab.audience?.userIds) ? tab.audience.userIds : [],
+      orgIds: Array.isArray(tab.audience?.orgIds) ? tab.audience.orgIds : [],
+    } };
+  }) : undefined;
   return {
-    filters: Array.isArray(source.filters) && source.filters.length ? source.filters.map((filter, index) => ({
+    ...(tabs?.length ? { tabs } : {}),
+    filters: Array.isArray(source.filters) ? source.filters.map((filter, index) => ({
       ...fallback.filters[index],
       ...filter,
       id: filter.id || `filter-${filter.fieldName || index}`,
@@ -143,7 +185,7 @@ export function normalizeViewConfig(config: unknown, fields: ViewFieldLike[], fi
     table: {
       ...fallback.table,
       ...(source.table || {}),
-      columns: Array.isArray(source.table?.columns) && source.table.columns.length
+      columns: Array.isArray(source.table?.columns)
         ? source.table.columns.map((column, index) => ({
           ...fallback.table.columns[index],
           ...column,

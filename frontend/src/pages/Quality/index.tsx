@@ -21,7 +21,6 @@ import {
   Form,
 } from 'antd';
 import {
-  SafetyCertificateOutlined,
   SearchOutlined,
   LineChartOutlined,
   PlusOutlined,
@@ -41,7 +40,7 @@ import {
 import { formatServerDateTime } from '@/utils/dateTime';
 import { exportCSV } from '@/utils/csvExport';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 // ── Types ──────────────────────────────────────────────────────────
 interface SPCPoint {
@@ -530,20 +529,17 @@ export default function QualityPage() {
   }
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 20 }}>
-        <SafetyCertificateOutlined style={{ marginRight: 8 }} />
-        质量管理
+    <div className="quality-page">
+      <header className="workspace-page-header">
         <Button
           type="primary"
           danger
           icon={<PlusOutlined />}
-          style={{ float: 'right', marginTop: 4 }}
           onClick={() => setWfModalOpen(true)}
         >
           提交异常处理
         </Button>
-      </Title>
+      </header>
 
       {/* ── SPC Control Chart ── */}
       <Card

@@ -127,16 +127,19 @@ export function useShellPreferences() {
   const updatePreferences = useCallback((updates: Partial<ShellPreferences>) => {
     const next = normalize({ ...readPreferences(key), ...updates });
     cachedPreferences.set(key, next);
+    let persisted = true;
     try {
       window.localStorage.setItem(key, JSON.stringify(next));
       unsavedPreferences.delete(key);
     } catch {
+      persisted = false;
       // Continue applying preferences in this window if storage is unavailable.
       unsavedPreferences.set(key, next);
     }
     setSnapshot({ key, preferences: next });
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { key, preferences: next } }));
+    return { persisted, preferences: next };
   }, [key]);
 
-  return { preferences, updatePreferences };
+  return { preferences, updatePreferences, persisted: !unsavedPreferences.has(key) };
 }

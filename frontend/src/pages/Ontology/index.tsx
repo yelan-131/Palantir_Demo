@@ -297,8 +297,8 @@ export default function OntologyPage() {
   };
 
   const browserTab = (
-    <Row gutter={16} style={{ minHeight: 620 }}>
-      <Col span={6}>
+    <Row gutter={[16, 16]} style={{ minHeight: 620, marginInline: 0 }}>
+      <Col xs={24} lg={6}>
         <Card title="实体类型" size="small" extra={<Text type="secondary">{entityTypes.length} 种</Text>}>
           <Input
             placeholder="搜索实体类型"
@@ -350,10 +350,10 @@ export default function OntologyPage() {
           </Spin>
         </Card>
       </Col>
-      <Col span={18}>
+      <Col xs={24} lg={18}>
         {!selectedType ? (
           <Card style={{ minHeight: 620, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Empty description="请在左侧选择一个实体类型" />
+            <Empty description="请选择一个实体类型" />
           </Card>
         ) : (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -622,11 +622,10 @@ export default function OntologyPage() {
 
   return (
     <div>
-      <Title level={4}>本体建模</Title>
       <Tabs
         defaultActiveKey="browser"
         items={[
-          { key: 'browser', label: '本体浏览', children: browserTab },
+          { key: 'browser', label: '实体浏览', children: browserTab },
           { key: 'extraction', label: '知识抽取工作台', children: extractionTab },
         ]}
       />

@@ -213,7 +213,7 @@ def extract_pdf_text(file_name: str, content: bytes) -> str:
 
 
 def _vision_url(config=None) -> str:
-    config = config or settings_to_provider_config(settings_snapshot())
+    config = config or settings_to_provider_config(settings_snapshot(), purpose='document')
     base_url = (config.base_url or "").strip()
     if not base_url:
         if config.provider == "glm":
@@ -225,9 +225,10 @@ def _vision_url(config=None) -> str:
     return urljoin(f"{base_url.rstrip('/')}/", "chat/completions")
 
 
-def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | None:
-    effective = settings_snapshot()
-    config = settings_to_provider_config(effective)
+def vision_extract_markdown(file_name: str, content: bytes, *, settings_data: dict | None = None) -> dict[str, Any] | None:
+    from .model_catalog import resolve_model_settings
+    effective = resolve_model_settings(settings_data if settings_data is not None else settings_snapshot(), 'document')
+    config = settings_to_provider_config(effective, purpose='document')
     api_key = config.api_key
     if not effective.get("aiEnabled", True) or config.vision_model == "disabled" or not api_key:
         return None
@@ -251,7 +252,7 @@ def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | 
             }
         ],
         "temperature": 0.0,
-        "max_tokens": 4096,
+        "max_tokens": int(effective.get("maxTokens") or 4096),
         "stream": False,
     }
     try:
@@ -259,7 +260,7 @@ def vision_extract_markdown(file_name: str, content: bytes) -> dict[str, Any] | 
             response = client.post(
                 _vision_url(config),
                 json=payload,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", **({"OpenAI-Organization": config.organization} if config.organization else {}), **({"OpenAI-Project": config.project} if config.project else {})},
             )
             response.raise_for_status()
         data = response.json()

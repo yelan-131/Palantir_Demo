@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import {
   LogoutOutlined,
-  SettingOutlined,
+  SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import { PERSONAL_SETTINGS_ENTRIES, visibleNavigationEntries } from '../../config/navigation';
 import { Avatar, Dropdown, Space, Tag } from 'antd';
 import type { MenuProps } from 'antd';
 
@@ -25,9 +26,10 @@ interface AccountMenuProps {
   onNavigate: (path: string) => void;
   onLogout: () => void;
   compact?: boolean;
+  active?: boolean;
 }
 
-export default function AccountMenu({ user, onNavigate, onLogout, compact = false }: AccountMenuProps) {
+export default function AccountMenu({ user, onNavigate, onLogout, compact = false, active = false }: AccountMenuProps) {
   const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
 
   const menu = useMemo<MenuProps>(() => ({
@@ -48,18 +50,25 @@ export default function AccountMenu({ user, onNavigate, onLogout, compact = fals
       },
       { type: 'divider' },
       {
-        key: 'account-center',
-        label: '个人账号',
-        icon: <UserOutlined />,
-        onClick: () => onNavigate('/account-center?section=account'),
+        key: 'personal-settings',
+        type: 'group' as const,
+        label: '个人设置',
+        children: PERSONAL_SETTINGS_ENTRIES.map(entry => ({
+          key: entry.path, label: entry.label,
+          onClick: () => onNavigate(entry.path),
+        })),
       },
       {
-        key: 'preferences',
-        label: '个人设置',
-        icon: <SettingOutlined />,
-        onClick: () => onNavigate('/account-center?section=preferences'),
+        key: 'application-settings',
+        type: 'group' as const,
+        label: '应用配置',
+        children: visibleNavigationEntries('studio', Boolean(user?.is_admin)).map(entry => ({
+          key: entry.path, label: entry.label,
+          onClick: () => onNavigate(entry.path),
+        })),
       },
-      { type: 'divider' },
+      ...(user?.is_admin ? [{ key: 'platform-settings', label: '平台管理', icon: <SafetyCertificateOutlined />, onClick: () => onNavigate('/admin') }] : []),
+      { type: 'divider' as const },
       {
         key: 'logout',
         label: '退出登录',
@@ -74,8 +83,9 @@ export default function AccountMenu({ user, onNavigate, onLogout, compact = fals
     <Dropdown menu={menu} trigger={['click']} placement={compact ? 'topRight' : 'bottomRight'}>
       <button
         type="button"
-        className={compact ? 'shell-account-button' : 'account-menu-button'}
-        aria-label="用户与账号"
+        className={`${compact ? 'shell-account-button' : 'account-menu-button'}${active ? ' is-active' : ''}`}
+        aria-pressed={active}
+        aria-label="用户菜单与设置"
         style={{
           cursor: 'pointer',
           border: 0,
