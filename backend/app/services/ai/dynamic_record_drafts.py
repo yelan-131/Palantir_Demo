@@ -120,10 +120,8 @@ def _pick_payload_value(payload: dict[str, Any], field: FormField) -> Any:
             continue
         if _normalize(str(key)) == _normalize(field.field_name) or (lowered_label and lowered_label in str(key).lower()):
             return value
-    if field.required:
-        if field.field_type in {"json", "array"}:
-            return {}
-        return str(payload.get("source_message") or "Pending action review")[:240]
+    # Missing values must be handled by the shared rules/validation boundary;
+    # do not fabricate text for required, generated or linked fields.
     return field.default_value
 
 
@@ -142,6 +140,23 @@ async def create_dynamic_record_draft_from_agent(
     if not await has_form_permission(user, form.id, "create", session):
         raise HTTPException(status_code=403, detail="Form create permission denied")
 
+    receipt_run = None
+    if payload.get('_execution_run_id'):
+        from app.models.relational import AIAgentRun
+        from .agent_items import extract_confirmation_payload
+        from .run_recovery import receipts
+        receipt_run = await session.scalar(select(AIAgentRun).where(
+            AIAgentRun.tenant_id == tenant_id, AIAgentRun.run_id == payload['_execution_run_id']).with_for_update())
+        if receipt_run is not None:
+            owner = (extract_confirmation_payload(receipt_run.items or []) or receipt_run.confirmation_payload or {}).get('user')
+            if str(owner) != str(user.get('sub') or user.get('username') or user.get('uid')):
+                raise HTTPException(403, '确认操作不属于当前用户')
+            for receipt in receipts(receipt_run.items):
+                if receipt.get('action_key', '0') == payload.get('_execution_action_key', '0'):
+                    return receipt['payload']
+            if receipt_run.status != 'confirmed':
+                raise HTTPException(409, '操作尚未确认或已结束')
+
     from app.services.records import runtime_fields, create_record
     from app.api.forms import DynamicRecordCreate
     fields = await runtime_fields(session, form)
@@ -153,7 +168,14 @@ async def create_dynamic_record_draft_from_agent(
         if value not in (None, "", [], {}):
             data[field.field_name] = value
     response = await create_record(form.id, DynamicRecordCreate(data=data, status="draft"),
-        session, user, draft=True, source="ai_agent_confirmation")
+        session, user, defer_commit=receipt_run is not None, draft=True, source="ai_agent_confirmation")
     record = response["data"]
-    return {"record_id": record["id"], "form_id": form.id, "form_code": form.code,
+    result = {"record_id": record["id"], "form_id": form.id, "form_code": form.code,
         "form_name": form.name, "status": record["status"], "data": record["data"]}
+    if receipt_run is not None:
+        action_key = payload.get('_execution_action_key', '0')
+        receipt_run.items = [*(receipt_run.items or []), {'type': 'tool_result',
+            'id': f'receipt-{action_key}', 'execution_receipt': True, 'action_key': action_key,
+            'tool': 'forms.create_dynamic_record_draft', 'status': 'completed', 'payload': result}]
+        await session.commit()
+    return result

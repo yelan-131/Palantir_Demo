@@ -12,6 +12,7 @@ import {
   PlusOutlined,
   SearchOutlined,
   SendOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import {
@@ -22,6 +23,7 @@ import {
   listAgentConversations,
   streamAgentChat,
   streamConfirmAgentRun,
+  getAgentRunState,
   updateAgentConversation,
 } from '@/services/api';
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
@@ -31,7 +33,7 @@ import type { AiKnowledgeContext } from './context';
 import './style.css';
 
 type ChatRole = 'assistant' | 'user';
-type MockSkillStatus = 'draft_created' | 'ready_for_review';
+type MockSkillStatus = 'draft_created' | 'ready_for_review' | 'completed' | 'failed';
 
 interface MockSkillAction {
   id: string;
@@ -131,6 +133,7 @@ interface AgentMessagePayload {
   model_name?: string | null;
   usage?: Record<string, unknown> | null;
   run_id?: string;
+  run_status?: string;
   mode?: string;
   items?: Array<Record<string, unknown>>;
   risk_level?: string;
@@ -391,13 +394,17 @@ function groupSessionsForHistory(sessions: AgentSession[]) {
 function mapServerMessage(message: AgentMessagePayload): ChatMessage {
   const isAssistant = message.role !== 'user';
   const items = normalizeAgentItems(message.items);
-  const confirmationPayload = getConfirmationItemPayload(items);
-  const actions = getConfirmationActions(items);
+  const terminal = ['completed', 'cancelled', 'failed'].includes(message.run_status || '');
+  const confirmationPayload = terminal ? undefined : getConfirmationItemPayload(items);
+  const actions = message.run_status === 'cancelled' ? undefined : getConfirmationActions(items);
+  const mappedActions = isAssistant ? mapAgentActions(actions) : undefined;
   return {
     id: message.message_id || message.id || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role: isAssistant ? 'assistant' : 'user',
     content: message.content || '',
-    actions: isAssistant ? mapAgentActions(actions) : undefined,
+    actions: message.run_status === 'failed'
+      ? mappedActions?.map(action => ({ ...action, status: 'failed', summary: '操作未完成，请查看执行结果。', nextSteps: [] }))
+      : message.run_status === 'completed' ? mappedActions?.map(action => ({ ...action, status: 'completed', summary: '已确认并执行。', nextSteps: [] })) : mappedActions,
     items: isAssistant ? items : undefined,
     steps: isAssistant ? mapAgentSteps(items) : undefined,
     trace: isAssistant ? mapTraceFromItems(items) : undefined,
@@ -405,7 +412,7 @@ function mapServerMessage(message: AgentMessagePayload): ChatMessage {
     source: isAssistant && message.model_name ? `model: ${message.model_name}` : undefined,
     contextSources: isAssistant ? getContextSources({ items }) : undefined,
     runId: isAssistant ? message.run_id : undefined,
-    requiresConfirmation: isAssistant ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : undefined,
+    requiresConfirmation: isAssistant && !terminal ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : false,
     confirmationPayload: isAssistant ? confirmationPayload : undefined,
   };
 }
@@ -563,6 +570,14 @@ function appendAgentTraceItem(
 }
 
 function createTraceItem(event: string, data: Record<string, unknown>): AgentTraceItem | undefined {
+  if (event === 'harness.progress') {
+    const phase = String(data.phase || '');
+    const labels: Record<string, string> = { 'turn/start': 'Harness 开始执行', 'step/start': `模型正在处理第 ${data.step || 1} 步`, 'step/end': `第 ${data.step || 1} 步完成`, 'assistant/message': '模型本步输出已接收', 'compaction/start': 'Harness 正在压缩上下文', 'compaction/end': '上下文压缩完成', 'turn/end': 'Harness 本轮执行结束', 'llm/retry': `模型将在等待后重试（第 ${data.retry || 1} 次）`, 'llm/retry-started': `模型正在重试（第 ${data.retry || 1} 次）` };
+    const usage = data.usage as Record<string, number> | undefined;
+    const accounting = usage && typeof usage.inputTokens === 'number' ? ` · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} Token` : '';
+    const stepId = (phase.startsWith('step/') || phase.startsWith('llm/retry')) ? `harness-step-${data.step}` : phase.startsWith('turn/') ? 'harness-turn' : phase.startsWith('compaction/') ? 'harness-compaction' : `harness-output-${data.step ?? data.sequence}`;
+    return { id: stepId, kind: 'note', content: (labels[phase] || phase) + accounting, status: phase.endsWith('/start') || phase.startsWith('llm/retry') ? 'active' : 'completed', stepId };
+  }
   if (event === 'assistant.note') {
     return undefined;
   }
@@ -635,7 +650,7 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
 }
 
 function getLowCodeReview(action: MockSkillAction) {
-  if (action.skill !== 'low_code.create_form_definition') return undefined;
+  if (!['low_code.create_form_definition', 'forms.create_form_definition'].includes(action.skill)) return undefined;
   const payload = asRecord(action.payload);
   const form = asRecord(payload.form);
   const menu = asRecord(payload.menu);
@@ -652,6 +667,7 @@ function getLowCodeReview(action: MockSkillAction) {
       label: formatActionValue(field.label),
       type: formatActionValue(field.field_type),
       required: Boolean(field.required),
+      options: Array.isArray(field.enum_values) ? field.enum_values.map(formatActionValue).join(' / ') : '',
     })),
     hiddenFieldCount: Math.max(0, fields.length - 8),
   };
@@ -703,7 +719,7 @@ function getDraftPreviewFields(payload?: Record<string, unknown>) {
 }
 
 function getGenericActionReview(action: MockSkillAction) {
-  if (action.skill === 'low_code.create_form_definition') return undefined;
+  if (getLowCodeReview(action)) return undefined;
   const payload = asRecord(action.payload);
   const fields = getDraftPreviewFields(payload);
   return {
@@ -716,7 +732,7 @@ function getGenericActionReview(action: MockSkillAction) {
 function getPendingStateFromAction(action: MockSkillAction): AgentActionState {
   const payload = asRecord(action.payload);
   let collectedSlots: Record<string, unknown> = payload;
-  if (action.skill === 'low_code.create_form_definition') {
+  if (getLowCodeReview(action)) {
     const form = asRecord(payload.form);
     const menu = asRecord(payload.menu);
     collectedSlots = {
@@ -816,7 +832,7 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
   if (recordId !== undefined && formCode) {
     return {
       kind: 'dynamic_record',
-      title: '动态记录草稿已创建',
+      title: result.operation === 'update' ? '记录已更新' : '动态记录草稿已创建',
       detail: [formName, `记录 ${recordId}`].filter(Boolean).join(' · '),
       href: `/dynamic/${formCode}?recordId=${recordId}`,
       id: recordId as string | number,
@@ -838,7 +854,7 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
 }
 
 function getStatusLabel(status: MockSkillStatus) {
-  return status === 'draft_created' ? '草稿已生成' : '待复核';
+  return status === 'failed' ? '未执行' : status === 'completed' ? '已执行' : status === 'draft_created' ? '草稿已生成' : '待复核';
 }
 
 function generateUnavailableReply(): AssistantReply {
@@ -859,7 +875,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [historyScope, setHistoryScope] = useState<'recent' | 'archived'>('recent');
   const [archivedSessions, setArchivedSessions] = useState<AgentSession[]>([]);
   const [sending, setSending] = useState(false);
+  const streamController = useRef<AbortController | null>(null);
+  useEffect(() => () => streamController.current?.abort(), []);
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
+  const confirmationLocks = useRef(new Set<string>());
   const [confirmationNotes, setConfirmationNotes] = useState<Record<string, string>>({});
   const [renamingSessionId, setRenamingSessionId] = useState<string>();
   const [renamingTitle, setRenamingTitle] = useState('');
@@ -1170,6 +1189,8 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     const trimmed = content.trim();
     if (!trimmed || sending || !activeSession) return;
 
+    const controller = new AbortController();
+    streamController.current = controller;
     const userMessage = createUserMessage(trimmed);
     const assistantMessageId = `assistant-stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const assistantPlaceholder: ChatMessage = {
@@ -1210,6 +1231,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           updateSessionMessage(sessionId, assistantMessageId, (message) => ({
             ...message,
             trace: appendAgentTraceItem(message.trace, traceItem),
+            ...(event === 'harness.progress' && typeof data.text === 'string' && data.text ? { content: data.text, fullContent: data.text, typing: false } : {}),
           }));
           return;
         }
@@ -1259,9 +1281,9 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           const answerContent = payload.answer || payload.assistant_message?.content || '后端没有返回可展示的回答。';
           updateSessionMessage(sessionId, assistantMessageId, (message) => ({
             ...message,
-            content: '',
+            content: answerContent,
             fullContent: answerContent,
-            typing: true,
+            typing: false,
             actions: mapAgentActions(getConfirmationActions(payload.items)) || message.actions,
             items: normalizeAgentItems(payload.items) || message.items,
             steps: mapAgentSteps(payload.items) || message.steps,
@@ -1292,8 +1314,12 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
             source: 'Agent 事件流',
           }));
         }
-      });
+      }, controller.signal);
     } catch {
+      if (controller.signal.aborted) {
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({ ...message, content: message.fullContent || message.content || '已停止本次执行。', fullContent: undefined, typing: false, trace: message.trace?.map(item => item.status === 'active' ? { ...item, status: 'failed', content: `${item.content}（已停止）` } : item), source: '执行已停止' }));
+        return;
+      }
       updateSessionMessage(sessionId, assistantMessageId, (message) => ({
         ...message,
         content: '',
@@ -1302,6 +1328,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         source: '无法连接后端 AI 事件流',
       }));
     } finally {
+      if (streamController.current === controller) streamController.current = null;
       setSending(false);
     }
   };
@@ -1310,10 +1337,23 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     const runId = message.runId;
     const token = getConfirmationToken(message.confirmationPayload);
     if (!runId || !token || !activeSession) return;
+    if (confirmationLocks.current.has(runId)) return;
+    confirmationLocks.current.add(runId);
     setConfirmingRunId(runId);
     const sessionId = activeSession.id;
 
     const applyCompletedRun = (run: Record<string, unknown>) => {
+      if (run.status !== 'completed') {
+        const results = Array.isArray(run.tool_results) ? run.tool_results as Record<string, unknown>[] : [];
+        const failed = results.find(result => result.status === 'failed');
+        const detail = String(failed?.error || '操作未完成，请重新读取记录后确认。');
+        updateSessionMessage(sessionId, message.id, item => ({ ...item,
+          content: `${item.fullContent || item.content}\n\n未保存：${detail}`, fullContent: undefined,
+          typing: false, requiresConfirmation: false, executionResult: undefined,
+          actions: item.actions?.map(action => ({ ...action, status: 'failed' as const, summary: detail, nextSteps: [] })),
+        }));
+        return;
+      }
       const results = Array.isArray(run.tool_results) ? run.tool_results : [];
       const completed = results.find((item) => (
         item && typeof item === 'object' && (item as Record<string, unknown>).status === 'completed'
@@ -1331,13 +1371,14 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         return {
           ...item,
           content: routePath
-            ? `${currentContent}\n\n已确认执行，表单已创建：${routePath}`
+            ? `${currentContent}\n\n已确认执行，${executionResult.title}：${routePath}`
             : `${currentContent}\n\n已确认执行。`,
           fullContent: undefined,
           typing: false,
           requiresConfirmation: false,
           actionState: undefined,
           executionResult,
+          actions: item.actions?.map(action => ({ ...action, status: 'completed' as const, summary: '已确认并执行，结果见上方。', nextSteps: [] })),
           source: 'backend Agent: confirmed execution',
         };
       });
@@ -1391,16 +1432,24 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         }
       });
     } catch (error) {
+      try {
+        const recovered = asRecord((await getAgentRunState(runId)).data?.data);
+        if (recovered.status === 'completed' || recovered.status === 'failed') {
+          applyCompletedRun(recovered);
+          return;
+        }
+      } catch { /* Retain the owner-bound card so the same run can be retried. */ }
       const detail = (error as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail
         || (error as { message?: string })?.message
         || 'unknown error';
       updateSessionMessage(sessionId, message.id, (item) => ({
         ...item,
-        content: `${item.fullContent || item.content}\n\n确认执行失败：${detail}`,
+        content: `${item.fullContent || item.content}\n\n暂未收到执行结果：${detail}。请重试此确认卡，系统会查询原操作结果。`,
         fullContent: undefined,
         typing: false,
       }));
     } finally {
+      confirmationLocks.current.delete(runId);
       setConfirmingRunId(undefined);
     }
   };
@@ -1570,7 +1619,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                               <Typography.Text strong>{action.title}</Typography.Text>
                               <code>{action.skill}</code>
                             </div>
-                            <Tag color="green" icon={<CheckCircleOutlined />}>
+                            <Tag color={action.status === 'failed' ? 'red' : action.status === 'completed' ? 'green' : 'orange'}>
                               {getStatusLabel(action.status)}
                             </Tag>
                           </div>
@@ -1596,7 +1645,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                 {review.fields.map((field) => (
                                   <div className="ai-confirm-field-item" key={`${action.id}-${field.name}`}>
                                     <span>{field.label}</span>
-                                    <small>{field.name} · {field.type}{field.required ? ' · 必填' : ''}</small>
+                                    <small>{field.name} · {field.type}{field.required ? ' · 必填' : ''}{field.options ? ` · ${field.options}` : ''}</small>
                                   </div>
                                 ))}
                                 {review.hiddenFieldCount ? (
@@ -1649,7 +1698,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                   <Typography.Text strong>{genericReview.title}</Typography.Text>
                                   <small>{genericReview.sourceDraftId ? `来源草稿 ${genericReview.sourceDraftId}` : action.skill}</small>
                                 </div>
-                                <Tag color="orange">待确认</Tag>
+                                <Tag color={action.status === 'failed' ? 'red' : action.status === 'completed' ? 'green' : 'orange'}>{getStatusLabel(action.status)}</Tag>
                               </div>
                               <div className="ai-confirm-field-list">
                                 {genericReview.fields.map((field) => (
@@ -1762,7 +1811,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                 }
               }}
             />
-            <Button type="primary" icon={<SendOutlined />} loading={sending} onClick={() => { void sendMessage(input); }} />
+            {sending ? <Button danger aria-label="停止生成" title="停止生成" icon={<StopOutlined />} onClick={() => streamController.current?.abort()} /> : <Button type="primary" aria-label="发送消息" icon={<SendOutlined />} onClick={() => { void sendMessage(input); }} />}
           </div>
     </div>
   );

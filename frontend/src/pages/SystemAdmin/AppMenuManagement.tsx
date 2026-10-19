@@ -1,3 +1,5 @@
+import './assembly.css';
+import { MenuAccessPanel, FieldStructurePanel, type AssemblyRole, type NewAssemblyField } from './AssemblyPropertyPanels';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -26,6 +28,8 @@ import {
   Card,
   Col,
   Empty,
+  Dropdown,
+  Modal,
   Form,
   Input,
   List,
@@ -53,6 +57,10 @@ import {
   createPlatformForm,
   updatePlatformForm,
   adminListRoles,
+  adminListUsers,
+  createPlatformFormField,
+  updatePlatformFormField,
+  archivePlatformFormField,
   adminUpdateApplication,
   createPlatformMenuNode,
   deletePlatformMenuNode,
@@ -69,7 +77,7 @@ import {
   type SavedAssemblyMenuNode,
 } from '@/config/appAssemblyMenus';
 
-import { persistApplication, persistForm, propertyError } from './assemblyPersistence';
+import { persistApplication, persistForm, propertyError, assemblyFieldPayload, assemblyFieldUpdatePayload } from './assemblyPersistence';
 
 const persistenceApi = { adminCreateApplication, adminUpdateApplication, getPlatformForm, createPlatformForm, updatePlatformForm };
 const notifyApplicationsChanged = () => window.dispatchEvent(new Event('applications-changed'));
@@ -111,7 +119,8 @@ type FormRecord = {
   entity: string;
   source: string;
   status: 'draft' | 'published' | 'disabled';
-  owner: string;
+  creator: string;
+  creatorId?: number | null;
   description: string;
   fields: number;
   fieldRows?: FieldRecord[];
@@ -119,6 +128,7 @@ type FormRecord = {
 };
 
 type FieldRecord = {
+  raw?: PlatformFormField;
   id: string;
   label: string;
   code: string;
@@ -336,6 +346,7 @@ function mapPlatformFieldToRow(field: PlatformFormField): FieldRecord {
   const controlType = field.control_type ?? stringFromConfigValue(uiConfig.controlType, uiConfig.component);
   return {
     id: String(field.id),
+    raw: field,
     label: field.label || field.field_name,
     code: field.field_name,
     columnName: field.field_name,
@@ -378,7 +389,8 @@ function mapPlatformFormToRecord(form: PlatformForm): FormRecord {
     entity: String(config.entityLabel || form.code),
     source: form.table_name || 'dynamic_records',
     status,
-    owner: String(config.ownerLabel || (form.owner_id ? String(form.owner_id) : 'system')),
+    creator: form.owner_id ? `用户 #${form.owner_id}` : '系统',
+    creatorId: form.owner_id,
     description: form.description || 'Database-backed platform form.',
     fields: fieldRows.length,
     fieldRows,
@@ -491,11 +503,13 @@ function getAllMenuNodes(nodes: MenuNode[]): MenuNode[] {
 }
 
 export default function AppMenuManagement() {
+  const navigate = useNavigate();
   const [appForm] = Form.useForm();
   const [formForm] = Form.useForm();
   const [menuForm] = Form.useForm();
   const [applications, setApplications] = useState<AppRecord[]>([]);
   const [roles, setRoles] = useState<RoleRecord[]>([]);
+  const [creatorNames, setCreatorNames] = useState<Record<number, string>>({});
   const [forms, setForms] = useState<FormRecord[]>([]);
   const [configs, setConfigs] = useState<AppFormConfig[]>([]);
   const [menusByApp, setMenusByApp] = useState<Record<number, MenuNode[]>>({});
@@ -512,6 +526,14 @@ export default function AppMenuManagement() {
   const appConfigs = selectedApp ? configs.filter((item) => item.appId === selectedApp.id) : [];
   const currentMenus = selectedApp ? menusByApp[selectedApp.id] ?? [] : [];
   const selectedMenu = findMenuNode(currentMenus, selectedMenuKey);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminListUsers().then(response => {
+      if (!cancelled) setCreatorNames(Object.fromEntries((response.data?.data || []).map((user: any) => [user.id, user.display_name || user.username])));
+    }).catch(() => { /* Retain the immutable creator ID when directory lookup is unavailable. */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     Promise.all([adminListApplications(), adminListRoles(), listPlatformForms()])
@@ -618,8 +640,35 @@ export default function AppMenuManagement() {
     const raw = await persistForm(persistenceApi, selectedForm, values);
     return commitForm(raw, selectedForm.id);
   };
+  const createAssemblyField = async (values: NewAssemblyField) => {
+    if (propertyOperation.current) throw new Error('正在保存配置，请稍后重试');
+    propertyOperation.current = true; setPropertySaving(true);
+    try {
+      const saved = await persistFormDraft();
+      await createPlatformFormField(saved.id, assemblyFieldPayload(values, saved.fields));
+      const response = await getPlatformForm(saved.id, { schema: 'draft', scope: 'designer' });
+      commitForm(response.data.data, saved.id);
+    } finally { propertyOperation.current = false; setPropertySaving(false); }
+  };
+  const mutateAssemblyField = async (id: string, values?: NewAssemblyField) => {
+    if (propertyOperation.current) throw new Error('正在保存配置，请稍后重试');
+    propertyOperation.current = true; setPropertySaving(true);
+    try {
+      const saved = await persistFormDraft();
+      const latest = (await getPlatformForm(saved.id, { schema: 'draft', scope: 'designer' })).data.data;
+      const field = latest.fields?.find((item: PlatformFormField) => String(item.id) === id && !item.archived);
+      if (!field) throw new Error('此字段已删除或不存在，请刷新后重试');
+      if (values) await updatePlatformFormField(saved.id, id, assemblyFieldUpdatePayload(values, field));
+      else await archivePlatformFormField(saved.id, id);
+      commitForm((await getPlatformForm(saved.id, { schema: 'draft', scope: 'designer' })).data.data, saved.id);
+    } finally { propertyOperation.current = false; setPropertySaving(false); }
+  };
   const saveApp = () => runPropertyOperation(async () => { await persistAppDraft(); message.success('应用属性已保存'); });
   const saveForm = () => runPropertyOperation(async () => { await persistFormDraft(); message.success('表单/看板属性已保存'); });
+  const enterFormDesigner = () => runPropertyOperation(async () => {
+    const saved = await persistFormDraft();
+    navigate(`/form-settings/${encodeURIComponent(saved.code)}`);
+  });
 
   const createDraftApp = () => {
     const nextId = Math.min(...applications.map((app) => app.id), 0) - 1;
@@ -678,7 +727,7 @@ export default function AppMenuManagement() {
       entity: 'NewEntity',
       source: 'generated_table',
       status: 'draft',
-      owner: '\u7cfb\u7edf\u7ba1\u7406\u5458',
+      creator: '保存后自动记录',
       description: '\u7528\u4e8e\u5f55\u5165\u3001\u7f16\u8f91\u3001\u5ba1\u6279\u548c\u914d\u7f6e\u4e1a\u52a1\u6570\u636e\u7684\u8349\u7a3f\u3002',
       fields: 0,
       fieldRows: [],
@@ -989,9 +1038,15 @@ export default function AppMenuManagement() {
         onCreateForm={createDraftForm}
         onSaveApp={saveApp}
         onSaveForm={saveForm}
+        onEnterDesign={enterFormDesigner}
         appActions={{ onPublish: publishSelectedApp, onDisable: disableSelectedApp, onEnable: enableSelectedApp, onDeleteDraft: deleteSelectedDraftApp, onCopyDraft: copySelectedAppAsDraft }}
         formActions={{ onPublish: publishSelectedForm, onDisable: disableSelectedForm, onEnable: enableSelectedForm, onDeleteDraft: deleteSelectedDraftForm, onCopyDraft: copySelectedFormAsDraft }}
         roles={roles}
+        creatorName={selectedForm?.creatorId ? creatorNames[selectedForm.creatorId] || selectedForm.creator : selectedForm?.creator}
+        onCreateField={createAssemblyField}
+        onUpdateField={(id, values) => mutateAssemblyField(id, values)}
+        onDeleteField={id => mutateAssemblyField(id)}
+        onRoleCreated={role => setRoles(previous => [role, ...previous.filter(item => item.id !== role.id)])}
         forms={forms}
         configs={appConfigs}
         menus={currentMenus}
@@ -1040,10 +1095,10 @@ function LifecycleActions({
       <Space wrap>
         <Button icon={<SaveOutlined />} onClick={onSave}>保存变更</Button>
         {allowRepublish && <Button type="primary" icon={<SendOutlined />} onClick={onPublish}>发布更新</Button>}
-        <Button icon={<AppstoreAddOutlined />} onClick={onCopyDraft}>复制为草稿</Button>
-        <Popconfirm title="确认停用？" onConfirm={onDisable}>
-          <Button danger icon={<StopOutlined />}>停用</Button>
-        </Popconfirm>
+        <Dropdown trigger={['click']} menu={{ items: [
+          { key: 'copy', label: '复制为草稿', icon: <AppstoreAddOutlined />, onClick: onCopyDraft },
+          { key: 'disable', label: '停用', icon: <StopOutlined />, danger: true, onClick: () => Modal.confirm({ title: '确认停用？', okText: '停用', cancelText: '取消', okButtonProps: { danger: true }, onOk: onDisable }) },
+        ] }}><Button>更多操作</Button></Dropdown>
       </Space>
     );
   }
@@ -1078,8 +1133,8 @@ type PropertyLifecycleActions = {
 
 function AssemblyWorkspace({
   apps,
-  appForm, formForm, selectedForm, propertySaving, onCreateApp, onCreateForm, onSaveApp, onSaveForm,
-  appActions, formActions,
+  appForm, formForm, selectedForm, propertySaving, onCreateApp, onCreateForm, onSaveApp, onSaveForm, onEnterDesign,
+  appActions, formActions, creatorName, onCreateField, onUpdateField, onDeleteField, onRoleCreated,
   roles,
   forms,
   configs,
@@ -1108,9 +1163,15 @@ function AssemblyWorkspace({
   onCreateForm: () => void;
   onSaveApp: () => void;
   onSaveForm: () => void;
+  onEnterDesign: () => void;
   appActions: PropertyLifecycleActions;
   formActions: PropertyLifecycleActions;
   roles: RoleRecord[];
+  creatorName?: string;
+  onCreateField: (field: NewAssemblyField) => Promise<void>;
+  onUpdateField: (id: string, field: NewAssemblyField) => Promise<void>;
+  onDeleteField: (id: string) => Promise<void>;
+  onRoleCreated: (role: AssemblyRole) => void;
   forms: FormRecord[];
   configs: AppFormConfig[];
   menus: MenuNode[];
@@ -1129,8 +1190,10 @@ function AssemblyWorkspace({
   onSaveMenu: () => void;
   onDeleteMenu: () => void;
 }) {
-  const navigate = useNavigate();
   const [propertyTarget, setPropertyTarget] = useState<'app' | 'form' | 'menu'>('menu');
+  const currentFormName = Form.useWatch('name', formForm) || selectedForm?.name || '表单';
+  const currentMenuName = Form.useWatch('title', menuForm);
+  const currentAppName = Form.useWatch('name', appForm);
   const selectedApp = apps.find((item) => item.id === selectedAppId) ?? apps[0];
   const currentAppForms = forms.filter((form) => boundFormIds.has(form.id));
   const otherForms = forms.filter((form) => !boundFormIds.has(form.id));
@@ -1192,15 +1255,6 @@ function AssemblyWorkspace({
 
   return (
     <div className="app-assembly-workspace">
-      <section className="assembly-help">
-        <div>
-          <Typography.Text strong>{selectedApp.name}</Typography.Text>
-          <Typography.Text type="secondary">
-            选择应用或表单/看板，在右侧编辑属性；将表单/看板拖入菜单结构以配置导航。
-          </Typography.Text>
-        </div>
-      </section>
-
       <Row className="assembly-grid">
         <Col>
           <Card title="应用" className="assembly-column-card" extra={<Tooltip title="新增应用"><Button type="text" size="small" aria-label="新增应用" icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateApp(); setPropertyTarget('app'); }} /></Tooltip>}>
@@ -1230,33 +1284,7 @@ function AssemblyWorkspace({
               <div className="assembly-form-section-title">其他可用表单/看板</div>
               {otherForms.map(renderFormCard)}
               {!otherForms.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无其他可用表单/看板" />}
-              {false && forms.map((form) => {
-                const config = configs.find((item) => item.formId === form.id);
-                const bound = boundFormIds.has(form.id);
-                return (
-                  <div className={`assembly-form-card ${bound ? 'bound' : ''}`} key={form.id}>
-                    <div>
-                      <Space wrap>
-                        <Typography.Text strong>{config?.alias ?? form.name}</Typography.Text>
-                        <Tag>{form.entity}</Tag>
-                        <Tag color={bound ? 'success' : 'default'}>{bound ? '已绑定' : '未绑定'}</Tag>
-                      </Space>
-                      <Typography.Text type="secondary">{form.description}</Typography.Text>
-                      {config && (
-                        <div className="assembly-config-line">
-                          <span>{config.defaultView}</span>
-                          <span>{config.dataScope}</span>
-                        </div>
-                      )}
-                    </div>
-                    <Space>
-                      <Button size="small" onClick={() => onToggleBinding(form.id)}>{bound ? '解绑' : '绑定'}</Button>
-                      <Button size="small" onClick={() => onAddFormToMenu(form)}>加到菜单</Button>
-                      <Button size="small" onClick={() => onOpenFormConfig(form.id)}>配置</Button>
-                    </Space>
-                  </div>
-                );
-              })}
+
             </div>
           </Card>
         </Col>
@@ -1293,102 +1321,45 @@ function AssemblyWorkspace({
               </Card>
         </Col>
         <Col>
-              <Card title="属性" className="assembly-property-card">
+              <Card title="属性" className="assembly-property-card" extra={propertyTarget === 'menu'
+                ? <Tag>菜单节点</Tag>
+                : <PropertyStatus status={propertyTarget === 'app' ? selectedApp.status : selectedForm?.status || 'draft'} />} >
                 {propertyTarget === 'app' ? <fieldset disabled={propertySaving} className="assembly-property-editor">
-                  <Typography.Text strong>应用属性</Typography.Text>
-                  <AppConfigForm form={appForm} />
-                  <LifecycleActions status={selectedApp.status} onSave={onSaveApp} {...appActions} />
+                  <div className="assembly-property-scroll">
+                    <PropertyIdentity icon={renderIcon(selectedApp.icon)} name={currentAppName || selectedApp.name} detail="应用配置" />
+                    <AppConfigForm form={appForm} />
+                  </div>
+                  <div className="assembly-property-actions"><Button onClick={() => appForm.setFieldsValue(selectedApp)}>取消更改</Button><LifecycleActions status={selectedApp.status} onSave={onSaveApp} {...appActions} /></div>
                 </fieldset> : propertyTarget === 'form' && selectedForm ? <fieldset disabled={propertySaving} className="assembly-property-editor">
-                  <Typography.Text strong>表单/看板属性</Typography.Text>
-                  <FormConfigForm form={formForm} />
-                  <section className="assembly-field-summary" aria-label="字段结构">
-                    <Typography.Text strong>字段结构（{selectedForm.fields}）</Typography.Text>
-                    <Table<FieldRecord> rowKey="id" size="small" pagination={false}
-                      dataSource={selectedForm.fieldRows || []} scroll={{ x: 400, y: 240 }}
-                      locale={{ emptyText: '尚未配置字段，请进入设计添加字段' }}
-                      columns={[
-                        { title: '字段名称', dataIndex: 'label', width: 135 },
-                        { title: '字段编码', dataIndex: 'code', width: 150 },
-                        { title: '类型', dataIndex: 'dataType', width: 100 },
-                      ]} />
-                  </section>
-                  <Space direction="vertical" style={{ width: '100%' }}><LifecycleActions allowRepublish status={selectedForm.status} onSave={onSaveForm} {...formActions} />
-                  <Button disabled={!/^\d+$/.test(selectedForm.id)} onClick={() => navigate(`/form-settings/${selectedForm.code}`)}>进入设计</Button></Space>
+                  <div className="assembly-property-scroll">
+                  <PropertyIdentity icon={selectedForm.category === 'analytics' ? <BarChartOutlined /> : <FormOutlined />} name={currentFormName} detail={selectedForm.category === 'analytics' ? '看板配置' : '表单配置'} />
+                  <FormConfigForm form={formForm} creatorName={creatorName || selectedForm.creator} isPersisted={/^\d+$/.test(selectedForm.id)} />
+                  <FieldStructurePanel fields={selectedForm.fieldRows || []} formName={currentFormName} onCreate={onCreateField} onUpdate={onUpdateField} onDelete={onDeleteField} disabled={propertySaving} />
+                  </div>
+                  <div className="assembly-property-actions">
+                    <Button className="assembly-design-link" loading={propertySaving} onClick={onEnterDesign}>进入设计</Button>
+                    <Button onClick={() => formForm.setFieldsValue(selectedForm)}>取消更改</Button>
+                    <LifecycleActions allowRepublish status={selectedForm.status} onSave={onSaveForm} {...formActions} />
+                  </div>
                 </fieldset> : selectedMenu ? (
-                  <Form form={menuForm} layout="vertical" size="small" className="assembly-node-editor">
-                    <div className="node-editor-hero">
-                      <div>
-                        <Form.Item name="title" noStyle>
-                          <Input className="node-title-input" placeholder="菜单名称" />
-                        </Form.Item>
-                      </div>
-                      <div className="node-state-switches">
-                        <Form.Item name="visible" valuePropName="checked" noStyle>
-                          <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
-                        </Form.Item>
-                        <Form.Item name="defaultEntry" valuePropName="checked" noStyle>
-                          <Switch checkedChildren="入口" unCheckedChildren="入口" />
-                        </Form.Item>
-                      </div>
+                  <Form form={menuForm} disabled={propertySaving} layout="vertical" className="assembly-node-editor">
+                    <div className="assembly-property-scroll">
+                    <PropertyIdentity icon={<MenuOutlined />} name={currentMenuName || getMenuLabel(selectedMenu)} detail={`${selectedApp.name} / 菜单入口`} />
+                    <PropertySection title="入口信息">
+                      <Form.Item name="title" label="菜单名称" rules={[{ required: true, whitespace: true, message: '请输入菜单名称' }]}><Input /></Form.Item>
+                      {selectedMenu.formId && <Form.Item name="formId" label="目标表单 / 看板" rules={[{ required: true, message: '请选择目标表单或看板' }]}>
+                        <Select showSearch optionFilterProp="label" options={forms.filter(item => /^\d+$/.test(item.id)).map(item => ({ label: item.name, value: item.id }))} />
+                      </Form.Item>}
+                    </PropertySection>
+                    <section className="assembly-property-section"><h3>导航行为</h3>
+                      <div className="assembly-setting-row"><div><strong>在菜单中显示</strong><p>关闭后，用户将看不到这个入口。</p></div><Form.Item name="visible" noStyle valuePropName="checked"><Switch aria-label="在菜单中显示" /></Form.Item></div>
+                      <div className="assembly-setting-row"><div><strong>设为应用默认入口</strong><p>进入「{selectedApp.name}」时首先打开此页面。</p></div><Form.Item name="defaultEntry" noStyle valuePropName="checked"><Switch aria-label="设为应用默认入口" /></Form.Item></div>
+                    </section>
+                    <MenuAccessPanel form={menuForm} roles={roles} inheritedIds={(selectedApp.roles || []).map(role => role.id)} applicationName={selectedApp.name}
+                      onRoleCreated={onRoleCreated} disabled={propertySaving} />
                     </div>
-                    <div className="node-editor-grid">
-                      {selectedMenu.formId && (
-                        <div className="node-config-card wide">
-                          <Typography.Text strong>目标表单</Typography.Text>
-                          <Form.Item name="formId" noStyle>
-                            <Select
-                              allowClear
-                              placeholder="绑定表单"
-                              options={forms.map((form) => ({ label: form.name, value: form.id }))}
-                            />
-                          </Form.Item>
-                        </div>
-                      )}
-                      <div className="node-config-card wide permission-rule-panel">
-                        <div className="permission-rule-head">
-                          <div className="permission-rule-title">
-                            <SafetyCertificateOutlined />
-                            <Typography.Text strong>入口角色</Typography.Text>
-                          </div>
-                          <Typography.Text type="secondary">同步到角色权限</Typography.Text>
-                        </div>
-                        <div className="entry-role-editor">
-                          <Form.Item name="permissionMode" label="入口策略">
-                            <Select
-                              options={[
-                                { label: '继承默认权限', value: 'inherit' },
-                                { label: '指定入口角色', value: 'custom' },
-                              ]}
-                            />
-                          </Form.Item>
-                          <Form.Item noStyle shouldUpdate>
-                            {({ getFieldValue }) => {
-                              const permissionMode = getFieldValue('permissionMode');
-                              if (permissionMode !== 'custom') {
-                                return (
-                                  <div className="entry-role-inherit">
-                                    当前菜单继承默认入口权限；需要单独授权时切换为“指定入口角色”。
-                                  </div>
-                                );
-                              }
-                              return (
-                                <Form.Item name="roleIds" label="可进入角色">
-                                  <Select
-                                    mode="multiple"
-                                    placeholder="选择能看到并进入该菜单的角色"
-                                    options={roles.map((role) => ({ label: `${role.label} / ${role.name}`, value: role.id }))}
-                                  />
-                                </Form.Item>
-                              );
-                            }}
-                          </Form.Item>
-                          <Typography.Text type="secondary">
-                            这里只配置菜单入口；字段、按钮、状态和数据范围仍在表单设计器里配置，最终结果可在角色管理的权限模拟中验证。
-                          </Typography.Text>
-                        </div>
-                      </div>
-                    </div>
-                    <Space.Compact block>
+                    <div className="assembly-property-actions">
+                      <Button onClick={() => menuForm.setFieldsValue({ title: getMenuLabel(selectedMenu), formId: selectedMenu.formId, visible: selectedMenu.visible ?? true, defaultEntry: selectedMenu.defaultEntry ?? false, permissionMode: selectedMenu.permissionMode || 'inherit', roleIds: selectedMenu.roleIds || [] })}>取消更改</Button>
                       <Button type="primary" icon={<SaveOutlined />} onClick={onSaveMenu}>
                         保存属性
                       </Button>
@@ -1408,7 +1379,7 @@ function AssemblyWorkspace({
                           删除
                         </Button>
                       </Popconfirm>
-                    </Space.Compact>
+                    </div>
                   </Form>
                 ) : (
                   <Empty description="选择应用、表单/看板或菜单节点以编辑属性" />
@@ -1420,162 +1391,67 @@ function AssemblyWorkspace({
   );
 }
 
-function AppConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) {
-  return (
-    <Form form={form} layout="vertical" className="app-config-form">
-      <Row gutter={12}>
-        <Col xs={24} md={10}>
-          <Form.Item name="name" label="应用名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={8}>
-          <Form.Item name="code" label="应用编码" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={6}>
-          <Form.Item name="icon" label="应用图标">
-            <Select
-              optionLabelProp="label"
-              options={iconOptions.map((item) => ({
-                value: item.value,
-                label: item.label,
-                display: (
-                  <Space>
-                    <span className="icon-option-preview">{renderIcon(item.value)}</span>
-                    <span>{item.label}</span>
-                  </Space>
-                ),
-              }))}
-              optionRender={(option) => option.data.display}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Row gutter={12}>
-        <Col xs={24}>
-          <Form.Item name="description" label="应用说明">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Row gutter={12}>
-        <Col xs={24} sm={8} md={5}>
-          <Form.Item name="status" label="发布状态">
-            <Select disabled
-              options={[
-                { label: '已发布', value: 'published' },
-                { label: '草稿', value: 'draft' },
-                { label: '已停用', value: 'disabled' },
-              ]}
-            />
-          </Form.Item>
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <Form.Item name="sort_order" label="排序">
-            <Input type="number" />
-          </Form.Item>
-        </Col>
-        <Col xs={12} sm={8} md={3}>
-          <Form.Item name="is_pinned" label="置顶" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </Col>
-      </Row>
-    </Form>
-  );
+function PropertyStatus({ status }: { status: string }) {
+  return <Tag color={status === 'published' ? 'success' : status === 'disabled' ? 'default' : 'processing'}>
+    {status === 'published' ? '已发布' : status === 'disabled' ? '已停用' : '草稿'}
+  </Tag>;
 }
 
-function FormConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) {
+function PropertyIdentity({ icon, name, detail }: { icon: ReactNode; name: string; detail: string }) {
+  return <div className="assembly-property-identity">
+    <span className="assembly-identity-icon">{icon}</span>
+    <div><Typography.Text type="secondary">{detail}</Typography.Text><Typography.Title level={5}>{name}</Typography.Title></div>
+  </div>;
+}
+
+function PropertySection({ title, children, note }: { title: string; children: ReactNode; note?: string }) {
+  return <section className="assembly-property-section" aria-label={title}>
+    <h3>{title}</h3>{note && <p className="assembly-section-note">{note}</p>}
+    <div className="assembly-property-fields">{children}</div>
+  </section>;
+}
+
+function AppConfigForm({ form }: { form: ReturnType<typeof Form.useForm>[0] }) {
+  return <Form form={form} layout="vertical" className="app-config-form">
+    <PropertySection title="基本信息">
+      <Form.Item name="name" label="应用名称" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="code" label="应用编码" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="icon" label="应用图标"><Select optionLabelProp="label"
+        options={iconOptions.map(item => ({ value: item.value, label: item.label }))}
+        optionRender={option => <Space>{renderIcon(option.data.value)}{option.data.label}</Space>} /></Form.Item>
+      <Form.Item name="description" label="应用说明" className="assembly-field-wide"><Input.TextArea rows={2} /></Form.Item>
+    </PropertySection>
+    <PropertySection title="导航设置">
+      <Form.Item name="sort_order" label="排列顺序"><Input type="number" /></Form.Item>
+      <Form.Item name="is_pinned" label="置顶到应用栏" valuePropName="checked"><Switch /></Form.Item>
+    </PropertySection>
+  </Form>;
+}
+
+function FormConfigForm({ form, isPersisted, creatorName }: { form: ReturnType<typeof Form.useForm>[0]; isPersisted: boolean; creatorName: string }) {
   const category = Form.useWatch('category', form) ?? 'interaction';
   const structureLocked = Boolean(Form.useWatch('structureLocked', form));
   const isAnalytics = category === 'analytics';
-
-  return (
-    <Form form={form} layout="vertical" className="form-config-form">
-      <Form.Item name="structureLocked" hidden valuePropName="checked">
-        <Switch />
-      </Form.Item>
-      <Row gutter={12}>
-        <Col xs={24} md={8}>
-          <Form.Item name="name" label={'\u8868\u5355\u540d\u79f0'} rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={6}>
-          <Form.Item name="code" label={'\u8868\u5355\u7f16\u7801'} rules={[{ required: true }]}>
-            <Input disabled={structureLocked} />
-          </Form.Item>
-        </Col>
-        <Col xs={12} md={5}>
-          <Form.Item name="category" label={'\u7c7b\u578b'}>
-            <Select
-              disabled={structureLocked}
-              onChange={(value) => {
-                form.setFieldValue('mode', value === 'analytics' ? 'bi_report' : undefined);
-                form.setFieldValue('source', value === 'analytics' ? 'existing_dataset' : 'generated_table');
-                form.setFieldValue('entity', value === 'analytics' ? 'MetricDataset' : 'NewEntity');
-              }}
-              options={[
-                { label: '\u4e1a\u52a1\u4ea4\u4e92\u7c7b', value: 'interaction' },
-                { label: '\u5206\u6790\u5c55\u793a\u7c7b', value: 'analytics' },
-              ]}
-            />
-          </Form.Item>
-        </Col>
-        <Col xs={12} md={5}>
-          {isAnalytics ? (
-            <Form.Item name="mode" label={'\u5c55\u793a\u6a21\u5f0f'}>
-              <Select disabled={structureLocked} options={analyticsModeOptions} />
-            </Form.Item>
-          ) : (
-            <Form.Item label={'\u5c55\u793a\u6a21\u5f0f'}>
-              <Input disabled value="" />
-            </Form.Item>
-          )}
-        </Col>
-      </Row>
-      <Row gutter={12}>
-        <Col xs={24} md={8}>
-          <Form.Item name="entity" label={category === 'analytics' ? '\u5206\u6790\u5bf9\u8c61' : '\u6570\u636e\u5b9e\u4f53'}>
-            <Input disabled={structureLocked} prefix={<NodeIndexOutlined />} />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={8}>
-          <Form.Item name="source" label={category === 'analytics' ? '\u6570\u636e\u96c6\u6765\u6e90' : '\u6570\u636e\u6765\u6e90'}>
-            <Input disabled placeholder="保存后自动生成" />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={4}>
-          <Form.Item name="status" label={'\u53d1\u5e03\u72b6\u6001'}>
-            <Select disabled
-              options={[
-                { label: '\u5df2\u53d1\u5e03', value: 'published' },
-                { label: '\u8349\u7a3f', value: 'draft' },
-                { label: '\u5df2\u505c\u7528', value: 'disabled' },
-              ]}
-            />
-          </Form.Item>
-        </Col>
-        <Col xs={24} md={4}>
-          <Form.Item name="owner" label={'\u8d1f\u8d23\u4eba'}>
-            <Input />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Form.Item name="description" label={category === 'analytics' ? '\u5206\u6790\u8bf4\u660e' : '\u8868\u5355\u8bf4\u660e'}>
-        <Input.TextArea rows={2} />
-      </Form.Item>
-      {structureLocked && (
-        <div className="structure-lock-note">
-          {isAnalytics
-            ? '\u7c7b\u578b\u3001\u5c55\u793a\u6a21\u5f0f\u3001\u7f16\u7801\u3001\u5206\u6790\u5bf9\u8c61\u548c\u6570\u636e\u96c6\u6765\u6e90\u4f1a\u5f71\u54cd\u770b\u677f\u8bbe\u8ba1\u4e0e\u5e95\u5c42\u7ed3\u6784\uff0c\u4fdd\u5b58\u540e\u53ea\u80fd\u67e5\u770b\uff0c\u907f\u514d\u540e\u7eed\u914d\u7f6e\u5931\u6548\u3002'
-            : '\u7c7b\u578b\u3001\u7f16\u7801\u3001\u6570\u636e\u5b9e\u4f53\u548c\u6570\u636e\u6765\u6e90\u4f1a\u5f71\u54cd\u8868\u5355\u8bbe\u8ba1\u4e0e\u5e95\u5c42\u4e1a\u52a1\u8868\u7ed3\u6784\uff0c\u4fdd\u5b58\u540e\u53ea\u80fd\u67e5\u770b\uff0c\u907f\u514d\u540e\u7eed\u914d\u7f6e\u5931\u6548\u3002'}
-        </div>
-      )}
-    </Form>
-  );
+  return <Form form={form} layout="vertical" className="form-config-form">
+    <Form.Item name="structureLocked" hidden valuePropName="checked"><Switch /></Form.Item>
+    <PropertySection title="基本信息">
+      <Form.Item name="name" label={isAnalytics ? '看板名称' : '表单名称'} rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="code" label={isAnalytics ? '看板编码' : '表单编码'} rules={[{ required: true }]}><Input disabled={structureLocked || isPersisted} /></Form.Item>
+      <Form.Item label="创建人" htmlFor="assembly-form-creator"><Input id="assembly-form-creator" readOnly value={creatorName} /></Form.Item>
+      <Form.Item name="description" label="说明" className="assembly-field-wide"><Input.TextArea rows={2} placeholder="添加用途说明" /></Form.Item>
+    </PropertySection>
+    <PropertySection title="类型与数据" note={structureLocked ? '结构已锁定，可进入设计维护字段与布局。' : undefined}>
+      <Form.Item name="category" label="类型"><Select disabled={structureLocked}
+        onChange={value => {
+          form.setFieldValue('mode', value === 'analytics' ? 'bi_report' : undefined);
+          form.setFieldValue('source', value === 'analytics' ? 'existing_dataset' : 'generated_table');
+          form.setFieldValue('entity', value === 'analytics' ? 'MetricDataset' : 'NewEntity');
+        }} options={[{label:'业务表单',value:'interaction'},{label:'分析看板',value:'analytics'}]} /></Form.Item>
+      {isAnalytics && <Form.Item name="mode" label="展示模式"><Select disabled={structureLocked} options={analyticsModeOptions} /></Form.Item>}
+      <Form.Item name="entity" label={isAnalytics ? '分析对象' : '数据实体'}><Input disabled={structureLocked} prefix={<NodeIndexOutlined />} /></Form.Item>
+      <Form.Item name="source" label={isAnalytics ? '数据集来源' : '数据来源'} className="assembly-field-wide"><Input disabled placeholder="保存后自动生成" /></Form.Item>
+    </PropertySection>
+  </Form>;
 }
 
 function MenuTitle({ label, formId, defaultEntry }: { label: string; formId?: string; defaultEntry?: boolean }) {

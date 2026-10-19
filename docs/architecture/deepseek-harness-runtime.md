@@ -2,7 +2,7 @@
 
 Updated: 2026-10-17
 
-New application requests use the official `deepseek-harness-sdk==0.1.5rc1`
+New application requests use the official `deepseek-harness-sdk==0.2.1rc2`
 Python SDK and its matching bundled runtime. The SDK drives the real Node/Cordis
 Agent loop. The platform does not emulate that loop or silently fall back to
 its historical planner.
@@ -55,14 +55,15 @@ role policy, including a disabled administrator policy.
 
 ## Conversation ownership and SDK compatibility
 
-The pinned Python SDK can continue sessions inside one runtime process, but
-reopening the same persisted id in a new runtime process fails with “session
-already exists”. Therefore a logical platform conversation remains owned by
-the platform database. Its permitted recent messages and recalled memory are
-assembled before the Harness request. Each SDK invocation gets a separate
-physical execution id and durable Harness log, scoped under a hash of tenant
-and user in `AI_HARNESS_HOME` (default `storage/ai_harness`). Settings changes
-and backend restarts do not depend on a surviving SDK process.
+The 0.2.1rc2 SDK supports explicit `resume_session`. This integration deliberately
+keeps the logical platform conversation in the platform database and assembles
+its permitted recent messages before each Harness request. Each invocation uses
+a separate physical execution id, avoiding duplicate replay of platform history
+and preserving fresh permission-scoped context on every request. Native compaction
+operates within an execution; it does not restore the retired platform memory.
+Durable Harness logs are scoped under a hash of tenant and user in
+`AI_HARNESS_HOME` (default `storage/ai_harness`). Backend restarts do not depend on
+a surviving SDK process.
 
 Concurrent requests to the same logical conversation are serialized. Stream
 cancellation closes the SDK subprocess. Native Harness logs remain distinct
@@ -151,7 +152,7 @@ retaining its private database network.
 ## Deployment and validation
 
 Install `backend/requirements.txt`, which pins both the official SDK and native
-runtime to `0.1.5rc1` and a compatible Pydantic version. The Docker build verifies
+runtime to `0.2.1rc2` and a compatible Pydantic version. The Docker build verifies
 both installed versions and SDK import; the default index is official PyPI
 (`PIP_INDEX_URL` build argument can select an approved mirror). Rebuild the backend image for other environments; installing
 only frontend assets is insufficient.
@@ -176,3 +177,33 @@ Official references:
 - [Python SDK](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk/README.md)
 - [Agent loop](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/README.md)
 - [MCP plugin](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/mcp-client/README.md)
+
+## 0.2.1rc2 integration boundaries
+
+SDK and runtime wheels are pinned together. Native file/working-directory tools,
+MCP resource tools and shells are disabled in the platform patch; only the
+authenticated platform MCP tool set is exposed. The native token meter is retained
+and one native compaction instance is configured in place. Its automatic hooks
+follow the enable switch; the service must be ready before SDK requests start.
+Compaction headroom and summary output are derived from each selected model,
+rather than inheriting the upstream 65,536-token defaults. Explicit overrides
+are checked against output reservation, retention and context capacity.
+
+`harness_parameters.effective_harness_parameters` is shared by execution and
+`POST /ai/settings/effective`. The preview contains resolved values, their sources
+and budget warnings; it never returns provider keys or invokes a model.
+Model context overrides the global window; otherwise the global window overrides
+the derived input-plus-output fallback. Request retries affect the computed total
+execution budget. MCP transport allows five seconds beyond platform tool timeout.
+
+Document vision calls now use the same SDK adapter with inline encoded image
+blocks, configured retries, reasoning and output limits. They expose no platform
+tools and use a temporary isolated DSH home that is removed on completion.
+
+The SDK's root-session notifications project committed assistant text, execution
+phases, usage and compaction events into `harness.progress`. Raw prompt, reasoning
+and child-session events are not forwarded. This SDK emits committed messages,
+not a token-delta protocol; the frontend does not fabricate per-token streaming.
+User cancellation, wall timeout and tool-budget exhaustion close the owned SDK
+process. There is no SDK cancel RPC in this release. Platform confirmations and
+pending writes remain outside the kernel.

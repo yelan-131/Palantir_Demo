@@ -124,7 +124,7 @@ def resolve_model_settings(data, purpose='chat'):
         result['maxTokens'] = model['maxTokens']
     native = result.setdefault('harnessPolicy', {})
     native['reasoning_effort'] = None
-    native['contextWindow'] = int(model.get('contextWindow') or (int((data.get('contextPolicy') or {}).get('maxContextTokens', 12000)) + int(result.get('maxTokens', 2048))))
+    native['contextWindow'] = int(model.get('contextWindow') or native.get('contextWindow') or (int((data.get('contextPolicy') or {}).get('maxContextTokens', 12000)) + int(result.get('maxTokens', 2048))))
     for source, target in (('contextWindow', 'contextWindow'), ('reasoningEffort', 'reasoning_effort')):
         if model.get(source) not in (None, ''):
             native[target] = model[source]

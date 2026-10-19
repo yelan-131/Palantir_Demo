@@ -98,6 +98,61 @@ from app.services.form_runtime import (
 
 router = APIRouter()
 
+
+class FormRulePreviewRequest(BaseModel):
+    data: dict[str, Any] = Field(default_factory=dict)
+    record_id: int | None = None
+
+
+@router.post('/{form_id}/rules/evaluate')
+async def evaluate_form_rules(form_id: int, body: FormRulePreviewRequest,
+                              db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from app.services import records
+    from app.services.form_rules import evaluate, accessible_fields
+    from app.models.relational import Form
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user):
+        raise HTTPException(404, 'Form not found')
+    scope = 'edit' if body.record_id is not None else 'create'
+    await records.require_form_permission(db, user, form_id, scope)
+    existing = None
+    if body.record_id is not None:
+        result = await records.get_record(form_id, body.record_id, db, user)
+        existing = result['data']['data']
+        raw = await records.read_raw(db, form, body.record_id)
+        await records.require_record_permission(db, user, form, 'edit', raw)
+    else:
+        await records.require_record_permission(db, user, form, 'create', {'data': body.data, 'created_by': current_user_id(user)})
+    fields = await accessible_fields(db, user, form, scope, {**(existing or {}), **body.data})
+    names = {field.field_name for field in fields}
+    if set(body.data) - names:
+        raise HTTPException(403, 'Field permission denied')
+    result = await evaluate(db, user, fields, body.data, existing=existing)
+    return {'data': {'data': {key: value for key, value in result['data'].items() if key in names},
+                     'states': result['states']}}
+
+
+@router.post('/{form_id}/fields/{field_name}/options')
+async def form_reference_options(form_id: int, field_name: str, body: FormRulePreviewRequest,
+                                 db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from app.services import records
+    from app.services.form_rules import archive_options, accessible_fields
+    from app.models.relational import Form
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user):
+        raise HTTPException(404, 'Form not found')
+    await records.require_form_permission(db, user, form_id, 'view')
+    fields = await accessible_fields(db, user, form)
+    if set(body.data) - {field.field_name for field in fields}:
+        raise HTTPException(403, 'Field permission denied')
+    field = next((field for field in fields if field.field_name == field_name), None)
+    if not field:
+        raise HTTPException(403, 'Field permission denied')
+    options = await archive_options(db, user, field, body.data)
+    # Only IDs and labels leave this endpoint; backfill attributes are projected
+    # through the form's own field permissions by the evaluator.
+    return {'data': [{'id': option['id'], 'label': option['label']} for option in options]}
+
 logger = logging.getLogger(__name__)
 
 INITIAL_FORM_VERSION = 1
@@ -192,6 +247,7 @@ class DynamicRecordCreate(BaseModel):
 class DynamicRecordUpdate(BaseModel):
     data: Optional[dict] = None
     status: Optional[str] = None
+    expected_values: Optional[dict] = None
 
 
 class MenuNodeCreate(BaseModel):
@@ -415,6 +471,14 @@ def _normalize_form_field_data(
     effective_type = _normalize_field_type(explicit_type or current_field_type)
     if explicit_type is not None or current_field_type is None:
         normalized["field_type"] = effective_type
+
+    validation = normalized.get("validation")
+    if isinstance(validation, dict) and "maxBytes" in validation:
+        limit = validation["maxBytes"]
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1073741823:
+            raise HTTPException(422, "字段字节上限必须为 1 至 1073741823 之间的整数")
+        if effective_type not in {"string", "text", "enum", "code"}:
+            raise HTTPException(422, "此字段类型不支持文本字节上限")
 
     ui_config = dict(current_ui_config or {})
     ui_config_touched = False
@@ -826,6 +890,7 @@ def _field_cfg_value_is_compatible(field, value) -> bool:
     proxy = type("FieldProxy", (), {})()
     proxy.field_type = _field_cfg_value(field, "field_type", "string")
     proxy.enum_values = _field_cfg_value(field, "enum_values")
+    proxy.validation = _field_cfg_value(field, "validation")
     return _field_value_is_compatible(proxy, value)
 
 
@@ -859,6 +924,56 @@ def _record_field_impact(rows: list[dict], field) -> dict:
 
 
 
+def _apply_designer_field_settings(config: dict, fields: list[dict]) -> list[dict]:
+    """Publish UI rules with the schema; never rewrite storage definitions.
+
+    Explicit False must override legacy defaults. Draft storage metadata stays
+    independent so saving a designer draft cannot affect the published runtime.
+    """
+    controls = config.get("formDesignerControls") or []
+    controls_by_field = {item.get("fieldKey"): item for item in controls
+                         if isinstance(item, dict) and item.get("source") == "field" and item.get("fieldKey")}
+    view = config.get("viewConfigDraft") or config.get("viewConfig") or {}
+    views = view.get("tabs") if isinstance(view, dict) else None
+    views = views if isinstance(views, list) and views else [view]
+    column_lists = [(current.get("table") or {}).get("columns") for current in views if isinstance(current, dict)]
+    has_column_config = any(isinstance(columns, list) for columns in column_lists)
+    visible_columns = {item.get("fieldName") for columns in column_lists if isinstance(columns, list)
+                       for item in columns if isinstance(item, dict) and item.get("enabled", True) is not False}
+    result = []
+    for original in fields:
+        field = copy.deepcopy(original)
+        control = controls_by_field.get(field.get("field_name"))
+        if control:
+            ui = dict(field.get('ui_config') or {})
+            ui['rules'] = copy.deepcopy(control.get('rules') or {})
+            if control.get('controlType'):
+                ui['controlType'] = control['controlType']
+            assignments = control.get('assignmentRules') or []
+            ref = ui.get('relation_config') or {}
+            if isinstance(ref, str):
+                ref = json.loads(ref)
+            if control.get('dataSourceKind') in {'masterData', 'businessForm'} and control.get('optionSource'):
+                source = control['optionSource']
+                aliases = {'material_master': 'materials', 'supplier_master': 'suppliers'}
+                ref['target_model'] = aliases.get(source, source)
+                ref.setdefault('label_field', 'name')
+            if assignments:
+                ref['backfill'] = {**ref.get('backfill', {}), **{
+                    item['targetField']: item['sourceAttribute'] for item in assignments
+                    if item.get('targetField') and item.get('sourceAttribute')}}
+            if ref:
+                ui['relation_config'] = ref
+            field['ui_config'] = ui
+            required = (control.get("rules") or {}).get("required") or {}
+            if isinstance(required, dict) and isinstance(required.get("enabled"), bool):
+                field["required"] = required["enabled"]
+        if has_column_config:
+            field["visible_in_list"] = field.get("field_name") in visible_columns
+        result.append(field)
+    return result
+
+
 async def _form_snapshot(db: AsyncSession, tenant_id: int, form) -> dict:
     from app.models.relational import FormAction, FormField, FormLayout, FormPermission, WorkflowBinding
 
@@ -877,7 +992,7 @@ async def _form_snapshot(db: AsyncSession, tenant_id: int, form) -> dict:
     bindings = (await db.execute(
         select(WorkflowBinding).where(WorkflowBinding.form_id == form.id, WorkflowBinding.tenant_id == tenant_id).order_by(WorkflowBinding.id)
     )).scalars().all()
-    field_payloads = [_field_payload(field) for field in fields]
+    field_payloads = _apply_designer_field_settings(form.config or {}, [_field_payload(field) for field in fields])
     # Designer changes stay in the draft until this snapshot is published.
     controls = (form.config or {}).get("formDesignerControls") or []
     rules_by_field = {control.get("fieldKey"): control["encodingRule"] for control in controls
@@ -999,6 +1114,12 @@ def _promote_snapshot_config(snapshot: dict, published_at: str, version: int) ->
     draft_view = config.get("viewConfigDraft")
     if draft_view is not None:
         config["viewConfig"] = draft_view
+    draft_analytics = config.get("analyticsDesignDraft")
+    if draft_analytics is not None:
+        config["analyticsDesign"] = draft_analytics
+        analytics_meta = {**(config.get("analyticsDesignMeta") or {})}
+        analytics_meta.update(publishedVersion=version, publishedAt=published_at, status="published")
+        config["analyticsDesignMeta"] = analytics_meta
     view_meta = {**(config.get("viewConfigMeta") or {})}
     if view_meta:
         view_meta["publishedVersion"] = version
@@ -1163,6 +1284,10 @@ async def _menu_node_payload(db: AsyncSession, node) -> dict:
         )
     )).fetchall()
     synced_role_ids = sorted({int(row[0]) for row in role_rows})
+    # Hiding an entry disables its grants, but must retain the configured role
+    # selection so a refresh/edit/show cycle does not erase the policy.
+    if not node.visible and config.get("permission_synced"):
+        synced_role_ids = _entry_role_ids_from_config(config)
     if config.get("permission_synced"):
         config["role_ids"] = synced_role_ids
         config["permission_mode"] = "custom" if synced_role_ids else config.get("permission_mode", "inherit")
@@ -2073,10 +2198,10 @@ async def update_form_field(
             409,
             f"Cannot require field with {impact['missing_required_count']} existing record(s) missing a value",
         )
-    if "field_type" in updates and impact and impact["incompatible_count"]:
+    if {"field_type", "enum_values", "validation"}.intersection(updates) and impact and impact["incompatible_count"]:
         raise HTTPException(
             409,
-            f"Cannot change field type with {impact['incompatible_count']} incompatible existing record value(s)",
+            f"有 {impact['incompatible_count']} 条已有记录不符合字段类型、选项或字节上限，请先调整数据",
         )
     await db.commit()
     await db.refresh(field)

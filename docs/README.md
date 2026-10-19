@@ -70,6 +70,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.6](operations/release-0.3.6.md) | AI workspace history, runtime form permissions, knowledge ontology intake, admin governance, auth hardening, and production deployment. |
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
 | [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
+| [Release 0.3.13](operations/release-0.3.13.md) | Harness upgrade, execution progress and confirmation recovery, shared form rules, existing record updates, and assembly improvements. |
 | [Release 0.3.12](operations/release-0.3.12.md) | Model catalogs, AI settings, form view tabs, conditional encoding, grouped approvals, assembly persistence, and workspace preferences. |
 | [Release 0.3.11](operations/release-0.3.11.md) | Unified business records, official Harness runtime, AI configuration, tool confirmation, and account center updates. |
 | [Release 0.3.10](operations/release-0.3.10.md) | Workspace navigation and themes, alert and material application entry points, form approvals, notifications, and release history updates. |

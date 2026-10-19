@@ -123,8 +123,20 @@ CREATE_FORM_DEFINITION_CONTRACT = {
     "tool": "forms.create_form_definition",
     "required": ["form.name", "form.code", "fields"],
     "optional": ["form.description", "menu.create", "menu.title", "menu.icon"],
-    "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
+    "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values", "ui_config"],
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
+}
+
+# The same native metadata is consumed by page previews and record writes.
+# Expose concrete shapes to the model so a prose promise cannot replace rules.
+CREATE_FORM_DEFINITION_CONTRACT["field_rules"] = {
+    "location": "fields[].ui_config",
+    "instructions": "以下每个示例的值就是完整 ui_config，不要把示例名称（如 automatic_code、reference、concatenation、conditional）当作 ui_config 的键。自动编号应直接写 ui_config.businessType 和 ui_config.encodingRule。用户要求的规则不能只写在描述中。先查询档案字段，再使用真实表单编码和字段名。",
+    "automatic_code": {"businessType": "code", "encodingRule": {"enabled": True, "allowManualOverride": False, "unique": True, "segments": [{"type": "fixed", "value": "DOC-"}, {"type": "date", "datePattern": "YYYYMMDD"}, {"type": "sequence", "length": 4, "resetCycle": "day"}]}},
+    "reference": {"relation_config": {"target_form_code": "<已查询的档案表单编码>", "label_field": "<档案显示字段>", "backfill": {"<本表目标字段>": "<档案源字段>"}, "filters": [{"field": "<档案状态字段>", "value": "<有效状态值>"}]}},
+    "readonly": {"readonly": True},
+    "concatenation": {"readonly": True, "computed": {"expression": "material_name + '-' + batch_no"}},
+    "conditional": {"visibility": {"showWhen": {"field": "result", "equals": "不合格"}}, "requiredWhen": {"field": "result", "equals": "不合格"}},
 }
 
 ADD_FORM_FIELD_CONTRACT = {
@@ -134,12 +146,43 @@ ADD_FORM_FIELD_CONTRACT = {
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
 }
+ADD_FORM_FIELD_CONTRACT["field_schema"] = CREATE_FORM_DEFINITION_CONTRACT["field_schema"]
+ADD_FORM_FIELD_CONTRACT["field_rules_reference"] = "low_code.create_form_definition.field_rules（相同 ui_config 格式）"
 
 
 def describe_create_form_definition_contract() -> dict[str, Any]:
     """Return the platform contract the Agent must consult before proposing a form write."""
 
     return CREATE_FORM_DEFINITION_CONTRACT
+
+
+def validate_field_rule_definitions(fields: list[dict[str, Any]]) -> None:
+    """Reject a relation that would silently degrade into a text input."""
+    import json
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        ui = field.get("ui_config") or {}
+        if not isinstance(ui, dict):
+            raise HTTPException(422, f"{field.get('field_name')} 的 ui_config 必须为对象")
+        for wrapper in ("automatic_code", "reference", "concatenation", "conditional"):
+            if wrapper in ui:
+                raise HTTPException(422, f"{field.get('field_name')} 的 ui_config 不支持 {wrapper} 包装层，请将示例对象内容直接放入 ui_config；自动编号必须直接包含 businessType 和 encodingRule")
+        if field.get("field_type") == "relation":
+            relation = ui.get("relation_config") or {}
+            if isinstance(relation, str):
+                try:
+                    relation = json.loads(relation)
+                except (TypeError, ValueError):
+                    relation = {}
+            if not isinstance(relation, dict) or not any(relation.get(k) for k in ("target_form_code", "target_model", "target_table")):
+                raise HTTPException(422, f"关联字段 {field.get('field_name')} 缺少 ui_config.relation_config 的档案来源，请查询真实档案并补齐规则")
+        if ui.get("computed"):
+            from app.services.form_rules import expression_tree
+            computed = ui["computed"]
+            if not isinstance(computed, dict):
+                raise HTTPException(422, "computed 必须是包含 expression 的对象")
+            expression_tree(computed.get("expression"))
 
 
 def describe_add_form_field_contract() -> dict[str, Any]:
@@ -552,6 +595,7 @@ async def execute_create_form_definition(
     tenant_id = current_tenant_id(user)
     form_data = dict(payload.get("form") or {})
     fields = payload.get("fields") or []
+    validate_field_rule_definitions(fields)
     menu = dict(payload.get("menu") or {})
     field_configs = [field for field in fields if isinstance(field, dict)]
     base_config = form_data.get("config") if isinstance(form_data.get("config"), dict) else None
@@ -837,6 +881,7 @@ async def execute_add_form_field(
     fields = payload.get("fields") or []
     if not isinstance(fields, list) or not fields:
         raise HTTPException(status_code=422, detail="At least one field is required")
+    validate_field_rule_definitions(fields)
 
     existing_names = {
         name

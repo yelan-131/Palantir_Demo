@@ -149,6 +149,11 @@ async def test_real_sdk_and_document_requests_reach_separate_services(monkeypatc
             if all(s.started for s in servers): break
             await asyncio.sleep(.01)
         data = catalog()
+        data['modelServices'][1]['models'].append({
+            'id': 'document-only', 'inputTypes': ['text', 'image'],
+            'maxTokens': 384, 'contextWindow': 24000,
+        })
+        data['modelAssignments']['document']['modelId'] = 'document-only'
         for service, url in zip(data['modelServices'], urls): service['baseUrl'] = url
         settings = merge_ai_settings(data)
         user = {'tenant_id': 1, 'sub': 'catalog-test'}
@@ -157,14 +162,41 @@ async def test_real_sdk_and_document_requests_reach_separate_services(monkeypatc
         result = await run_sdk(settings, user, 'reply OK', uuid.uuid4().hex, purpose='reasoning')
         assert 'reason OK' in result.final_response
         import base64
-        pixel = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
+        pixel = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGP8//8/AymAiSTVoxpGNQwpDQBVbQMdPVIhQwAAAABJRU5ErkJggg==')
         result = await asyncio.to_thread(vision_extract_markdown, 'test.png', pixel, settings_data=settings)
-        assert result['markdown'] == 'document OK'
+        assert result['markdown'] == 'reason OK'
+        assert result['engine'] == 'deepseek-harness'
         assert [c[0] for c in calls[:3]] == ['chat', 'reason', 'reason']
         assert calls[0][1] == 'Bearer chat-secret' and calls[1][1] == calls[2][1] == 'Bearer reason-secret'
-        assert calls[0][2]['max_tokens'] == 128 and calls[1][2]['max_tokens'] == calls[2][2]['max_tokens'] == 256
+        assert [call[2]['max_tokens'] for call in calls[:3]] == [128, 256, 384]
+        assert calls[2][2]['model'] == 'document-only'
         assert calls[1][2]['reasoning_effort'] == 'low'
-        assert calls[2][2]['messages'][0]['content'][1]['type'] == 'image_url'
+        assert any(isinstance(m.get('content'), list) and any(block.get('type') == 'image_url' for block in m['content']) for m in calls[2][2]['messages'])
+        assert not calls[2][2].get('reasoning_effort')
+        assert not calls[2][2].get('tools')
+        # PDF pages must pass through the same native image protocol and document route.
+        import pymupdf
+        with pymupdf.open() as pdf:
+            for page_number in (1, 2):
+                page = pdf.new_page(width=100, height=100)
+                page.insert_text((10, 20), f'Page {page_number}')
+            pdf_bytes = pdf.tobytes()
+        result = await asyncio.to_thread(vision_extract_markdown, 'test.pdf', pdf_bytes, settings_data=settings)
+        assert result['model'] == 'document-only' and result['markdown'] == 'reason OK'
+        image_blocks = [block for message in calls[-1][2]['messages']
+                        if isinstance(message.get('content'), list)
+                        for block in message['content'] if block.get('type') == 'image_url']
+        assert len(image_blocks) == 2 and not calls[-1][2].get('tools')
+        # Removing an explicit reasoning assignment must use chat credentials and limits.
+        fallback = merge_ai_settings({'modelAssignments': {**settings['modelAssignments'], 'reasoning': None}}, existing=settings)
+        await run_sdk(fallback, user, 'reply OK', uuid.uuid4().hex, purpose='reasoning')
+        assert calls[-1][0] == 'chat' and calls[-1][1] == 'Bearer chat-secret'
+        assert calls[-1][2]['max_tokens'] == 128 and not calls[-1][2].get('reasoning_effort')
+        # A disabled document route must return before contacting any provider.
+        disabled = merge_ai_settings({'modelAssignments': {**settings['modelAssignments'], 'document': None}}, existing=settings)
+        before = len(calls)
+        assert await asyncio.to_thread(vision_extract_markdown, 'test.png', pixel, settings_data=disabled) is None
+        assert len(calls) == before
         assert (await _test_catalog_settings(settings, {'purpose': 'reasoning'}, user))['ok']
         assert (await _test_catalog_settings(settings, {'purpose': 'document'}, user))['ok']
         assert (await _test_catalog_settings(settings, {'serviceId': 'chat-server'}, user))['ok']

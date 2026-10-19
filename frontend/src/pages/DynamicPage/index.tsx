@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
-  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline, Tabs,
+  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline, Tabs, Alert,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined,
@@ -25,6 +25,7 @@ import {
   deletePlatformDynamicRecord,
   type PlatformForm,
   type PlatformFormField,
+  evaluateFormRules,
 } from '@/services/api';
 import RelationPicker from '@/components/FormWidgets/RelationPicker';
 import {
@@ -47,6 +48,7 @@ interface FieldDef {
   visible_in_form: boolean;
   enum_values?: string | string[] | Record<string, unknown> | null;
   relation_config?: string;
+  generated_code?: boolean;
 }
 
 interface PageConfig {
@@ -168,7 +170,24 @@ const dynamicProgramRouteAliases: Record<string, string> = {
   'supplier-scorecard': '/program/supplier-scorecard',
 };
 
-function renderFormField(field: FieldDef) {
+type FieldRuntime = { formId?: number; data?: Record<string, unknown>; states?: Record<string, { visible: boolean; required: boolean; readonly: boolean }> };
+
+function renderFormField(field: FieldDef, runtime: FieldRuntime = {}) {
+  const state = runtime.states?.[field.field_name];
+  if (state?.visible === false) return null;
+  const item = renderFormFieldControl({ ...field, required: state?.required ?? field.required }, runtime);
+  if (!React.isValidElement(item)) return item;
+  const child = (item.props as any).children;
+  return React.isValidElement(child) ? React.cloneElement(item, {}, React.cloneElement(child as React.ReactElement<any>, {
+    disabled: Boolean(state?.readonly || (child.props as any).disabled),
+  })) : item;
+}
+
+function renderFormFieldControl(field: FieldDef, runtime: FieldRuntime) {
+  if (field.generated_code) {
+    return <Form.Item key={field.field_name} name={field.field_name} label={field.label}
+      extra="保存时按编码规则自动生成"><Input disabled placeholder="保存后自动生成" /></Form.Item>;
+  }
   switch (field.field_type) {
     case 'int':
     case 'float':
@@ -221,7 +240,7 @@ function renderFormField(field: FieldDef) {
           rules={[{ required: field.required, message: `请选择${field.label}` }]}
           getValueProps={(v) => ({ value: v ? dayjs(v) : undefined })}
         >
-          <DatePicker style={{ width: '100%' }} placeholder={`请选择${field.label}`} />
+          <DatePicker showTime={field.field_type === 'datetime'} style={{ width: '100%' }} placeholder={`请选择${field.label}`} />
         </Form.Item>
       );
     case 'boolean':
@@ -251,7 +270,7 @@ function renderFormField(field: FieldDef) {
       if (field.relation_config) {
         try {
           const config = JSON.parse(field.relation_config);
-          targetModel = config.target_model || config.target_table || '';
+          targetModel = config.target_form_code || config.target_model || config.target_table || '';
         } catch { /* ignore */ }
       }
       if (!targetModel) {
@@ -275,6 +294,9 @@ function renderFormField(field: FieldDef) {
         >
           <RelationPicker
             modelName={targetModel}
+            formId={runtime.formId}
+            fieldName={field.field_name}
+            contextData={runtime.data}
             placeholder={`请选择${field.label}`}
           />
         </Form.Item>
@@ -298,7 +320,8 @@ function formFieldsToPayload(values: Record<string, unknown>, fields: FieldDef[]
   const payload: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(values)) {
     if (dayjs.isDayjs(val)) {
-      payload[key] = val.format('YYYY-MM-DD');
+      payload[key] = val.format(fields.find(field => field.field_name === key)?.field_type === 'datetime'
+        ? 'YYYY-MM-DDTHH:mm:ss' : 'YYYY-MM-DD');
     } else {
       payload[key] = val;
     }
@@ -311,17 +334,23 @@ function isWideFormField(field: FieldDef) {
 }
 
 function mapPlatformField(field: PlatformFormField): FieldDef {
+  const ui = (field.ui_config || {}) as Record<string, any>;
+  const encoding = (field as any).encoding_rule || ui.encodingRule || {};
+  const codeField = (field as any).business_type === 'code' || (field as any).control_type === 'code'
+    || field.field_type === 'code' || ui.businessType === 'code' || ui.controlType === 'code' || ui.encodingRule;
   return {
     field_name: field.field_name,
     label: field.label,
-    field_type: field.field_type,
+    field_type: ui.controlType === 'relation' ? 'relation' : field.field_type,
     required: field.required,
     searchable: field.searchable,
     sortable: field.sortable,
     visible_in_list: field.visible_in_list,
     visible_in_form: field.visible_in_form,
     enum_values: field.enum_values,
-    relation_config: (field.ui_config as any)?.relation_config,
+    relation_config: typeof ui.relation_config === 'object' ? JSON.stringify(ui.relation_config) : ui.relation_config,
+    generated_code: Boolean(codeField && encoding.enabled !== false && encoding.generationMode !== 'manual'
+      && !(encoding.allowManualOverride || encoding.allow_manual_override)),
   };
 }
 
@@ -356,6 +385,8 @@ function unwrapApiList<T>(payload: unknown): T[] {
 export default function DynamicPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const linkedRecordId = searchParams.get('recordId');
   const aliasProgramRoute = slug ? dynamicProgramRouteAliases[slug] : undefined;
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
   useShellPageTitle(pageConfig?.title);
@@ -379,6 +410,40 @@ export default function DynamicPage() {
   const [filterForm] = Form.useForm();
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [schemaLoading, setSchemaLoading] = useState(false);
+  const [ruleStates, setRuleStates] = useState<FieldRuntime['states']>({});
+  const [ruleData, setRuleData] = useState<Record<string, unknown>>({});
+  const [ruleError, setRuleError] = useState('');
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [ruleRevision, setRuleRevision] = useState(0);
+  const ruleRequest = useRef(0);
+  useEffect(() => {
+    if (!modalOpen || !platformForm) return;
+    const request = ++ruleRequest.current;
+    let cancelled = false;
+    setRulesLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const values = formFieldsToPayload(form.getFieldsValue(true), mutationFields);
+        const result = unwrapApiData<{ data: Record<string, unknown>; states: FieldRuntime['states'] }>(
+          await evaluateFormRules(platformForm.id, values, editingRecord?.id));
+        if (cancelled || request !== ruleRequest.current || !result) return;
+        const nextValues = { ...result.data };
+        mutationFields.forEach(field => {
+          const value = nextValues[field.field_name];
+          if (value && ['date', 'datetime'].includes(field.field_type)) nextValues[field.field_name] = dayjs(String(value));
+        });
+        form.setFieldsValue(nextValues);
+        setRuleData(result.data);
+        setRuleStates(result.states);
+        setRuleError('');
+      } catch (error: any) {
+        if (!cancelled && request === ruleRequest.current) setRuleError(error?.response?.data?.detail || '字段规则预览失败');
+      } finally {
+        if (!cancelled && request === ruleRequest.current) setRulesLoading(false);
+      }
+    }, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [modalOpen, platformForm?.id, editingRecord?.id, mutationFields, ruleRevision, form]);
   const usesDraftLifecycle = Boolean(platformForm?.runtime_submission_available && (!editingRecord || editingRecord._approval));
 
   const requestIdRef = useRef(0);
@@ -426,7 +491,7 @@ export default function DynamicPage() {
       });
       if (requestId !== requestIdRef.current) return;
       const records = unwrapApiList<any>(res);
-      setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval })));
+      setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval, _fieldStates: record.field_states })));
       setTotal(res.data?.total ?? records.length);
     } catch { message.error('加载数据失败'); }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
@@ -545,9 +610,22 @@ export default function DynamicPage() {
     if (!platformForm) return;
     try {
       const item = unwrapApiData<any>(await getPlatformDynamicRecord(platformForm.id, record.id));
-      setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+      setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
     } catch (error: any) { message.error(error?.response?.data?.detail || '详情加载失败'); }
   };
+  useEffect(() => {
+    if (!platformForm || !linkedRecordId) return;
+    const recordId = Number(linkedRecordId);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) return;
+    let cancelled = false;
+    getPlatformDynamicRecord(platformForm.id, recordId).then(response => {
+      const item = unwrapApiData<any>(response);
+      if (!cancelled && item) setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
+    }).catch((error: any) => {
+      if (!cancelled) message.error(error?.response?.data?.detail || '详情加载失败');
+    });
+    return () => { cancelled = true; };
+  }, [platformForm?.id, linkedRecordId]);
   const submitApproval = () => {
     const approval = detailRecord?._approval as RecordApproval | undefined;
     if (!platformForm || !detailRecord || !approval?.can_submit) return;
@@ -618,7 +696,7 @@ export default function DynamicPage() {
     if (!platformForm) return;
     try {
       const item = unwrapApiData<any>(await getPlatformDynamicRecord(platformForm.id, record.id));
-      record = { ...item.data, id: item.id, _approval: item._approval };
+      record = { ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states };
       if (record._approval && !record._approval.can_edit) { message.warning('当前审批状态不能修改'); return; }
     } catch (error: any) { message.error(error?.response?.data?.detail || '记录加载失败'); return; }
     setEditingRecord(record);
@@ -646,16 +724,18 @@ export default function DynamicPage() {
 
   const handleModalOk = async () => {
     try {
+      if (rulesLoading || ruleError) return;
       const values = usesDraftLifecycle ? form.getFieldsValue() : await form.validateFields();
       const payload = formFieldsToPayload(values, formFields);
       setConfirmLoading(true);
       if (platformForm && editingRecord) {
-        const item = unwrapApiData<any>(await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload));
-        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+        const expected = Object.fromEntries(Object.keys(payload).map(key => [key, editingRecord[key] ?? null]));
+        const item = unwrapApiData<any>(await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload, expected));
+        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
         message.success(item._approval ? '草稿已保存' : '已保存');
       } else if (platformForm) {
         const item = unwrapApiData<any>(await createPlatformDynamicRecord(platformForm.id, payload));
-        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval });
+        setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
         message.success(item._approval ? '草稿已保存，请从详情提交审批' : '已保存');
       } else if (editingRecord) {
         message.warning('当前页面没有绑定平台表单，不能写入业务记录');
@@ -844,7 +924,7 @@ export default function DynamicPage() {
         </Space>}>
         {detailRecord && <>
           {detailRecord._approval && <Typography.Paragraph>审批状态：<Tag>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</Tag></Typography.Paragraph>}
-          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_')).map(f => ({ key: f.field_name, label: f.label, children: typeof detailRecord[f.field_name] === 'object' ? JSON.stringify(detailRecord[f.field_name]) : String(detailRecord[f.field_name] ?? '—') }))} />
+          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false).map(f => ({ key: f.field_name, label: f.label, children: detailRecord[f.field_name] == null ? '—' : typeof detailRecord[f.field_name] === 'object' ? JSON.stringify(detailRecord[f.field_name]) : String(detailRecord[f.field_name]) }))} />
           {detailRecord._approval && <>
             <Typography.Title level={5}>审批与修改记录</Typography.Title>
             <Timeline items={(detailRecord._approval.history || []).map((entry: Record<string, unknown>) => ({ children: <Space direction="vertical" size={0}>
@@ -860,7 +940,8 @@ export default function DynamicPage() {
         open={modalOpen}
         onOk={handleModalOk}
         onCancel={() => setModalOpen(false)}
-        confirmLoading={confirmLoading}
+        confirmLoading={confirmLoading || rulesLoading}
+        okButtonProps={{ disabled: Boolean(ruleError) }}
         okText={usesDraftLifecycle ? '保存草稿' : '保存'}
         cancelText="取消"
         width={820}
@@ -872,11 +953,13 @@ export default function DynamicPage() {
           layout="vertical"
           size="middle"
           className="app-business-create-form dynamic-business-create-form"
+          onValuesChange={() => { ruleRequest.current += 1; setRuleRevision(value => value + 1); }}
         >
+          {ruleError && <Alert type="error" showIcon message={ruleError} style={{ marginBottom: 16 }} />}
           <Row gutter={12}>
-            {formFields.map(f => (
+            {formFields.filter(f => ruleStates?.[f.field_name]?.visible !== false).map(f => (
               <Col key={f.field_name} xs={24} md={isWideFormField(f) ? 24 : 12}>
-                {renderFormField(f)}
+                {renderFormField(f, { formId: platformForm?.id, data: ruleData, states: ruleStates })}
               </Col>
             ))}
           </Row>

@@ -49,6 +49,12 @@ def _field_allowed_values(field) -> Optional[set[str]]:
     return None
 
 
+def _field_max_bytes(field) -> Optional[int]:
+    rules = getattr(field, "validation", None) or {}
+    limit = rules.get("maxBytes")
+    return limit if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else None
+
+
 def _validate_record_data(fields: list, data: dict, *, partial: bool = False) -> None:
     if not fields:
         return
@@ -71,6 +77,9 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
         if value in (None, ""):
             continue
         field = by_name[name]
+        limit = _field_max_bytes(field)
+        if limit is not None and isinstance(value, str) and len(value.encode("utf-8")) > limit:
+            raise HTTPException(422, f"字段「{field.label or name}」不能超过 {limit} 字节（UTF-8）")
         field_type = (field.field_type or "string").lower()
         if field_type in {"number", "decimal", "float"} and (not isinstance(value, (int, float)) or isinstance(value, bool)):
             raise HTTPException(422, f"Field {name} must be a number")
@@ -100,6 +109,9 @@ def _merged_record_data(existing: Optional[dict], patch: Optional[dict]) -> dict
 def _field_value_is_compatible(field, value) -> bool:
     if value in (None, ""):
         return True
+    limit = _field_max_bytes(field)
+    if limit is not None and isinstance(value, str) and len(value.encode("utf-8")) > limit:
+        return False
     field_type = (field.field_type or "string").lower()
     if field_type in {"number", "decimal", "float"}:
         return isinstance(value, (int, float)) and not isinstance(value, bool)

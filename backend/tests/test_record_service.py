@@ -28,11 +28,11 @@ async def environment(request, tmp_path):
         # Test the dependency-closed record/workflow schema. Production uses
         # Alembic for unrelated AI/knowledge tables, not metadata.create_all.
         from app.models import relational
-        model_names = ['Tenant', 'User', 'Role', 'UserRole', 'Form', 'FormField', 'FormLayout',
+        model_names = ['Tenant', 'User', 'Role', 'UserRole', 'Material', 'Supplier', 'Form', 'FormField', 'FormLayout',
             'FormAction', 'FormPermission', 'FormVersion', 'FormCodeSequence', 'DynamicRecord',
             'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode',
             'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'WorkflowInstance',
-            'WorkflowApproval', 'RolePermission', 'UserOrgMembership', 'OrgUnit', 'AuditLog', 'Notification']
+            'WorkflowApproval', 'RolePermission', 'UserOrgMembership', 'OrgUnit', 'AuditLog', 'Notification', 'AIAgentRun']
         tables = {getattr(relational, name).__table__ for name in model_names}
         pending = list(tables)
         while pending:
@@ -46,6 +46,11 @@ async def environment(request, tmp_path):
         if external_url:
             await connection.execute(text('DROP TABLE IF EXISTS t1_business_contract'))
             await connection.run_sync(lambda conn: Base.metadata.drop_all(conn, tables=schema_tables))
+            # Migration 0015 creates this legacy unique index separately from
+            # ORM metadata; its conversation foreign key depends on it.
+            await connection.run_sync(relational.Tenant.__table__.create)
+            await connection.run_sync(relational.AIConversation.__table__.create)
+            await connection.execute(text('CREATE UNIQUE INDEX ix_ai_conversations_legacy_id ON ai_conversations (conversation_id)'))
         await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=schema_tables))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as db:
@@ -67,6 +72,9 @@ async def environment(request, tmp_path):
                 field_type=kind, required=name == 'title', searchable=True, sortable=True))
         db.add(FormPermission(tenant_id=1, form_id=1, role_id=1, action='*', effect='allow'))
         await db.commit()
+        if external_url:
+            await db.execute(text("SELECT setval(pg_get_serial_sequence('forms', 'id'), 1)"))
+            await db.commit()
         user = {'uid': 1, 'tenant_id': 1, 'is_admin': False}
         app = FastAPI()
         app.include_router(forms.router, prefix='/forms')
@@ -85,6 +93,192 @@ async def environment(request, tmp_path):
 async def seed(db, title, *, uid=1):
     return (await records.create_record(1, forms.DynamicRecordCreate(data={'title': title, 'secret': 'private', 'qty': 2}, status='draft'),
         db, {'uid': uid, 'tenant_id': 1, 'is_admin': True}))['data']
+
+
+@pytest.mark.asyncio
+async def test_two_user_concurrency_never_overwrites_a_confirmed_change(environment):
+    import asyncio
+    from app.services.ai.form_record_tools import prepare_record_update, update_form_record
+    db, factory, form, user, _ = environment
+    if db.bind.dialect.name != 'postgresql':
+        pytest.skip('Real row locking is verified against the disposable PostgreSQL database')
+    record = await seed(db, 'Concurrent')
+    proposals = []
+    for uid, quantity in [(1, 31), (2, 32)]:
+        actor = {**user, 'uid': uid}
+        async with factory() as session:
+            proposal = await prepare_record_update(session, user=actor, payload={'form_id': 1,
+                'record_id': record['id'], 'data': {'qty': quantity}})
+            proposals.append((actor, proposal))
+    async def save(actor, proposal):
+        async with factory() as session:
+            try:
+                return await update_form_record(session, user=actor, payload=proposal)
+            except HTTPException as error:
+                await session.rollback()
+                return error.status_code
+    results = await asyncio.wait_for(asyncio.gather(*(save(*p) for p in proposals)), 30)
+    assert sum(isinstance(result, dict) for result in results) == 1, results
+    assert 409 in results
+    current = (await records.get_record(1, record['id'], db, user))['data']
+    assert current['data']['qty'] in {31, 32}
+    assert len((await db.scalars(select(AuditLog).where(AuditLog.action == 'update'))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_page_stale_values_are_rejected_under_the_record_lock(environment):
+    db, _, _, user, client = environment
+    record = await seed(db, 'UI conflict')
+    url = f"/forms/1/records/{record['id']}"
+    assert (await client.put(url, json={'data': {'qty': 31}, 'expected_values': {'qty': 2}})).status_code == 200
+    response = await client.put(url, json={'data': {'qty': 32}, 'expected_values': {'qty': 2}})
+    assert response.status_code == 409
+    assert (await records.get_record(1, record['id'], db, user))['data']['data']['qty'] == 31
+
+
+@pytest.mark.asyncio
+async def test_update_receipt_recovers_lost_response_without_a_second_write(environment, monkeypatch):
+    from contextlib import asynccontextmanager
+    from datetime import datetime, timedelta
+    from app.models.relational import AIConversation, AIAgentRun
+    from app.services.ai import run_recovery
+    from app.services.ai.form_record_tools import prepare_record_update, update_form_record
+    db, factory, _, user, _ = environment
+    actor = {**user, 'sub': 'user1'}
+    record = await seed(db, 'Receipt')
+    proposal = await prepare_record_update(db, user=actor, payload={'form_id': 1, 'record_id': record['id'], 'data': {'qty': 30}})
+    db.add(AIConversation(tenant_id=1, conversation_id='receipt-test', user_id='user1', title='Test'))
+    await db.flush()
+    confirmation = {'confirmation_token': 'test-receipt-token', 'user': 'user1',
+        'expires_at': (datetime.now()+timedelta(minutes=10)).isoformat()}
+    db.add(AIAgentRun(tenant_id=1, run_id='receipt-run', conversation_id='receipt-test', status='waiting_confirmation',
+        input_message='改成30件', actions=[{'skill': 'forms.update_record', 'payload': proposal}],
+        items=[{'type': 'confirmation', 'payload': confirmation}]))
+    await db.commit()
+    @asynccontextmanager
+    async def session():
+        async with factory() as scoped:
+            yield scoped
+    monkeypatch.setattr(run_recovery, 'db_session', session)
+    if db.bind.dialect.name == 'postgresql':
+        import asyncio
+        results = await asyncio.gather(*[run_recovery.claim_confirmation('receipt-run', 'test-receipt-token', actor)
+            for _ in range(2)], return_exceptions=True)
+        assert sum(isinstance(item, tuple) and not item[1] for item in results) == 1
+        assert sum(isinstance(item, HTTPException) and item.status_code == 409 for item in results) == 1
+    else:
+        _, replay = await run_recovery.claim_confirmation('receipt-run', 'test-receipt-token', actor)
+        assert not replay
+        with pytest.raises(HTTPException) as running:
+            await run_recovery.claim_confirmation('receipt-run', 'test-receipt-token', actor)
+        assert running.value.status_code == 409
+    proposal['_execution_run_id'] = 'receipt-run'
+    async with factory() as scoped:
+        written = await update_form_record(scoped, user=actor, payload=proposal)
+    # Simulate a lost response/process state: only the atomic DB receipt remains.
+    recovered, replay = await run_recovery.claim_confirmation('receipt-run', 'test-receipt-token', actor)
+    assert replay and recovered['status'] == 'completed'
+    assert recovered['tool_results'][0]['result']['record_id'] == written['record_id']
+    for token, principal in [('wrong-token', actor), ('test-receipt-token', {**actor, 'sub': 'user2'})]:
+        with pytest.raises(HTTPException) as denied:
+            await run_recovery.claim_confirmation('receipt-run', token, principal)
+        assert denied.value.status_code == 404
+    with pytest.raises(HTTPException) as terminal:
+        await run_recovery.cancel_pending_run('receipt-run', actor)
+    assert terminal.value.status_code == 409
+    async with factory() as scoped:
+        assert (await update_form_record(scoped, user=actor, payload=proposal)) == written
+    assert len((await db.scalars(select(AuditLog).where(AuditLog.action == 'update'))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_ai_identity_uses_current_database_roles_not_token_claims(environment, monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.services.ai import identity_context
+    db, _, _, user, _ = environment
+    @asynccontextmanager
+    async def session():
+        yield db
+    monkeypatch.setattr(identity_context, 'db_session', session)
+    identity = await identity_context.resolve_ai_identity({**user, 'roles': [{'name': 'admin'}]})
+    assert not identity['is_admin']
+    assert [role['name'] for role in identity['roles']] == ['reader']
+    from sqlalchemy import delete
+    await db.execute(delete(UserRole).where(UserRole.user_id == 1))
+    await db.commit()
+    assert (await identity_context.resolve_ai_identity({**user, 'roles': [{'name': 'reader'}]}))['roles'] == []
+
+
+@pytest.mark.asyncio
+async def test_ai_record_scope_and_permission_revocation_block_confirmed_updates(environment):
+    from app.services.ai.form_record_tools import prepare_record_update, update_form_record
+    db, _, form, user, _ = environment
+    own = await seed(db, 'Own')
+    other = await seed(db, 'Other', uid=2)
+    db.add(RolePermission(tenant_id=1, role_id=1, resource_type='form', resource_key='1', action='edit', effect='allow', data_scope='self'))
+    await db.commit()
+    with pytest.raises(HTTPException) as denied:
+        await prepare_record_update(db, user=user, payload={'form_id': 1, 'record_id': other['id'], 'data': {'qty': 99}})
+    assert denied.value.status_code == 403
+    await db.rollback()
+    proposal = await prepare_record_update(db, user=user, payload={'form_id': 1, 'record_id': own['id'], 'data': {'qty': 30}})
+    # A view permission can be revoked while a confirmation card is open.
+    db.add(FormPermission(tenant_id=1, form_id=1, role_id=1, action='view', field_name='qty', effect='deny'))
+    await db.commit()
+    with pytest.raises(HTTPException) as revoked:
+        await update_form_record(db, user=user, payload=proposal)
+    assert revoked.value.status_code == 403
+    await db.rollback()
+    admin = {**user, 'is_admin': True}
+    assert (await records.get_record(1, own['id'], db, admin))['data']['data']['qty'] == 2
+    assert (await records.get_record(1, other['id'], db, admin))['data']['data']['qty'] == 2
+
+
+@pytest.mark.asyncio
+async def test_ai_update_preserves_record_and_rejects_stale_or_forbidden_writes(environment):
+    from app.services.ai.form_record_tools import prepare_record_update, update_form_record
+    db, _, form, user, client = environment
+    first = await seed(db, 'Original')
+    other = await seed(db, 'Other')
+    proposal = await prepare_record_update(db, user=user, payload={
+        'form_code': form.code, 'record_id': first['id'], 'data': {'qty': 30}, 'expected_values': {'qty': 999}})
+    assert proposal['expected_values'] == {'qty': 2}
+    assert (await records.get_record(form.id, first['id'], db, user))['data']['data']['qty'] == 2
+    result = await update_form_record(db, user=user, payload=proposal)
+    assert result['operation'] == 'update' and result['record_id'] == first['id']
+    assert result['record']['data']['qty'] == 30 and result['record']['data']['title'] == 'Original'
+    assert (await records.get_record(form.id, other['id'], db, user))['data']['data']['qty'] == 2
+    with pytest.raises(HTTPException) as stale:
+        await update_form_record(db, user=user, payload=proposal)
+    assert stale.value.status_code == 409
+    await db.rollback()
+    db.add(FormPermission(tenant_id=1, form_id=1, role_id=1, action='edit', field_name='qty', effect='deny'))
+    await db.commit()
+    with pytest.raises(HTTPException) as forbidden:
+        await prepare_record_update(db, user=user, payload={'form_id': 1, 'record_id': first['id'], 'data': {'qty': 40}})
+    assert forbidden.value.status_code == 403
+    await db.rollback()
+    with pytest.raises(HTTPException) as foreign:
+        await prepare_record_update(db, user={**user, 'tenant_id': 2}, payload={'form_id': 1, 'record_id': first['id'], 'data': {'qty': 40}})
+    assert foreign.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ai_form_settings_resolves_exact_schema_without_cross_tenant_leak(environment, monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.services.ai import tool_handlers
+    db, _, form, user, _ = environment
+    db.add(Form(tenant_id=2, code='other-private', name='Private', status='published'))
+    await db.commit()
+    @asynccontextmanager
+    async def session():
+        yield db
+    monkeypatch.setattr(tool_handlers, 'db_session', session)
+    context = tool_handlers.ToolHandlerContext(tool_name='platform.form_settings.query', current_user=user, settings={})
+    result = await tool_handlers._platform_query({'form_code': form.code}, context)
+    assert result['count'] == 1
+    assert {f['field_name'] for f in result['items'][0]['fields']} == {'title', 'secret', 'qty', 'status'}
+    assert (await tool_handlers._platform_query({'form_code': 'other-private'}, context))['count'] == 0
 
 
 @pytest.mark.asyncio
@@ -152,6 +346,87 @@ async def test_ai_draft_uses_shared_validation_permissions_and_atomic_audit(envi
     audits = (await db.scalars(select(AuditLog).where(AuditLog.action == 'create'))).all()
     assert len(audits) == 1
     assert json.loads(audits[0].new_values)['source'] == 'ai_agent_confirmation'
+
+
+@pytest.mark.asyncio
+async def test_shared_archive_computation_visibility_and_encoding_for_ai_and_ui(environment):
+    db, _, form, user, client = environment
+    from app.models.relational import Material
+    db.add_all([Material(id=1, tenant_id=1, name='真实物料', material_type='RAW', specs='10mm', unit='件'),
+                Material(id=2, tenant_id=2, name='其他租户', material_type='RAW', unit='个')])
+    definitions = [
+        ('category', 'enum', True, None),
+        ('material_code', 'string', True, {'businessType': 'code', 'encodingRule': {'template': 'MAT-{seq:4}', 'sequenceLength': 4, 'allowManualOverride': False}}),
+        ('material_id', 'relation', True, {'relation_config': {'target_model': 'materials', 'label_field': 'name',
+            'filters': [{'field': 'material_type', 'sourceField': 'category'}], 'backfill': {'material_name': 'name', 'unit': 'unit'}}}),
+        ('material_name', 'string', False, {'readonly': True}),
+        ('unit', 'string', False, {'readonly': True}),
+        ('batch', 'string', True, None),
+        ('display', 'string', False, {'readonly': True, 'computed': {'expression': "material_name + '-' + batch"}}),
+        ('result', 'enum', True, None),
+        ('reason', 'text', False, {'visibility': {'showWhen': {'field': 'result', 'equals': '不合格'}},
+                                  'requiredWhen': {'field': 'result', 'equals': '不合格'}}),
+        ('locked', 'string', False, {'readonly': True}),
+    ]
+    for name, kind, required, ui in definitions:
+        db.add(FormField(tenant_id=1, form_id=form.id, field_name=name, label=name,
+                         field_type=kind, required=required, ui_config=ui))
+    await db.commit()
+    payload = {'title': '规则测试', 'category': 'RAW', 'material_id': 1, 'batch': 'B001', 'result': '合格',
+               'material_code': 'FORGED', 'display': 'FORGED', 'reason': 'should clear'}
+    options = await client.post('/forms/1/fields/material_id/options', json={'data': {'category': 'RAW'}})
+    assert options.status_code == 200 and options.json()['data'] == [{'id': 1, 'label': '真实物料'}]
+    preview = await client.post('/forms/1/rules/evaluate', json={'data': payload})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['data']['data']['display'] == '真实物料-B001'
+    assert preview.json()['data']['states']['reason']['visible'] is False
+    created = await create_dynamic_record_draft_from_agent(db, user=user, skill='forms.create_record_draft',
+                                                         payload={'form_id': 1, 'form_code': form.code, 'data': payload})
+    assert created['data']['display'] == '真实物料-B001' and created['data']['reason'] is None
+    assert created['data']['material_code'] == 'MAT-0001' and created['data']['unit'] == '件'
+    rid = created['record_id']
+    updated = await client.put(f'/forms/1/records/{rid}', json={'data': {'batch': 'B002'}})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['data']['data']['display'] == '真实物料-B002'
+    for patch in [{'material_id': 2}, {'category': 'FINISHED'}, {'locked': 'manual'},
+                  {'material_code': 'CHANGED'}, {'result': '不合格'}]:
+        rejected = await client.put(f'/forms/1/records/{rid}', json={'data': patch})
+        assert rejected.status_code == 422, (patch, rejected.text)
+        await db.rollback()
+    updated = await client.put(f'/forms/1/records/{rid}', json={'data': {'result': '不合格', 'reason': '复检异常'}})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['data']['data']['reason'] == '复检异常'
+
+
+@pytest.mark.asyncio
+async def test_form_archives_apply_source_row_and_field_permissions(environment):
+    db, _, form, user, client = environment
+    archive = Form(id=2, tenant_id=1, name='Supplier archive', code='supplier-archive', status='published')
+    db.add(archive)
+    await db.flush()
+    db.add_all([FormField(tenant_id=1, form_id=2, field_name='name', label='Name', field_type='string'),
+                FormField(tenant_id=1, form_id=2, field_name='status', label='Status', field_type='string'),
+                FormPermission(tenant_id=1, form_id=2, role_id=1, action='*', effect='allow')])
+    ref = FormField(tenant_id=1, form_id=1, field_name='supplier', label='Supplier', field_type='relation',
+                    ui_config={'relation_config': {'target_form_code': 'supplier-archive', 'label_field': 'name',
+                        'filters': [{'field': 'status', 'value': '启用'}], 'backfill': {'title': 'name'}}})
+    db.add(ref)
+    await db.commit()
+    for name, status in [('Allowed', '启用'), ('Disabled', '停用'), ('Blocked', '启用')]:
+        await records.create_record(2, forms.DynamicRecordCreate(data={'name': name, 'status': status}), db, user)
+    db.add(RolePermission(tenant_id=1, role_id=1, resource_type='form', resource_key='2', action='view', effect='deny',
+                          condition_json={'rules': [{'field': 'name', 'op': 'equals', 'value': 'Blocked'}]}))
+    await db.commit()
+    result = await client.post('/forms/1/fields/supplier/options', json={'data': {}})
+    assert result.status_code == 200, result.text
+    assert [option['label'] for option in result.json()['data']] == ['Allowed']
+    source_id = result.json()['data'][0]['id']
+    result = await client.post('/forms/1/records', json={'data': {'supplier': source_id}})
+    assert result.status_code == 200, result.text
+    assert result.json()['data']['data']['title'] == 'Allowed'
+    db.add(FormPermission(tenant_id=1, form_id=2, role_id=1, action='view', field_name='name', effect='deny'))
+    await db.commit()
+    assert (await client.post('/forms/1/fields/supplier/options', json={'data': {}})).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -280,3 +555,73 @@ async def test_approval_transition_is_visible_to_ui_ai_and_dashboard(environment
     assert board['rows'][0]['_approval']['status'] == 'approved'
     audit = (await db.scalars(select(AuditLog).where(AuditLog.action == 'status_transition'))).all()
     assert len(audit) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_receipt_recovers_lost_response_without_another_record(environment, monkeypatch):
+    from contextlib import asynccontextmanager
+    from datetime import datetime, timedelta
+    from app.models.relational import AIConversation, AIAgentRun
+    from app.services.ai import run_recovery
+    db, factory, form, user, _ = environment
+    actor = {**user, 'sub': 'user1'}
+    db.add(FormField(tenant_id=1, form_id=form.id, field_name='document_no', label='单号', field_type='string',
+        ui_config={'businessType': 'code', 'encodingRule': {'template': 'IN-{seq:4}', 'sequenceLength': 4, 'allowManualOverride': False}}))
+    proposal = {'form_code': form.code, 'data': {'title': '新增入库', 'qty': 10},
+                '_execution_run_id': 'create-retry-run', '_execution_action_key': '0'}
+    db.add(AIConversation(tenant_id=1, conversation_id='create-retry', user_id='user1', title='Test'))
+    await db.flush()
+    confirmation = {'confirmation_token': 'create-retry-token', 'user': 'user1',
+        'expires_at': (datetime.now()+timedelta(minutes=10)).isoformat()}
+    db.add(AIAgentRun(tenant_id=1, run_id='create-retry-run', conversation_id='create-retry', status='waiting_confirmation',
+        input_message='帮我新增一条入库记录', actions=[{'skill': 'forms.create_record_draft', 'payload': proposal}],
+        items=[{'type': 'confirmation', 'payload': confirmation}]))
+    await db.commit()
+    @asynccontextmanager
+    async def session():
+        async with factory() as scoped:
+            yield scoped
+    monkeypatch.setattr(run_recovery, 'db_session', session)
+    await run_recovery.claim_confirmation('create-retry-run', 'create-retry-token', actor)
+    async with factory() as scoped:
+        async def lost_commit():
+            raise RuntimeError('simulated transaction failure')
+        with monkeypatch.context() as patch:
+            patch.setattr(scoped, 'commit', lost_commit)
+            with pytest.raises(RuntimeError, match='simulated transaction failure'):
+                await create_dynamic_record_draft_from_agent(scoped, user=actor, skill='forms.create_record_draft', payload=proposal)
+        await scoped.rollback()
+    async with factory() as scoped:
+        created = await create_dynamic_record_draft_from_agent(scoped, user=actor, skill='forms.create_record_draft', payload=proposal)
+    # No executor final-state sync: emulate a lost reply immediately after commit.
+    recovered, replay = await run_recovery.claim_confirmation('create-retry-run', 'create-retry-token', actor)
+    assert replay and recovered['status'] == 'completed'
+    assert recovered['tool_results'][0]['result']['record_id'] == created['record_id']
+    assert created['data']['document_no'] == 'IN-0001'
+    async with factory() as scoped:
+        assert await create_dynamic_record_draft_from_agent(scoped, user=actor, skill='forms.create_record_draft', payload=proposal) == created
+    rows = (await records.list_records(form.id, db, user))['data']
+    assert len(rows) == 1
+    assert len((await db.scalars(select(AuditLog).where(AuditLog.action == 'create'))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_users_create_records_with_distinct_codes(environment):
+    import asyncio
+    db, factory, form, user, _ = environment
+    if db.bind.dialect.name != 'postgresql':
+        pytest.skip('Concurrent sequence allocation requires PostgreSQL row locks')
+    db.add(FormField(tenant_id=1, form_id=form.id, field_name='document_no', label='单号', field_type='string',
+        ui_config={'businessType': 'code', 'encodingRule': {'template': 'IN-{seq:4}', 'sequenceLength': 4, 'allowManualOverride': False}}))
+    await db.commit()
+    async def create(uid):
+        async with factory() as scoped:
+            return await create_dynamic_record_draft_from_agent(scoped, user={**user, 'uid': uid}, skill='forms.create_record_draft',
+                payload={'form_code': form.code, 'data': {'title': '并发入库', 'qty': 10}})
+    created = await asyncio.wait_for(asyncio.gather(create(1), create(2)), 30)
+    assert len({item['record_id'] for item in created}) == 2
+    assert {item['data']['document_no'] for item in created} == {'IN-0001', 'IN-0002'}
+    # Repeat with the table, indexes and sequence counter already provisioned.
+    more = await asyncio.wait_for(asyncio.gather(create(1), create(2)), 30)
+    assert len({item['record_id'] for item in created + more}) == 4
+    assert {item['data']['document_no'] for item in more} == {'IN-0003', 'IN-0004'}

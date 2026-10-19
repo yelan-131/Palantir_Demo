@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from app.core.db import db_session
 from app.models.relational import Application, Form, Role, User, UserRole
 
-from .form_record_tools import get_form_record, query_form_records
+from .form_record_tools import get_form_record, query_form_records, update_form_record
 from .knowledge_ingestion import search_ingested_knowledge
 from .low_code_tools import execute_add_form_field, execute_create_form_definition
 from .semantic_planner import plan_agent_turn_semantic
@@ -65,6 +65,11 @@ async def _forms_get_record(payload: dict[str, Any], context: ToolHandlerContext
         return await get_form_record(session, user=context.current_user or {}, payload=payload)
 
 
+async def _forms_update_record(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
+    async with db_session() as session:
+        return await update_form_record(session, user=context.current_user or {}, payload=payload)
+
+
 async def _forms_create_form_definition(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
     async with db_session() as session:
         return await execute_create_form_definition(session, user=context.current_user or {}, payload=payload)
@@ -100,10 +105,26 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
             return {"items": items, "count": len(items), "subject": "applications"}
 
         if context.tool_name == "platform.form_settings.query":
+            statement = select(Form).where(Form.tenant_id == tenant_id)
+            form_id = payload.get("form_id")
+            form_code = payload.get("form_code")
+            if form_id:
+                statement = statement.where(Form.id == int(form_id))
+            elif form_code:
+                statement = statement.where(Form.code == str(form_code))
             rows = (
-                await session.execute(select(Form).where(Form.tenant_id == tenant_id).order_by(Form.id).limit(limit))
+                await session.execute(statement.order_by(Form.id).limit(limit))
             ).scalars().all()
             items = [{"id": row.id, "name": row.name, "code": row.code, "status": row.status} for row in rows]
+            if form_id or form_code or payload.get("subject") == "fields":
+                from app.services.records import runtime_fields
+                from app.core.permissions import allowed_form_fields
+                for row, item in zip(rows, items):
+                    fields = await runtime_fields(session, row)
+                    allowed = await allowed_form_fields(context.current_user or {}, row.id, "view", fields, session)
+                    item["fields"] = [{"field_name": f.field_name, "label": f.label, "field_type": f.field_type,
+                        "required": f.required, "enum_values": f.enum_values, "ui_config": f.ui_config}
+                        for f in fields if not f.archived and f.field_name in allowed]
             return {"items": items, "count": len(items), "subject": "forms"}
 
         if context.tool_name == "platform.identity_settings.query":
@@ -152,6 +173,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "knowledge.search": _knowledge_search,
     "forms.query_records": _forms_query_records,
     "forms.get_record": _forms_get_record,
+    "forms.update_record": _forms_update_record,
     "forms.create_dynamic_record_draft": _create_record_draft,
     "forms.create_form_definition": _forms_create_form_definition,
     "forms.add_form_field": _forms_add_form_field,

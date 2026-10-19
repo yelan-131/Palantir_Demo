@@ -69,11 +69,20 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
     editable_fields = await allowed_form_fields(user, form_id, "create", fields, db,
         record_data=policy_data({"data": body.data, "created_by": current_user_id(user)}))
     input_data = prepare_domain_create(form.code, dict(body.data or {}), user)
+    unknown = set(body.data or {}) - {field.field_name for field in fields if not field.archived}
+    if unknown:
+        raise HTTPException(422, f"Unknown field(s): {', '.join(sorted(unknown))}")
+    denied_input = set(body.data or {}) - editable_fields
+    if denied_input:
+        raise HTTPException(403, f"Field permission denied: {', '.join(sorted(denied_input))}")
+    from app.services.form_rules import evaluate
+    rule_result = await evaluate(db, user, fields, input_data, enforce=True, partial=managed_draft or draft)
+    input_data = rule_result['data']
     if _uses_physical_form_table(form):
         await _ensure_physical_form_table(db, form, fields)
     record_data = await _apply_record_encoding_rules(db, tenant_id, form, fields, input_data)
-    generated_fields = {key for key, value in record_data.items() if input_data.get(key) != value}
-    _validate_record_data(fields, record_data, partial=managed_draft or draft)
+    generated_fields = rule_result['derived'] | {key for key, value in record_data.items() if input_data.get(key) != value}
+    _validate_record_data(rule_result['fields'], record_data, partial=managed_draft or draft)
     await require_record_permission(db, user, form, "create", {"data": record_data, "created_by": current_user_id(user)})
     if _uses_physical_form_table(form):
         payload = _physical_write_payload(fields, record_data, editable_fields | generated_fields)
@@ -166,7 +175,7 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
     return {"data": await project_record(db, user, form, {**record_result, "workflow_instances": workflow_instances}, fields)}
 
 
-async def update_record(form_id, record_id, body, db, user):
+async def update_record(form_id, record_id, body, db, user, *, defer_commit=False):
     from app.api.forms import _protect_pending_form_record
     from app.models.relational import DynamicRecord, Form
 
@@ -178,6 +187,9 @@ async def update_record(form_id, record_id, body, db, user):
     from app.services.form_application_lifecycle import locked_record, guard_edit, decorate, metadata, audit as lifecycle_audit
     locked = await read_raw(db, form, record_id, lock=True)
     await require_record_permission(db, user, form, "edit", locked)
+    expected = getattr(body, 'expected_values', None)
+    if expected is not None and any(locked['data'].get(key) != value for key, value in expected.items()):
+        raise HTTPException(409, '记录已被其他人修改，请刷新后确认最新内容再保存')
     await guard_edit(db, form, locked, user, body.status)
     tracked = await metadata(db, form, locked, user)
     await _protect_pending_form_record(db, tenant_id, form_id, record_id)
@@ -186,11 +198,25 @@ async def update_record(form_id, record_id, body, db, user):
     validate_domain_update(form.code, body.data or {})
     if form.code == "material-application":
         raise HTTPException(409, "料号申请请通过专用入口修改")
+    fields = await _runtime_form_fields(db, tenant_id, form_id)
+    editable = await allowed_form_fields(user, form_id, 'edit', fields, db, record_data=policy_data(locked))
+    unknown = set(body.data or {}) - {field.field_name for field in fields if not field.archived}
+    if unknown:
+        raise HTTPException(422, f"Unknown field(s): {', '.join(sorted(unknown))}")
+    denied = set(body.data or {}) - editable
+    if denied:
+        raise HTTPException(403, f"Field permission denied: {', '.join(sorted(denied))}")
+    from app.services.form_rules import evaluate
+    rule_result = await evaluate(db, user, fields, body.data or {}, existing=locked.get('data') or {},
+                                 enforce=True, partial=bool(tracked and tracked['status'] in {'draft', 'rejected'}))
+    rule_patch = {key: value for key, value in rule_result['data'].items()
+                  if key in (body.data or {}) or value != (locked.get('data') or {}).get(key)}
+    body = body.copy(update={'data': rule_patch})
     if _uses_physical_form_table(form):
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         await _ensure_physical_form_table(db, form, fields)
         editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db, record_data=policy_data(locked))
-        updates = body.dict(exclude_unset=True)
+        updates = body.dict(exclude_unset=True, exclude={'expected_values'})
         if tracked or updates.get("status") is None:
             updates.pop("status", None)
         data_updates = updates.get("data") or {}
@@ -198,9 +224,9 @@ async def update_record(form_id, record_id, body, db, user):
         existing = await _get_physical_record(db, form, fields, all_field_names, record_id, include_deleted=False)
         merged = _merged_record_data(existing["data"]["data"], data_updates)
         await require_record_permission(db, user, form, "edit", {**locked, "data": merged})
-        _validate_record_data(fields, merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
+        _validate_record_data(rule_result['fields'], merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, data_updates, exclude_record_id=record_id)
-        payload = _physical_write_payload(fields, data_updates, editable_fields)
+        payload = _physical_write_payload(fields, data_updates, editable_fields | rule_result['derived'])
         table_name = str(form.table_name)
         assert_safe_identifier(table_name)
         assignments = []
@@ -231,14 +257,15 @@ async def update_record(form_id, record_id, body, db, user):
             resource_id=record_id,
             new_values={"form_id": form.id, **updates},
         )
-        await db.commit()
+        if not defer_commit:
+            await db.commit()
         return {"data": await decorate(db, form, await project_record(db, user, form, result, fields), user)}
 
     record = await db.get(DynamicRecord, record_id)
     if not record or record.form_id != form_id or record.tenant_id != tenant_id or record.deleted_at is not None:
         raise HTTPException(404, "Record not found")
     protect_migrated_request(form.code, record.data or {})
-    updates = body.dict(exclude_unset=True)
+    updates = body.dict(exclude_unset=True, exclude={'expected_values'})
     if tracked or updates.get("status") is None:
         updates.pop("status", None)
     if updates.get("data") is None:
@@ -246,12 +273,12 @@ async def update_record(form_id, record_id, body, db, user):
     if "data" in updates:
         fields = await _runtime_form_fields(db, tenant_id, form_id)
         editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db, record_data=policy_data(locked))
-        denied_fields = sorted(set(updates["data"].keys()) - editable_fields)
+        denied_fields = sorted(set(updates["data"].keys()) - editable_fields - rule_result['derived'])
         if denied_fields:
             raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
         merged = _merged_record_data(record.data, updates["data"])
         await require_record_permission(db, user, form, "edit", {**locked, "data": merged})
-        _validate_record_data(fields, merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
+        _validate_record_data(rule_result['fields'], merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, updates["data"], exclude_record_id=record_id)
         updates["data"] = merged
     for key, value in updates.items():
@@ -268,7 +295,8 @@ async def update_record(form_id, record_id, body, db, user):
         resource_id=record.id,
         new_values={"form_id": form.id, **updates},
     )
-    await db.commit()
+    if not defer_commit:
+        await db.commit()
     await db.refresh(record)
     fields = await _runtime_form_fields(db, tenant_id, form_id)
     return {"data": await decorate(db, form, await project_record(db, user, form, _record_payload(record), fields), user)}
@@ -386,7 +414,10 @@ async def require_record_permission(db, user, form, action, record):
 async def project_record(db, user, form, record, fields=None, *, cache=None):
     fields = fields if fields is not None else await runtime_fields(db, form)
     visible = await allowed_form_fields(user, form.id, "view", fields, db, record_data=policy_data(record), cache=cache)
-    return {**record, "data": {key: value for key, value in (record.get("data") or {}).items() if key in visible}}
+    from app.services.form_rules import states
+    state = states([field for field in fields if not field.archived], record.get('data') or {})
+    return {**record, "data": {key: value for key, value in (record.get("data") or {}).items() if key in visible},
+            'field_states': {key: value for key, value in state.items() if key in visible}}
 
 
 async def read_raw(db, form, record_id, *, lock=False, include_deleted=False):

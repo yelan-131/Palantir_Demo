@@ -1,5 +1,6 @@
 """AI Assistant API backed by explicit runtime storage and provider configuration."""
 
+import anyio
 import asyncio
 import json
 import uuid
@@ -56,6 +57,7 @@ from app.services.ai.tool_executor import agent_tool_executor
 from app.services.ai.tool_registry import list_tools
 
 router = APIRouter()
+_CONFIRMATION_TASKS: set[asyncio.Task] = set()
 
 
 class ChatRequest(BaseModel):
@@ -115,10 +117,9 @@ def _roles_for_user(user: dict) -> list[dict]:
     return []
 
 
-def _normalize_user(user: dict) -> dict:
-    normalized = {**user}
-    normalized["roles"] = _roles_for_user(normalized)
-    return normalized
+async def _normalize_user(user: dict) -> dict:
+    from app.services.ai.identity_context import resolve_ai_identity
+    return await resolve_ai_identity(user)
 
 
 def _user_key(user: dict[str, Any]) -> str:
@@ -451,8 +452,9 @@ async def _sync_persisted_agent_run_final_state(
                 return
             persisted_run.status = status
             if run_state and isinstance(run_state.get("items"), list):
-                persisted_run.items = run_state["items"]
-            if status in {"completed", "cancelled"}:
+                from app.services.ai.run_recovery import merge_execution_items
+                persisted_run.items = merge_execution_items(persisted_run.items, run_state)
+            if status in {"completed", "cancelled", "failed"}:
                 persisted_run.requires_confirmation = False
             conversation = await session.scalar(
                 select(AIConversation).where(
@@ -964,7 +966,7 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
 
 @router.get("/skills")
 async def get_ai_skills(user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
     return {"data": list_skills()}
@@ -972,7 +974,7 @@ async def get_ai_skills(user: dict = Depends(get_current_user)):
 
 @router.get("/tools")
 async def get_ai_tools(user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
     return {"data": list_tools()}
@@ -980,7 +982,7 @@ async def get_ai_tools(user: dict = Depends(get_current_user)):
 
 @router.post("/agent/conversations")
 async def create_agent_conversation(body: AgentConversationRequest, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     tenant_id = current_tenant_id(current_user)
     context = body.context or {}
@@ -1018,7 +1020,7 @@ async def list_agent_conversations(
     limit: int = Query(30, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     tenant_id = current_tenant_id(current_user)
     async with db_session() as session:
@@ -1040,7 +1042,7 @@ async def list_agent_conversations(
 
 @router.get("/agent/conversations/{conversation_id}/messages")
 async def list_agent_conversation_messages(conversation_id: str, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     tenant_id = current_tenant_id(current_user)
     async with db_session() as session:
@@ -1082,7 +1084,7 @@ async def update_agent_conversation(
     body: AgentConversationUpdateRequest,
     user: dict = Depends(get_current_user),
 ):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     tenant_id = current_tenant_id(current_user)
     title = (body.title or "").strip()
@@ -1116,7 +1118,7 @@ async def update_agent_conversation(
 
 @router.delete("/agent/conversations/{conversation_id}")
 async def close_agent_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     tenant_id = current_tenant_id(current_user)
     async with db_session() as session:
@@ -1151,7 +1153,7 @@ async def list_ai_memories(
     limit: int = Query(50, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     await _load_effective_ai_settings()
     async with db_session() as session:
@@ -1168,7 +1170,7 @@ async def list_ai_memories(
 
 @router.delete("/memories/{memory_id}")
 async def delete_ai_memory(memory_id: str, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     user_key = _user_key(current_user)
     async with db_session() as session:
         memory = await memory_service.delete_user_memory(
@@ -1185,7 +1187,7 @@ async def delete_ai_memory(memory_id: str, user: dict = Depends(get_current_user
 
 @router.post("/chat")
 async def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
-    result = await _run_agent_for_user(AgentRequest(message=body.message), _normalize_user(user))
+    result = await _run_agent_for_user(AgentRequest(message=body.message), await _normalize_user(user))
     return {
         "session_id": body.session_id or result.run_id,
         "message": body.message, "intent": "agent", "response": result.answer,
@@ -1197,7 +1199,7 @@ async def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
 @router.post("/agent")
 async def agent_chat(body: AgentRequest, user: dict = Depends(get_current_user)):
     """Enterprise AI Agent shell: RAG evidence + structured skill actions."""
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     result = await _run_agent_for_user(body, current_user)
     payload = result.model_dump()
     persisted = await _persist_agent_turn(body, result, current_user)
@@ -1215,7 +1217,7 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
     execution events.
     """
 
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
 
     async def event_generator():
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
@@ -1251,6 +1253,9 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
         finally:
             if not task.done():
                 task.cancel()
+                # ASGI disconnect cancellation is level-triggered: let child cleanup finish.
+                with anyio.CancelScope(shield=True):
+                    await asyncio.gather(task, return_exceptions=True)
 
     return StreamingResponse(
         event_generator(),
@@ -1265,17 +1270,18 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
 @router.post("/agent-runs")
 async def create_ai_agent_run(body: AgentRequest, user: dict = Depends(get_current_user)):
     """Create an observable Agent run with steps, evidence, and pending confirmations."""
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     result = await _run_agent_for_user(body, current_user)
     return result.model_dump()
 
 
 @router.get("/agent-runs/{run_id}")
 async def get_ai_agent_run(run_id: str, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
-    run = get_agent_run(run_id)
+    from app.services.ai.run_recovery import read_run
+    run = await read_run(run_id, current_user) or get_agent_run(run_id)
     if not run or run.get("created_by") != _user_key(current_user) or run.get("tenant_id") != current_tenant_id(current_user):
         raise HTTPException(status_code=404, detail="Agent run not found")
     return {"data": _public_agent_run(run)}
@@ -1292,7 +1298,8 @@ async def _confirm_agent_run_for_user(
     _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa"))
     if not body.confirmed:
         try:
-            run = cancel_agent_run(run_id, current_user)
+            from app.services.ai.run_recovery import cancel_pending_run
+            run = await cancel_pending_run(run_id, current_user) or cancel_agent_run(run_id, current_user)
         except ValueError as exc:
             status_code = 404 if "not found" in str(exc).lower() else 400
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -1307,17 +1314,23 @@ async def _confirm_agent_run_for_user(
         raise HTTPException(status_code=400, detail="Confirmation token is required")
     if event_sink:
         await event_sink("pre.confirmation", {"run_id": run_id, "confirmed": True})
-    try:
-        run = confirm_agent_run(run_id, body.confirmation_token, current_user)
-    except ValueError as exc:
-        if "not found" not in str(exc).lower():
-            status_code = 404 if "not found" in str(exc).lower() else 400
-            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    from app.services.ai.run_recovery import claim_confirmation
+    claimed = await claim_confirmation(run_id, body.confirmation_token, current_user)
+    if claimed is not None:
+        run, replay = claimed
+        if replay:
+            return _public_agent_run(run)
+    else:
+        # Non-persisted API runs still use the owner-bound in-process nonce.
+        cached = get_agent_run(run_id)
+        if cached and cached.get('created_by') == _user_key(current_user) and cached.get('tenant_id') == current_tenant_id(current_user):
+            expected = extract_confirmation_payload(cached.get('items') or []).get('confirmation_token')
+            if expected == body.confirmation_token and cached.get('status') in {'completed', 'failed'}:
+                return _public_agent_run(cached)
         try:
-            run = await _load_persisted_agent_run_for_confirmation(run_id, body.confirmation_token, current_user)
-        except ValueError as persisted_exc:
-            status_code = 404 if "not found" in str(persisted_exc).lower() else 400
-            raise HTTPException(status_code=status_code, detail=str(persisted_exc)) from persisted_exc
+            run = confirm_agent_run(run_id, body.confirmation_token, current_user)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     if event_sink:
         await event_sink(
@@ -1338,14 +1351,14 @@ async def _confirm_agent_run_for_user(
 
 @router.post("/agent-runs/{run_id}/confirm")
 async def confirm_ai_agent_run(run_id: str, body: AgentRunConfirmRequest, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     run = await _confirm_agent_run_for_user(run_id, body, current_user)
     return {"data": run, "ok": True}
 
 
 @router.post("/agent-runs/{run_id}/confirm/stream")
 async def confirm_ai_agent_run_stream(run_id: str, body: AgentRunConfirmRequest, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
 
     async def event_generator():
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
@@ -1369,21 +1382,25 @@ async def confirm_ai_agent_run_stream(run_id: str, body: AgentRunConfirmRequest,
         except Exception as exc:  # noqa: BLE001 - stream should report failures as events
             yield _sse("run.failed", {"status": "failed", "detail": str(exc)})
         finally:
-            if not task.done():
-                task.cancel()
+            # A lost response is not cancellation of an already confirmed write.
+            # Keep a strong reference until execution and durable result sync end.
+            _CONFIRMATION_TASKS.add(task)
+            def finished(completed):
+                _CONFIRMATION_TASKS.discard(completed)
+                if not completed.cancelled():
+                    completed.exception()
+            task.add_done_callback(finished)
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/agent-runs/{run_id}/cancel")
 async def cancel_ai_agent_run(run_id: str, user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     try:
-        run = cancel_agent_run(run_id, current_user)
+        from app.services.ai.run_recovery import cancel_pending_run
+        run = await cancel_pending_run(run_id, current_user) or cancel_agent_run(run_id, current_user)
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -1403,7 +1420,7 @@ async def cancel_ai_agent_run(run_id: str, user: dict = Depends(get_current_user
 @router.post("/drafts/save")
 async def save_ai_draft(body: DraftSaveRequest, user: dict = Depends(get_current_user)):
     """Save a confirmed AI-generated draft without submitting workflow."""
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     action_stub = {
         "type": "skill_result",
         "skill": body.skill,
@@ -1439,7 +1456,7 @@ async def save_ai_draft(body: DraftSaveRequest, user: dict = Depends(get_current
 
 @router.get("/drafts")
 async def list_ai_drafts(limit: int = Query(30, ge=1, le=100), user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "save_draft", risk_level="low")
     _raise_for_ai_decision(decision)
     tenant_id = current_tenant_id(current_user)
@@ -1504,6 +1521,20 @@ async def get_ai_settings(user: dict = Depends(require_admin)):
     return {"data": _mask_settings(AI_SYSTEM_SETTINGS), "runtime": runtime_status(AI_SYSTEM_SETTINGS)}
 
 
+@router.post("/settings/effective")
+async def preview_effective_ai_settings(body: AISettingsRequest, user: dict = Depends(require_admin)):
+    """Preview the same projection as DSH execution, without returning any secrets."""
+    current_tenant_id(user)
+    await _load_effective_ai_settings()
+    try:
+        candidate = merge_ai_settings(body.settings)
+        from app.services.ai.harness_parameters import effective_harness_parameters
+        return {"routes": [effective_harness_parameters(candidate, purpose) for purpose in ('chat', 'reasoning', 'document')],
+                "runtime": {key: value for key, value in runtime_status(candidate).items() if key in {'sdkVersion', 'runtimeVersion', 'engine'}}}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.put("/settings")
 async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(require_admin)):
     """Update backend-owned AI system settings for the demo runtime."""
@@ -1547,7 +1578,7 @@ async def _test_catalog_settings(candidate: dict, target: dict, user: dict):
             if purpose == 'document':
                 import base64
                 from app.services.ai.ocr_service import vision_extract_markdown
-                pixel = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
+                pixel = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGP8//8/AymAiSTVoxpGNQwpDQBVbQMdPVIhQwAAAABJRU5ErkJggg==')
                 result = await asyncio.to_thread(vision_extract_markdown, 'connection-test.png', pixel, settings_data=effective)
                 if not result or not result.get('markdown'):
                     raise ValueError('视觉模型未返回有效响应')
@@ -1638,7 +1669,7 @@ async def update_agent_registry(body: AIAgentRegistryRequest, user: dict = Depen
 
 @router.get("/audit")
 async def list_ai_audit_logs(user: dict = Depends(get_current_user)):
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     if not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin privilege required")
     return {"data": list_ai_audit_logs(100)}
@@ -1650,7 +1681,7 @@ async def list_sessions(
     user: dict = Depends(get_current_user),
 ):
     """Conversation history backed by persisted agent conversations."""
-    current_user = _normalize_user(user)
+    current_user = await _normalize_user(user)
     tenant_id = current_tenant_id(current_user)
     user_key = _user_key(current_user)
     try:
@@ -1681,5 +1712,5 @@ async def list_sessions(
 @router.post("/analyze")
 async def smart_analyze(body: AnalyzeRequest, user: dict = Depends(get_current_user)):
     """Legacy analysis endpoint: no static demo insight fallback."""
-    result = await _run_agent_for_user(AgentRequest(message=body.query, context={"entity_type": body.entity_type, "entity_id": body.entity_id}), _normalize_user(user))
+    result = await _run_agent_for_user(AgentRequest(message=body.query, context={"entity_type": body.entity_type, "entity_id": body.entity_id}), await _normalize_user(user))
     return {"query": body.query, "analysis_type": "agent", "response": result.answer, "evidence": result.evidence, "timestamp": datetime.now(timezone.utc).isoformat()}

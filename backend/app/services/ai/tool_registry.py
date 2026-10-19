@@ -11,7 +11,7 @@ from .skills import get_skill
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
-SideEffect = Literal["read", "draft_write", "workflow_action", "external_write", "configuration_write"]
+SideEffect = Literal["read", "draft_write", "record_write", "workflow_action", "external_write", "configuration_write"]
 
 
 class ToolDefinition(BaseModel):
@@ -67,6 +67,11 @@ def to_openai_function(tool: ToolDefinition) -> dict[str, Any]:
         description += f" (副作用类型: {tool.side_effect}, 风险等级: {tool.risk_level})"
 
     parameters = _normalize_input_schema(tool.input_schema)
+    if tool.name == 'platform.form_settings.query':
+        parameters.setdefault('properties', {}).update({
+            'form_id': {'type': 'integer', 'description': '精确查询表单及其已发布字段'},
+            'form_code': {'type': 'string', 'description': '精确查询表单及其已发布字段'},
+        })
     return {
         "type": "function",
         "function": {

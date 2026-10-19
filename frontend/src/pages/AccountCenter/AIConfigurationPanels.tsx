@@ -27,7 +27,7 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
       const service = services[field.name] || {};
       return <section key={field.key} hidden={service.id !== active}>
         <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
-        <Card title="连接配置" className="settings-section ai-catalog-connection" extra={<Space><span className="ai-card-note">OpenAI Chat Completions</span><Button size="small" icon={<ApiOutlined />} loading={testing} onClick={() => onTest({ serviceId: service.id, modelId: service.models?.[0]?.id })}>测试连接</Button><Button size="small" type="text" danger disabled={services.length === 1 || used(service.id)} title={used(service.id) ? '请先修改引用此服务的模型用途' : undefined} onClick={() => remove(field.name)}>移除服务</Button></Space>}>
+        <Card title="连接配置" className="settings-section ai-catalog-connection" extra={<Space><Form.Item name={[field.name, 'provider']} noStyle><Select aria-label="接口适配类型" style={{ width: 180 }} options={[{ value: 'openai-compatible', label: '通用 Chat Completions' }, { value: 'deepseek', label: 'DeepSeek 兼容' }, { value: 'openai', label: 'OpenAI 兼容' }, { value: 'glm', label: 'GLM 兼容' }, { value: 'qwen', label: 'Qwen 兼容' }]} /></Form.Item><Button size="small" icon={<ApiOutlined />} loading={testing} onClick={() => onTest({ serviceId: service.id, modelId: service.models?.[0]?.id })}>测试连接</Button><Button size="small" type="text" danger disabled={services.length === 1 || used(service.id)} title={used(service.id) ? '请先修改引用此服务的模型用途' : undefined} onClick={() => remove(field.name)}>移除服务</Button></Space>}>
           <div className="ai-catalog-field-grid">
             <Form.Item name={[field.name, 'name']} label="服务名称" rules={[{ required: true, whitespace: true, message: '请输入服务名称' }]}><Input placeholder="例如：企业模型网关" /></Form.Item>
             <Form.Item name={[field.name, 'baseUrl']} label="服务地址" rules={[{ required: true, message: '请输入服务地址' }, { validator: (_, value) => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.hostname && !url.username && !url.password ? Promise.resolve() : Promise.reject(new Error('请输入不含账号密码的 HTTP(S) 地址')); } catch { return Promise.reject(new Error('请输入完整的 HTTP(S) 地址')); } } }]}><Input placeholder="https://gateway.example.com/v1" autoComplete="off" /></Form.Item>
@@ -58,7 +58,7 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
         </>}</Form.List>
         </Card>
         <Collapse className="ai-catalog-advanced" items={[{ key: 'advanced', label: '请求与连接参数', children: <div className="ai-catalog-field-grid">
-          {number('请求超时 · 秒', [field.name, 'timeoutSeconds'], 1, 300)}
+          {number('响应等待回退 · 秒', [field.name, 'timeoutSeconds'], 1, 300, '未设置流式空闲超时时使用')}
           {number('请求重试次数', [field.name, 'retryCount'], 0, 3)}
           {number('流式空闲超时 · 毫秒', [field.name, 'streamIdleTimeoutMs'], 1, 3600000)}
           <Form.Item name={[field.name, 'organization']} label="Organization"><Input placeholder="可选" /></Form.Item>
@@ -110,5 +110,5 @@ export function PurposeModelsPanel({ values, onTest, testing }: { values: any; o
 }
 
 export function NativeCompactionPanel() {
-  return <div className="ai-native-compaction"><div className="ai-native-compaction-heading"><strong>DSH 会话压缩</strong><Form.Item name={['harnessPolicy', 'compaction', 'enabled']} valuePropName="checked" noStyle><Switch aria-label="启用 DSH 会话压缩" /></Form.Item></div><p className="ai-settings-quiet-note">上下文达到阈值时，由 Harness 原生压缩并保留最近的会话内容。</p><div className="ai-catalog-field-grid"><Form.Item name={['harnessPolicy', 'compaction', 'thresholdRatio']} label="触发比例"><InputNumber min={0.01} max={1} step={0.01} /></Form.Item><Form.Item name={['harnessPolicy', 'compaction', 'retainRatio']} label="保留比例"><InputNumber min={0.01} max={0.99} step={0.01} /></Form.Item></div></div>;
+  return <div className="ai-native-compaction"><div className="ai-native-compaction-heading"><strong>DSH 会话压缩</strong><Form.Item name={['harnessPolicy', 'compaction', 'enabled']} valuePropName="checked" noStyle><Switch aria-label="启用 DSH 会话压缩" /></Form.Item></div><p className="ai-settings-quiet-note">上下文达到阈值时，由 Harness 原生压缩并保留最近的会话内容。</p><div className="ai-catalog-field-grid"><Form.Item name={['harnessPolicy', 'compaction', 'thresholdRatio']} label="触发比例"><InputNumber min={0.01} max={1} step={0.01} /></Form.Item><Form.Item name={['harnessPolicy', 'compaction', 'retainRatio']} label="保留比例"><InputNumber min={0.01} max={0.99} step={0.01} /></Form.Item></div><Collapse ghost items={[{ key: 'compression-budget', label: '高级压缩参数', children: <div className="ai-catalog-field-grid">{number('压缩预留 · Token', ['harnessPolicy', 'compaction', 'headroomTokens'], 0, 32768, '留空时按所选模型计算')}{number('摘要输出上限 · Token', ['harnessPolicy', 'compaction', 'maxTokens'], 1, 32768, '不得超过模型输出上限')}</div> }]} /></div>;
 }

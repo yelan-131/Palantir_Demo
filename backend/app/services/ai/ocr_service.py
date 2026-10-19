@@ -13,9 +13,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
 
-import httpx
 
 from app.config import settings
 from app.core.logging import get_logger
@@ -212,19 +210,6 @@ def extract_pdf_text(file_name: str, content: bytes) -> str:
     return "\n".join(parts)
 
 
-def _vision_url(config=None) -> str:
-    config = config or settings_to_provider_config(settings_snapshot(), purpose='document')
-    base_url = (config.base_url or "").strip()
-    if not base_url:
-        if config.provider == "glm":
-            base_url = "https://open.bigmodel.cn/api/paas/v4"
-        else:
-            raise RuntimeError(f"{config.provider} base URL is not configured")
-    if base_url.endswith("/chat/completions"):
-        return base_url
-    return urljoin(f"{base_url.rstrip('/')}/", "chat/completions")
-
-
 def vision_extract_markdown(file_name: str, content: bytes, *, settings_data: dict | None = None) -> dict[str, Any] | None:
     from .model_catalog import resolve_model_settings
     effective = resolve_model_settings(settings_data if settings_data is not None else settings_snapshot(), 'document')
@@ -232,44 +217,31 @@ def vision_extract_markdown(file_name: str, content: bytes, *, settings_data: di
     api_key = config.api_key
     if not effective.get("aiEnabled", True) or config.vision_model == "disabled" or not api_key:
         return None
-    mime_type = mimetypes.guess_type(file_name)[0] or "image/png"
-    image_url = f"data:{mime_type};base64,{base64.b64encode(content).decode('ascii')}"
-    payload = {
-        "model": config.vision_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Extract all readable text from this document image. "
-                            "Return clean Markdown only. Preserve page labels, tables, dates, codes, and low-confidence notes."
-                        ),
-                    },
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            }
-        ],
-        "temperature": 0.0,
-        "max_tokens": int(effective.get("maxTokens") or 4096),
-        "stream": False,
-    }
+    from .harness_runtime import run_document_sdk
     try:
-        with httpx.Client(timeout=config.timeout_seconds) as client:
-            response = client.post(
-                _vision_url(config),
-                json=payload,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", **({"OpenAI-Organization": config.organization} if config.organization else {}), **({"OpenAI-Project": config.project} if config.project else {})},
-            )
-            response.raise_for_status()
-        data = response.json()
-        markdown = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        if markdown:
-            return {"markdown": markdown, "model": data.get("model") or config.vision_model, "usage": data.get("usage") or {}}
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Vision OCR enhancement skipped for %s: %s", file_name, exc)
-        return {"error": str(exc)}
+        mime_type = mimetypes.guess_type(file_name)[0] or "image/png"
+        images = [("image/png", image) for image in _pdf_page_images(content)] if mime_type == 'application/pdf' else [(mime_type, content)]
+        if any(mime not in {'image/png', 'image/jpeg', 'image/webp', 'image/gif'} for mime, _ in images):
+            raise ValueError('视觉增强仅支持图片或 PDF')
+        if sum(len(image) for _, image in images) > 15 * 1024 * 1024:
+            raise ValueError('文档图片超过视觉请求大小限制，请拆分文档')
+        blocks = [{"type": "text", "text": "Extract all readable text from these document images. Return clean Markdown only. Preserve page labels, tables, dates, codes, and low-confidence notes."}]
+        blocks.extend({"type": "image", "mimeType": mime, "data": base64.b64encode(image).decode('ascii')} for mime, image in images)
+        result = run_document_sdk(effective, blocks)
+        if result.finish_reason not in {'completed', 'stop', None}:
+            raise RuntimeError(f'文档模型执行未完成：{result.finish_reason}')
+        if result.final_response.strip():
+            usage = {}
+            for event in result.events:
+                for key, value in (event.get('data', {}).get('usage') or {}).items():
+                    if isinstance(value, (int, float)):
+                        usage[key] = usage.get(key, 0) + value
+            return {"markdown": result.final_response.strip(), "model": config.vision_model, "usage": usage, "engine": "deepseek-harness"}
+    except Exception as exc:
+        from .settings import mask_sensitive_text
+        detail = mask_sensitive_text(str(exc).replace(api_key, '[REDACTED_SECRET]'))
+        logger.warning("Vision OCR enhancement skipped for %s: %s", file_name, detail)
+        return {"error": detail}
     return None
 
 

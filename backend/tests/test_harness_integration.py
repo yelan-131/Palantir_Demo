@@ -57,7 +57,7 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         calls.append(body)
         pattern = 'forms_create_form_definition_' if confirmation == 'write' else 'forms_query_records_'
         query_tool = next(t['function']['name'] for t in body.get('tools', []) if pattern in t['function']['name'])
-        if not any(m['role'] == 'tool' for m in body['messages']) and '平台恢复' not in str(body['messages'][-1].get('content')):
+        if not any(m['role'] == 'tool' for m in body['messages']) and '平台恢复' not in str(body['messages']):
             delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'test-call', 'type': 'function', 'function': {'name': query_tool, 'arguments': json.dumps({'form': {'name': '测试表单', 'code': 'test'}, 'fields': [{'field_name': 'name', 'label': '名称', 'field_type': 'string'}]} if confirmation == 'write' else {'form_code': 'test'})}}]}
             reason = 'tool_calls'
         else:
@@ -87,13 +87,13 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512
         assert calls[0]['reasoning_effort'] == 'low'
-        assert all('bash' not in t['function']['name'] and 'shell' not in t['function']['name'] for t in calls[0]['tools'])
+        assert all(t['function']['name'].removeprefix('mcp__platform__') in {mod.tool_alias(tool.name) for tool in mod.tool_registry().values()} for t in calls[0]['tools'])
         settings['maxTokens'] = 384
         resumed = await mod.run_sdk(settings, user, '平台恢复的历史：助手已读取 1 条记录。继续上次的对话', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
         assert resumed.finish_reason == 'completed'
         assert len(calls) == 3
         assert calls[-1]['max_tokens'] == 384
-        assert '平台恢复的历史' in str(calls[-1]['messages'][-1]['content'])
+        assert '平台恢复的历史' in str(calls[-1]['messages'])
         assert resumed.session_id != result.session_id
         if confirmation:
             handler.assert_not_awaited()

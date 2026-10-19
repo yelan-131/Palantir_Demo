@@ -56,7 +56,7 @@ class AgentToolExecutor:
                     event_sink=event_sink,
                     audit_ai_event=audit_ai_event,
                     run_id=str(run.get("run_id") or ""),
-                    callback=lambda payload_override=None, skill=str(skill or ""), payload=payload, evidence=action.get("evidence") or [], source_draft_id=source_draft_id: self._execute_action(
+                    callback=lambda payload_override=None, skill=str(skill or ""), payload=payload, evidence=action.get("evidence") or [], source_draft_id=source_draft_id, action_index=index: self._execute_action(
                         skill=str(skill or ""),
                         payload=payload_override if isinstance(payload_override, dict) else payload,
                         evidence=evidence,
@@ -66,6 +66,7 @@ class AgentToolExecutor:
                         update_ai_draft_status=update_ai_draft_status,
                         audit_ai_event=audit_ai_event,
                         source_draft_id=source_draft_id,
+                        execution_key=str(action_index),
                     ),
                 )
             except asyncio.TimeoutError:
@@ -133,11 +134,16 @@ class AgentToolExecutor:
         update_ai_draft_status: UpdateDraftStatus,
         audit_ai_event: AuditEvent | None,
         source_draft_id: str,
+        execution_key: str = '0',
     ) -> dict[str, Any]:
         harness_tool = payload.get("_harness_tool")
         if harness_tool:
             from .tool_handlers import dispatch_tool_handler
-            result = await dispatch_tool_handler(str(harness_tool), {k: v for k, v in payload.items() if not k.startswith("_")}, current_user=current_user, settings=settings_snapshot())
+            arguments = {k: v for k, v in payload.items() if not k.startswith('_')}
+            if harness_tool in {'forms.update_record', 'forms.create_dynamic_record_draft'}:
+                arguments['_execution_run_id'] = run.get('run_id')
+                arguments['_execution_action_key'] = execution_key
+            result = await dispatch_tool_handler(str(harness_tool), arguments, current_user=current_user, settings=settings_snapshot())
             return {"tool": harness_tool, "status": "failed" if result.get("status") in {"not_implemented", "failed", "error"} else "completed", "result": result}
 
         if skill == "low_code.create_form_definition":
@@ -178,16 +184,19 @@ class AgentToolExecutor:
             return {"skill": skill, "tool": "forms.get_record", "status": "completed", "result": result}
 
         dynamic_result = None
+        record_payload = {**payload, '_execution_run_id': run.get('run_id'), '_execution_action_key': execution_key}
         try:
             async with db_session() as session:
                 dynamic_result = await create_dynamic_record_draft_from_agent(
                     session,
                     user=current_user,
                     skill=skill,
-                    payload=payload,
+                    payload=record_payload,
                     evidence=evidence,
                 )
         except (HTTPException, SQLAlchemyError):
+            if payload.get('form_code') or payload.get('target_form_code'):
+                raise
             dynamic_result = None
         if dynamic_result:
             await self._mark_executed(update_ai_draft_status, source_draft_id, current_user, run, dynamic_result)

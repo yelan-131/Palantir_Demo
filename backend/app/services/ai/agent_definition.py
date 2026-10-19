@@ -38,7 +38,12 @@ def load_agent_system_prompt() -> str:
 
 @lru_cache(maxsize=8)
 def load_action_contracts() -> dict[str, dict[str, Any]]:
-    return _load_json_block("action-contracts.md")
+    from .low_code_tools import describe_create_form_definition_contract, describe_add_form_field_contract
+    contracts = _load_json_block("action-contracts.md")
+    for name, native in (("low_code.create_form_definition", describe_create_form_definition_contract()),
+                         ("low_code.add_form_field", describe_add_form_field_contract())):
+        contracts[name] = {**contracts.get(name, {}), **native}
+    return contracts
 
 
 @lru_cache(maxsize=8)

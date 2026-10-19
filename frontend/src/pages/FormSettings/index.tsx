@@ -1,4 +1,5 @@
 import SettingsTabs from '@/components/SettingsTabs';
+import { fieldStorageSize } from '../SystemAdmin/assemblyPersistence';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -293,6 +294,8 @@ interface AssignmentRule {
 }
 
 interface DesignerField {
+  storageType?: string;
+  maxBytes?: number;
   key: string;
   name: string;
   type: string;
@@ -1331,12 +1334,12 @@ function isNumericFormRouteId(value: string) {
 
 async function resolvePlatformFormForConfig(configId: string) {
   if (isNumericFormRouteId(configId)) {
-    const detailResponse = await getPlatformForm(configId);
+    const detailResponse = await getPlatformForm(configId, { schema: 'draft', scope: 'designer' });
     const form = detailResponse.data?.data as PlatformForm | undefined;
     return form || null;
   }
   try {
-    const detailResponse = await getPlatformFormByCode(configId);
+    const detailResponse = await getPlatformFormByCode(configId, { schema: 'draft', scope: 'designer' });
     const form = detailResponse.data?.data as PlatformForm | undefined;
     if (form) return form;
   } catch {
@@ -1346,7 +1349,7 @@ async function resolvePlatformFormForConfig(configId: string) {
   const forms = (formsResponse.data?.data || []) as PlatformForm[];
   const matchedForm = forms.find((form) => form.code === configId);
   if (!matchedForm) return null;
-  const detailResponse = await getPlatformForm(matchedForm.id);
+  const detailResponse = await getPlatformForm(matchedForm.id, { schema: 'draft', scope: 'designer' });
   return (detailResponse.data?.data || matchedForm) as PlatformForm;
 }
 
@@ -1806,7 +1809,9 @@ function mapPlatformBusinessType(rawBusinessType: string | undefined, rawType: s
   if (rawBusinessType === 'enum' || rawType === 'enum') return 'enum';
   if (rawBusinessType === 'datetime' || rawType === 'datetime') return 'datetime';
   if (rawBusinessType === 'date' || rawType === 'date') return 'date';
-  if (rawBusinessType === 'number' || rawType === 'number') return 'number';
+  if (['number', 'integer', 'int', 'decimal', 'float'].includes(rawBusinessType || '') || ['number', 'integer', 'int', 'decimal', 'float'].includes(rawType)) return 'number';
+  if (rawBusinessType === 'person') return 'person';
+  if (rawBusinessType === 'attachment') return 'attachment';
   if (dataSource === 'users') return 'person';
   if (rawBusinessType === 'relation' || rawType === 'relation' || Boolean(dataSource)) return 'relation';
   if (widget === 'upload') return 'attachment';
@@ -1863,6 +1868,8 @@ function platformFieldsToDesignerFields(fields?: PlatformFormField[]) {
       const mapped = mapPlatformFieldType(field);
       return {
         key: field.field_name,
+        storageType: field.field_type,
+        maxBytes: typeof field.validation?.maxBytes === 'number' ? field.validation.maxBytes : undefined,
         name: field.label || field.field_name,
         type: mapped.type,
         businessType: mapped.businessType,
@@ -1888,6 +1895,8 @@ function areDesignerFieldsSame(left?: DesignerField[], right?: DesignerField[]) 
     return other
       && field.key === other.key
       && field.name === other.name
+      && field.storageType === other.storageType
+      && field.maxBytes === other.maxBytes
       && field.type === other.type
       && field.businessType === other.businessType
       && field.placeholder === other.placeholder
@@ -2086,7 +2095,7 @@ function makeRuntimeFormLayout(controls: LayoutControl[], fields: DesignerField[
               width: control.width,
               colSpan: widthToColSpan(control.width),
               controlType: getEffectiveControlTypeForControl(control, field),
-              required: Boolean(control.rules.required.enabled || field?.required),
+              required: Boolean(control.rules.required.enabled),
               readonly: Boolean(control.rules.readonly.enabled),
               placeholder: control.placeholder || field?.placeholder,
               helpText: control.helpText,
@@ -2115,6 +2124,7 @@ function getStoredViewConfig(form: PlatformForm | null | undefined, designerConf
 }
 
 function mapDesignerFieldType(field: DesignerField) {
+  if (field.storageType) return field.storageType;
   const businessType = getFieldBusinessType(field);
   if (businessType === 'code') return 'string';
   if (businessType === 'date' || businessType === 'datetime') return 'datetime';
@@ -2412,14 +2422,14 @@ export default function FormSettingsPage() {
   const baseConfig = useMemo<DesignerConfig>(() => {
     const databaseFields = databaseFieldsByForm[staticBaseConfig.id];
     const databaseMeta = databaseMetaByForm[staticBaseConfig.id];
-    if (!databaseFields?.length && !databaseMeta) return staticBaseConfig;
+    if (!databaseFields && !databaseMeta) return staticBaseConfig;
     return {
       ...staticBaseConfig,
       id: databaseMeta?.code || staticBaseConfig.id,
       name: databaseMeta?.name || staticBaseConfig.name,
       createTitle: databaseMeta?.name ? `新增${databaseMeta.name}` : staticBaseConfig.createTitle,
       kind: databaseMeta?.kind || staticBaseConfig.kind,
-      fields: databaseFields?.length ? databaseFields : staticBaseConfig.fields,
+      fields: databaseFields ?? staticBaseConfig.fields,
       dataSource: databaseMeta?.dataSource || staticBaseConfig.dataSource,
       description: databaseMeta?.description || staticBaseConfig.description,
     };
@@ -2496,6 +2506,7 @@ export default function FormSettingsPage() {
     [commonControlKeys, componentGroups],
   );
   const [encodingSettingsDraft, setEncodingSettingsDraft] = useState<EncodingRule | null>(null);
+  const encodingEditorRef = useRef<HTMLDivElement>(null);
   const [workflowMeta, setWorkflowMeta] = useState<WorkflowDesignerMeta>({});
   const [isPersistingFlow, setPersistingFlow] = useState(false);
   const [isPersistingPermissions, setPersistingPermissions] = useState(false);
@@ -2724,7 +2735,6 @@ export default function FormSettingsPage() {
         if (cancelled) return;
         const databaseFields = platformFieldsToDesignerFields(formDetail.fields);
         setDatabaseFieldsByForm((current) => {
-          if (!databaseFields.length) return current;
           if (areDesignerFieldsSame(current[staticBaseConfig.id], databaseFields)) return current;
           return { ...current, [staticBaseConfig.id]: databaseFields };
         });
@@ -2765,7 +2775,7 @@ export default function FormSettingsPage() {
           console.warn('form permissions load failed', error);
           if (!cancelled) setFormPermissionRows([]);
         }
-        const viewSourceFields = databaseFields.length ? databaseFields : baseConfig.fields;
+        const viewSourceFields = databaseFields;
         let persistedViewConfig = getStoredViewConfig(formDetail, baseConfig);
         if (!persistedViewConfig) {
           try {
@@ -3334,6 +3344,10 @@ export default function FormSettingsPage() {
           <span>字段类型</span>
           <Input value={getFieldStorageTypeLabel(selectedField)} disabled suffix="数据库字段" />
         </label>
+        {selectedField && <label className="designer-prop-locked">
+          <span>字段大小</span>
+          <Input value={fieldStorageSize(mapDesignerFieldType(selectedField), selectedField.maxBytes)} readOnly />
+        </label>}
       </section>
     );
   };
@@ -6278,11 +6292,20 @@ export default function FormSettingsPage() {
         )}
       </section>
 
-      <Modal centered className="encoding-segment-modal" title="编码规则设置" open={Boolean(encodingSettingsDraft)}
-        onCancel={() => setEncodingSettingsDraft(null)} okText="保存规则" cancelText="取消" width={760}
+      <Modal centered className="encoding-rule-modal" title="编码规则设置" open={Boolean(encodingSettingsDraft)}
+        afterOpenChange={(open) => { if (open) encodingEditorRef.current?.scrollTo({ top: 0 }); }}
+        onCancel={() => setEncodingSettingsDraft(null)} okText="保存规则" cancelText="取消" width={980}
+        footer={(_, { OkBtn, CancelBtn }) => <div className="encoding-rule-footer">
+          <div>{encodingSettingsDraft && getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) &&
+            <Tooltip title={getEncodingRules(selectedEncodingRule).length <= 1 ? '至少保留一条规则，可在列表中停用' : '从当前表单配置中移除此规则'}>
+              <Button type="text" danger disabled={getEncodingRules(selectedEncodingRule).length <= 1} icon={<DeleteOutlined />}
+                onClick={() => { updateSelectedEncodingRule({ rules: getEncodingRules(selectedEncodingRule).filter((r) => r.id !== encodingSettingsDraft.id) }); setEncodingSettingsDraft(null); }}>删除规则</Button>
+            </Tooltip>}</div>
+          <Space><CancelBtn /><OkBtn /></Space>
+        </div>}
         onOk={() => {
           if (!encodingSettingsDraft || !encodingSettingsDraft.name?.trim()) { message.warning('请填写规则名称'); return; }
-          if (!selectedEncodingSegments.length) { message.warning('请添加编码段'); return; }
+          if (encodingSettingsDraft.generationMode !== 'manual' && !selectedEncodingSegments.length) { message.warning('请添加编码段'); return; }
           if ((encodingSettingsDraft.conditions || []).some((c) => !c.sourceField || (!['isEmpty', 'notEmpty'].includes(c.operator || '') && !c.value?.trim()))) {
             message.warning('请完整填写触发条件'); return;
           }
@@ -6295,47 +6318,78 @@ export default function FormSettingsPage() {
           nextRules.splice(Math.max(0, Math.min(nextRules.length, (priority || 1) - 1)), 0, savedRule);
           updateSelectedEncodingRule({ rules: nextRules }); setEncodingSettingsDraft(null);
         }}>
-        {encodingSettingsDraft && <div className="encoding-rule-dialog">
-          <div className="encoding-settings-form">
-            <label><span>规则名称</span><Input aria-label="编码规则名称" value={encodingSettingsDraft.name}
-              onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, name: e.target.value })} /></label>
-            <label><span>匹配顺序</span><InputNumber aria-label="编码规则匹配顺序" min={1}
-              max={getEncodingRules(selectedEncodingRule).length + (getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) ? 0 : 1)}
-              value={encodingSettingsDraft.priority || 1} onChange={(priority) => setEncodingSettingsDraft({ ...encodingSettingsDraft, priority: Number(priority || 1) })} /></label>
-            {getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) && <label><span>删除规则</span>
-              <Button danger size="small" disabled={getEncodingRules(selectedEncodingRule).length <= 1} icon={<DeleteOutlined />}
-                onClick={() => { updateSelectedEncodingRule({ rules: getEncodingRules(selectedEncodingRule).filter((r) => r.id !== encodingSettingsDraft.id) }); setEncodingSettingsDraft(null); }}>删除当前规则</Button></label>}
+        {encodingSettingsDraft && <div className="encoding-rule-workspace">
+          <div className="encoding-rule-editor" ref={encodingEditorRef}>
+            <section className="encoding-editor-section">
+              <div className="encoding-section-title"><strong>规则信息</strong><span>一条规则对应一种编码方案</span></div>
+              <label className="encoding-editor-field"><span>规则名称</span><Input aria-label="编码规则名称" value={encodingSettingsDraft.name}
+                placeholder="例如：成品物料编码" maxLength={60}
+                onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, name: e.target.value })} /></label>
+              <div className="encoding-editor-grid">
+                <label className="encoding-editor-field"><span>生成方式</span><Select aria-label="编码生成方式" value={encodingSettingsDraft.generationMode || 'auto'} options={encodingGenerationModeOptions}
+                  onChange={(generationMode) => setEncodingSettingsDraft({ ...encodingSettingsDraft, generationMode,
+                    allowManualOverride: generationMode === 'autoEditable' || generationMode === 'manual' })} /></label>
+                <label className="encoding-editor-field"><span>匹配顺序 <Tooltip title="数字越小越先匹配，只使用第一条满足条件且已启用的规则。"><span className="encoding-inline-hint">ⓘ</span></Tooltip></span>
+                  <InputNumber aria-label="编码规则匹配顺序" min={1} precision={0}
+                    max={getEncodingRules(selectedEncodingRule).length + (getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) ? 0 : 1)}
+                    value={encodingSettingsDraft.priority || 1} onChange={(priority) => setEncodingSettingsDraft({ ...encodingSettingsDraft, priority: Number(priority || 1) })} /></label>
+              </div>
+            </section>
+            <section className="encoding-editor-section">
+              <div className="encoding-section-title"><strong>何时使用这条规则</strong></div>
+              <Segmented aria-label="编码规则适用条件" value={encodingSettingsDraft.conditions?.length ? 'conditional' : 'always'}
+                options={[{label:'无条件匹配',value:'always'},{label:'满足条件时匹配',value:'conditional'}]}
+                onChange={(value) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: value === 'always' ? [] : [{sourceField: assignmentTargetFieldOptions[0]?.value, operator:'eq',value:''}] })} />
+              {!encodingSettingsDraft.conditions?.length ? <p className="encoding-editor-hint">轮到本规则时直接使用，适合作为最后一条兜底规则。</p> : <>
+                <div className="encoding-condition-caption"><span>同时满足以下所有条件</span><Button size="small" type="text" icon={<PlusOutlined />} onClick={() =>
+                  setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: [...(encodingSettingsDraft.conditions || []), {sourceField: assignmentTargetFieldOptions[0]?.value,operator:'eq',value:''}] })}>添加条件</Button></div>
+                {encodingSettingsDraft.conditions.map((condition,index) => <div className="encoding-condition-row" key={index}>
+                  <Select aria-label={`条件字段 ${index + 1}`} placeholder="选择字段" value={condition.sourceField} options={assignmentTargetFieldOptions}
+                    onChange={(sourceField) => setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.map((c,i)=>i===index?{...c,sourceField}:c)})} />
+                  <Select aria-label={`条件运算符 ${index + 1}`} value={condition.operator} options={[
+                    {value:'eq',label:'等于'},{value:'ne',label:'不等于'},{value:'contains',label:'包含'},
+                    {value:'gte',label:'大于等于'},{value:'lte',label:'小于等于'},{value:'isEmpty',label:'为空'},{value:'notEmpty',label:'不为空'}]}
+                    onChange={(operator)=>setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.map((c,i)=>i===index?{...c,operator}:c)})} />
+                  {['isEmpty','notEmpty'].includes(condition.operator || '') ? <span className="encoding-no-value">无需填写值</span> :
+                    <Input aria-label={`条件值 ${index + 1}`} placeholder="填写匹配值" value={condition.value}
+                      onChange={(e)=>setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.map((c,i)=>i===index?{...c,value:e.target.value}:c)})} />}
+                  <Button aria-label={`删除条件 ${index + 1}`} disabled={encodingSettingsDraft.conditions?.length === 1} type="text" icon={<DeleteOutlined />}
+                    onClick={()=>setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.filter((_,i)=>i!==index)})} />
+                </div>)}
+              </>}
+            </section>
+            <section className="encoding-editor-section">
+              <div className="encoding-section-title"><strong>如何组成编码 <span className="encoding-section-count">{selectedEncodingSegments.length} 段</span></strong>
+                {encodingSettingsDraft.generationMode !== 'manual' && <Button size="small" type="text" icon={<PlusOutlined />} onClick={()=>openEncodingSegmentEditor()}>添加编码段</Button>}</div>
+              {encodingSettingsDraft.generationMode === 'manual' ? <p className="encoding-editor-hint">由使用者录入完整编码，不使用自动编码段。</p> : <>
+                <p className="encoding-editor-hint">按从上到下的顺序拼接；点击设置编辑每段内容。</p>
+                {!selectedEncodingSegments.length && <div className="encoding-empty-segments">尚未配置编码段，请点击右上角添加。</div>}
+                <div className="encoding-segment-list">{selectedEncodingSegments.map((segment,index)=><div className="encoding-segment-item" key={segment.id}>
+                  <span className="encoding-segment-index">{index+1}</span>
+                  <div className="encoding-segment-description"><strong>{segment.name}</strong><span>{getEncodingSegmentTypeLabel(segment.type)} · {segment.length} 位</span></div>
+                  <code title="段示例">{renderEncodingSegmentSample(segment,baseConfig.fields) || '—'}</code>
+                  <div className="encoding-segment-actions">
+                    <Button size="small" type="text" title="上移" aria-label={`上移编码段：${segment.name}`} disabled={index===0} onClick={()=>{const next=[...selectedEncodingSegments];[next[index-1],next[index]]=[next[index],next[index-1]];syncEncodingSegments(next);}}>↑</Button>
+                    <Button size="small" type="text" title="下移" aria-label={`下移编码段：${segment.name}`} disabled={index===selectedEncodingSegments.length-1} onClick={()=>{const next=[...selectedEncodingSegments];[next[index+1],next[index]]=[next[index],next[index+1]];syncEncodingSegments(next);}}>↓</Button>
+                    <Button size="small" type="text" title="设置编码段" aria-label={`设置编码段：${segment.name}`} icon={<SettingOutlined />} onClick={()=>openEncodingSegmentEditor(segment,index)} />
+                    <Button size="small" type="text" title="删除编码段" aria-label={`删除编码段：${segment.name}`} icon={<DeleteOutlined />} onClick={()=>removeEncodingSegment(index)} />
+                  </div>
+                </div>)}</div>
+              </>}
+            </section>
           </div>
-          <div className="encoding-dialog-heading"><strong>触发条件</strong><Button size="small" type="text" icon={<PlusOutlined />} onClick={() =>
-            setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: [...(encodingSettingsDraft.conditions || []), { sourceField: assignmentTargetFieldOptions[0]?.value, operator: 'eq', value: '' }] })}>添加条件</Button></div>
-          <p className="encoding-dialog-help">规则从上到下匹配，采用第一条满足条件的规则；本规则的条件需全部满足，未添加条件时始终匹配。新规则默认排在首位，可通过“匹配顺序”调整优先级。</p>
-          {(encodingSettingsDraft.conditions || []).map((condition, index) => <div className="encoding-condition-row" key={index}>
-            <Select aria-label={`条件字段 ${index + 1}`} value={condition.sourceField} options={assignmentTargetFieldOptions}
-              onChange={(sourceField) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, sourceField } : c) })} />
-            <Select aria-label={`条件运算符 ${index + 1}`} value={condition.operator} options={[
-              {value:'eq',label:'等于'}, {value:'ne',label:'不等于'}, {value:'contains',label:'包含'},
-              {value:'gte',label:'大于等于'}, {value:'lte',label:'小于等于'}, {value:'isEmpty',label:'为空'}, {value:'notEmpty',label:'不为空'}]}
-              onChange={(operator) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, operator } : c) })} />
-            <Input aria-label={`条件值 ${index + 1}`} disabled={['isEmpty','notEmpty'].includes(condition.operator || '')} value={condition.value}
-              onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.map((c, i) => i === index ? { ...c, value: e.target.value } : c) })} />
-            <Button aria-label={`删除条件 ${index + 1}`} type="text" danger icon={<DeleteOutlined />} onClick={() => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: encodingSettingsDraft.conditions?.filter((_, i) => i !== index) })} />
-          </div>)}
-          <div className="encoding-dialog-heading"><strong>编码组成</strong><Button size="small" type="text" icon={<PlusOutlined />} onClick={() => openEncodingSegmentEditor()}>添加编码段</Button></div>
-          {selectedEncodingSegments.map((segment, index) => <div className="encoding-composition-row" key={segment.id}>
-            <span>{index + 1}. {segment.name}</span><span>{getEncodingSegmentTypeLabel(segment.type)} · {segment.length} 位</span>
-            <Button size="small" disabled={index === 0} onClick={() => { const next = [...selectedEncodingSegments]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; syncEncodingSegments(next); }}>上移</Button>
-            <Button size="small" type="text" aria-label={`设置编码段：${segment.name}`} icon={<SettingOutlined />} onClick={() => openEncodingSegmentEditor(segment,index)} />
-            <Button size="small" type="text" danger aria-label={`删除编码段：${segment.name}`} icon={<DeleteOutlined />} onClick={() => removeEncodingSegment(index)} />
-          </div>)}
-          <div className="encoding-dialog-heading"><strong>生成设置</strong></div>
-          <div className="encoding-settings-form">
-            <label><span>生成方式</span><Select aria-label="编码生成方式" value={encodingSettingsDraft.generationMode || 'auto'} options={encodingGenerationModeOptions}
-              onChange={(generationMode) => setEncodingSettingsDraft({ ...encodingSettingsDraft, generationMode,
-                allowManualOverride: generationMode === 'autoEditable' || generationMode === 'manual' })} /></label>
-            <label><span>组成说明</span><Input value={getEncodingComposition(encodingSettingsDraft, baseConfig.fields)} readOnly /></label>
-            <label><span>编码示例</span><Input value={renderEncodingSample(encodingSettingsDraft, baseConfig.fields)} readOnly /></label>
-          </div>
+          <aside className="encoding-preview-panel" aria-label="编码规则预览">
+            <div className="encoding-section-title"><strong>生成结果预览</strong><Tag>示例</Tag></div>
+            {encodingSettingsDraft.generationMode === 'manual' ? <div className="encoding-preview-code">手工录入</div> : <>
+              <div className="encoding-preview-code">{selectedEncodingSegments.length ? renderEncodingSample({...encodingSettingsDraft,enabled:true},baseConfig.fields) : '等待添加编码段'}</div>
+              <div className="encoding-preview-parts">{selectedEncodingSegments.map((segment)=><div key={segment.id}><span>{segment.name}</span><code>{renderEncodingSegmentSample(segment,baseConfig.fields) || '—'}</code></div>)}</div>
+              <div className="encoding-preview-total">{selectedEncodingSegments.length} 个编码段 · 配置长度 {selectedEncodingSegments.reduce((total,segment)=>total+(segment.length||0),0)} 位</div>
+            </>}
+            <p className="encoding-editor-hint">预览使用示例值，实际编码根据记录内容和流水号生成。</p>
+            <div className="encoding-preview-status"><span>当前状态</span><strong>{encodingSettingsDraft.enabled === false ? '已停用' : '已启用'}</strong></div>
+          </aside>
         </div>}
+
       </Modal>
 
       <Modal

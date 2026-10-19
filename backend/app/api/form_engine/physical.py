@@ -20,7 +20,7 @@ from app.api.form_engine.query import (
     _queryable_field_names,
     _visible_field_subset,
 )
-from app.api.form_engine.validation import _field_allowed_values, _field_value_is_compatible
+from app.api.form_engine.validation import _field_allowed_values, _field_value_is_compatible, _field_max_bytes
 from app.config import settings
 from app.database import DB_TYPE
 
@@ -74,6 +74,8 @@ def _physical_record_payload(row, form, fields: list, *, visible_fields: Optiona
                 pass  # Preserve legacy scalar text rather than inventing data.
         elif str(field.field_type).lower() == "boolean":
             data[name] = bool(value)
+        elif str(field.field_type).lower() == 'relation' and isinstance(value, str) and value.isdecimal():
+            data[name] = int(value)
         elif str(field.field_type).lower() in {"date", "datetime"} and hasattr(value, "isoformat"):
             data[name] = value.isoformat()
     workflow = {
@@ -115,6 +117,35 @@ async def _ensure_physical_form_table(db: AsyncSession, form, fields: Optional[l
         return
     table_name = str(form.table_name)
     assert_safe_identifier(table_name)
+    # Avoid CREATE INDEX's ShareLock on every ordinary read/write. Two
+    # sessions upgrading that lock to write locks can otherwise deadlock.
+    existing_columns = await _physical_table_columns(db, table_name)
+    if DB_TYPE != 'sqlite':
+        index_names = set((await db.execute(text('SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = :name'), {'name': table_name})).scalars())
+        required_columns = {_physical_column_name(field.field_name) for field in fields or [] if not field.archived}
+        required_indexes = {f'ix_{table_name}_tenant_deleted_id'} | {
+            f'uq_{table_name}_{_physical_column_name(field.field_name)}_code' for field in fields or []
+            if not field.archived and _is_encoding_field(field) and _encoding_rule_for_field(field).get('enabled') is not False}
+        if not existing_columns or required_columns - existing_columns or required_indexes - index_names:
+            # IF NOT EXISTS alone does not serialize concurrent PostgreSQL
+            # catalog creation. Only provisioning takes this transaction lock.
+            await db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:name, 0))'),
+                {'name': f'form-schema:{table_name}'})
+            existing_columns = await _physical_table_columns(db, table_name)
+            index_names = set((await db.execute(text('SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = :name'), {'name': table_name})).scalars())
+    if existing_columns:
+        for field in fields or []:
+            column_name = _physical_column_name(field.field_name)
+            if not field.archived and column_name not in existing_columns:
+                await db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {_physical_column_type(field)} NULL"))
+                existing_columns.add(column_name)
+        if DB_TYPE != 'sqlite':
+            if f'ix_{table_name}_tenant_deleted_id' not in index_names:
+                await db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_tenant_deleted_id ON {table_name} (tenant_id, deleted_at, id)"))
+            await _ensure_physical_code_indexes(db, table_name, fields or [], existing_columns, index_names)
+        else:
+            await _ensure_physical_code_indexes(db, table_name, fields or [], existing_columns)
+        return
     if DB_TYPE == "sqlite":
         await db.execute(text(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
@@ -155,7 +186,7 @@ async def _ensure_physical_form_table(db: AsyncSession, form, fields: Optional[l
     await _ensure_physical_code_indexes(db, table_name, fields or [], existing_columns)
 
 
-async def _ensure_physical_code_indexes(db: AsyncSession, table_name: str, fields: list, existing_columns: set[str]) -> None:
+async def _ensure_physical_code_indexes(db: AsyncSession, table_name: str, fields: list, existing_columns: set[str], index_names: Optional[set[str]] = None) -> None:
     """Hard uniqueness backstop for auto-encoding (料号) columns.
 
     Index creation is wrapped in a savepoint so legacy tables that already
@@ -172,6 +203,8 @@ async def _ensure_physical_code_indexes(db: AsyncSession, table_name: str, field
             continue
         index_name = f"uq_{table_name}_{column_name}_code"
         assert_safe_identifier(index_name)
+        if index_names is not None and index_name in index_names:
+            continue
         try:
             async with db.begin_nested():
                 await db.execute(
@@ -340,6 +373,8 @@ def _coerce_physical_value(field, value):
     if value in (None, ""):
         return None
     field_type = str(field.field_type or "string").lower()
+    if field_type == 'relation' and isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
     if field_type == "date" and isinstance(value, str):
         return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
     if field_type == "datetime" and isinstance(value, str):
@@ -403,15 +438,24 @@ async def _physical_record_field_impact(db: AsyncSession, tenant_id: int, form, 
         filled_where = f"{base_where} AND {column_name} IS NOT NULL AND CAST({column_name} AS TEXT) != ''"
         filled = int(await db.scalar(text(f"SELECT COUNT(*) FROM {table_name} WHERE {filled_where}"), params) or 0)
         allowed = _field_allowed_values(field) if str(field.field_type or "").lower() == "enum" else None
+        invalid_clauses = []
         if allowed:
             enum_params = {f"enum_{index}": value for index, value in enumerate(sorted(allowed))}
             in_clause = ", ".join(f":{key}" for key in enum_params)
-            incompatible = int(await db.scalar(
-                text(f"SELECT COUNT(*) FROM {table_name} WHERE {filled_where} AND CAST({column_name} AS TEXT) NOT IN ({in_clause})"),
-                {**params, **enum_params},
-            ) or 0)
-        elif _normalize_sql_type(_physical_column_type(field)) != column_types[column_name]:
+            params.update(enum_params)
+            invalid_clauses.append(f"CAST({column_name} AS TEXT) NOT IN ({in_clause})")
+        limit = _field_max_bytes(field)
+        if limit is not None:
+            size_sql = f"length(CAST({column_name} AS BLOB))" if DB_TYPE == "sqlite" else f"octet_length(CAST({column_name} AS TEXT))"
+            invalid_clauses.append(f"{size_sql} > :max_bytes")
+            params["max_bytes"] = limit
+        if _normalize_sql_type(_physical_column_type(field)) != column_types[column_name]:
             incompatible = filled
+        elif invalid_clauses:
+            invalid_sql = " OR ".join(invalid_clauses)
+            incompatible = int(await db.scalar(
+                text(f"SELECT COUNT(*) FROM {table_name} WHERE {filled_where} AND ({invalid_sql})"), params,
+            ) or 0)
     missing_required = (total - filled) if field.required else 0
     return {
         "record_count": total,

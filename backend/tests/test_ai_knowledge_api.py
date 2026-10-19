@@ -104,13 +104,38 @@ def ai_user_client():
     from app.api.deps import get_current_user
     from app.api.knowledge import router as knowledge_router
 
+    async def provision_identity():
+        from sqlalchemy import select
+        from app.database import init_db
+        from app.core.db import db_session
+        from app.models.relational import User, Role, UserRole
+        await init_db()
+        async with db_session() as session:
+            principal = await session.scalar(select(User).where(User.tenant_id == 1, User.username == 'qe_wang'))
+            if principal is None:
+                principal = User(tenant_id=1, username='qe_wang', hashed_password='fixture-only', is_active=True)
+                session.add(principal)
+                await session.flush()
+            role = await session.scalar(select(Role).where(Role.tenant_id == 1, Role.name == 'quality_engineer'))
+            if role is None:
+                role = Role(tenant_id=1, name='quality_engineer', label='Quality engineer')
+                session.add(role)
+                await session.flush()
+            binding = await session.scalar(select(UserRole).where(UserRole.tenant_id == 1, UserRole.user_id == principal.id, UserRole.role_id == role.id))
+            if binding is None:
+                session.add(UserRole(tenant_id=1, user_id=principal.id, role_id=role.id))
+            await session.commit()
+            return principal.id, role.id
+
+    uid, role_id = asyncio.run(provision_identity())
+
     async def _current_user():
         return {
             "sub": "qe_wang",
-            "uid": 5,
+            "uid": uid,
             "tenant_id": 1,
             "is_admin": False,
-            "roles": [{"id": 4, "name": "quality_engineer", "label": "Quality engineer"}],
+            "roles": [{"id": role_id, "name": "quality_engineer", "label": "Quality engineer"}],
         }
 
     app = FastAPI()

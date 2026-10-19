@@ -197,6 +197,7 @@ class AgentResponse(BaseModel):
     requires_confirmation: bool = False
     mode: Literal["qa", "assisted", "agentic"] = "qa"
     frozen_context: FrozenContext | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
     token_budget: dict[str, Any] | None = None
 
     @model_validator(mode="before")

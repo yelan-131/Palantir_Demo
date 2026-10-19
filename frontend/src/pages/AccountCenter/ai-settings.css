@@ -288,3 +288,8 @@
 }
 .ai-settings-notice .ant-notification-notice-message { font-size: 13px; font-weight: 600; }
 .ai-settings-notice .ant-notification-notice-description { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.ai-effective-preview { margin-top: 16px; background: var(--ai-surface); }
+.ai-effective-preview .ant-descriptions-item-content { overflow-wrap: anywhere; font-size: 12px; }
+.ai-effective-preview .ant-descriptions-item-label { font-size: 12px; }
+.ai-effective-preview .ant-alert { margin-bottom: 12px; }
+@media(max-width:760px) { .ai-catalog-connection .ant-card-head { flex-wrap: wrap; gap: 8px; padding-block: 10px; } .ai-catalog-connection .ant-card-extra .ant-space { flex-wrap: wrap; justify-content: flex-end; } }

@@ -385,5 +385,42 @@
       "impacts": "array"
     },
     "permission_check": "business_query"
+  },
+  "forms.update_record": {
+    "name": "forms.update_record",
+    "title": "修改业务记录",
+    "description": "修改已存在的业务记录，先读取确认记录身份，再只提交需要修改的字段。保留原单号及其他字段；需要平台确认。",
+    "handler_key": "forms.update_record",
+    "side_effect": "record_write",
+    "risk_level": "high",
+    "permission_check": "save_draft",
+    "audit_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer"
+        },
+        "form_code": {
+          "type": "string"
+        },
+        "record_id": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "record_id",
+        "data"
+      ]
+    },
+    "output_schema": {
+      "form_code": "string",
+      "record_id": "integer",
+      "operation": "string",
+      "record": "object"
+    }
   }
 }

@@ -1,0 +1,90 @@
+/* The outer page scrolls horizontally on small screens; each column owns vertical scrolling. */
+.tech-white-shell .content-surface:has(.app-assembly-workspace) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tech-white-shell .navigation-area-page:has(> .app-admin-workspace > .app-assembly-workspace) {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.app-admin-workspace:has(> .app-assembly-workspace) { flex: 1 1 0; min-width: 1218px; height: 100%; }
+.app-assembly-workspace { height: 100%; min-height: 0; }
+.app-assembly-workspace .assembly-grid { flex: 1 1 0; }
+.assembly-grid > .ant-col > .ant-card > .ant-card-head { flex-shrink: 0; position: sticky; top: 0; z-index: 2; }
+.assembly-grid > .ant-col > .ant-card > .ant-card-body { min-height: 0; }
+.assembly-grid > .ant-col > .assembly-property-card { container-type: inline-size; }
+.assembly-grid > .ant-col > .assembly-property-card > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.assembly-property-card .assembly-property-editor,
+.assembly-property-card .assembly-node-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.assembly-property-scroll { flex: 1 1 0; min-height: 0; overflow: auto; padding: 20px; }
+.assembly-property-identity { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.assembly-identity-icon { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 10px; background: var(--mf-rail, #f4f6f8); color: var(--mf-primary, #384e65); font-size: 20px; }
+.assembly-property-identity > div { min-width: 0; }
+.assembly-property-identity .ant-typography-secondary { font-size: 12px; }
+.assembly-property-identity h5.ant-typography { margin: 2px 0 0; overflow-wrap: anywhere; }
+.assembly-property-section { margin: 0 0 20px; }
+.assembly-property-section h3, .assembly-field-summary > .ant-typography { margin: 0 0 14px; font-size: 13px; font-weight: 600; }
+.assembly-property-section + .assembly-property-section { border-top: 1px solid var(--mf-border, #e7ebef); padding-top: 20px; }
+.assembly-section-note { margin: -6px 0 14px; color: var(--mf-text-secondary, #7b8794); font-size: 12px; }
+.assembly-property-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; }
+.assembly-property-fields > .ant-form-item { min-width: 0; margin-bottom: 16px; }
+.assembly-property-fields .ant-form-item-label { padding-bottom: 6px; }
+.assembly-property-fields .ant-form-item-label > label { font-size: 12px; color: var(--mf-text-secondary, #6b7785); }
+.assembly-field-wide { grid-column: 1 / -1; }
+.assembly-property-card .assembly-property-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0; padding: 14px 20px; border-top: 1px solid var(--mf-border, #e7ebef); background: #fff; }
+.assembly-property-actions > .assembly-design-link { margin-right: auto; }
+.assembly-property-card .assembly-field-summary { margin: 4px 0 0; padding-top: 20px; border-top: 1px solid var(--mf-border, #e7ebef); }
+.assembly-property-card .node-editor-hero { display: block; padding: 0; margin-bottom: 20px; background: transparent; border: 0; }
+.assembly-property-card .node-state-switches { display: flex; justify-content: flex-start; gap: 32px; }
+.assembly-property-card .node-title-input { font-size: 14px; font-weight: 400; }
+.assembly-property-card .node-config-card { padding: 16px; }
+.tech-white-shell .app-content .assembly-field-summary .ant-table table { min-width: 400px; }
+/* Use the inspector's available width, independent of the viewport or collapsed sidebar. */
+@container (min-width: 520px) {
+  .assembly-property-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Grouped inspector: open sections, explicit access source and a persistent action footer. */
+.assembly-property-card .assembly-access-section { padding-top: 20px; border-top: 1px solid var(--mf-border); }
+.assembly-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.assembly-section-heading h3, .assembly-section-heading strong { margin: 0; font-size: 13px; font-weight: 600; }
+.assembly-section-heading h3 > span:not(.anticon), .assembly-section-heading strong > span:not(.anticon) { color: var(--mf-text-secondary); font-size: 12px; font-weight: 400; }
+.assembly-role-identity strong { display: block; color: var(--mf-text); font-size: 13px; font-weight: 500; }
+.assembly-role-identity small { display: block; color: var(--mf-text-secondary); font-size: 11px; margin-top: 2px; }
+.assembly-role-allowed { color: var(--mf-text); white-space: nowrap; font-size: 12px; }
+.assembly-role-allowed .anticon { color: #377460; }
+.assembly-role-denied { color: var(--mf-text-secondary); font-size: 12px; }
+.assembly-access-note { display: flex; gap: 7px; align-items: flex-start; color: var(--mf-text-secondary); font-size: 12px; margin: 14px 0 0; }
+.assembly-access-note .anticon { flex-shrink: 0; margin-top: 3px; }
+.assembly-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 0; }
+.assembly-setting-row strong { font-size: 13px; font-weight: 500; }
+.assembly-setting-row p { margin: 4px 0 0; color: var(--mf-text-secondary); font-size: 12px; }
+.assembly-property-card .assembly-field-summary .ant-table { font-size: 12px; }
+.assembly-field-summary code { font-size: 11px; color: var(--mf-text-secondary); }
+.assembly-property-drawer .ant-drawer-footer { text-align: right; padding: 16px 24px; }
+.assembly-property-drawer .ant-alert { margin-bottom: 20px; }
+.assembly-drawer-intro { color: var(--mf-text-secondary); font-size: 12px; margin: 0 0 24px; }
+.assembly-property-drawer .ant-form-item-label > label { font-size: 12px; }
+
+.assembly-property-identity h5.ant-typography { font-size: 20px; font-weight: 600; }
+.tech-white-shell .app-content .assembly-access-section .ant-table table { min-width: 0; table-layout: fixed; }
+.assembly-role-identity { overflow-wrap: anywhere; }
+
+.assembly-editable-field { cursor: pointer; }
+.assembly-field-summary .ant-btn-link { padding-inline: 0; height: auto; white-space: normal; text-align: left; }
+.assembly-field-drawer-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

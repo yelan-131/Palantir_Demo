@@ -363,3 +363,26 @@ def test_professional_flow_graph_resolves_executable_steps():
     assert [step["type"] for step in steps] == ["start", "approval", "condition", "end"]
     assert steps[1]["assignee_role"] == "质量经理"
     assert steps[1]["approval_mode"] == "orSign"
+
+
+def test_utf8_byte_limits_measure_bytes_and_do_not_change_design_required_flags():
+    from types import SimpleNamespace
+    from app.api.form_engine.validation import _validate_record_data, _field_value_is_compatible
+    from app.api.forms import _normalize_form_field_data
+    from fastapi import HTTPException
+    field = SimpleNamespace(field_name='name', label='名称', field_type='string', required=False,
+                            archived=False, enum_values=None, validation={'maxBytes':6})
+    _validate_record_data([field], {'name':'中文'})
+    _validate_record_data([field], {'name':'abcdef'})
+    _validate_record_data([field], {})
+    assert _field_value_is_compatible(field, '中文')
+    assert not _field_value_is_compatible(field, '中文字')
+    with pytest.raises(HTTPException, match='6 字节'):
+        _validate_record_data([field], {'name':'中文字'})
+    with pytest.raises(HTTPException, match='6 字节'):
+        _validate_record_data([field], {'name':'😀😀'})
+    for limit in [0, -1, 1.5, True, 1073741824]:
+        with pytest.raises(HTTPException):
+            _normalize_form_field_data({'validation':{'maxBytes':limit}}, current_field_type='string')
+    with pytest.raises(HTTPException):
+        _normalize_form_field_data({'validation':{'maxBytes':6}}, current_field_type='integer')

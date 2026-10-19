@@ -16,7 +16,7 @@ RUN pip install \
       -r requirements.txt
 
 # Fail the build if the official SDK or its platform binary is absent/mismatched.
-RUN python -c "from importlib.metadata import version; from deepseek_harness import DeepSeekHarness; assert version('deepseek-harness-sdk') == version('deepseek-harness-runtime-bin') == '0.1.5rc1'"
+RUN python -c "from importlib.metadata import version; from deepseek_harness import DeepSeekHarness; assert version('deepseek-harness-sdk') == version('deepseek-harness-runtime-bin') == '0.2.1rc2'"
 
 COPY . .
 

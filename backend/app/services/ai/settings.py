@@ -399,6 +399,11 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
     merged['memoryPolicy'].update(enabled=False, recallLimit=0)
     merged['compactionPolicy'].update(enabled=False, compactOnClose=False)
     validate_ai_settings(merged)
+    from .harness_parameters import effective_harness_parameters
+    for purpose in ('chat', 'reasoning', 'document'):
+        if purpose == 'document' and 'modelServices' in merged and not merged.get('modelAssignments', {}).get('document'):
+            continue
+        effective_harness_parameters(merged, purpose)
     return merged
 
 
@@ -426,6 +431,10 @@ def validate_ai_settings(data: dict[str, Any]) -> None:
         raise ValueError("DSH 压缩比例必须是数字") from None
     if not 0 < retain < threshold <= 1:
         raise ValueError("DSH 压缩比例需满足 0 < retainRatio < thresholdRatio ≤ 1")
+    for key, low in (("headroomTokens", 0), ("maxTokens", 1)):
+        value = compaction.get(key)
+        if value not in (None, "") and (isinstance(value, bool) or not isinstance(value, int) or not low <= value <= 32768):
+            raise ValueError(f"harnessPolicy.compaction.{key} 必须是 {low} 到 32768 之间的整数")
     window = harness.get("contextWindow")
     if window not in (None, "") and int(window) <= int(data.get("maxTokens", 2048)):
         raise ValueError("contextWindow 必须大于 max_tokens，为输入保留空间")

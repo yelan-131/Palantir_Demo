@@ -1,3 +1,4 @@
+import EffectiveHarnessPreview from './EffectiveHarnessPreview';
 import useAISettingsNotification from './useAISettingsNotification';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useSearchParams } from 'react-router-dom';
@@ -55,6 +56,7 @@ import {
   getAIAgentRegistry,
   getClosedLoopConfig,
   getAISettings,
+  previewAISettings,
   listAgentConversations,
   listAIMemories,
   listAuditLogs,
@@ -966,7 +968,10 @@ export function AIPlatformPanelV2() {
     { key: 'connection', children: <ServiceCatalogPanel form={form} values={watchedSettings} onChange={() => { setDirty(true); setConnectionResult(null); }} onTest={handleTestConnection} testing={testing} /> },
     { key: 'models', children: <PurposeModelsPanel values={watchedSettings} onTest={handleTestConnection} testing={testing} /> },
     ...advancedSections.filter(section => section.key === 'agent-registry'),
-    { key: 'safety', children: <div className="ai-settings-safety"><AIStatusSummary items={[{ label: '执行模式', value: ({ off: '关闭', readonly: '只读查询', draft: '仅生成草稿', confirm: '确认后执行' } as Record<string, string>)[watchedSettings.agentMode] || '未配置' }, { label: '会话压缩', value: watchedSettings.harnessPolicy?.compaction?.enabled ? '启用' : '关闭' }, { label: '写入策略', value: '操作前确认' }]} /><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={5} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>                <Card title="安全护栏" className="settings-section">
+    { key: 'safety', children: <div className="ai-settings-safety"><AIStatusSummary items={[{ label: '执行模式', value: ({ off: '关闭', readonly: '只读查询', draft: '仅生成草稿', confirm: '确认后执行' } as Record<string, string>)[watchedSettings.agentMode] || '未配置' }, { label: '会话压缩', value: watchedSettings.harnessPolicy?.compaction?.enabled ? '启用' : '关闭' }, { label: '写入策略', value: '操作前确认' }]} /><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={1} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>                <Card title="安全护栏" className="settings-section">
+                  <Form.Item name="domains" label="开放业务范围" extra="仅开放所选范围内的工具；创建表单和查询应用配置需要选择低代码，写入仍须确认并遵守角色权限。">
+                    <Select mode="multiple" options={aiDomainOptions} aria-label="开放业务范围" />
+                  </Form.Item>
                   <div className="ai-policy-toggle-list">
 
 
@@ -1095,7 +1100,7 @@ export function AIPlatformPanelV2() {
     <div className="account-admin-section ai-settings-page">
       {aiNoticeHolder}
       <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={onDraftChange}>
-        <AISettingsWorkspace sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} onSave={handleSaveToBackend} onTest={handleTestConnection} onReset={resetDraft} onDismissTest={() => setConnectionResult(null)} />
+        <AISettingsWorkspace effectivePreview={<EffectiveHarnessPreview onError={description => notify('error', '参数预览失败', description)} values={watchedSettings} onPreview={async () => (await previewAISettings(await collectSettings())).data} />} sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} onSave={handleSaveToBackend} onTest={handleTestConnection} onReset={resetDraft} onDismissTest={() => setConnectionResult(null)} />
       </Form>
       <Modal
         title={permissionRuleEditor.index === null ? '添加工具权限规则' : '编辑工具权限规则'}
@@ -1260,6 +1265,7 @@ export function AIPlatformPanelV2() {
                   { label: '读取', value: 'read' },
                   { label: '分析', value: 'analyze' },
                   { label: '草稿写入', value: 'draft_write' },
+                  { label: '记录修改', value: 'record_write' },
                   { label: '配置写入', value: 'configuration_write' },
                   { label: '流程操作', value: 'workflow_action' },
                   { label: '外部写入', value: 'external_write' },

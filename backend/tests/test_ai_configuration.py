@@ -3,6 +3,20 @@ from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import pytest
+
+
+def test_low_code_scope_controls_both_application_lookup_and_confirmed_creation():
+    from app.services.ai.policies import decide_tool_permission
+    from app.services.ai.settings import merge_ai_settings
+    user = {'tenant_id': 1, 'sub': 'scope-test', 'is_admin': True}
+    settings = merge_ai_settings({'agentMode': 'confirm', 'domains': ['quality']})
+    tools = ['platform.application_settings.query', 'forms.create_form_definition']
+    for tool in tools:
+        assert not decide_tool_permission(user, settings, tool).allowed
+    opened = merge_ai_settings({'domains': ['quality', 'low-code']}, existing=settings)
+    assert decide_tool_permission(user, opened, tools[0]).allowed
+    creation = decide_tool_permission(user, opened, tools[1])
+    assert creation.allowed and creation.requires_confirmation
 from fastapi import HTTPException, FastAPI
 from fastapi.testclient import TestClient
 
@@ -275,20 +289,18 @@ def test_credentials_are_not_reused_across_server_origins(monkeypatch):
 
 
 def test_ocr_enhancement_uses_saved_configuration_and_disable_switches(monkeypatch):
-    import httpx
-    from app.services.ai import ocr_service
+    from types import SimpleNamespace
+    from app.services.ai import ocr_service, harness_runtime
     settings = config(baseUrl='https://vision.example/v1', apiKey='test-key', visionModel='configured-vision-model')
     calls = []
-    client_type = httpx.Client
-    def handler(request):
-        import json
-        calls.append(json.loads(request.content))
-        assert str(request.url) == 'https://vision.example/v1/chat/completions'
-        return httpx.Response(200, json={'model': 'configured-vision-model', 'choices': [{'message': {'content': '# Parsed'}}]})
+    def document_sdk(effective, content):
+        calls.append((effective, content))
+        assert content[1]['type'] == 'image' and content[1]['mimeType'] == 'image/png'
+        return SimpleNamespace(finish_reason='completed', final_response='# Parsed', events=[])
     monkeypatch.setattr(ocr_service, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(ocr_service.httpx, 'Client', lambda **kwargs: client_type(transport=httpx.MockTransport(handler), **kwargs))
+    monkeypatch.setattr(harness_runtime, 'run_document_sdk', document_sdk)
     assert ocr_service.vision_extract_markdown('image.png', b'local-test-image')['model'] == 'configured-vision-model'
-    assert calls[0]['model'] == 'configured-vision-model'
+    assert calls[0][0]['visionModel'] == 'configured-vision-model'
     settings['visionModel'] = 'disabled'
     assert ocr_service.vision_extract_markdown('image.png', b'local-test-image') is None
     settings['visionModel'] = 'configured-vision-model'

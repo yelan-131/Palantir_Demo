@@ -121,6 +121,13 @@ class AgentValidationService:
         elif tool_def.side_effect != "read" and not payload:
             issues.append(ValidationIssue("error", "empty_write_payload", "Write tools require a non-empty payload", tool=tool_name))
         issues.extend(self._validate_declared_input_schema(tool_name, payload))
+        if tool_name in {"forms.create_form_definition", "forms.add_form_field"}:
+            from fastapi import HTTPException
+            from .low_code_tools import validate_field_rule_definitions
+            try:
+                validate_field_rule_definitions(payload.get("fields") or [])
+            except HTTPException as error:
+                issues.append(ValidationIssue("error", "invalid_field_rules", str(error.detail), tool=tool_name))
         issues.extend(self._apply_rules("pre_tool", tool_name, payload, settings))
         return ValidationResult(phase="pre_tool", issues=issues, tool=tool_name, skill=skill_name)
 

@@ -592,10 +592,12 @@ const postAgentEventStream = async (
   path: string,
   data: Record<string, unknown>,
   onEvent: (event: AgentStreamEvent) => void,
+  signal?: AbortSignal,
 ) => {
   const token = localStorage.getItem('mf_token');
   const response = await fetch(`${apiBaseURL}${path}`, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -609,7 +611,8 @@ const postAgentEventStream = async (
 export const streamAgentChat = async (
   data: Record<string, unknown>,
   onEvent: (event: AgentStreamEvent) => void,
-) => postAgentEventStream('/ai/agent/stream', data, onEvent);
+  signal?: AbortSignal,
+) => postAgentEventStream('/ai/agent/stream', data, onEvent, signal);
 
 export const confirmAgentRun = (runId: string, data: Record<string, unknown>) =>
   api.post(`/ai/agent-runs/${runId}/confirm`, data);
@@ -617,7 +620,14 @@ export const streamConfirmAgentRun = async (
   runId: string,
   data: Record<string, unknown>,
   onEvent: (event: AgentStreamEvent) => void,
-) => postAgentEventStream(`/ai/agent-runs/${runId}/confirm/stream`, data, onEvent);
+) => {
+  let finished = false;
+  await postAgentEventStream(`/ai/agent-runs/${runId}/confirm/stream`, data, event => {
+    if (['run.completed', 'run.failed', 'run.cancelled'].includes(event.event)) finished = true;
+    onEvent(event);
+  });
+  if (!finished) throw new Error('连接已中断，正在核实原操作结果');
+};
 export const cancelAgentRun = (runId: string) =>
   api.post(`/ai/agent-runs/${runId}/cancel`);
 export const listAIDrafts = (params?: Record<string, unknown>) =>
@@ -638,6 +648,7 @@ export const deleteAIMemory = (memoryId: string) =>
   api.delete(`/ai/memories/${memoryId}`);
 export const testAIProvider = (providerConfig: Record<string, unknown>) =>
   api.post('/ai/provider/test', { provider_config: providerConfig });
+export const previewAISettings = (settings: Record<string, unknown>) => api.post('/ai/settings/effective', { settings });
 export const getAISettings = () => api.get('/ai/settings');
 export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
 export const testSavedAISettings = (settings?: Record<string, unknown>) => api.post('/ai/settings/test', settings ? { settings } : undefined);
@@ -685,6 +696,11 @@ export const getFieldOptions = (
   modelName: string,
   params?: { label_field?: string; cascade_from?: string; cascade_value?: string | number },
 ) => api.get(`/model-driven/data/${modelName}/options`, { params });
+
+export const evaluateFormRules = (formId: number, data: Record<string, unknown>, recordId?: number) =>
+  api.post(`/forms/${formId}/rules/evaluate`, { data, record_id: recordId });
+export const getFormReferenceOptions = (formId: number, field: string, data: Record<string, unknown>) =>
+  api.post(`/forms/${formId}/fields/${field}/options`, { data });
 
 export const getChildren = (modelName: string, recordId: number, childTable: string) =>
   api.get(`/model-driven/data/${modelName}/${recordId}/children/${childTable}`);
@@ -1167,11 +1183,13 @@ export const createPlatformDynamicRecord = (formId: number | string, data: Recor
   api.post(`/forms/${formId}/records`, { data });
 export const getPlatformDynamicRecord = (formId: number | string, recordId: number | string) =>
   api.get(`/forms/${formId}/records/${recordId}`);
+export const getAgentRunState = (runId: string) => api.get(`/ai/agent-runs/${runId}`);
 export const updatePlatformDynamicRecord = (
   formId: number | string,
   recordId: number | string,
   data: Record<string, unknown>,
-) => api.put(`/forms/${formId}/records/${recordId}`, { data });
+  expectedValues?: Record<string, unknown>,
+) => api.put(`/forms/${formId}/records/${recordId}`, { data, expected_values: expectedValues });
 export interface RecordApproval {
   status: 'draft' | 'pending' | 'approved' | 'rejected';
   can_edit: boolean;
