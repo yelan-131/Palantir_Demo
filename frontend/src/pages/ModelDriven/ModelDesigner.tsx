@@ -47,6 +47,7 @@ interface MetaField {
 }
 
 export default function ModelDesigner() {
+  const [fieldForm] = Form.useForm();
   const [models, setModels] = useState<MetaModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRowKeys, setExpandedRowKeys] = useState<number[]>([]);
@@ -99,34 +100,27 @@ export default function ModelDesigner() {
   };
 
   const handleAddField = (modelId: number) => {
+    fieldForm.resetFields();
     Modal.confirm({
       title: '添加字段',
       content: (
-        <Form layout="vertical" size="small" style={{ marginTop: 16 }}>
-          <Form.Item label="字段名"><Input id="f-name" placeholder="如 status" /></Form.Item>
-          <Form.Item label="显示名"><Input id="f-label" placeholder="如 状态" /></Form.Item>
-          <Form.Item label="类型">
-            <Select id="f-type" options={FIELD_TYPES} defaultValue="string" />
+        <Form form={fieldForm} layout="vertical" size="small" initialValues={{ field_type: 'string', searchable: true, sort_order: 0 }} style={{ marginTop: 16 }}>
+          <Form.Item name="field_name" label="字段名" rules={[{ required: true, whitespace: true }]}><Input id="f-name" placeholder="如 status" /></Form.Item>
+          <Form.Item name="label" label="显示名" rules={[{ required: true, whitespace: true }]}><Input id="f-label" placeholder="如 状态" /></Form.Item>
+          <Form.Item name="field_type" label="类型">
+            <Select id="f-type" options={FIELD_TYPES} />
           </Form.Item>
-          <Form.Item label="必填"><Switch id="f-required" /></Form.Item>
-          <Form.Item label="可搜索"><Switch id="f-searchable" defaultChecked /></Form.Item>
-          <Form.Item label="可排序"><Switch id="f-sortable" /></Form.Item>
-          <Form.Item label="枚举值(JSON)"><Input id="f-enum" placeholder='如 ["a","b"]' /></Form.Item>
-          <Form.Item label="排序"><InputNumber id="f-sort" min={0} defaultValue={0} /></Form.Item>
+          <Form.Item name="required" label="必填" valuePropName="checked"><Switch id="f-required" /></Form.Item>
+          <Form.Item name="searchable" label="可搜索" valuePropName="checked"><Switch id="f-searchable" /></Form.Item>
+          <Form.Item name="sortable" label="可排序" valuePropName="checked"><Switch id="f-sortable" /></Form.Item>
+          <Form.Item name="enum_values" label="枚举值(JSON)"><Input id="f-enum" placeholder='如 ["a","b"]' /></Form.Item>
+          <Form.Item name="sort_order" label="排序"><InputNumber id="f-sort" min={0} /></Form.Item>
         </Form>
       ),
       onOk: async () => {
-        const field_name = (document.getElementById('f-name') as HTMLInputElement)?.value?.trim();
-        const label = (document.getElementById('f-label') as HTMLInputElement)?.value?.trim();
-        const field_type = (document.getElementById('f-type') as any)?.value || 'string';
-        const required = (document.getElementById('f-required') as any)?.checked || false;
-        const searchable = (document.getElementById('f-searchable') as any)?.checked || false;
-        const sortable = (document.getElementById('f-sortable') as any)?.checked || false;
-        const enum_values = (document.getElementById('f-enum') as HTMLInputElement)?.value?.trim() || undefined;
-        const sort_order = (document.getElementById('f-sort') as any)?.value || 0;
-        if (!field_name || !label) { message.warning('字段名必填'); return; }
+        const values = await fieldForm.validateFields();
         try {
-          await addField(modelId, { field_name, label, field_type, required, searchable, sortable, enum_values, sort_order });
+          await addField(modelId, values);
           message.success('字段已添加');
           fetchModels();
         } catch { message.error('添加失败'); }

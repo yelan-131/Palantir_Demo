@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.api.deps import current_tenant_id, get_current_user
+from app.api.deps import current_tenant_id, get_current_user,require_admin
 from app.services.metadata_scan_service import scan_data_source_metadata
 
 router = APIRouter()
@@ -38,6 +38,17 @@ def _parse_connection_config(raw: str | None) -> dict:
     except json.JSONDecodeError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _public_address(raw):
+    from urllib.parse import urlsplit
+    config=_parse_connection_config(raw)
+    url=config.get('url') or config.get('endpoint') or config.get('base_url')
+    if url:
+        try:
+            parsed=urlsplit(str(url));return f'{parsed.scheme}://{parsed.hostname}'+(f':{parsed.port}' if parsed.port else '')
+        except ValueError:return 'API 地址待修正'
+    return str(config.get('host') or '—')+(f":{config['port']}" if config.get('port') else '')
 
 
 INVALID_TEXT_VALUES = {"", "undefined", "null", "none", "nan"}
@@ -81,6 +92,12 @@ def _validated_connection_config(name: str | None, source_type: str | None, conn
     config["type"] = normalized_type
     config["source_type"] = normalized_type
 
+    if normalized_type in {'api','rest_api'}:
+        from urllib.parse import urlsplit
+        parsed=urlsplit(str(config.get('url') or config.get('endpoint') or config.get('base_url') or ''))
+        if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:raise HTTPException(422,'请提供有效 HTTP(S) URL，认证信息请放在 headers 中')
+        if str(config.get('method') or 'GET').upper()!='GET':raise HTTPException(422,'表单选项接口仅支持只读 GET')
+        if not isinstance(config.get('headers',{}),dict):raise HTTPException(422,'headers 必须为 JSON 对象')
     if normalized_type == "postgresql":
         required_fields = {
             "host": config.get("host"),
@@ -114,13 +131,14 @@ class DataSourceUpdate(BaseModel):
 
 class DataSourceConnectionTest(BaseModel):
     source_type: str = "postgresql"
-    host: str
+    host: str = ""
     port: int = 5432
-    database: str
+    database: str = ""
     schema_name: str = "source"
-    username: str
-    password: str
+    username: str = ""
+    password: str = ""
     ssl_enabled: bool = False
+    connection_config: str | None = None
 
 
 class DataSourceMetadataScanBody(BaseModel):
@@ -192,6 +210,7 @@ async def list_data_sources(
                     "tenant_id": s.tenant_id,
                     "name": s.name,
                     "source_type": _normalize_data_source_type(s.source_type, s.connection_config),
+                    "connection_address":_public_address(s.connection_config),
                     "status": s.status,
                     "last_sync": s.last_sync.isoformat() if s.last_sync else None,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -216,6 +235,7 @@ async def list_data_sources(
 @router.post("")
 async def create_data_source(body: DataSourceCreate, user: dict = Depends(get_current_user)):
     """创建数据源."""
+    if body.source_type in {'api','rest_api'} and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
     async def _query(db):
         from app.models.relational import DataSource
         tenant_id = current_tenant_id(user)
@@ -240,13 +260,18 @@ async def create_data_source(body: DataSourceCreate, user: dict = Depends(get_cu
     result = await _try_db(_query)
     if result is not None:
         return result
+    if body.source_type in {'api','rest_api'}:raise HTTPException(503,'数据源未能写入数据库')
     # Mock fallback
     return {"id": 9, "tenant_id": current_tenant_id(user), "name": "未保存的数据源", "status": "error", "source": "fallback"}
 
 
 @router.post("/test-config")
-async def test_connection_config(body: DataSourceConnectionTest):
+async def test_connection_config(body: DataSourceConnectionTest,user:dict=Depends(require_admin)):
     """Test an ad-hoc data source connection before it is saved."""
+    if body.source_type in {'api','rest_api'}:
+        from app.services.form_option_sources import fetch_json
+        await fetch_json(_parse_connection_config(body.connection_config))
+        return {'status':'success','success':True,'message':'已读取真实 JSON 响应'}
     if body.source_type not in {"postgresql", "mysql", "sqlserver", "oracle"}:
         return {
             "status": "success",
@@ -255,6 +280,7 @@ async def test_connection_config(body: DataSourceConnectionTest):
             "tables": [],
         }
 
+    if not body.host or not body.database or not body.username:raise HTTPException(422,'数据库连接需要 host、database 和 username')
     try:
         import time
 
@@ -425,6 +451,7 @@ async def get_data_source(source_id: int, user: dict = Depends(get_current_user)
         ds = await db.get(DataSource, source_id)
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
+        if (ds.source_type in {'api','rest_api'}) and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
         return {
             "id": ds.id,
             "tenant_id": ds.tenant_id,
@@ -450,12 +477,14 @@ async def get_data_source(source_id: int, user: dict = Depends(get_current_user)
 @router.put("/{source_id}")
 async def update_data_source(source_id: int, body: DataSourceUpdate, user: dict = Depends(get_current_user)):
     """更新数据源."""
+    if body.source_type in {'api','rest_api'} and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
     async def _query(db):
         from app.models.relational import DataSource
         tenant_id = current_tenant_id(user)
         ds = await db.get(DataSource, source_id)
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
+        if (ds.source_type in {'api','rest_api'}) and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
         if body.name is not None or body.source_type is not None or body.connection_config is not None:
             clean_name, normalized_type, normalized_config = _validated_connection_config(
                 body.name if body.name is not None else ds.name,
@@ -489,6 +518,7 @@ async def delete_data_source(source_id: int, user: dict = Depends(get_current_us
         ds = await db.get(DataSource, source_id)
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
+        if ds.source_type in {'api','rest_api'} and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
         await db.execute(delete(DataSourceMetadata).where(DataSourceMetadata.tenant_id == tenant_id, DataSourceMetadata.source_id == source_id))
         await db.execute(delete(DataSourceSyncStatus).where(DataSourceSyncStatus.tenant_id == tenant_id, DataSourceSyncStatus.source_id == source_id))
         await db.delete(ds)
@@ -510,6 +540,11 @@ async def test_connection(source_id: int, user: dict = Depends(get_current_user)
         ds = await db.get(DataSource, source_id)
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
+        if ds.source_type in {'api','rest_api'}:
+            from app.services.form_option_sources import fetch_json,connection
+            payload=await fetch_json(connection(ds))
+            ds.status='connected';await db.commit()
+            return {'status':'success','success':True,'message':'已读取真实 JSON 响应'}
         return {
             "status": "success",
             "message": f"成功连接到 {ds.name}",
@@ -520,12 +555,8 @@ async def test_connection(source_id: int, user: dict = Depends(get_current_user)
     result = await _try_db(_query)
     if result is not None:
         return result
-    return {
-        "status": "success",
-        "message": f"成功连接到数据源 {source_id}",
-        "latency_ms": 45,
-        "record_count": 1250,
-    }
+    raise HTTPException(503,'无法读取数据源连接配置')
+
 
 @router.post("/{source_id}/sync")
 async def trigger_sync(source_id: int, user: dict = Depends(get_current_user)):
@@ -582,6 +613,13 @@ async def preview_data(
         ds = await db.get(DataSource, source_id)
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
+        if ds.source_type in {'api','rest_api'}:
+            if not user.get('is_admin'):raise HTTPException(403,'接口完整响应仅供管理员预览')
+            from app.services.form_option_sources import fetch_json,connection
+            payload=await fetch_json(connection(ds))
+            rows=payload if isinstance(payload,list) else payload.get('data') if isinstance(payload,dict) and isinstance(payload.get('data'),list) else [payload]
+            sample=[{str(key):json.dumps(value,ensure_ascii=False) if isinstance(value,(dict,list)) else value for key,value in row.items()} if isinstance(row,dict) else {'value':str(row)} for row in rows[:limit]]
+            return {'columns':list(dict.fromkeys(key for row in sample for key in row)),'rows':sample,'total':len(rows)}
         sample_columns = ["id", "timestamp", "value", "status"]
         sample_rows = [
             {"id": i, "timestamp": f"2026-04-21T{10+i:02d}:00:00", "value": round(25.5 + i * 0.3, 1), "status": "normal"}
@@ -593,9 +631,4 @@ async def preview_data(
     if result is not None:
         return result
 
-    sample_columns = ["id", "timestamp", "value", "status"]
-    sample_rows = [
-        {"id": i, "timestamp": f"2026-04-21T{10+i:02d}:00:00", "value": round(25.5 + i * 0.3, 1), "status": "normal"}
-        for i in range(1, limit + 1)
-    ]
-    return {"columns": sample_columns, "rows": sample_rows, "total": 1250}
+    raise HTTPException(503,'无法读取数据源预览数据')

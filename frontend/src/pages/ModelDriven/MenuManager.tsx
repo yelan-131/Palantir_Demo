@@ -18,6 +18,7 @@ interface MenuItem {
 }
 
 export default function MenuManager() {
+  const [form] = Form.useForm();
   const [menus, setMenus] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,26 +49,22 @@ export default function MenuManager() {
   useEffect(() => { fetchMenus(); }, [fetchMenus]);
 
   const handleCreate = (parentId?: number) => {
+    form.resetFields();
     Modal.confirm({
       title: parentId ? '新建子菜单' : '新建菜单',
       content: (
-        <Form layout="vertical" size="small" style={{ marginTop: 16 }}>
-          <Form.Item label="标题"><Input id="mi-title" placeholder="菜单标题" /></Form.Item>
-          <Form.Item label="图标"><Input id="mi-icon" placeholder="如 ToolOutlined" /></Form.Item>
-          <Form.Item label="路由"><Input id="mi-route" placeholder="如 /dynamic/equipment-list" /></Form.Item>
-          <Form.Item label="排序"><InputNumber id="mi-sort" min={0} defaultValue={0} /></Form.Item>
-          <Form.Item label="可见"><Switch id="mi-visible" defaultChecked /></Form.Item>
+        <Form form={form} layout="vertical" size="small" initialValues={{ sort_order: 0, is_visible: true }} style={{ marginTop: 16 }}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, whitespace: true }]}><Input id="mi-title" placeholder="菜单标题" /></Form.Item>
+          <Form.Item name="icon" label="图标"><Input id="mi-icon" placeholder="如 ToolOutlined" /></Form.Item>
+          <Form.Item name="route_path" label="路由"><Input id="mi-route" placeholder="如 /dynamic/equipment-list" /></Form.Item>
+          <Form.Item name="sort_order" label="排序"><InputNumber id="mi-sort" min={0} /></Form.Item>
+          <Form.Item name="is_visible" label="可见" valuePropName="checked"><Switch id="mi-visible" /></Form.Item>
         </Form>
       ),
       onOk: async () => {
-        const title = (document.getElementById('mi-title') as HTMLInputElement)?.value?.trim();
-        const icon = (document.getElementById('mi-icon') as HTMLInputElement)?.value?.trim();
-        const route_path = (document.getElementById('mi-route') as HTMLInputElement)?.value?.trim();
-        const sort_order = (document.getElementById('mi-sort') as any)?.value || 0;
-        const is_visible = (document.getElementById('mi-visible') as any)?.checked ?? true;
-        if (!title) { message.warning('标题必填'); return; }
+        const values = await form.validateFields();
         try {
-          await createMenu({ parent_id: parentId || null, title, icon, route_path, sort_order, is_visible });
+          await createMenu({ ...values, parent_id: parentId || null });
           message.success('创建成功');
           fetchMenus();
         } catch { message.error('创建失败'); }
@@ -80,7 +77,7 @@ export default function MenuManager() {
     { title: '图标', dataIndex: 'icon', width: 120 },
     {
       title: '路由', dataIndex: 'route_path', width: 200,
-      render: (v: string) => v ? <Tag>{v}</Tag> : <span style={{ color: '#ccc' }}>目录</span>,
+      render: (v: string) => v ? <Tag>{v}</Tag> : <span style={{ color: 'var(--mf-faint)' }}>目录</span>,
     },
     { title: '排序', dataIndex: 'sort_order', width: 70 },
     {

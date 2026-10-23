@@ -11,6 +11,12 @@ const context = {};
 vm.createContext(context);
 vm.runInContext(ts.transpileModule(fn.getText(ast), {}).outputText, context);
 
+test('conditional fixed defaults wait for server evaluation instead of prefilling unconditionally', () => {
+  const input = {field_name:'target',field_type:'string',default_value:'RAW',ui_config:{defaultRule:{mode:'fixed',conditions:[{sourceField:'source',operator:'eq',value:'yes'}]}}};
+  assert.equal(context.mapPlatformField(input).defaultValue, undefined);
+  assert.equal(context.mapPlatformField({...input,ui_config:{}}).defaultValue, 'RAW');
+});
+
 test('AI-created relation metadata works in both object and legacy string form', () => {
   const relation = { target_model: 'test_archive', label_field: 'name' };
   for (const config of [relation, JSON.stringify(relation)]) {
@@ -38,4 +44,14 @@ test('editing datetime records preserves time while date fields stay date-only',
   ]);
   assert.equal(payload.inbound_date, '2026-10-19T22:43:23');
   assert.equal(payload.date, '2026-10-19');
+});
+
+test('runtime controls retain the field binding and persisted type settings',()=>{
+  const React=require('react');context.React=React;context.Form={Item:'form-item'};context.FieldControl='field-control';
+  const renderFunction=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='renderFormFieldControl');
+  vm.runInContext(ts.transpileModule(renderFunction.getText(ast),{compilerOptions:{jsx:ts.JsxEmit.React}}).outputText,context);
+  const mapped=context.mapPlatformField({field_name:'quantity',label:'数量',field_type:'decimal',ui_config:{controlType:'number',typeSettings:{min:1,max:20,precision:2}}});
+  const rendered=context.renderFormFieldControl(mapped,{formId:9,recordId:4});
+  assert.equal(rendered.props.name,'quantity');assert.ok(React.isValidElement(rendered.props.children),'Form.Item requires a single controlled element');
+  assert.equal(rendered.props.children.props.settings.precision,2);assert.equal(rendered.props.children.props.recordId,4);
 });

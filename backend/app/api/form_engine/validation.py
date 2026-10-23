@@ -50,12 +50,14 @@ def _field_allowed_values(field) -> Optional[set[str]]:
 
 
 def _field_max_bytes(field) -> Optional[int]:
-    rules = getattr(field, "validation", None) or {}
-    limit = rules.get("maxBytes")
-    return limit if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else None
+    from app.services.field_limits import max_bytes
+    return max_bytes(field)
 
 
 def _validate_record_data(fields: list, data: dict, *, partial: bool = False) -> None:
+    from app.services.field_limits import byte_size, DEFAULT_RECORD_BYTES
+    if byte_size(data) > DEFAULT_RECORD_BYTES:
+        raise HTTPException(422, '单条表单记录不能超过系统上限 2 MiB')
     if not fields:
         return
     active_fields = [field for field in fields if not field.archived]
@@ -68,7 +70,7 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
         missing = [
             field.label or field.field_name
             for field in active_fields
-            if field.required and data.get(field.field_name) in (None, "")
+            if field.required and data.get(field.field_name) in (None, "", [])
         ]
         if missing:
             raise HTTPException(422, f"Missing required field(s): {', '.join(missing)}")
@@ -78,13 +80,16 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
             continue
         field = by_name[name]
         limit = _field_max_bytes(field)
-        if limit is not None and isinstance(value, str) and len(value.encode("utf-8")) > limit:
+        from app.services.field_limits import byte_size
+        if limit is not None and byte_size(value) > limit:
             raise HTTPException(422, f"字段「{field.label or name}」不能超过 {limit} 字节（UTF-8）")
         field_type = (field.field_type or "string").lower()
         if field_type in {"number", "decimal", "float"} and (not isinstance(value, (int, float)) or isinstance(value, bool)):
             raise HTTPException(422, f"Field {name} must be a number")
         if field_type in {"integer", "int"} and (not isinstance(value, int) or isinstance(value, bool)):
             raise HTTPException(422, f"Field {name} must be an integer")
+        if field_type in {"integer", "int"} and not -(2 ** 31) <= value <= 2 ** 31 - 1:
+            raise HTTPException(422, f"字段「{field.label or name}」超出 32 位整数范围")
         if field_type == "boolean" and not isinstance(value, bool):
             raise HTTPException(422, f"Field {name} must be a boolean")
         if field_type in {"date", "datetime"} and not isinstance(value, str):
@@ -98,7 +103,9 @@ def _validate_record_data(fields: list, data: dict, *, partial: bool = False) ->
             raise HTTPException(422, f"Field {name} must be a code string")
         if field_type == "enum":
             allowed = _field_allowed_values(field)
-            if allowed and str(value) not in allowed:
+            settings = (getattr(field, 'ui_config', None) or {}).get('typeSettings') or {}
+            values = value if isinstance(value, list) and (settings.get('selectionMode') == 'multiple' or settings.get('displayMode') == 'tags') else [value]
+            if allowed and not settings.get('allowCreateOption') and any(str(item) not in allowed for item in values):
                 raise HTTPException(422, f"Field {name} must be one of: {', '.join(sorted(allowed))}")
 
 
@@ -110,13 +117,14 @@ def _field_value_is_compatible(field, value) -> bool:
     if value in (None, ""):
         return True
     limit = _field_max_bytes(field)
-    if limit is not None and isinstance(value, str) and len(value.encode("utf-8")) > limit:
+    from app.services.field_limits import byte_size
+    if limit is not None and byte_size(value) > limit:
         return False
     field_type = (field.field_type or "string").lower()
     if field_type in {"number", "decimal", "float"}:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if field_type in {"integer", "int"}:
-        return isinstance(value, int) and not isinstance(value, bool)
+        return isinstance(value, int) and not isinstance(value, bool) and -(2 ** 31) <= value <= 2 ** 31 - 1
     if field_type == "boolean":
         return isinstance(value, bool)
     if field_type in {"date", "datetime"}:
@@ -125,5 +133,7 @@ def _field_value_is_compatible(field, value) -> bool:
         return isinstance(value, str)
     if field_type == "enum":
         allowed = _field_allowed_values(field)
-        return not allowed or str(value) in allowed
+        ui=getattr(field,'ui_config',None) or {};settings=ui.get('typeSettings') or {}
+        values=value if isinstance(value,list) and (settings.get('selectionMode')=='multiple' or settings.get('displayMode')=='tags') else [value]
+        return settings.get('allowCreateOption') or not allowed or all(str(item) in allowed for item in values)
     return True

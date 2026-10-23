@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { ConfigProvider, Empty } from 'antd';
 import type { ThemeConfig } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
@@ -35,6 +35,12 @@ const techWhiteTheme: ThemeConfig = {
     colorTextSecondary: colors.muted,
     colorBgBase: colors.canvas,
     colorBgContainer: colors.surface,
+    colorBgLayout: colors.canvas,
+    colorBgElevated: colors.surface,
+    colorFillAlter: colors.rail,
+    controlItemBgHover: colors.hover,
+    controlItemBgActive: colors.selected,
+    controlOutline: colors.infoBorder,
     colorBorder: colors.border,
     colorBorderSecondary: colors.border,
     borderRadius: geometry.controlRadius,
@@ -127,6 +133,14 @@ const techWhiteTheme: ThemeConfig = {
     Menu: {
       itemBorderRadius: 10,
       itemHeight: 36,
+      itemColor: colors.muted,
+      itemHoverColor: colors.text,
+      subMenuItemBg: colors.menu,
+      popupBg: colors.surface,
+      groupTitleColor: colors.primary,
+      itemSelectedBg: colors.selected,
+      itemSelectedColor: colors.primary,
+      itemHoverBg: colors.hover,
     },
   },
 };
@@ -139,6 +153,8 @@ ConfigProvider.config({
   holderRender: children => <ConfigProvider locale={zhCN} theme={techWhiteTheme}>{children}</ConfigProvider>,
 });
 
+const router = createBrowserRouter([{path:'*',element:<App/>}]);
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ConfigProvider
@@ -146,9 +162,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       renderEmpty={renderEmpty}
       theme={techWhiteTheme}
     >
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </ConfigProvider>
   </React.StrictMode>,
 );

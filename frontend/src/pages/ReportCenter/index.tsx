@@ -137,8 +137,8 @@ export default function ReportCenter() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+    <div className="catalog-page">
+      <div className="page-list-toolbar">
         <Space>
           <Select
             allowClear

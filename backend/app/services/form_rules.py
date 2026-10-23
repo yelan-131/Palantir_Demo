@@ -1,13 +1,14 @@
 """Declarative, database-authoritative rules for previews and every record write.
 
-Expressions are parsed as a tiny AST (names, literals and addition); no eval,
+Expressions use a bounded arithmetic and text formula language; no eval,
 SQL identifiers, Python attributes or arbitrary source tables are accepted.
 """
 from __future__ import annotations
 
-import ast
 import json
 from types import SimpleNamespace
+
+from app.services.form_calculations import expression_tree, compute, references, validate_rule
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -15,9 +16,14 @@ from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from app.api.deps import current_tenant_id
 from app.core.permissions import allowed_form_fields
-from app.models.relational import Material, Supplier
+from app.models.relational import Material, Supplier, Equipment, ProductionLine, User, OrgUnit, Role
 
 ARCHIVES = {
+    'equipment': (Equipment, {'id','name','model','manufacturer','status','line_id'}),
+    'production_lines': (ProductionLine, {'id','name','status','workshop_id'}),
+    'users': (User, {'id','username','display_name'}),
+    'org_units': (OrgUnit, {'id','name','code'}),
+    'roles': (Role, {'id','name','label'}),
     'materials': (Material, {'id', 'name', 'material_type', 'specs', 'unit'}),
     'suppliers': (Supplier, {'id', 'name', 'location', 'rating', 'lead_time_days'}),
 }
@@ -82,7 +88,8 @@ def states(fields, data):
     for field in fields:
         ui = config(field)
         rules = ui.get('rules') or {}
-        visible = control_rule(rules.get('visible'), data, True)
+        ancestors = ui.get('layoutAncestors') or []
+        visible = control_rule(rules.get('visible'), data, True) and all(control_rule(parent.get('visible'), data, True) for parent in ancestors if isinstance(parent, dict))
         show_when = (ui.get('visibility') or {}).get('showWhen')
         if show_when:
             visible = visible and matches(show_when, data)
@@ -94,40 +101,24 @@ def states(fields, data):
                          and encoding.get('generationMode') != 'manual'
                          and not (encoding.get('allowManualOverride') or encoding.get('allow_manual_override')))
         result[field.field_name] = {'visible': visible, 'required': required and visible and not generated,
-            'readonly': generated or bool(ui.get('readonly')) or bool(ui.get('computed'))
-                        or control_rule(rules.get('readonly'), data, False), 'generated': generated}
+            'readonly': ui.get('controlType') in {'readonly-table','readonly-text'} or generated or bool(ui.get('readonly')) or bool(ui.get('computed'))
+                        or control_rule(rules.get('readonly'), data, False)
+                        or any(control_rule(parent.get('readonly'), data, False) for parent in ancestors if isinstance(parent, dict)), 'generated': generated}
     return result
 
 
-def expression_tree(expression):
-    if not isinstance(expression, str) or len(expression) > 4096:
-        raise HTTPException(422, '字段拼接表达式过长或无效')
-    try:
-        tree = ast.parse(expression, mode='eval')
-    except (SyntaxError, TypeError):
-        raise HTTPException(422, '字段拼接表达式无效')
-    if sum(1 for _ in ast.walk(tree)) > 100:
-        raise HTTPException(422, '字段拼接表达式过长')
-    if any(not isinstance(node, (ast.Expression, ast.BinOp, ast.Add, ast.Name, ast.Load, ast.Constant)) for node in ast.walk(tree)):
-        raise HTTPException(422, '字段表达式只支持字段名、常量和加法拼接')
-    return tree
-
-
-def compute(node, data):
-    if isinstance(node, ast.Expression):
-        return compute(node.body, data)
-    if isinstance(node, ast.Name):
-        return data.get(node.id) if data.get(node.id) is not None else ''
-    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float)) and not isinstance(node.value, bool):
-        return node.value
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = compute(node.left, data), compute(node.right, data)
-        return str(left) + str(right) if isinstance(left, str) or isinstance(right, str) else left + right
-    raise HTTPException(422, '不支持的字段表达式')
-
-
-async def archive_options(db, user, field, data, *, selected=None):
+async def archive_options(db, user, field, data, *, selected=None, search=None):
     ref = relation(field)
+    from app.services.option_search import settings as search_settings, validate as validate_search, filter_options, sql_query, range_matches, match_fields
+    spec = search_settings(field)
+    validate_search(spec)
+    keyword = (search or {}).get('keyword', '')
+    offset = ((search or {}).get('page', 1) - 1) * (search or {}).get('page_size', 20)
+    count = (search or {}).get('page_size', 20) + 1
+    if ref.get('source_kind') in {'dictionary','externalApi'}:
+        from app.services.form_option_sources import options
+        rows = filter_options(await options(db,user,ref,selected=selected), {'label', 'value'}, spec, data, keyword)
+        return rows[offset:offset + count] if search else rows
     source = ref.get('target_form_code') or ref.get('target_model') or ref.get('target_table')
     if source not in ARCHIVES:
         # Configured business-form archives use the same row and field scope as
@@ -137,8 +128,10 @@ async def archive_options(db, user, field, data, *, selected=None):
         await records.require_form_permission(db, user, target.id, 'view')
         source_fields = await accessible_fields(db, user, target)
         readable = {field.field_name for field in source_fields}
+        searchable = {item.field_name for item in source_fields if item.field_type != 'json'} | {'id'}
+        validate_search(spec, searchable)
         label = ref.get('label_field', 'name')
-        mapping = ref.get('backfill') or {}
+        mapping = (ref.get('backfill') or {}) if config(field).get('assignmentRulesEnabled') is not False else {}
         if label not in readable or any(attr not in readable and attr != 'id' for attr in mapping.values()):
             raise HTTPException(403, '档案来源字段不可访问')
         if selected is not None:
@@ -165,16 +158,21 @@ async def archive_options(db, user, field, data, *, selected=None):
                 expected = data.get(item.get('sourceField')) if item.get('sourceField') else item.get('value')
                 if expected in (None, '') or str(values.get(item['field'])) != str(expected):
                     valid = False
-            if valid:
-                options.append({'id': row['id'], 'label': str(values.get(label) or row['id']), 'data': values})
-            if len(options) >= 200:
+            matched = match_fields(values, spec.get('fields') or [label], keyword, spec.get('match', 'contains')) if keyword else []
+            if valid and range_matches(values, spec, data) and (not keyword or matched):
+                options.append({'id': row['id'], 'label': str(values.get(label) or row['id']), 'data': values, 'matchedFields': matched})
+            if len(options) >= (offset + count if search else 200):
                 break
-        return options
+        return options[offset:offset + count] if search else options
     model, attributes = ARCHIVES[source]
     label = ref.get('label_field', 'name')
+    if source=='users' and label=='name':label='display_name'
+    if source=='roles' and label=='name':label='label'
     if label not in attributes:
         raise HTTPException(422, f'档案显示字段不可用：{label}')
     query = select(model).where(model.tenant_id == current_tenant_id(user))
+    if source=='users':query=query.where(User.is_active.is_(True))
+    if source=='org_units':query=query.where(OrgUnit.status=='active')
     if selected is not None:
         if isinstance(selected, bool) or not str(selected).isdigit() or int(selected) <= 0:
             raise HTTPException(422, f'{field.label}必须选择有效档案 ID')
@@ -192,17 +190,25 @@ async def archive_options(db, user, field, data, *, selected=None):
         query = query.where(getattr(model, column) == value)
     try:
         async with db.begin_nested():
-            rows = (await db.scalars(query.order_by(model.id).limit(200))).all()
+            query = sql_query(query, model, attributes, spec, data, keyword, label)
+            rows = (await db.scalars(query.order_by(model.id).offset(offset if search else 0).limit(count if search else 200))).all()
     except (ProgrammingError, OperationalError) as exc:
         raise HTTPException(422, f'档案来源 {source} 不可用，请绑定已发布的档案表单') from exc
-    return [{'id': row.id, 'label': str(getattr(row, label)),
-             'data': {name: getattr(row, name) for name in attributes}} for row in rows]
+    return [{'id': row.id, 'label': str(getattr(row,label) or getattr(row,'username',None) or row.id),
+             'data': {name: getattr(row, name) for name in attributes},
+             'matchedFields': match_fields({name: getattr(row, name) for name in attributes}, spec.get('fields') or [label], keyword, spec.get('match', 'contains')) if keyword else []} for row in rows]
 
 
 async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, partial=False):
     fields = [field for field in fields if not field.archived]
     by_name = {field.field_name: field for field in fields}
     data = {**(existing or {}), **incoming}
+    from app.services.form_control_validation import normalize, validate
+    for field in fields:
+        if field.field_name in incoming:
+            data[field.field_name] = normalize(data[field.field_name], config(field).get('typeSettings') or {})
+    from app.services.form_defaults import apply_defaults
+    defaulted = apply_defaults(fields, data, existing)
     derived = set()
     # Validate every reference, even if no backfill is configured. IDs remain
     # tenant-scoped and dependent filters also apply to AI/HTTP writes.
@@ -210,7 +216,7 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
         if not relation(field):
             continue
         ref = relation(field)
-        mapping = ref.get('backfill') or {}
+        mapping = (ref.get('backfill') or {}) if config(field).get('assignmentRulesEnabled') is not False else {}
         if any(target not in by_name for target in mapping):
             raise HTTPException(422, '档案回填引用了不存在的目标字段')
         value = data.get(field.field_name)
@@ -220,14 +226,49 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
                 raise HTTPException(422, f'{field.label}不存在、不可访问或不满足关联条件')
             data[field.field_name] = None
         elif options:
-            data[field.field_name] = options[0]['id']
+            data[field.field_name] = str(options[0]['id']) if field.field_type in {'string','text','person','enum','code'} else options[0]['id']
         for target, attr in mapping.items():
             if options and attr not in options[0]['data']:
                 raise HTTPException(422, f'档案回填属性不可用：{attr}')
             data[target] = options[0]['data'].get(attr) if options else None
             derived.add(target)
-    expressions = {field.field_name: expression_tree(config(field)['computed']['expression'])
-                   for field in fields if (config(field).get('computed') or {}).get('expression')}
+    # Value/option assignments are persisted editor rules, not client-side only.
+    assignments={}
+    for source in fields:
+        if config(source).get('assignmentRulesEnabled') is False: continue
+        for rule in config(source).get('assignmentRules') or []:
+            target=rule.get('targetField');attr=rule.get('sourceAttribute','')
+            if not target or not attr or attr.startswith('record.'):continue
+            if target not in by_name or attr not in {'self.value','self.option_value','self.option_label'}:
+                raise HTTPException(422,'赋值规则引用了无效字段或属性')
+            if relation(by_name[target]):raise HTTPException(422,'不能通过赋值规则改写关联字段，请直接选择关联记录')
+            if target in assignments:raise HTTPException(422,'同一字段不能配置多个赋值来源')
+            assignments[target]=(source,attr)
+    resolved_assignments=set();resolving_assignments=set()
+    async def assign(target):
+        if target in resolved_assignments:return
+        if target in resolving_assignments:raise HTTPException(422,'字段赋值存在循环依赖')
+        resolving_assignments.add(target)
+        source,attr=assignments[target]
+        if source.field_name in assignments:await assign(source.field_name)
+        value=data.get(source.field_name)
+        if attr=='self.option_label' and value not in (None,''):
+            if relation(source):
+                options=await archive_options(db,user,source,data,selected=value)
+                value=options[0]['label'] if options else None
+            else:
+                choices=source.enum_values or []
+                if isinstance(choices,str):
+                    try:choices=json.loads(choices)
+                    except (ValueError,TypeError):choices=[]
+                if isinstance(choices,dict):choices=choices.get('values',choices)
+                if isinstance(choices,dict):value=choices.get(str(value),value)
+                elif isinstance(choices,list):value=next((item.get('label',item.get('value')) for item in choices if isinstance(item,dict) and str(item.get('value'))==str(value)),value)
+        data[target]=value;derived.add(target)
+        resolving_assignments.remove(target);resolved_assignments.add(target)
+    for target in assignments:await assign(target)
+    expressions = {field.field_name: validate_rule(config(field)['computed'])
+                   for field in fields if config(field).get('computed')}
     visiting, done = set(), set()
     def resolve(name):
         if name in done:
@@ -235,14 +276,25 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
         if name in visiting:
             raise HTTPException(422, '字段计算存在循环依赖')
         visiting.add(name)
-        for node in ast.walk(expressions[name]):
-            if isinstance(node, ast.Name):
-                if node.id not in by_name:
-                    raise HTTPException(422, f'字段表达式引用未知字段：{node.id}')
-                if node.id in expressions:
-                    resolve(node.id)
-        dependencies = {node.id for node in ast.walk(expressions[name]) if isinstance(node, ast.Name)}
-        data[name] = None if any(data.get(key) in (None, '') for key in dependencies) else compute(expressions[name], data)
+        dependencies = references(expressions[name])
+        for source in dependencies:
+            if source not in by_name:
+                raise HTTPException(422, f'字段表达式引用未知字段：{source}')
+            if source in expressions:
+                resolve(source)
+        try:
+            data[name] = compute(expressions[name], data, config(by_name[name])['computed'])
+            value = data[name]
+            kind = by_name[name].field_type
+            if value is not None:
+                if kind in {'int', 'integer'} and not isinstance(value, int):
+                    raise HTTPException(422, '计算结果必须为整数，请调整公式或小数位数')
+                if kind in {'number', 'decimal', 'float'} and not isinstance(value, (int, float)):
+                    raise HTTPException(422, '计算结果必须为数值')
+                if kind in {'string', 'text'}:
+                    data[name] = str(value)
+        except HTTPException as exc:
+            raise HTTPException(exc.status_code, f'字段「{by_name[name].label}」{exc.detail}') from exc
         if isinstance(data[name], str) and len(data[name].encode('utf-8')) > 65536:
             raise HTTPException(422, '字段计算结果过长')
         derived.add(name)
@@ -251,6 +303,11 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
     for name in expressions:
         resolve(name)
     status = states(fields, data)
+    from app.services.designer_permissions import field_settings
+    role_fields=await field_settings(db,user,fields)
+    for name,extra in role_fields.items():
+        if extra.get('required') and status[name]['visible'] and not status[name].get('generated'):status[name]['required']=True
+        if extra.get('hidden'):status[name]['required']=False
     for name in derived:
         status[name]['readonly'] = True
     for field in fields:
@@ -261,20 +318,28 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
             derived.add(name)
         if enforce and existing is not None and state['generated'] and name in incoming and incoming[name] != existing.get(name):
             raise HTTPException(422, f'字段「{field.label}」的自动编码不能手工修改')
-        if enforce and state['readonly'] and not state['generated'] and name not in derived and name in incoming:
+        if enforce and state['readonly'] and not state['generated'] and name not in derived and name not in defaulted and name in incoming:
             expected = (existing or {}).get(name, getattr(field, 'default_value', None))
             if incoming[name] != expected and incoming[name] not in (None, ''):
                 raise HTTPException(422, f'字段「{field.label}」为只读，不能直接修改')
+        if enforce and state['visible']:
+            validate(data.get(name), field, partial=partial)
+            ui = config(field)
+            if ui.get('controlType') == 'upload' and data.get(name) not in (None, ''):
+                from app.services.form_files import validate_value
+                from app.api.deps import current_user_id
+                data[name] = validate_value(data[name], tenant_id=current_tenant_id(user), form_id=field.form_id, field_name=name,
+                    uid=current_user_id(user), rules=ui.get('typeSettings') or {}, existing=(existing or {}).get(name))
         # Configured conditional requirements apply even to AI drafts.
-        if enforce and state['required'] and data.get(name) in (None, '') and (not partial or config(field).get('requiredWhen')):
+        if enforce and state['required'] and data.get(name) in (None, '', []) and (not partial or config(field).get('requiredWhen')):
             raise HTTPException(422, f'请填写{field.label}')
     validation_fields = []
     for field in fields:
         clone = SimpleNamespace(**{key: getattr(field, key, None) for key in
-            ('field_name', 'label', 'field_type', 'archived', 'validation', 'enum_values')},
+            ('field_name', 'label', 'field_type', 'archived', 'validation', 'enum_values', 'ui_config')},
             required=status[field.field_name]['required'])
         validation_fields.append(clone)
-    return {'data': data, 'states': status, 'derived': derived, 'fields': validation_fields}
+    return {'data': data, 'states': status, 'derived': derived | defaulted, 'fields': validation_fields}
 
 
 async def accessible_fields(db, user, form, scope='view', data=None):

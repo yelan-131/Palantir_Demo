@@ -893,6 +893,32 @@ class FormVersion(TimestampMixin, Base):
     form: Mapped["Form"] = relationship(back_populates="versions")
 
 
+class AnalyticsSharedMetric(TimestampMixin, Base):
+    """Tenant-owned metric draft; published definitions live in immutable versions."""
+    __tablename__ = 'analytics_shared_metrics'
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey('tenants.id'), index=True)
+    draft: Mapped[dict] = mapped_column(JSON, default=dict)
+    published_version: Mapped[int] = mapped_column(Integer, default=0)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey('users.id'), nullable=True)
+
+
+class AnalyticsSharedMetricVersion(TimestampMixin, Base):
+    __tablename__ = 'analytics_shared_metric_versions'
+    __table_args__ = (UniqueConstraint('metric_id', 'version', name='uq_analytics_shared_metric_version'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey('tenants.id'), index=True)
+    metric_id: Mapped[str] = mapped_column(ForeignKey('analytics_shared_metrics.id'), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    definition: Mapped[dict] = mapped_column(JSON)
+    note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    published_by: Mapped[Optional[int]] = mapped_column(ForeignKey('users.id'), nullable=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class FormCodeSequence(TimestampMixin, Base):
     """Atomic per-scope counter backing auto-encoding (料号) fields.
 

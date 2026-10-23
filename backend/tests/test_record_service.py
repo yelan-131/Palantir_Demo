@@ -28,8 +28,8 @@ async def environment(request, tmp_path):
         # Test the dependency-closed record/workflow schema. Production uses
         # Alembic for unrelated AI/knowledge tables, not metadata.create_all.
         from app.models import relational
-        model_names = ['Tenant', 'User', 'Role', 'UserRole', 'Material', 'Supplier', 'Form', 'FormField', 'FormLayout',
-            'FormAction', 'FormPermission', 'FormVersion', 'FormCodeSequence', 'DynamicRecord',
+        model_names = ['SystemSetting','DataSource','Tenant', 'User', 'Role', 'UserRole', 'Material', 'Supplier', 'Form', 'FormField', 'FormLayout',
+            'FormAction', 'FormPermission', 'FormVersion', 'AnalyticsSharedMetric', 'AnalyticsSharedMetricVersion', 'FormCodeSequence', 'DynamicRecord',
             'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode',
             'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'WorkflowInstance',
             'WorkflowApproval', 'RolePermission', 'UserOrgMembership', 'OrgUnit', 'AuditLog', 'Notification', 'AIAgentRun']
@@ -625,3 +625,180 @@ async def test_two_users_create_records_with_distinct_codes(environment):
     more = await asyncio.wait_for(asyncio.gather(create(1), create(2)), 30)
     assert len({item['record_id'] for item in created + more}) == 4
     assert {item['data']['document_no'] for item in more} == {'IN-0003', 'IN-0004'}
+
+
+async def publish_field_rules(db,form,client,user,rules_by_field):
+    await db.refresh(form)
+    controls=[{'id':name,'source':'field','fieldKey':name,'name':name,'controlType':'field','rules':rules} for name,rules in rules_by_field.items()]
+    form.config={**(form.config or {}),'formDesignerControls':controls}
+    await db.commit()
+    await db.refresh(form)
+    previous=user['is_admin'];user['is_admin']=True
+    try:
+        from unittest.mock import patch,AsyncMock
+        with patch.object(forms,'write_audit_log',AsyncMock()):
+            response=await client.post(f'/forms/{form.id}/publish')
+    finally:user['is_admin']=previous
+    return response
+
+
+@pytest.mark.asyncio
+async def test_published_unique_rule_survives_reload_and_guards_create_update(environment):
+    db,_,form,user,client=environment
+    response=await publish_field_rules(db,form,client,user,{'title':{'unique':{'enabled':True,'conditions':{'strategy':'form'}}}})
+    assert response.status_code==200,response.text
+    one=await seed(db,'Unique');two=await seed(db,'Other')
+    with pytest.raises(HTTPException) as error:await seed(db,'Unique')
+    assert error.value.status_code==409
+    await db.rollback()
+    r=await client.put(f'/forms/1/records/{two["id"]}',json={'data':{'title':'Unique'}})
+    assert r.status_code==409,r.text
+    await db.rollback()
+    r=await client.put(f'/forms/1/records/{one["id"]}',json={'data':{'title':'Unique','qty':5}})
+    assert r.status_code==200,r.text
+    r=await client.get('/forms/1?schema=published&scope=designer')
+    assert r.status_code==200
+    user['is_admin']=True
+    r=await client.get('/forms/1?schema=published&scope=designer')
+    assert r.json()['data']['fields'][0]['ui_config']['rules']['unique']['conditions']['strategy']=='form'
+
+
+@pytest.mark.asyncio
+async def test_masks_survive_publication_and_never_replace_raw_storage(environment):
+    db,_,form,user,client=environment
+    rules={'secret':{'masked':{'enabled':True,'conditions':{'strategy':'partial','keepStart':2,'keepEnd':2}},'copyable':{'enabled':True,'conditions':{'strategy':'maskedCopy'}}},'qty':{'copyable':{'enabled':False}}}
+    r=await publish_field_rules(db,form,client,user,rules);assert r.status_code==200,r.text
+    record=await seed(db,'Masked');rid=record['id']
+    assert record['data']['secret']=='pr****te'
+    r=await client.get(f'/forms/1/records/{rid}');assert r.json()['data']['data']['secret']=='pr****te'
+    policy=r.json()['data']['field_states'];assert policy['secret']['copyMode']=='maskedCopy' and policy['qty']['copyMode']=='disabled'
+    r=await client.get('/forms/1/records');assert r.json()['data'][0]['data']['secret']=='pr****te'
+    user['is_admin']=True
+    r=await client.get('/forms/1/records');assert r.json()['data'][0]['data']['secret']=='pr****te'
+    user['is_admin']=False
+    r=await client.post('/forms/1/rules/evaluate',json={'record_id':rid,'data':{'secret':'pr****te','qty':9}})
+    assert r.status_code==200 and r.json()['data']['data']['secret']=='pr****te',r.text
+    r=await client.put(f'/forms/1/records/{rid}',json={'data':{'qty':9}});assert r.status_code==200,r.text
+    raw=await records.read_raw(db,form,rid);assert raw['data']['secret']=='private' and raw['data']['qty']==9
+    r=await client.put(f'/forms/1/records/{rid}',json={'data':{'secret':'masked-placeholder'}});assert r.status_code==403,r.text
+    await db.rollback()
+    r=await client.put(f'/forms/1/records/{rid}',json={'data':{'qty':10},'expected_values':{'secret':'private'}});assert r.status_code==403,r.text
+
+
+@pytest.mark.asyncio
+async def test_compound_unique_and_existing_duplicates_block_publication(environment):
+    db,_,form,user,client=environment
+    await seed(db,'Duplicate');await seed(db,'Duplicate')
+    r=await publish_field_rules(db,form,client,user,{'title':{'unique':{'enabled':True}}})
+    assert r.status_code==409 and r.json()['detail']['report']['blocking_count']>0,r.text
+    await db.rollback()
+    # A failed publish leaves the active schema usable; draft rules do not leak.
+    await seed(db,'Duplicate')
+
+
+@pytest.mark.asyncio
+async def test_role_mask_reads_current_membership_instead_of_admin_bypass(environment):
+    db,_,form,user,client=environment
+    r=await publish_field_rules(db,form,client,user,{'secret':{'masked':{'enabled':True,'conditions':{'strategy':'role','roleIds':[1]}}}})
+    assert r.status_code==200,r.text
+    record=await seed(db,'Role mask');rid=record['id']
+    r=await client.get(f'/forms/1/records/{rid}');assert r.json()['data']['data']['secret']=='private'
+    # Remove the second user's unmasking role; admin form access remains intact.
+    from sqlalchemy import delete
+    await db.execute(delete(UserRole).where(UserRole.user_id==2));await db.commit()
+    other=await records.get_record(1,rid,db,{'uid':2,'tenant_id':1,'is_admin':True})
+    assert other['data']['data']['secret']!='private' and other['data']['field_states']['secret']['masked']
+
+
+@pytest.mark.asyncio
+async def test_compound_unique_and_domain_writes_share_the_guard(environment):
+    db,_,form,user,client=environment
+    r=await publish_field_rules(db,form,client,user,{'title':{'unique':{'enabled':True,'conditions':{'strategy':'compound','fields':['qty']}}}})
+    assert r.status_code==200,r.text
+    one=await seed(db,'Compound')
+    other=(await records.create_record(1,forms.DynamicRecordCreate(data={'title':'Compound','qty':3}),db,{**user,'is_admin':True}))['data']
+    raw=await records.read_raw(db,form,other['id'])
+    with pytest.raises(HTTPException) as error:await records.write_fields(db,form,raw,{'qty':2},user=user,system=True)
+    assert error.value.status_code==409
+    await db.rollback()
+    assert one['data']['qty']==2
+
+
+@pytest.mark.asyncio
+async def test_tenant_wide_unique_also_covers_forms_without_local_rule(environment):
+    db,_,form,user,client=environment
+    r=await publish_field_rules(db,form,client,user,{'title':{'unique':{'enabled':True,'conditions':{'strategy':'global'}}}})
+    assert r.status_code==200,r.text
+    await seed(db,'Shared')
+    for tenant,fid in [(1,2),(2,3)]:
+        peer=Form(id=fid,tenant_id=tenant,name='Peer',code=f'peer-{fid}',storage_mode='dynamic')
+        db.add(peer);await db.flush();db.add(FormField(tenant_id=tenant,form_id=fid,field_name='title',label='title',field_type='string'));await db.commit()
+    with pytest.raises(HTTPException) as error:await records.create_record(2,forms.DynamicRecordCreate(data={'title':'Shared'}),db,{**user,'is_admin':True})
+    assert error.value.status_code==409
+    await db.rollback()
+    other=await records.create_record(3,forms.DynamicRecordCreate(data={'title':'Shared'}),db,{**user,'tenant_id':2,'is_admin':True})
+    assert other['data']['data']['title']=='Shared'
+
+
+@pytest.mark.asyncio
+async def test_concurrent_unique_writes_are_serialized_on_postgres(environment):
+    import asyncio
+    db,factory,form,user,client=environment
+    if db.bind.dialect.name!='postgresql':pytest.skip('Concurrent uniqueness requires PostgreSQL transaction locks')
+    r=await publish_field_rules(db,form,client,user,{'title':{'unique':{'enabled':True}}});assert r.status_code==200,r.text
+    await db.commit()
+    async def writer():
+        async with factory() as session:
+            try:
+                await records.create_record(1,forms.DynamicRecordCreate(data={'title':'Concurrent unique'}),session,{**user,'is_admin':True})
+                return 200
+            except HTTPException as error:
+                await session.rollback();return error.status_code
+    assert sorted(await asyncio.gather(writer(),writer()))==[200,409]
+
+
+@pytest.mark.asyncio
+async def test_form_field_capacity_rejects_new_fields_at_system_default(environment, monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.services.field_limits import DEFAULT_FORM_FIELDS
+    db, _, form, _, _ = environment
+    actor = {'uid': 1, 'tenant_id': 1, 'is_admin': True}
+    monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    for index in range(DEFAULT_FORM_FIELDS - 4):
+        db.add(FormField(tenant_id=1, form_id=form.id, field_name=f'capacity_{index}', label='容量测试', field_type='string'))
+    await db.commit()
+    with pytest.raises(HTTPException) as error:
+        await forms.create_form_field(form.id, forms.FormFieldCreate(field_name='overflow', label='超额字段'), db, actor)
+    assert error.value.status_code == 422 and '200' in error.value.detail
+    old = await db.scalar(select(FormField).where(FormField.form_id == form.id, FormField.field_name == 'capacity_0'))
+    old.archived = True
+    await db.commit()
+    added = await forms.create_form_field(form.id, forms.FormFieldCreate(field_name='available', label='可用字段'), db, actor)
+    assert added['data']['field_name'] == 'available'
+    with pytest.raises(HTTPException) as restore_error:
+        await forms.update_form_field(form.id, old.id, forms.FormFieldUpdate(archived=False), db, actor)
+    assert restore_error.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_calculations_are_authoritative_in_runtime_preview_create_and_update(environment):
+    db, _, form, user, client = environment
+    fields = [FormField(tenant_id=1, form_id=1, field_name='price', label='单价', field_type='number'),
+        FormField(tenant_id=1, form_id=1, field_name='total', label='金额', field_type='number',
+            ui_config={'computed': {'expression': 'qty * price', 'precision': 2}})]
+    db.add_all(fields); await db.commit()
+    preview = await client.post('/forms/1/rules/evaluate', json={'data': {'title': '公式测试', 'qty': 3, 'price': 19.9, 'total': 1}})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['data']['data']['total'] == 59.7
+    assert preview.json()['data']['states']['total']['readonly']
+    created = await client.post('/forms/1/records', json={'data': {'title': '公式测试', 'qty': 3, 'price': 19.9, 'total': 1}})
+    assert created.status_code == 200, created.text
+    result = created.json()['data']
+    assert result['data']['total'] == 59.7
+    updated = await client.put(f'/forms/1/records/{result["id"]}', json={'data': {'qty': 4, 'total': 999}})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['data']['data']['total'] == 79.6
+    fields[-1].ui_config = {'computed': {'expression': 'qty / (price - price)'}}
+    await db.commit()
+    invalid = await client.post('/forms/1/records', json={'data': {'title': '应阻止', 'qty': 3, 'price': 19.9}})
+    assert invalid.status_code == 422 and '除数不能为 0' in invalid.text

@@ -1463,6 +1463,13 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                     if action == 'reject' and not str(body.comment or '').strip():
                         raise HTTPException(422, '驳回时必须填写原因')
 
+        if candidate and candidate.tenant_id==tenant_id and candidate_vars.get('form_id'):
+            from app.models.relational import Form
+            from app.services.designer_permissions import require_action
+            permission_form=await db.get(Form,candidate_vars['form_id'])
+            if permission_form and permission_form.tenant_id==tenant_id:
+                await require_action(db,user or {},permission_form,'approve')
+
         # Row lock: concurrent actions on the same instance serialize here.
         # (SQLite ignores FOR UPDATE but serializes writes at the DB level.)
         inst = (await db.execute(

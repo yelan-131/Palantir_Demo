@@ -1,6 +1,14 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApartmentOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  FileTextOutlined,
+  FolderOutlined,
+  OrderedListOutlined,
+  LinkOutlined,
   BranchesOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
@@ -42,6 +50,7 @@ import {
   Tag,
   Tree,
   Typography,
+  Tooltip,
   Upload,
   message,
 } from 'antd';
@@ -64,6 +73,13 @@ import ReactFlow, {
   type NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { useNavigate } from 'react-router-dom';
+import type { CSSProperties } from 'react';
+import GlobalSearch from '../../components/GlobalSearch';
+import NotificationCenter from '../../components/NotificationCenter';
+import KnowledgeReader from '../../components/KnowledgeReader';
+import { parseKnowledgeMarkdown, prepareKnowledgeMarkdown } from '../../utils/knowledgeMarkdown';
+import './knowledgeWorkspace.css';
 import {
   approveKnowledgeExtractionJob,
   commitKnowledgeExtractionJobToGraph,
@@ -3871,6 +3887,19 @@ function KnowledgeExtractionWorkbench() {
 }
 
 export function KnowledgeCenter() {
+  const navigate = useNavigate();
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [libraryWidth, setLibraryWidth] = useState(280);
+  const [inspectorWidth, setInspectorWidth] = useState(280);
+  const resizeStart = useRef<{ side: 'library' | 'inspector'; x: number; width: number } | null>(null);
+  const commandRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandOpen(true); }
+    };
+    window.addEventListener('keydown', keyboard);
+    return () => window.removeEventListener('keydown', keyboard);
+  }, []);
   const [spaces, setSpaces] = useState<KnowledgeSpace[]>([]);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
@@ -3893,6 +3922,17 @@ export function KnowledgeCenter() {
   const [ontologyApproving, setOntologyApproving] = useState(false);
   const [ontologyCommitting, setOntologyCommitting] = useState(false);
   const [mode, setMode] = useState<string | number>('original');
+  const [libraryVisible, setLibraryVisible] = useState(true);
+  const [inspectorVisible, setInspectorVisible] = useState(() => window.innerWidth >= 1200);
+  const [inspectorTab, setInspectorTab] = useState<string | number>('outline');
+  const [openDocumentIds, setOpenDocumentIds] = useState<string[]>([]);
+  const [expandedFolders, setExpandedFolders] = useState<string[] | null>(null);
+  const readerRef = useRef<HTMLDivElement | null>(null);
+  const openDocument = (id: string) => {
+    if (id !== selectedDocumentId) setDocumentMarkdown('');
+    setSelectedDocumentId(id);
+    setMode('original');
+  };
   const [ocrBlocks, setOcrBlocks] = useState<EditableOcrBlock[]>([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrSaving, setOcrSaving] = useState(false);
@@ -3970,29 +4010,15 @@ export function KnowledgeCenter() {
               const docId = getKnowledgeDocumentId(item);
               const linkedObjects = item.linked_objects ?? [];
               const statusMeta = getKnowledgeDocumentStatusMeta(item);
-              if (docId === selectedDocumentId) expandedKeys.push(`doc:${docId}`);
               return {
                 key: `doc:${docId}`,
                 title: (
                   <div className="knowledge-tree-node document">
-                    <span className="knowledge-tree-node-title"><strong>{getKnowledgeDocumentTitle(item)}</strong><Tag color={statusMeta.color}>{statusMeta.label}</Tag></span>
+                    <span className="knowledge-tree-node-title"><strong title={getKnowledgeDocumentTitle(item)}>{getKnowledgeDocumentTitle(item)}</strong><Tag color={statusMeta.color}>{statusMeta.label}</Tag></span>
                     <small>{getKnowledgeDocumentFileName(item)}{linkedObjects.length ? ` · ${linkedObjects.length} 个对象` : ''}</small>
                   </div>
                 ),
-                children: linkedObjects.map((link, index) => {
-                  const type = link.type ?? link.object_type ?? 'Object';
-                  const objectId = link.id ?? link.object_id ?? index;
-                  const name = link.name ?? link.object_name ?? objectId;
-                  return {
-                    key: `object:${docId}:${type}:${objectId}`,
-                    title: (
-                      <div className="knowledge-tree-node object">
-                        <span className="knowledge-tree-node-title"><BranchesOutlined /><strong>{name}</strong></span>
-                        <small>{type} · {objectId}</small>
-                      </div>
-                    ),
-                  };
-                }),
+                isLeaf: true,
               };
             }),
           };
@@ -4008,15 +4034,27 @@ export function KnowledgeCenter() {
         children: typeNodes,
       };
     });
-    const treeData: DataNode[] = visibleDocuments.length ? sourceNodes : [];
+    const treeData: DataNode[] = visibleDocuments.length ? sourceNodes.length === 1 ? sourceNodes[0].children : sourceNodes : [];
     return { data: treeData, expandedKeys };
-  }, [selectedDocumentId, sourceLabelById, visibleDocuments]);
-  const selectedDocument = visibleDocuments.find((item: any) => (item.id ?? item.document_id) === selectedDocumentId) ?? visibleDocuments[0];
+  }, [sourceLabelById, visibleDocuments]);
+  const selectedDocument = documents.find((item: any) => (item.id ?? item.document_id) === selectedDocumentId) ?? documents[0];
   const selectedTitle = (selectedDocument as any)?.title ?? (selectedDocument as any)?.document_title ?? (selectedDocument as any)?.file_name ?? '暂无知识文档';
   const selectedSummary = (selectedDocument as any)?.summary ?? (selectedDocument ? `来源文件：${(selectedDocument as any)?.source_file_name ?? (selectedDocument as any)?.file_name ?? '数据库文档'}` : '上传或完成种子数据后，知识库目录会按数据库内容自动刷新。');
   const selectedUpdatedAt = (selectedDocument as any)?.updated_at ?? '-';
   const selectedLinks = ((selectedDocument as any)?.linked_objects ?? []) as Array<{ type?: string; id?: string; name?: string; object_type?: string; object_id?: string; object_name?: string; confidence?: number; status?: string; source_location?: string }>;
   const selectedRawText = documentMarkdown || (selectedDocument as any)?.markdown_content || '';
+  const readerSource = useMemo(() => prepareKnowledgeMarkdown(selectedRawText, selectedTitle), [selectedRawText, selectedTitle]);
+  const outline = useMemo(() => parseKnowledgeMarkdown(readerSource).filter(block => block.type === 'heading'), [readerSource]);
+  useEffect(() => {
+    if (!selectedDocumentId || !documents.some(item => getKnowledgeDocumentId(item) === selectedDocumentId)) return;
+    setOpenDocumentIds(previous => [...new Set([...previous.filter(id => documents.some(item => getKnowledgeDocumentId(item) === id)), selectedDocumentId])]);
+  }, [selectedDocumentId, documents]);
+  const closeDocument = (id: string) => {
+    const remaining = openDocumentIds.filter(item => item !== id);
+    if (!remaining.length) return;
+    setOpenDocumentIds(remaining);
+    if (selectedDocumentId === id) openDocument(remaining[Math.max(0, openDocumentIds.indexOf(id) - 1)] || remaining[0]);
+  };
   const selectedSourceType = String((selectedDocument as any)?.source_type ?? (selectedDocument as any)?.doc_type ?? 'database');
   const selectedDomainTags = selectedDocument
     ? [selectedSourceType.toUpperCase(), (selectedDocument as any)?.permission_scope ?? 'enterprise', (selectedDocument as any)?.owner_user_id ?? 'knowledge']
@@ -4494,43 +4532,56 @@ export function KnowledgeCenter() {
     </div>
   );
 
+  const documentHeading = (<div className="knowledge-document-head">
+              <div><h1>{selectedTitle}</h1><Space wrap size={8}><Tag>{KNOWLEDGE_TYPE_LABELS[normalizeKnowledgeTypeGroup(selectedDocument || {} as KnowledgeDocument)] || selectedSourceType.toUpperCase()}</Tag><span>{selectedDocument ? getKnowledgeDocumentStatusMeta(selectedDocument).label : '暂无文档'}</span><span>{selectedLinks.length} 个关联对象</span></Space></div>
+            </div>);
+
+  const renderResizeHandle = (side: 'library' | 'inspector') => {
+    const width = side === 'library' ? libraryWidth : inspectorWidth;
+    const setWidth = side === 'library' ? setLibraryWidth : setInspectorWidth;
+    return <div className={`knowledge-pane-resizer ${side}`} role="separator" aria-label={side === 'library' ? '调整文档目录宽度' : '调整文档信息宽度'} aria-orientation="vertical" aria-valuenow={width} aria-valuemin={200} aria-valuemax={420} tabIndex={0}
+      onPointerDown={event => { event.preventDefault(); resizeStart.current = { side, x: event.clientX, width }; event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerMove={event => { const start = resizeStart.current; if (!start || start.side !== side) return; setWidth(Math.max(200, Math.min(420, start.width + (event.clientX - start.x) * (side === 'library' ? 1 : -1)))); }}
+      onPointerUp={() => { resizeStart.current = null; }} onPointerCancel={() => { resizeStart.current = null; }}
+      onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); setWidth(Math.max(200, Math.min(420, width + (event.key === 'ArrowRight' ? 16 : -16) * (side === 'library' ? 1 : -1)))); }} />;
+  };
+
   return (
-    <div className="knowledge-center">
-      <div className="knowledge-workbench unified-knowledge-workbench">
-        <aside className="knowledge-left-panel">
-          <Card className="knowledge-panel-card knowledge-library-card" title={spaces[0]?.name || '文档目录'} extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadKnowledge}>刷新</Button>}>
+    <div className="knowledge-center knowledge-vault">
+      <div className={`knowledge-workbench unified-knowledge-workbench knowledge-vault-grid${libraryVisible ? '' : ' is-library-hidden'}${inspectorVisible ? '' : ' is-inspector-hidden'}`} style={{ '--knowledge-library-width': `${libraryWidth}px`, '--knowledge-inspector-width': `${inspectorWidth}px` } as CSSProperties}>
+
+        <aside className="knowledge-left-panel" hidden={!libraryVisible} aria-label="文档目录">
+          <Card className="knowledge-panel-card knowledge-library-card" title={<Space><FolderOutlined />知识库</Space>} extra={<Tooltip title="刷新文档"><Button type="text" size="small" icon={<ReloadOutlined />} aria-label="刷新文档" onClick={loadKnowledge} /></Tooltip>}>
+            <div className="knowledge-explorer-heading"><span>文件目录</span><span>{documents.length}</span></div>
             <div className="knowledge-tree-tools">
               <Input
-                placeholder="搜索文档、标签或实体"
+                aria-label="搜索知识文档"
+                placeholder="搜索文档、标签或对象"
                 prefix={<FileSearchOutlined />}
                 value={knowledgeSearch}
                 onChange={(event) => setKnowledgeSearch(event.target.value)}
                 allowClear
               />
-              <Space wrap size={6}>
-                <Tag color="processing">已索引 {indexedDocumentCount}</Tag>
-                <Tag color="warning">待抽取 {pendingExtractCount}</Tag>
-                <Tag color="success">已发布 {publishedDocumentCount}</Tag>
-              </Space>
+
             </div>
             <div className="knowledge-directory-tree">
               {knowledgeTree.data.length ? (
                 <div className="knowledge-tree-viewport">
                   <Tree
-                    key={`${knowledgeSearch}-${selectedDocumentId}-${visibleDocuments.length}`}
                     blockNode
                     showLine
                     treeData={knowledgeTree.data}
                     selectedKeys={selectedDocumentId ? [`doc:${selectedDocumentId}`] : []}
-                    defaultExpandedKeys={knowledgeTree.expandedKeys}
+                    expandedKeys={knowledgeSearch.trim() ? knowledgeTree.expandedKeys : expandedFolders ?? knowledgeTree.expandedKeys}
+                    onExpand={keys => setExpandedFolders(keys.map(String))}
                     onSelect={(keys) => {
                       const key = String(keys[0] ?? '');
                       if (key.startsWith('doc:')) {
-                        setSelectedDocumentId(key.slice(4));
+                        openDocument(key.slice(4));
                         return;
                       }
                       if (key.startsWith('object:')) {
-                        setSelectedDocumentId(key.split(':')[1]);
+                        openDocument(key.split(':')[1]);
                       }
                     }}
                   />
@@ -4539,29 +4590,30 @@ export function KnowledgeCenter() {
             </div>
             <Upload.Dragger className="knowledge-upload-dragger" customRequest={handleUpload} showUploadList={false} disabled={uploading}>
               <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-              <p className="ant-upload-text">上传知识资料</p>
-              <p className="ant-upload-hint">统一入库，右侧继续抽取和发布</p>
+              <p className="ant-upload-text">导入文档</p>
+              <p className="ant-upload-hint">支持上传资料，保留抽取与发布流程</p>
             </Upload.Dragger>
           </Card>
+          <button type="button" className="knowledge-vault-switcher" onClick={() => navigate('/data-center/sources')}><DatabaseOutlined /><span>数据中心</span><SettingOutlined /></button>
+          {renderResizeHandle('library')}
         </aside>
 
         <main className="knowledge-main-panel">
+          <div className="knowledge-tab-row">
+            <Tooltip title={libraryVisible ? '收起文档目录' : '展开文档目录'}><Button className="knowledge-sidebar-toggle" type="text" aria-label={libraryVisible ? '收起文档目录' : '展开文档目录'} aria-pressed={libraryVisible} icon={libraryVisible ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />} onClick={() => setLibraryVisible(!libraryVisible)} /></Tooltip>
+          <Tabs className="knowledge-file-tabs" type="editable-card" hideAdd activeKey={selectedDocumentId} onChange={openDocument} onEdit={(key, action) => { if (action === 'remove') closeDocument(String(key)); }} items={openDocumentIds.filter(id => documents.some(item => getKnowledgeDocumentId(item) === id)).map(id => ({ key: id, label: <span title={getKnowledgeDocumentTitle(documents.find(item => getKnowledgeDocumentId(item) === id)!)}><FileTextOutlined /> {getKnowledgeDocumentTitle(documents.find(item => getKnowledgeDocumentId(item) === id)!)}</span>, closable: openDocumentIds.length > 1 }))} />
+          <div className="knowledge-tab-actions">
+            <Tooltip title="搜索工作空间 · Ctrl / ⌘ K"><Button type="text" icon={<SearchOutlined />} aria-label="搜索工作空间" onClick={() => setCommandOpen(true)} /></Tooltip>
+            <NotificationCenter />
+            <Tooltip title={inspectorVisible ? '收起文档信息' : '展开文档信息'}><Button type="text" icon={<OrderedListOutlined />} aria-label={inspectorVisible ? '收起文档信息' : '展开文档信息'} aria-pressed={inspectorVisible} onClick={() => setInspectorVisible(!inspectorVisible)} /></Tooltip>
+          </div>
+          </div>
           <Card
             className="knowledge-document-card"
-            title={<Space wrap><span>{selectedTitle}</span>{selectedDomainTags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space>}
-            extra={<Segmented value={mode} onChange={setMode} options={[{ label: '原文', value: 'original' }, { label: '关联对象', value: 'objects' }, { label: '知识图谱', value: 'graph' }]} />}
+            title={<span className="knowledge-document-path">知识库 <span>/</span> {getKnowledgeDocumentFileName(selectedDocument || {} as KnowledgeDocument)}</span>}
+            extra={<Segmented value={mode} onChange={setMode} options={[{ label: '阅读', value: 'original' }, { label: '源码', value: 'source' }, { label: '关联', value: 'objects' }, { label: '图谱', value: 'graph' }]} />}
           >
-            <div className="knowledge-document-head">
-              <div>
-                <Typography.Text type="secondary">{selectedSummary}</Typography.Text>
-                <div className="knowledge-note-properties">
-                  <div><span>created</span><strong>{selectedUpdatedAt}</strong></div>
-                  <div><span>status</span><strong>{(selectedDocument as any)?.status ?? 'indexed'}</strong></div>
-                  <div><span>objects</span><strong>{selectedLinks.length} 个关联对象</strong></div>
-                </div>
-              </div>
-              <Button icon={<ReloadOutlined />} onClick={loadKnowledge}>刷新当前知识</Button>
-            </div>
+            {(mode === 'objects' || mode === 'graph') && documentHeading}
             {mode === 'objects' ? (
               <div className="knowledge-object-panel">
                 {selectedLinks.length ? selectedLinks.map((item) => {
@@ -4586,10 +4638,11 @@ export function KnowledgeCenter() {
             ) : mode === 'graph' ? (
               <KnowledgeGraphCenterV2 embedded sourceDocumentId={selectedDocumentId} />
             ) : (
-              <article className="knowledge-note-content">
+              <article className="knowledge-note-content" ref={readerRef} aria-label="文档阅读区">
+                {documentHeading}
                 {markdownLoading ? <Progress percent={70} status="active" showInfo={false} /> : null}
                 {selectedRawText ? (
-                  <pre className="knowledge-original-text">{selectedRawText}</pre>
+                  mode === 'source' ? <pre className="knowledge-original-text">{selectedRawText}</pre> : <KnowledgeReader source={readerSource} />
                 ) : (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前文档暂无可展示原文" />
                 )}
@@ -4598,7 +4651,13 @@ export function KnowledgeCenter() {
           </Card>
         </main>
 
-        <aside className="knowledge-rag-panel">
+        <aside className="knowledge-rag-panel knowledge-inspector" hidden={!inspectorVisible} aria-label="文档信息">
+          {renderResizeHandle('inspector')}
+          <div className="knowledge-inspector-tabs"><Segmented block value={inspectorTab} onChange={setInspectorTab} options={[{ label: '大纲', value: 'outline', icon: <OrderedListOutlined /> }, { label: '关联', value: 'links', icon: <LinkOutlined /> }, { label: '助手', value: 'assistant', icon: <RobotOutlined /> }]} /></div>
+          <div className="knowledge-inspector-body">
+          {inspectorTab === 'outline' && <section className="knowledge-outline-panel"><header><strong>文档大纲</strong><span>{outline.length} 个标题</span></header>{outline.length ? outline.map(item => item.type === 'heading' && <button key={item.id} type="button" style={{ paddingLeft: 12 + (item.level - 1) * 12 }} onClick={() => { setMode('original'); requestAnimationFrame(() => readerRef.current?.querySelector(`#${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>{item.text}</button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前文档暂无标题" />}<div className="knowledge-inspector-properties"><h3>文档属性</h3><dl><dt>更新于</dt><dd>{selectedUpdatedAt === '-' ? '—' : new Date(selectedUpdatedAt).toLocaleString('zh-CN')}</dd><dt>关联对象</dt><dd>{selectedLinks.length} 个</dd><dt>内容长度</dt><dd>{selectedRawText.length.toLocaleString()} 字符</dd></dl></div></section>}
+          {inspectorTab === 'links' && <section className="knowledge-links-panel"><header><strong>关联对象</strong><span>{selectedLinks.length} 个</span></header>{selectedLinks.length ? selectedLinks.map((item, index) => <div className="knowledge-linked-object" key={index}><BranchesOutlined /><div><strong>{item.name || item.object_name || item.id || item.object_id}</strong><small>{item.type || item.object_type} · {item.id || item.object_id}</small></div></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已确认关联" />}<Button block icon={<NodeIndexOutlined />} onClick={() => setMode('graph')}>查看文档图谱</Button></section>}
+          <div className="knowledge-assistant-tools" hidden={inspectorTab !== 'assistant'}>
           <Card
             className="knowledge-rag-card knowledge-intake-card"
             title={<Space><NodeIndexOutlined />AI 本体抽取准备</Space>}
@@ -4797,8 +4856,12 @@ export function KnowledgeCenter() {
                 },              ]}
             />
           </Card>
+          </div>
+          </div>
         </aside>
       </div>
+      <Modal open={commandOpen} title="搜索工作空间" footer={null} onCancel={() => setCommandOpen(false)} destroyOnClose className="knowledge-command-dialog" afterOpenChange={open => { if (open) commandRef.current?.querySelector<HTMLInputElement>('input')?.focus(); }}><div ref={commandRef}><GlobalSearch /></div></Modal>
+      <footer className="knowledge-vault-status"><Space size={14}><span>知识库</span><span>{documents.length} 篇文档</span><span>已索引 {indexedDocumentCount} · 待抽取 {pendingExtractCount} · 已发布 {publishedDocumentCount}</span></Space><span>{markdownLoading ? '正在读取文档…' : selectedDocument ? '文档已加载' : '等待选择文档'}</span><Space size={20}><span>{selectedRawText.length.toLocaleString()} 字符</span><span>{selectedLinks.length} 个关联对象</span></Space></footer>
     </div>
   );
 }

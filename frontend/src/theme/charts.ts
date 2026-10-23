@@ -3,7 +3,7 @@ import { TECH_WHITE_PALETTE as colors, TECH_WHITE_TYPOGRAPHY as typography } fro
 
 export const TECH_WHITE_CHART_THEME_NAME = 'manufoundry-tech-white';
 // Categorical series remain distinguishable from the semantic status palette.
-export const CHART_SERIES_COLORS = ['#526B86', '#548985', '#B29258', '#877394', '#5981A5', '#AD7770'];
+export const CHART_SERIES_COLORS = [colors.primary, '#548985', '#B29258', '#877394', '#5981A5', '#AD7770'];
 
 const axis = {
   axisLine: { lineStyle: { color: colors.borderStrong } },

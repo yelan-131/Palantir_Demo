@@ -352,8 +352,10 @@ async def allowed_form_fields(user: dict, form_id: int, action: str, fields: lis
         elif decision.get("reason") == "explicit deny":
             denied.add(field.field_name)
     if not allowed and (await evaluate_form_permission(user, form_id, action, db, record_data=record_data, cache=cache))["allowed"]:
-        return {field.field_name for field in fields if not getattr(field, "archived", False)} - denied
-    return allowed
+        allowed = {field.field_name for field in fields if not getattr(field, "archived", False)} - denied
+    from app.services.designer_permissions import field_settings
+    settings=await field_settings(db,user,fields,cache=cache)
+    return allowed-{name for name,value in settings.items() if value.get("hidden")}
 
 
 def require_form_permission(action: str):

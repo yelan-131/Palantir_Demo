@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Button, Collapse, Radio, Select, Space, Switch, Tag, Typography, message } from 'antd';
-import { BellOutlined, CheckCircleFilled, DesktopOutlined, LayoutOutlined, MessageOutlined, RobotOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
+import { Button, Collapse, Radio, Select, Switch, Tag, Typography, message } from 'antd';
+import { BellOutlined, CheckCircleFilled, DesktopOutlined, EditOutlined, InfoCircleOutlined, LayoutOutlined, MessageOutlined, RobotOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
 import ThemePalette from '../../components/ThemePalette';
 import { useShellPreferences, type ShellPreferences } from '../../hooks/useShellPreferences';
 
@@ -27,9 +28,9 @@ function WorkspacePreview({ draft }: { draft: EditablePreferences }) {
       <div className="preferences-mini-workspace" aria-hidden="true"><div className="preferences-mini-topbar"><b /><i /></div><div className="preferences-mini-content"><div className="preferences-mini-title">我的工作台<span>示例</span></div><div className="preferences-mini-metrics"><div><span>待审批</span><strong>12</strong></div><div><span>进行中</span><strong>8</strong></div></div><div className="preferences-mini-table"><div className="preferences-mini-table-head"><span>工作事项</span><span>状态</span></div>{['生产计划审核', '质量事件复核', '设备维护申请'].map(t => <div className="preferences-mini-table-row" key={t}><span>{t}</span><i /></div>)}</div></div></div>
       {draft.aiBubbleVisible && <span className="preferences-mini-ai" aria-hidden="true"><MessageOutlined /></span>}
     </div>
-    <div className="preferences-preview-caption"><span>科技灰白</span><strong>{densityLabels[draft.density]}密度</strong></div>
+    <div className="preferences-preview-caption"><span>浅雾蓝</span><strong>{densityLabels[draft.density]}密度</strong></div>
     <div className="preferences-preview-note"><CheckCircleFilled /><p>先预览，再应用。<br /><span>保存后更新真实工作空间。</span></p></div>
-    <div className="preferences-preview-colors" aria-hidden="true">{['#FFFFFF', '#F2F3F5', '#CBD2DA', '#68717D', '#202326', '#394D63'].map(c => <i key={c} style={{ background: c }} />)}</div>
+    <div className="preferences-preview-colors" aria-hidden="true">{[colors.surface, colors.hover, colors.borderStrong, colors.muted, colors.text, colors.primaryStrong].map(c => <i key={c} style={{ background: c }} />)}</div>
     <Collapse ghost className="preferences-palette" items={[{ key: 'palette', label: '标准色系与设计规范', children: <ThemePalette /> }]} />
   </aside>;
 }
@@ -57,8 +58,8 @@ export default function WorkspacePreferences() {
     <div className="preferences-scroll">
       <header className="preferences-page-heading"><div><Typography.Title level={2}>工作偏好</Typography.Title><p>调整界面与工作习惯，找到适合自己的办公节奏。</p></div><Tag>个人偏好</Tag></header>
       <div className="preferences-layout"><div className="preferences-groups">
-        <SettingGroup title="外观与布局" description="清晰的灰白层次，舒适的显示密度" icon={<DesktopOutlined />}>
-          <SettingRow title="界面主题" description="当前提供科技灰白；深色主题规划中。"><Radio.Group aria-label="界面主题" value={draft.theme} onChange={event => update('theme', event.target.value)} className="preferences-theme-options"><Radio.Button value="tech-white"><span className="preferences-theme-thumb" aria-hidden="true"><i /><i /><i /></span><strong>科技灰白</strong><CheckCircleFilled /></Radio.Button><Radio.Button value="dark" disabled><span className="preferences-dark-dot" />深色 · 规划中</Radio.Button></Radio.Group></SettingRow>
+        <SettingGroup title="外观与布局" description="柔和的雾蓝层次，舒适的显示密度" icon={<DesktopOutlined />}>
+          <SettingRow title="界面主题" description="浅蓝底色与深蓝灰文字，清晰而柔和。"><Radio.Group aria-label="界面主题" value={draft.theme} onChange={event => update('theme', event.target.value)} className="preferences-theme-options"><Radio.Button value="tech-white"><span className="preferences-theme-thumb" aria-hidden="true"><i /><i /><i /></span><strong>浅雾蓝</strong><CheckCircleFilled /></Radio.Button><Radio.Button value="dark" disabled><span className="preferences-dark-dot" />深色 · 规划中</Radio.Button></Radio.Group></SettingRow>
           <SettingRow title="显示密度" description="调整列表、表格与控件的留白。"><Radio.Group aria-label="显示密度" optionType="button" buttonStyle="solid" value={draft.density} onChange={event => update('density', event.target.value)} options={[{ value: 'compact', label: '紧凑' }, { value: 'standard', label: '标准' }, { value: 'relaxed', label: '宽松' }]} /></SettingRow>
           <SettingRow title="默认菜单栏" description="设置工作空间导航的展开方式。"><Radio.Group aria-label="默认菜单栏" optionType="button" buttonStyle="solid" value={draft.sidebar} onChange={event => update('sidebar', event.target.value)} options={[{ value: 'expanded', label: '展开' }, { value: 'collapsed', label: '折叠' }]} /></SettingRow>
         </SettingGroup>
@@ -76,6 +77,19 @@ export default function WorkspacePreferences() {
         </SettingGroup>
       </div><WorkspacePreview draft={draft} /></div>
     </div>
-    <footer className="preferences-savebar"><div className={`preferences-save-status${changed.length ? ' is-dirty' : ''}`} role="status"><i /><span>{changed.length ? `${changed.length} 项偏好待应用` : !persisted ? '已应用 · 仅当前窗口保留' : '偏好已同步'}<small>{changed.length ? '预览不会改变当前界面' : persisted ? '按账号保存在当前浏览器' : '浏览器存储不可用，刷新后可能无法保留'}</small></span></div><Space wrap><Button icon={<UndoOutlined />} disabled={!changed.length} onClick={() => setState(previous => ({ ...previous, draft: { ...previous.baseline } }))}>还原更改</Button><Button type="primary" icon={<SaveOutlined />} disabled={!changed.length} onClick={save}>保存并应用</Button></Space></footer>
+    <footer className={`preferences-savebar${changed.length ? ' is-dirty' : ''}`}>
+      <div className="preferences-savebar-inner">
+        <div className="preferences-save-status" role="status" aria-live="polite">
+          <span className="preferences-save-icon" aria-hidden="true">{changed.length ? <EditOutlined /> : persisted ? <CheckCircleFilled /> : <InfoCircleOutlined />}</span>
+          <span><strong>{changed.length ? `有 ${changed.length} 项未保存的更改` : persisted ? '偏好已保存' : '偏好已应用'}</strong>
+            <small>{changed.length ? '确认预览效果后，保存到工作空间' : persisted ? '已在此浏览器中保留你的工作偏好' : '仅在当前窗口生效，刷新后可能无法保留'}</small>
+          </span>
+        </div>
+        <div className="preferences-save-actions">
+          {changed.length > 0 && <Button type="text" icon={<UndoOutlined />} onClick={() => setState(previous => ({ ...previous, draft: { ...previous.baseline } }))}>还原更改</Button>}
+          <Button type="primary" icon={changed.length ? <SaveOutlined /> : <CheckCircleFilled />} disabled={!changed.length} onClick={save}>{changed.length ? '保存并应用' : '已应用'}</Button>
+        </div>
+      </div>
+    </footer>
   </section>;
 }

@@ -14,7 +14,7 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form as FormParam
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,7 +99,17 @@ from app.services.form_runtime import (
 router = APIRouter()
 
 
+@router.get('/reference-sources')
+async def form_reference_sources(db:AsyncSession=Depends(get_db),user:dict=Depends(require_admin)):
+    from app.services.form_option_sources import catalog
+    return {'data':await catalog(db,current_tenant_id(user))}
+
+
 class FormRulePreviewRequest(BaseModel):
+    query: str = Field(default='', max_length=256)
+    page: int | None = Field(default=None, ge=1, le=100000)
+    page_size: int = Field(default=20, ge=1, le=100)
+    selected: str | int | None = None
     data: dict[str, Any] = Field(default_factory=dict)
     record_id: int | None = None
 
@@ -121,15 +131,129 @@ async def evaluate_form_rules(form_id: int, body: FormRulePreviewRequest,
         existing = result['data']['data']
         raw = await records.read_raw(db, form, body.record_id)
         await records.require_record_permission(db, user, form, 'edit', raw)
+        existing=raw['data']
     else:
         await records.require_record_permission(db, user, form, 'create', {'data': body.data, 'created_by': current_user_id(user)})
     fields = await accessible_fields(db, user, form, scope, {**(existing or {}), **body.data})
     names = {field.field_name for field in fields}
     if set(body.data) - names:
         raise HTTPException(403, 'Field permission denied')
-    result = await evaluate(db, user, fields, body.data, existing=existing)
-    return {'data': {'data': {key: value for key, value in result['data'].items() if key in names},
-                     'states': result['states']}}
+    from app.services.field_policies import presentation
+    _,prior=await presentation(db,user,fields,existing or {})
+    incoming={key:value for key,value in body.data.items() if existing is None or not prior.get(key,{}).get('masked')}
+    result = await evaluate(db, user, fields, incoming, existing=existing)
+    safe,policies=await presentation(db,user,fields,result['data'])
+    if existing is None:
+        safe={key:value for key,value in result['data'].items() if policies.get(key,{}).get('visible') is not False}
+        policies={key:{**value,'masked':False} for key,value in policies.items()}
+    return {'data': {'data': {key: value for key, value in safe.items() if key in names},
+                     'states': {key:{**value,**policies.get(key,{})} for key,value in result['states'].items()}}}
+
+
+class DesignerRulePreviewRequest(BaseModel):
+    validate_only: bool = False
+    query: str = Field(default='', max_length=256)
+    page: int | None = Field(default=None, ge=1, le=100000)
+    page_size: int = Field(default=20, ge=1, le=100)
+    selected: str | int | None = None
+    mask_record: bool = False
+    controls: list[dict] = Field(default_factory=list, max_length=1000)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post('/{form_id}/rules/preview')
+async def preview_designer_rules(form_id: int, body: DesignerRulePreviewRequest,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.models.relational import Form, FormField
+    from app.services.form_rules import evaluate
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user): raise HTTPException(404, 'Form not found')
+    fields = (await db.scalars(select(FormField).where(FormField.form_id == form_id, FormField.tenant_id == form.tenant_id))).all()
+    payloads = _apply_designer_field_settings({'formDesignerControls': body.controls}, [_field_payload(field) for field in fields])
+    from app.services.form_calculations import design_errors as calculation_errors
+    errors = calculation_errors(payloads)
+    if errors: raise HTTPException(422, '；'.join(errors))
+    if body.validate_only: return {'data': {'data': {}, 'states': {}}}
+    result = await evaluate(db, user, [_field_proxy_from_payload(field) for field in payloads], body.data, existing=body.data if body.mask_record else None)
+    from app.services.field_policies import presentation
+    safe,policies=await presentation(db,user,[_field_proxy_from_payload(field) for field in payloads],result['data'])
+    if not body.mask_record:
+        safe=result['data'];policies={key:{**value,'masked':False} for key,value in policies.items()}
+    return {'data': {'data': safe, 'states': {key:{**value,**policies.get(key,{})} for key,value in result['states'].items()}}}
+
+
+@router.post('/{form_id}/fields/{field_name}/options/preview')
+async def preview_form_reference_options(form_id:int,field_name:str,body:DesignerRulePreviewRequest,db:AsyncSession=Depends(get_db),user:dict=Depends(require_admin)):
+    from app.models.relational import Form,FormField
+    from app.services.form_rules import archive_options
+    form=await db.get(Form,form_id)
+    if not form or form.tenant_id!=current_tenant_id(user):raise HTTPException(404,'Form not found')
+    fields=(await db.scalars(select(FormField).where(FormField.form_id==form_id,FormField.tenant_id==form.tenant_id))).all()
+    payloads=_apply_designer_field_settings({'formDesignerControls':body.controls},[_field_payload(field) for field in fields])
+    field=next((_field_proxy_from_payload(field) for field in payloads if field['field_name']==field_name),None)
+    if not field:raise HTTPException(404,'Field not found')
+    if body.page is not None or body.query or body.selected is not None:
+        from app.services.option_search import search
+        return await search(db, user, field, body.data, keyword=body.query, page=body.page or 1, page_size=body.page_size, selected=body.selected, context_fields={item['field_name'] for item in payloads})
+    options=await archive_options(db,user,field,body.data)
+    return {'data':[{'id':option['id'],'label':option['label']} for option in options]}
+
+
+@router.post('/{form_id}/fields/{field_name}/options/schema/preview')
+async def preview_option_search_schema(form_id: int, field_name: str, body: DesignerRulePreviewRequest,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.models.relational import Form, FormField
+    from app.services.option_search import schema
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user): raise HTTPException(404, 'Form not found')
+    fields = (await db.scalars(select(FormField).where(FormField.form_id == form_id, FormField.tenant_id == form.tenant_id))).all()
+    payloads = _apply_designer_field_settings({'formDesignerControls': body.controls}, [_field_payload(item) for item in fields])
+    field = next((_field_proxy_from_payload(item) for item in payloads if item['field_name'] == field_name), None)
+    if not field: raise HTTPException(404, 'Field not found')
+    return {'data': await schema(db, user, field)}
+
+
+async def _attachment_field(db, user, form_id, field_name, action):
+    from app.models.relational import Form
+    from app.services import records
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user): raise HTTPException(404, 'Form not found')
+    await records.require_form_permission(db, user, form_id, action)
+    fields = await _runtime_form_fields(db, form.tenant_id, form_id)
+    permitted = await allowed_form_fields(user, form_id, action, fields, db)
+    field = next((item for item in fields if item.field_name == field_name and not item.archived), None)
+    if not field or field_name not in permitted: raise HTTPException(403, 'Field permission denied')
+    ui = field.ui_config or {}
+    if field.field_type != 'json' or (ui.get('controlType') != 'upload' and ui.get('businessType') != 'attachment'):
+        raise HTTPException(422, '该字段不是附件字段')
+    return form, field
+
+
+@router.post('/{form_id}/fields/{field_name}/files')
+async def upload_form_file(form_id: int, field_name: str, file: UploadFile = File(...), record_id: int | None = None,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from app.services import form_files, records
+    form, field = await _attachment_field(db, user, form_id, field_name, 'edit' if record_id else 'create')
+    if record_id is not None:
+        raw=await records.read_raw(db,form,record_id)
+        await records.require_record_permission(db,user,form,'edit',raw)
+    result = await form_files.save(file, form.tenant_id, form_id, field_name, current_user_id(user), (field.ui_config or {}).get('typeSettings') or {})
+    return {'data': result}
+
+
+@router.get('/{form_id}/fields/{field_name}/files/{file_id}')
+async def download_form_file(form_id: int, field_name: str, file_id: str, record_id: int | None = None,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from fastapi.responses import FileResponse
+    from app.services import form_files, records
+    form, _ = await _attachment_field(db, user, form_id, field_name, 'view')
+    info, path = form_files.metadata(form.tenant_id, form_id, field_name, file_id)
+    if record_id is not None:
+        record = await records.get_record(form_id, record_id, db, user)
+        values = (record.get('data') or {}).get('data', {}).get(field_name) or []
+        if not any(isinstance(item, dict) and item.get('id') == file_id for item in values): raise HTTPException(403, '记录未关联此附件')
+    elif info['owner_id'] != current_user_id(user): raise HTTPException(403, '附件尚未授权给当前用户')
+    return FileResponse(path, filename=info['name'], media_type='application/octet-stream', headers={'X-Content-Type-Options':'nosniff'})
 
 
 @router.post('/{form_id}/fields/{field_name}/options')
@@ -148,6 +272,9 @@ async def form_reference_options(form_id: int, field_name: str, body: FormRulePr
     field = next((field for field in fields if field.field_name == field_name), None)
     if not field:
         raise HTTPException(403, 'Field permission denied')
+    if body.page is not None or body.query or body.selected is not None:
+        from app.services.option_search import search
+        return await search(db, user, field, body.data, keyword=body.query, page=body.page or 1, page_size=body.page_size, selected=body.selected, context_fields={item.field_name for item in fields})
     options = await archive_options(db, user, field, body.data)
     # Only IDs and labels leave this endpoint; backfill attributes are projected
     # through the form's own field permissions by the evaluator.
@@ -669,6 +796,7 @@ def _scoped_form_payload(payload: dict, scope: str) -> dict:
         scoped["config"] = {
             "formLayout": config.get("formLayout"),
             "formDesignerLayout": config.get("formDesignerLayout"),
+            "canvasSettings": config.get("canvasSettings"),
             "publishedSchemaVersion": config.get("publishedSchemaVersion"),
             "publishedAt": config.get("publishedAt"),
         }
@@ -931,8 +1059,9 @@ def _apply_designer_field_settings(config: dict, fields: list[dict]) -> list[dic
     independent so saving a designer draft cannot affect the published runtime.
     """
     controls = config.get("formDesignerControls") or []
+    controls_by_id = {item.get("id"): item for item in controls if isinstance(item, dict) and item.get("id")}
     controls_by_field = {item.get("fieldKey"): item for item in controls
-                         if isinstance(item, dict) and item.get("source") == "field" and item.get("fieldKey")}
+                         if isinstance(item, dict) and item.get("fieldKey")}
     view = config.get("viewConfigDraft") or config.get("viewConfig") or {}
     views = view.get("tabs") if isinstance(view, dict) else None
     views = views if isinstance(views, list) and views else [view]
@@ -940,6 +1069,7 @@ def _apply_designer_field_settings(config: dict, fields: list[dict]) -> list[dic
     has_column_config = any(isinstance(columns, list) for columns in column_lists)
     visible_columns = {item.get("fieldName") for columns in column_lists if isinstance(columns, list)
                        for item in columns if isinstance(item, dict) and item.get("enabled", True) is not False}
+    sortable_columns={item.get('fieldName') for columns in column_lists if isinstance(columns,list) for item in columns if isinstance(item,dict) and item.get('enabled',True) and item.get('sortable')}
     result = []
     for original in fields:
         field = copy.deepcopy(original)
@@ -947,29 +1077,81 @@ def _apply_designer_field_settings(config: dict, fields: list[dict]) -> list[dic
         if control:
             ui = dict(field.get('ui_config') or {})
             ui['rules'] = copy.deepcopy(control.get('rules') or {})
-            if control.get('controlType'):
-                ui['controlType'] = control['controlType']
+            ui['typeSettings'] = copy.deepcopy(control.get('typeSettings') or {})
+            if 'computed' in control:
+                if control['computed'] is None:
+                    ui.pop('computed', None)
+                else:
+                    from app.services.form_calculations import validate_rule
+                    validate_rule(control['computed'])
+                    ui['computed'] = copy.deepcopy(control['computed'])
+                    if control['computed'].get('precision') is None:
+                        ui['typeSettings'].pop('precision', None)
+                    else:
+                        ui['typeSettings']['precision'] = control['computed']['precision']
+            if 'defaultRule' in control:
+                if not isinstance(control.get('defaultRule'), dict):
+                    raise HTTPException(422, '默认值规则配置无效')
+                if control['defaultRule'].get('mode') == 'template' or 'enabled' in control['defaultRule'] or control['defaultRule'].get('conditions'):
+                    ui['defaultRule'] = copy.deepcopy(control['defaultRule'])
+                else:
+                    ui.pop('defaultRule', None)
+            # Ignore storageMaxBytes in old control drafts: storage budgets
+            # belong to schema policy, never to presentation settings.
+            ui['placeholder'] = control.get('placeholder') or ''
+            ui['helpText'] = control.get('helpText') or ''
+            ui['label'] = control.get('name') or field.get('label')
+            ancestors = []
+            seen = {control.get('id')}
+            parent = controls_by_id.get(control.get('parentId'))
+            while parent and parent.get('id') not in seen:
+                seen.add(parent.get('id'))
+                ancestors.append(copy.deepcopy(parent.get('rules') or {}))
+                parent = controls_by_id.get(parent.get('parentId'))
+            ui['layoutAncestors'] = ancestors
+            kind=control.get('controlType')
+            if kind=='field':
+                business=field.get('business_type') or ui.get('businessType')
+                kind={'attachment':'upload','longText':'textarea','person':'relation','number':'number','date':'datetime','datetime':'datetime','enum':'select','code':'code','relation':'relation'}.get(business) or ui.get('controlType')
+                if not kind or kind=='field': kind={'enum':'select','boolean':'switch','date':'datetime','datetime':'datetime','text':'textarea','int':'number','integer':'number','float':'number','decimal':'number','number':'number'}.get(field.get('field_type'),'text')
+            if kind: ui['controlType']=kind
+            field['label'] = control.get('name') or field.get('label')
+            if ui.get('controlType')=='select' and control.get('dataSourceKind','static')=='static' and control.get('optionSource'):
+                choices=[item.strip() for item in re.split(r'[、,/，|]', control['optionSource']) if item.strip()]
+                raw=field.get('enum_values') or {};current=raw.get('values',raw) if isinstance(raw,dict) else raw
+                old=[str(item.get('value')) if isinstance(item,dict) else str(item) for item in current] if isinstance(current,list) else list(current) if isinstance(current,dict) else []
+                if choices!=old: field['enum_values']={**(raw if isinstance(raw,dict) else {}),'values':choices}
             assignments = control.get('assignmentRules') or []
-            ref = ui.get('relation_config') or {}
+            ui['assignmentRules']=copy.deepcopy(assignments)
+            ui['assignmentRulesEnabled'] = control.get('assignmentRulesEnabled', True)
+            ref = {} if control.get('dataSourceKind') == 'static' else ui.get('relation_config') or {}
             if isinstance(ref, str):
                 ref = json.loads(ref)
-            if control.get('dataSourceKind') in {'masterData', 'businessForm'} and control.get('optionSource'):
+            if control.get('dataSourceKind') in {'masterData', 'businessForm', 'organization'} and control.get('optionSource'):
                 source = control['optionSource']
                 aliases = {'material_master': 'materials', 'supplier_master': 'suppliers'}
+                ref.pop('target_form_code',None);ref.pop('target_table',None);ref.pop('source_kind',None);ref.pop('source_id',None);ref.pop('source_code',None)
                 ref['target_model'] = aliases.get(source, source)
-                ref.setdefault('label_field', 'name')
-            if assignments:
-                ref['backfill'] = {**ref.get('backfill', {}), **{
-                    item['targetField']: item['sourceAttribute'] for item in assignments
-                    if item.get('targetField') and item.get('sourceAttribute')}}
+                ref['label_field']=control.get('referenceLabelField') or ref.get('label_field') or 'name'
+            if control.get('dataSourceKind') in {'dictionary','externalApi'}:
+                source_kind=control['dataSourceKind']
+                ref={'source_kind':source_kind,'source_code':control.get('optionSource')} if source_kind=='dictionary' else {'source_kind':source_kind,'source_id':control.get('optionSource'),'items_path':control.get('referenceItemsPath','data'),'value_field':control.get('referenceValueField') or 'id','label_field':control.get('referenceLabelField') or 'name'}
+                field['enum_values']=None  # The referenced source is authoritative, not old inline choices.
+            if 'assignmentRules' in control and ref:
+                ref['backfill'] = {
+                    item['targetField']: item['sourceAttribute'].removeprefix('record.') for item in assignments if ui['assignmentRulesEnabled'] is not False
+                    if item.get('targetField') and str(item.get('sourceAttribute','')).startswith('record.')}
+            if control.get('dataSourceKind') == 'static':ui.pop('relation_config',None)
             if ref:
                 ui['relation_config'] = ref
+                ui['controlType']='relation'
             field['ui_config'] = ui
             required = (control.get("rules") or {}).get("required") or {}
             if isinstance(required, dict) and isinstance(required.get("enabled"), bool):
-                field["required"] = required["enabled"]
+                field["required"] = required["enabled"] and all((parent.get("visible") or {}).get("enabled") is not False for parent in ancestors)
         if has_column_config:
             field["visible_in_list"] = field.get("field_name") in visible_columns
+            field["sortable"] = field.get("field_name") in sortable_columns
         result.append(field)
     return result
 
@@ -1054,6 +1236,12 @@ async def _runtime_permission_summary(user: dict, form_id: int, db: AsyncSession
     for action in actions:
         decision = await evaluate_form_permission(user, form_id, action, db, cache=cache)
         summary[action] = bool(decision["allowed"])
+    from app.models.relational import Form
+    from app.services.designer_permissions import role_configs
+    form=await db.get(Form,form_id)
+    configs=await role_configs(db,user,form) if form else []
+    for action in ['saveDraft','submit']:
+        summary[action]=not any((value.get('actions') or {}).get(action) is False for value in configs)
     return summary
 
 
@@ -1114,6 +1302,7 @@ def _promote_snapshot_config(snapshot: dict, published_at: str, version: int) ->
     draft_view = config.get("viewConfigDraft")
     if draft_view is not None:
         config["viewConfig"] = draft_view
+    if isinstance(config.get('permissionDesignDraft'),dict):config['permissionDesign']=copy.deepcopy(config['permissionDesignDraft'])
     draft_analytics = config.get("analyticsDesignDraft")
     if draft_analytics is not None:
         config["analyticsDesign"] = draft_analytics
@@ -1232,20 +1421,47 @@ def _publish_impact_report(latest_version, next_version: int, draft_snapshot: di
     }
 
 
-async def _build_publish_preview(db: AsyncSession, tenant_id: int, form) -> tuple[dict, dict]:
+async def _build_publish_preview(db:AsyncSession,tenant_id:int,form)->tuple[dict,dict]:
+    from app.services.form_option_sources import read_snapshot
+    async with read_snapshot():return await _build_publish_preview_inner(db,tenant_id,form)
+
+
+async def _build_publish_preview_inner(db: AsyncSession, tenant_id: int, form) -> tuple[dict, dict]:
     from app.models.relational import DynamicRecord, FormField
 
     latest = await _latest_form_version(db, tenant_id, form.id)
     next_version = (latest.version + 1) if latest else INITIAL_FORM_VERSION
     snapshot = await _form_snapshot(db, tenant_id, form)
-    rows = (await db.execute(
-        select(DynamicRecord.data).where(
-            DynamicRecord.form_id == form.id,
-            DynamicRecord.tenant_id == tenant_id,
-            DynamicRecord.deleted_at.is_(None),
-        )
-    )).scalars().all()
-    report = _publish_impact_report(latest, next_version, snapshot, [row or {} for row in rows])
+    from app.services.records import iter_raw
+    rows=[record['data'] async for record in iter_raw(db,form)]
+    report = _publish_impact_report(latest, next_version, snapshot, rows)
+    from app.services.form_control_validation import design_errors
+    errors=design_errors(form.config or {},snapshot['fields'])
+    analytics_design = (form.config or {}).get('analyticsDesignDraft', (form.config or {}).get('analyticsDesign'))
+    if analytics_design is not None:
+        from app.services.analytics_metric_library import hydrate_design
+        analytics_design, shared_errors = await hydrate_design(db, tenant_id, analytics_design, require_current=True)
+        errors += shared_errors
+        snapshot['form']['config']['analyticsDesignDraft'] = analytics_design
+        from app.services.analytics_runtime import design_errors as analytics_errors
+        errors += analytics_errors(analytics_design)
+        from app.services.analytics_runtime import source_errors as analytics_source_errors
+        errors += await analytics_source_errors(db, tenant_id, form, analytics_design, snapshot['fields'])
+
+    from app.services.field_policies import design_errors as policy_errors
+    errors+=policy_errors(snapshot['fields'])
+    if not errors:
+        from app.services.form_rules import relation,archive_options
+        for payload in snapshot['fields']:
+            field=_field_proxy_from_payload(payload)
+            if relation(field):
+                try:await archive_options(db,{'tenant_id':tenant_id,'is_admin':True},field,{})
+                except HTTPException as exc:errors.append(f'「{field.label}」关联配置不可用：{exc.detail}')
+    if not errors:
+        from app.services.field_uniqueness import publish_errors
+        errors+=await publish_errors(db,form,[_field_proxy_from_payload(field) for field in snapshot['fields']])
+    report['items'].extend({'level':'blocking','type':'control_configuration','detail':error,'affected_count':0} for error in errors)
+    report['blocking_count']+=len(errors)
     return report, snapshot
 
 
@@ -1895,12 +2111,19 @@ async def publish_form(
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
+    from app.services.field_uniqueness import lock
+    await lock(db,tenant_id)
+    await db.refresh(form)
     report, snapshot = await _build_publish_preview(db, tenant_id, form)
     if report["blocking_count"] > 0:
         raise HTTPException(409, {"message": "Publish blocked by incompatible form changes", "report": report})
     now = datetime.now()
     published_at = now.isoformat()
     snapshot = _promote_snapshot_config(snapshot, published_at, report["next_version"])
+    from app.services.designer_permissions import sync_published
+    await sync_published(db,form,snapshot['form']['config'])
+    from app.models.relational import FormPermission
+    snapshot['permissions']=[_permission_payload(row) for row in (await db.scalars(select(FormPermission).where(FormPermission.tenant_id==tenant_id,FormPermission.form_id==form_id))).all()]
     version = FormVersion(
         tenant_id=tenant_id,
         form_id=form.id,
@@ -1925,6 +2148,29 @@ async def publish_form(
         new_values={"version": version.version, "impact_report": report},
     )
     return {"data": _form_version_payload(version)}
+
+
+@router.post('/{form_id}/draft/restore')
+async def restore_form_draft(form_id:int, db:AsyncSession=Depends(get_db),user:dict=Depends(require_admin)):
+    from app.models.relational import Form,FormField
+    form=await db.get(Form,form_id)
+    if not form or form.tenant_id!=current_tenant_id(user):raise HTTPException(404,'Form not found')
+    version=await _latest_form_version(db,form.tenant_id,form_id)
+    if not version:raise HTTPException(409,'当前没有可恢复的已发布版本')
+    config=copy.deepcopy(((version.snapshot or {}).get('form') or {}).get('config') or {})
+    # Restore design metadata only. Field definitions and business rows are never deleted.
+    config['viewConfigDraft']=copy.deepcopy(config.get('viewConfig') or {})
+    config['permissionDesignDraft']=copy.deepcopy(config.get('permissionDesign') or {'roles':{}})
+    if 'analyticsDesign' in config:config['analyticsDesignDraft']=copy.deepcopy(config['analyticsDesign'])
+    meta=config.get('workflowDesigner') or {}
+    meta.pop('draftWorkflowId',None)
+    config['workflowDesigner']=meta
+    for payload in (version.snapshot or {}).get('fields',[]):
+        field=await db.get(FormField,payload.get('id')) if payload.get('id') else None
+        if field and field.form_id==form_id and field.tenant_id==form.tenant_id:field.default_value=payload.get('default_value')
+    form.config=config
+    await db.commit();await db.refresh(form)
+    return {'data':_form_payload(form)}
 
 
 @router.get("/{form_id}/versions")
@@ -2061,11 +2307,27 @@ async def update_form(
     from app.models.relational import Form
 
     tenant_id = current_tenant_id(user)
+    updates = body.dict(exclude_unset=True)
+    if 'config' in updates:
+        # Serialize legacy full-config saves with the dashboard editor and
+        # publication, then compare against the state after acquiring the lock.
+        from app.services.field_uniqueness import lock
+        await lock(db, tenant_id)
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
+    if 'config' in updates:
+        await db.refresh(form)
+        current_config = form.config or {}
+        analytics_meta = current_config.get('analyticsDesignMeta') or {}
+        if (analytics_meta.get('managedBy') == 'analytics-editor'
+                and (isinstance(current_config.get('analyticsDesign'), dict)
+                     or await _latest_form_version(db, tenant_id, form_id) is not None)):
+            incoming_config = updates['config'] or {}
+            if any(incoming_config.get(key) != current_config.get(key)
+                   for key in ('analyticsDesign', 'analyticsDesignDraft', 'analyticsDesignMeta')):
+                raise HTTPException(409, '看板配置已由看板编辑器管理，请重新加载表单设置；修改看板请从看板编辑器操作')
     old_values = _form_payload(form)
-    updates = body.dict(exclude_unset=True)
     if updates.get("table_name"):
         _validate_physical_table_name(tenant_id, updates["table_name"])
     for key, value in updates.items():
@@ -2149,6 +2411,15 @@ async def create_form_field(
     if existing:
         raise HTTPException(409, "Field already exists on this form")
 
+    from app.services.field_limits import DEFAULT_FORM_FIELDS
+    # Serialize field additions for this form so simultaneous requests cannot
+    # both pass the last available slot.
+    await db.execute(select(Form.id).where(Form.id == form_id, Form.tenant_id == tenant_id).with_for_update())
+    field_count = await db.scalar(select(func.count()).select_from(FormField).where(
+        FormField.form_id == form_id, FormField.tenant_id == tenant_id, FormField.archived.is_(False)))
+    if field_count >= DEFAULT_FORM_FIELDS:
+        raise HTTPException(422, f'表单字段数量不能超过系统上限 {DEFAULT_FORM_FIELDS} 个')
+
     field_data = _normalize_form_field_data(body.dict())
     field = FormField(tenant_id=tenant_id, form_id=form_id, **field_data)
     db.add(field)
@@ -2175,7 +2446,7 @@ async def update_form_field(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import FormField
+    from app.models.relational import Form, FormField
 
     tenant_id = current_tenant_id(user)
     field = await db.get(FormField, field_id)
@@ -2186,6 +2457,13 @@ async def update_form_field(
         current_field_type=field.field_type,
         current_ui_config=field.ui_config,
     )
+    if field.archived and updates.get('archived') is False:
+        from app.services.field_limits import DEFAULT_FORM_FIELDS
+        await db.execute(select(Form.id).where(Form.id == form_id, Form.tenant_id == tenant_id).with_for_update())
+        count = await db.scalar(select(func.count()).select_from(FormField).where(
+            FormField.form_id == form_id, FormField.tenant_id == tenant_id, FormField.archived.is_(False)))
+        if count >= DEFAULT_FORM_FIELDS:
+            raise HTTPException(422, f'表单字段数量不能超过系统上限 {DEFAULT_FORM_FIELDS} 个')
     old_values = _field_payload(field)
     changed = False
     for key, value in updates.items():
@@ -2581,6 +2859,47 @@ async def list_dynamic_records(
     return await list_records(form_id, db, user, include_deleted=include_deleted, search=search, filters_json=filters_json, sort_field=sort_field, sort_order=sort_order, cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id, include_total=include_total, page=page, page_size=page_size)
 
 
+@router.get('/{form_id}/records-export')
+async def export_records_page(form_id:int,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=200),search:Optional[str]=None,filters_json:Optional[str]=Query(None,alias='filters'),sort_field:Optional[str]=None,sort_order:str=Query('desc',pattern='^(asc|desc)$'),db:AsyncSession=Depends(get_db),user:dict=Depends(get_current_user)):
+    import csv,io
+    from fastapi.responses import Response
+    from app.services import records
+    from app.models.relational import Form
+    form=await db.get(Form,form_id)
+    if not form or form.tenant_id!=current_tenant_id(user):raise HTTPException(404,'Form not found')
+    await records.require_form_permission(db,user,form_id,'export')
+    result=await records.list_records(form_id,db,user,page=page,page_size=page_size,search=search,filters_json=filters_json,sort_field=sort_field,sort_order=sort_order)
+    fields=await records.runtime_fields(db,form)
+    columns=[field for field in fields if not field.archived]
+    stream=io.StringIO();writer=csv.writer(stream)
+    writer.writerow([field.label for field in columns])
+    for row in result['data']:
+        if not await records.record_allowed(db,user,form,'export',row):continue
+        allowed=await allowed_form_fields(user,form_id,'export',fields,db,record_data=records.policy_data(row))
+        values=[]
+        for field in columns:
+            value=(row.get('data') or {}).get(field.field_name,'') if field.field_name in allowed else ''
+            value=json.dumps(value,ensure_ascii=False) if isinstance(value,(dict,list)) else str(value) if value is not None else ''
+            # Keep spreadsheet software from evaluating formula-like cell content.
+            values.append("'"+value if value.startswith(('=','+','-','@','\t','\r')) else value)
+        writer.writerow(values)
+    return Response('\ufeff'+stream.getvalue(),media_type='text/csv; charset=utf-8')
+
+
+@router.post('/{form_id}/imports/preview')
+async def preview_form_import(form_id:int,file:UploadFile=File(...),db:AsyncSession=Depends(get_db),user:dict=Depends(get_current_user)):
+    from app.services.form_imports import preview,MAX_BYTES
+    return {'data':await preview(db,user,form_id,file.filename or '',await file.read(MAX_BYTES+1))}
+
+
+@router.post('/{form_id}/imports')
+async def execute_form_import(form_id:int,file:UploadFile=File(...),mapping:str=FormParam(...),request_key:str=FormParam(...),schema_version:int=FormParam(...),db:AsyncSession=Depends(get_db),user:dict=Depends(get_current_user)):
+    from app.services.form_imports import execute,MAX_BYTES
+    try:columns=json.loads(mapping)
+    except (ValueError,TypeError):raise HTTPException(422,'列映射格式无效')
+    return {'data':await execute(db,user,form_id,file.filename or '',await file.read(MAX_BYTES+1),columns,request_key,schema_version)}
+
+
 @router.get("/{form_id}/records/{record_id}")
 async def get_dynamic_record(
     form_id: int,
@@ -2679,6 +2998,8 @@ async def submit_form_application(form_id: int, record_id: int, body: FormApplic
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
     await _ensure_form_permission(db, user, form_id, "edit")
+    from app.services.designer_permissions import require_action
+    await require_action(db,user,form,'submit')
     if not await enabled(db, form):
         raise HTTPException(409, "此表单尚未配置审批流程")
     record = await locked_record(db, form, record_id)
@@ -2693,7 +3014,11 @@ async def submit_form_application(form_id: int, record_id: int, body: FormApplic
         raise HTTPException(403, "仅申请人或管理员可以提交")
     await _protect_pending_form_record(db, tenant_id, form_id, record_id)
     fields = await _runtime_form_fields(db, tenant_id, form_id)
-    _validate_record_data(fields, record['data'])
+    from app.services.form_rules import evaluate
+    checked=await evaluate(db,user,fields,{},existing=record['data'],enforce=True)
+    _validate_record_data(checked['fields'],checked['data'])
+    if any(record['data'].get(key)!=value for key,value in checked['data'].items()):
+        raise HTTPException(409,'表单规则已更新，请重新保存草稿后提交')
     instances = await _start_form_workflows(db, tenant_id=tenant_id, form=form, record_payload=record, user=user)
     if len(instances) != 1:
         raise HTTPException(409, "表单须配置唯一的审批流程")

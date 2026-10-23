@@ -17,6 +17,7 @@ venv/
 
 # Build
 dist/
+dist-ui-review/
 build/
 *.egg-info/
 
@@ -43,3 +44,6 @@ backend/manufoundry.before-*.db
 
 # Local image/package artifacts
 *.tar
+
+# Private runtime form attachments
+data/form_files/

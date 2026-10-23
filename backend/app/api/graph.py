@@ -121,6 +121,7 @@ def _frontend_node_from_graph_node(node: dict) -> dict:
         "actions": node.get("actions") or [],
         "source_id": node.get("source_id"),
         "source_system": node.get("source_system"),
+        "occurred_at": node.get("occurred_at"),
     }
 
 
@@ -131,6 +132,7 @@ def _frontend_edge_from_graph_edge(edge: dict, index: int) -> dict:
         "target": edge.get("target"),
         "label": edge.get("label") or edge.get("relation_label") or edge.get("type") or edge.get("relation_type"),
         "relation_type": edge.get("relation_type") or edge.get("type"),
+        "occurred_at": edge.get("occurred_at"),
     }
 
 
@@ -254,15 +256,12 @@ async def _try_neo4j(fn):
     """Run a Neo4j query or fail explicitly when the graph backend is unavailable."""
     timeout = _neo4j_query_timeout(5)
     try:
-        from app.database import get_neo4j
+        from app.database import neo4j_driver
 
-        neo4j_session = None
-        async for session in get_neo4j():
-            neo4j_session = session
-            break
-        if neo4j_session is None:
+        if neo4j_driver is None:
             raise graph_unavailable("Neo4j driver is not configured")
-        return await asyncio.wait_for(fn(neo4j_session), timeout=timeout)
+        async with neo4j_driver.session() as session:
+            return await asyncio.wait_for(fn(session), timeout=timeout)
     except HTTPException:
         raise
     except asyncio.TimeoutError as exc:

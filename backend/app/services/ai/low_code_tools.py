@@ -391,16 +391,16 @@ def _standard_analytics_design(form_code: str, form_name: str, fields: list[dict
         field["field_name"]
         for field in fields
         if field.get("searchable") or str(field.get("field_type") or "") in {"enum", "date", "datetime", "string"}
-    ][:4] or ["category", "status", "owner"]
+    ][:4] or [field["field_name"] for field in fields][:4]
     measures = [
         field["field_name"]
         for field in fields
         if str(field.get("field_type") or "") in {"number", "integer", "decimal"}
-    ][:4] or ["count"]
-    primary_dimension = dimensions[0]
-    primary_measure = measures[0]
+    ][:4]
+    primary_dimension = dimensions[0] if dimensions else None
+    primary_measure = measures[0] if measures else None
     dataset_id = f"{form_code}-dataset"
-    return {
+    design = {
         "datasets": [
             {
                 "id": dataset_id,
@@ -423,8 +423,8 @@ def _standard_analytics_design(form_code: str, form_name: str, fields: list[dict
             },
             {
                 "id": "metric-primary",
-                "name": f"{primary_measure}汇总",
-                "expression": f"sum({primary_measure})" if primary_measure != "count" else "count(*)",
+                "name": f"{primary_measure}汇总" if primary_measure else "记录数",
+                "expression": f"sum({primary_measure})" if primary_measure else "count(*)",
                 "datasetId": dataset_id,
                 "format": "number",
                 "threshold": "按业务目标配置",
@@ -435,21 +435,26 @@ def _standard_analytics_design(form_code: str, form_name: str, fields: list[dict
             {"id": "widget-trend", "title": "趋势分析", "type": "line", "datasetId": dataset_id, "metricIds": ["metric-total"], "dimension": primary_dimension, "width": "half", "interaction": "filter"},
             {"id": "widget-rank", "title": "排行分析", "type": "rank-table", "datasetId": dataset_id, "metricIds": ["metric-primary"], "dimension": primary_dimension, "width": "half", "interaction": "drilldown"},
         ],
-        "globalFilters": [primary_dimension],
+        "globalFilters": [primary_dimension] if primary_dimension else [],
         "interactions": [
             {"sourceWidgetId": "widget-trend", "targetWidgetId": "widget-rank", "action": "filter"},
         ],
         "style": {
-            "preset": "factory-clear",
+            "preset": "factory",
             "background": "#f4f5f6",
             "componentGap": 12,
             "cardRadius": 4,
-            "cardBorder": "subtle",
-            "chartPalette": "industrial",
-            "tableDensity": "middle",
-            "filterTheme": "compact",
+            "cardBorder": "light",
+            "chartPalette": "manufacturing",
+            "tableDensity": "standard",
+            "filterTheme": "toolbar",
         },
     }
+
+    if not primary_dimension:
+        design['widgets'] = design['widgets'][:1]
+        design['interactions'] = []
+    return design
 
 
 def _standard_form_config(base_config: dict[str, Any] | None, fields: list[dict[str, Any]]) -> dict[str, Any]:

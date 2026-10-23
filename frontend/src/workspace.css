@@ -687,3 +687,147 @@ body:has(.tech-white-shell) .workflow-business-sheet-value { color: var(--mf-tex
 .assembly-form-card[role="button"]:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
 
 .assembly-form-card.is-selected { background: var(--mf-selected); box-shadow: inset 0 0 0 1px var(--mf-border); }
+
+/* The continuation card's mist-blue palette is shared by all work surfaces. */
+.tech-white-shell .app-content :is(.ant-card-head, .app-business-panel-head, .designer-panel-head, .config-editor-header) {
+  background: var(--mf-feature-bg);
+  border-bottom-color: var(--mf-info-border);
+}
+.tech-white-shell .app-content .ant-card-head {
+  border-radius: var(--mf-panel-radius) var(--mf-panel-radius) 0 0;
+}
+.tech-white-shell .app-content :is(.dashboard-command-header, .quality-command-hero, .node-editor-hero, .designer-prop-summary) {
+  background: var(--mf-feature-bg);
+  border-color: var(--mf-info-border);
+  color: var(--mf-text);
+}
+.tech-white-shell .app-content :is(.todo-metric-primary, .hierarchy-kpi-primary) {
+  background: var(--mf-feature-bg);
+  border-color: var(--mf-info-border);
+}
+.tech-white-shell .app-content .todo-metric-primary :is(strong, em, .todo-metric-arrow),
+.tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-content {
+  color: var(--mf-text);
+}
+.tech-white-shell .app-content .todo-metric-primary small,
+.tech-white-shell .app-content .hierarchy-kpi-primary .ant-statistic-title {
+  color: var(--mf-muted);
+}
+.tech-white-shell .app-content .todo-metric-primary .todo-metric-icon {
+  background: var(--mf-icon-bg);
+  color: var(--mf-focus);
+}
+.tech-white-shell .app-content .todo-metric-primary:hover {
+  background: var(--mf-selected);
+  border-color: var(--mf-border-strong);
+}
+.tech-white-shell .app-content .todo-metric-primary:hover strong { color: var(--mf-text); }
+.tech-white-shell .app-menu .ant-menu-item-selected {
+  color: var(--mf-text) !important;
+  box-shadow: inset 3px 0 0 var(--mf-focus);
+}
+.tech-white-shell .shell-rail-button.is-active,
+.tech-white-shell .shell-rail-button.is-active :is(.anticon, svg) { color: var(--mf-focus); }
+body:has(.tech-white-shell) :is(.ant-modal-header, .ant-drawer-header) {
+  background: var(--mf-feature-bg);
+  border-bottom-color: var(--mf-info-border);
+}
+body:has(.tech-white-shell) :is(.ant-modal-footer, .ant-drawer-footer) {
+  border-top-color: var(--mf-border);
+}
+.tech-white-shell .app-content :is(.application-icon, .assembly-row-icon, .shell-library-icon, .app-program-icon, .alert-business-icon) {
+  background: var(--mf-icon-bg);
+  color: var(--mf-focus);
+}
+
+/* Catalogs and secondary editor navigation follow the shared surface states. */
+.tech-white-shell .catalog-page { min-width: 0; }
+.tech-white-shell .page-list-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-feature-bg);
+}
+.tech-white-shell .catalog-page > .ant-empty,
+.tech-white-shell .catalog-page > .ant-table-wrapper {
+  margin: 0;
+  padding: 24px;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-panel);
+}
+.tech-white-shell .catalog-page > .ant-empty { padding-block: 64px; }
+.tech-white-shell .app-content :is(.analytics-toolbar-selected, .analytics-settings-navigation .analytics-toolbar-selected) {
+  color: var(--mf-primary-strong);
+  background: var(--mf-selected);
+  border-color: var(--mf-border-strong);
+}
+.tech-white-shell .app-content .analytics-selected-widget {
+  border-color: var(--mf-focus) !important;
+  outline-color: var(--mf-info-border);
+}
+.tech-white-shell .app-content :is(.analytics-editor-panel-header, .analytics-version-detail, .account-security-card-heading, .preferences-group-heading) {
+  background: var(--mf-feature-bg);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content .ai-settings-nav-group button[aria-current="page"] {
+  color: var(--mf-text);
+  background: var(--mf-selected);
+  box-shadow: inset 3px 0 0 var(--mf-focus);
+}
+.tech-white-shell .app-content .ai-settings-nav-label { color: var(--mf-primary); font-weight: 600; }
+.tech-white-shell .app-content :is(.ant-tree-node-content-wrapper.ant-tree-node-selected, .ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper) {
+  color: var(--mf-text);
+  background: var(--mf-selected);
+}
+body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
+  color: var(--mf-text);
+  background: var(--mf-selected);
+  font-weight: 600;
+}
+.tech-white-shell .app-content :is(.data-domain-list button.active, .data-source-compact-row.active, .semantic-list-item.active) {
+  color: var(--mf-text);
+  border-color: var(--mf-border-strong);
+  background: var(--mf-selected);
+}
+.tech-white-shell .app-content :is(.data-domain-list button:hover, .data-source-compact-row:hover, .semantic-list-item:hover) {
+  background: var(--mf-hover);
+  border-color: var(--mf-border-strong);
+}
+.tech-white-shell .app-content :is(.data-asset-metrics, .semantic-mapping-metrics) > div,
+.tech-white-shell .app-content .data-source-compact-summary {
+  color: var(--mf-text);
+  background: var(--mf-panel-soft);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .app-content :is(.data-asset-metrics, .semantic-mapping-metrics) strong { color: var(--mf-text); }
+.tech-white-shell .app-content :is(.data-asset-metrics, .semantic-mapping-metrics) span { color: var(--mf-muted); }
+.tech-white-shell .app-content .data-asset-table .ant-table-tbody > tr.active-row > td { background: var(--mf-selected); }
+.tech-white-shell .app-content .ai-settings-savebar {
+  margin-right: 64px;
+  border-color: var(--mf-border);
+  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(43,67,103,.05);
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div {
+  background: var(--mf-feature-bg);
+  border-color: var(--mf-info-border);
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics span { color: var(--mf-muted); }
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics strong { color: var(--mf-text); }
+.tech-white-shell .app-content :is(.data-source-row-main strong, .semantic-flow-node strong) { color: var(--mf-text); }
+.tech-white-shell .app-content :is(.data-source-row-main small, .semantic-flow-node-kicker) { color: var(--mf-muted); }
+.tech-white-shell .app-content .semantic-flow-node { background: var(--mf-panel); border-color: var(--mf-border); }
+.tech-white-shell .analytics-metric-library { color: var(--mf-text); }
+.tech-white-shell :is(.analytics-library-list small, .analytics-library-field small, .analytics-library-help, .analytics-library-intro) { color: var(--mf-muted); }
+.tech-white-shell :is(.analytics-library-field label, .analytics-library-impact-summary strong) { color: var(--mf-text); }
+.tech-white-shell :is(.analytics-library-source, .analytics-library-impact-summary > div, .analytics-library-bind) { background: var(--mf-info-bg); border-color: var(--mf-border); }
+.tech-white-shell .analytics-library-list > button { border-color: var(--mf-border); background: var(--mf-panel); }
+.tech-white-shell .analytics-library-list > button:hover:not(:disabled) { border-color: var(--mf-border-strong); background: var(--mf-hover); }
+.tech-white-shell .analytics-library-list > button:focus-visible { outline-color: var(--mf-focus); }

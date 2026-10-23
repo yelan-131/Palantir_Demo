@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Button, Modal, Tag, Empty, Spin, message,
   Space, Typography, Input, Tabs,
@@ -11,11 +12,11 @@ import {
 import { listTemplates, instantiateTemplate, getTemplate } from '@/services/api';
 
 const CATEGORY_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  production: { label: '生产管理', color: '#1677ff', icon: <AppstoreOutlined /> },
-  quality: { label: '质量管理', color: '#52c41a', icon: <SafetyCertificateOutlined /> },
-  maintenance: { label: '设备管理', color: '#faad14', icon: <ToolOutlined /> },
-  supply_chain: { label: '供应链', color: '#722ed1', icon: <ShopOutlined /> },
-  general: { label: '通用', color: '#8c8c8c', icon: <ThunderboltOutlined /> },
+  production: { label: '生产管理', color: colors.primary, icon: <AppstoreOutlined /> },
+  quality: { label: '质量管理', color: colors.success, icon: <SafetyCertificateOutlined /> },
+  maintenance: { label: '设备管理', color: colors.warning, icon: <ToolOutlined /> },
+  supply_chain: { label: '供应链', color: '#877394', icon: <ShopOutlined /> },
+  general: { label: '通用', color: colors.muted, icon: <ThunderboltOutlined /> },
 };
 
 interface TemplateItem {
@@ -98,8 +99,8 @@ export default function TemplateMarket() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+    <div className="catalog-page">
+      <div className="page-list-toolbar">
         <Space>
           <Tag color="blue">{templates.length} 个模板</Tag>
         </Space>
@@ -158,7 +159,7 @@ export default function TemplateMarket() {
                     }
                     description={
                       <div>
-                        <div style={{ marginBottom: 8, color: '#666', minHeight: 20 }}>
+                        <div style={{ marginBottom: 8, color: 'var(--mf-muted)', minHeight: 20 }}>
                           {tpl.description || '暂无描述'}
                         </div>
                         <Space size={4} wrap>
@@ -193,7 +194,7 @@ export default function TemplateMarket() {
       >
         {selectedTemplate && (
           <div>
-            <p style={{ color: '#666' }}>{selectedTemplate.description}</p>
+            <p style={{ color: 'var(--mf-muted)' }}>{selectedTemplate.description}</p>
             <div style={{ marginBottom: 16 }}>
               <Tag color={CATEGORY_CONFIG[selectedTemplate.category]?.color}>
                 {CATEGORY_CONFIG[selectedTemplate.category]?.label || selectedTemplate.category}

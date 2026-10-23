@@ -1,3 +1,5 @@
+import { timelineRange as getTimelineRange, timelinePosition, timelineTime, type TimelineRange } from '@/utils/qualityTimeline';
+import './style.css';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import {
   Alert,
@@ -9,6 +11,7 @@ import {
   Empty,
   Modal,
   Progress,
+  Select,
   Space,
   Table,
   Tag,
@@ -39,6 +42,7 @@ import {
   getQualityEventAiSuggestion,
   getQualityEventImpact,
   getRelatedKnowledgeCards,
+  listKnowledgeCards,
   listQualityEvents,
 } from '@/services/api';
 
@@ -68,6 +72,7 @@ interface ImpactNode {
   actions: string[];
   source_id?: string;
   source_system?: string;
+  occurred_at?: string;
 }
 
 interface ImpactEdge {
@@ -76,6 +81,7 @@ interface ImpactEdge {
   target: string;
   label: string;
   relation_type?: string;
+  occurred_at?: string;
 }
 
 interface GraphStats {
@@ -287,7 +293,9 @@ function clampPosition(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getTimelinePercentForNode(node?: ImpactNode) {
+function getTimelinePercentForNode(node?: ImpactNode, range?: TimelineRange) {
+  const position = timelinePosition(node?.occurred_at, range);
+  if (position !== undefined) return position;
   if (!node) return 100;
   const stage = getTypeStage(node.type);
   if (['Supplier', 'Material', 'MaterialBatch', 'InventoryLot'].includes(node.type)) return Math.max(12, stage);
@@ -297,21 +305,19 @@ function getTimelinePercentForNode(node?: ImpactNode) {
   return stage;
 }
 
-function getTimelinePercentForEdge(edge: ImpactEdge, nodeById: Map<string, ImpactNode>) {
-  const sourcePercent = getTimelinePercentForNode(nodeById.get(edge.source));
-  const targetPercent = getTimelinePercentForNode(nodeById.get(edge.target));
+function getTimelinePercentForEdge(edge: ImpactEdge, nodeById: Map<string, ImpactNode>, range?: TimelineRange) {
+  const sourcePercent = getTimelinePercentForNode(nodeById.get(edge.source), range);
+  const targetPercent = getTimelinePercentForNode(nodeById.get(edge.target), range);
+  const position = timelinePosition(edge.occurred_at, range);
+  if (position !== undefined) return Math.max(position, sourcePercent, targetPercent);
+  if (range) return Math.max(sourcePercent, targetPercent);
   if (isTimeSeriesEvidenceEdge(edge)) return Math.min(76, Math.max(sourcePercent, targetPercent));
   if (isKnowledgeEvidenceEdge(edge)) return Math.min(92, Math.max(sourcePercent, targetPercent));
   return Math.max(sourcePercent, targetPercent);
 }
 
-function formatTimelinePercent(percent: number) {
-  const startMinutes = 9 * 60 + 40;
-  const endMinutes = 10 * 60;
-  const minute = Math.round(startMinutes + ((endMinutes - startMinutes) * percent) / 100);
-  const hour = Math.floor(minute / 60);
-  const minutes = `${minute % 60}`.padStart(2, '0');
-  return `${hour}:${minutes}`;
+function formatTimelinePercent(percent: number, range?: TimelineRange) {
+  return timelineTime(percent, range);
 }
 
 function getEdgeDirection(edge: ImpactEdge, selectedId: string, nodeById: Map<string, ImpactNode>, view: GraphViewKey) {
@@ -558,6 +564,7 @@ function normalizeGraphNode(node: Record<string, unknown>, index: number): Impac
     summary: String(node.summary || node.description || `${objectTypeLabel[type] || type}：${name}`),
     actions: Array.isArray(node.actions) ? node.actions as string[] : ['查看关系', '展开影响'],
     source_id: typeof node.source_id === 'string' ? node.source_id : undefined,
+    occurred_at: typeof node.occurred_at === 'string' ? node.occurred_at : undefined,
     source_system: typeof node.source_system === 'string' ? node.source_system : undefined,
   };
 }
@@ -570,6 +577,7 @@ function normalizeGraphEdge(edge: Record<string, unknown>, index: number): Impac
     target: String(edge.target || ''),
     label: String(edge.label || relationLabel[relType] || relType),
     relation_type: relType,
+    occurred_at: typeof edge.occurred_at === 'string' ? edge.occurred_at : undefined,
   };
 }
 
@@ -764,6 +772,7 @@ export default function QualityImpactWorkbench() {
   const [graphContext, setGraphContext] = useState<GraphContext>(initialGraphContext);
   const [timelinePercent, setTimelinePercent] = useState(100);
   const [draggingTimeline, setDraggingTimeline] = useState(false);
+  const [partFilter, setPartFilter] = useState('全部');
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) || nodes[0],
@@ -798,10 +807,12 @@ export default function QualityImpactWorkbench() {
     return connected;
   }, [visibleEdges]);
 
+  const timelineRange = useMemo(() => getTimelineRange([...nodes, ...edges]), [nodes, edges]);
+
   const timelineFilteredEdges = useMemo(() => {
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
-    return edges.filter((edge) => getTimelinePercentForEdge(edge, nodeById) <= timelinePercent);
-  }, [edges, nodes, timelinePercent]);
+    return edges.filter((edge) => getTimelinePercentForEdge(edge, nodeById, timelineRange) <= timelinePercent);
+  }, [edges, nodes, timelinePercent, timelineRange]);
 
   const timelineFilteredNodes = useMemo(() => {
     if (timelinePercent >= 100) return nodes;
@@ -811,8 +822,8 @@ export default function QualityImpactWorkbench() {
       visibleNodeIds.add(edge.target);
     });
     if (selectedNode) visibleNodeIds.add(selectedNode.id);
-    return nodes.filter((node) => visibleNodeIds.has(node.id) || getTimelinePercentForNode(node) <= timelinePercent);
-  }, [nodes, selectedNode, timelineFilteredEdges, timelinePercent]);
+    return nodes.filter((node) => visibleNodeIds.has(node.id) || getTimelinePercentForNode(node, timelineRange) <= timelinePercent);
+  }, [nodes, selectedNode, timelineFilteredEdges, timelinePercent, timelineRange]);
 
   const canvasNodes = useMemo(() => {
     if (!selectedNode) {
@@ -837,19 +848,20 @@ export default function QualityImpactWorkbench() {
   );
 
   const activeGraphView = graphViewOptions.find((item) => item.key === graphView) || graphViewOptions[0];
-  const selectedTimelinePercent = getTimelinePercentForNode(selectedNode);
+  const selectedTimelinePercent = getTimelinePercentForNode(selectedNode, timelineRange);
   const objectQuickEntries = useMemo(() => {
     const entryTypes = new Set(['MaterialBatch', 'InventoryLot', 'ProductBatch', 'WorkOrder', 'CustomerOrder']);
     return nodes
       .filter((node) => entryTypes.has(node.type))
+      .filter(node => partFilter === '全部' || partFilter === '物料' && node.type === 'MaterialBatch' || partFilter === '产品' && node.type === 'ProductBatch' || partFilter === '库存' && node.type === 'InventoryLot')
       .slice(0, 8)
       .map((node) => ({
         objectType: node.type,
-        objectId: node.source_id || node.name || node.id,
+        objectId: node.id,
         title: node.name,
         hint: [objectTypeLabel[node.type] || node.type, node.status, node.risk].filter(Boolean).join(' / '),
       }));
-  }, [nodes]);
+  }, [nodes, partFilter]);
 
   const contextualTimeline = useMemo(() => {
     const sourceLabel = graphSource || '后端子图';
@@ -952,6 +964,7 @@ export default function QualityImpactWorkbench() {
       }
       setGraphContext(context);
     } finally {
+      setTimelinePercent(100);
       setLoading(false);
     }
   };
@@ -1020,7 +1033,7 @@ export default function QualityImpactWorkbench() {
     setSelectedNodeId(node.id);
     setGraphContext({
       objectType: node.type,
-      objectId: node.source_id || node.name || node.id,
+      objectId: node.id,
       title: node.name,
     });
   };
@@ -1054,17 +1067,20 @@ export default function QualityImpactWorkbench() {
       setKnowledgeEvidence([]);
       return;
     }
-    getRelatedKnowledgeCards({
+    let cancelled = false;
+    const graphCardIds = new Set(nodes.filter(node => node.type === 'KnowledgeCard').map(node => node.source_id));
+    Promise.all([getRelatedKnowledgeCards({
       object_type: selectedNode.type,
       object_id: selectedNode.source_id || selectedNode.name,
       limit: 3,
-    })
-      .then((res) => {
-        const nextCards = res.data?.data ?? [];
-        setKnowledgeEvidence(nextCards);
+    }), listKnowledgeCards()])
+      .then(([related, cards]) => {
+        const nextCards: KnowledgeEvidence[] = [...(related.data?.data ?? []), ...(cards.data?.data ?? []).filter((card: KnowledgeEvidence) => graphCardIds.has(card.id))];
+        if (!cancelled) setKnowledgeEvidence([...new Map(nextCards.map(card => [card.id, card])).values()].slice(0, 3));
       })
-      .catch(() => setKnowledgeEvidence([]));
-  }, [selectedNode?.id, selectedNode?.type]);
+      .catch(() => { if (!cancelled) setKnowledgeEvidence([]); });
+    return () => { cancelled = true; };
+  }, [selectedNode?.id, selectedNode?.type, nodes]);
 
   const runAiAnalysis = async () => {
     if (!event) {
@@ -1105,29 +1121,19 @@ export default function QualityImpactWorkbench() {
     const currentEvent = event;
 
     if (action === 'generate_capa') {
+      const defectId = currentEvent.affected.defect_id;
+      if (!defectId) { message.warning('当前事件没有关联缺陷记录，无法创建 CAPA'); return; }
       try {
-        await createCapa({
-          defect_id: 1,
-          action_type: 'corrective',
-          description: `${currentEvent.title} - CAPA 纠正预防措施`,
-          due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-          assignee_id: 3,
-        });
-      } catch {
-        // Keep the CAPA flow non-blocking when the CAPA service is unavailable.
-      }
+        await createCapa({ defect_id: defectId, action_type: 'corrective', description: `${currentEvent.title} - CAPA 纠正预防措施`, due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() });
+        message.success('CAPA 已保存');
+      } catch { message.error('CAPA 创建失败，请检查服务后重试'); }
+      return;
     }
-
     try {
-      const res = await executeQualityEventAction(currentEvent.id, {
-        action,
-        node_id: selectedNode?.id,
-        comment: selectedNode?.summary,
-      });
-      message.success(res.data?.data?.message || '动作已创建');
-    } catch {
-      message.success('演示动作已创建，已进入待办闭环');
-    }
+      const res = await executeQualityEventAction(currentEvent.id, { action, node_id: selectedNode?.id, comment: selectedNode?.summary });
+      if (res.data?.data?.status === 'preview_only') message.info(res.data.data.message);
+      else message.info('演示处置结果，仅用于流程预览，请到对应业务页面提交实际操作。');
+    } catch { message.error('处置请求未完成，请稍后重试'); }
   };
 
   const moveNodeByPointer = (nodeId: string, event: PointerEvent<HTMLElement>) => {
@@ -1198,8 +1204,10 @@ export default function QualityImpactWorkbench() {
       <section className="quality-command-hero">
         <div>
           <Typography.Title level={3}>料号关系追踪台</Typography.Title>
+          {event && <Typography.Text type="secondary">事件日期：{event.occurred_at?.slice(0, 10)}</Typography.Text>}
         </div>
         <Space wrap>
+          <Select aria-label="选择质量事件" value={event?.id} loading={loading} style={{ width: 290 }} options={events.map(item => ({ value: item.id, label: `${item.title} · ${item.status === 'closed' ? '已关闭' : '处理中'}` }))} onChange={value => { setPartFilter('全部'); loadEvent(value); }} />
           <Button icon={<ReloadOutlined />} onClick={() => loadObjectGraph(graphContext, graphView)} loading={loading}>刷新</Button>
           <Button icon={<NodeIndexOutlined />} onClick={expandSelectedNode} loading={loading}>以此为中心展开</Button>
           {isQualityActionNode(selectedNode) && (
@@ -1215,8 +1223,8 @@ export default function QualityImpactWorkbench() {
         <aside className="quality-left-rail">
           <Card className="quality-side-panel quality-task-panel">
             <div className="quality-task-filter">
-              {partFilters.map((filter, index) => (
-                <button key={filter} className={index === 0 ? 'active' : ''}>{filter}</button>
+              {partFilters.map((filter) => (
+                <button key={filter} className={partFilter === filter ? 'active' : ''} onClick={() => setPartFilter(filter)}>{filter}</button>
               ))}
             </div>
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -1439,7 +1447,7 @@ export default function QualityImpactWorkbench() {
         <Card className="quality-progress-card">
           <div className="quality-timeline-board">
             <div className="quality-time-ruler">
-              {['09:40', '09:43', '09:47', '09:50', '09:55', '10:00'].map((tick) => (
+              {[0, 20, 40, 60, 80, 100].map(value => formatTimelinePercent(value, timelineRange)).map((tick) => (
                 <span key={tick}>{tick}</span>
               ))}
             </div>
@@ -1489,7 +1497,7 @@ export default function QualityImpactWorkbench() {
                 <Button size="small" onClick={() => setTimelinePercent(selectedTimelinePercent)}>回到当前节点时间</Button>
                 <Button size="small" onClick={() => setTimelinePercent(100)}>回到最新时间</Button>
               </Space>
-              <span>当前截面 {formatTimelinePercent(timelinePercent)} · 显示 {canvasNodes.length} 节点 / {canvasEdges.length} 关系</span>
+              <span>当前截面 {formatTimelinePercent(timelinePercent, timelineRange)} · 显示 {canvasNodes.length} 节点 / {canvasEdges.length} 关系</span>
             </div>
             <div className="quality-timeline-foot">
               <span>料号流转时间线</span>

@@ -1,16 +1,16 @@
 :root {
   --app-ui-scale: 0.75;
-  --mf-bg: #f4f6f8;
+  --mf-bg: #f7f9fd;
   --mf-panel: #ffffff;
-  --mf-panel-soft: #f8fafb;
-  --mf-sidebar: #eef2f5;
-  --mf-border: #d8dee4;
-  --mf-border-strong: #c4ccd4;
-  --mf-text: #172026;
-  --mf-muted: #5d6972;
-  --mf-faint: #8a97a1;
-  --mf-primary: #2f5f73;
-  --mf-primary-strong: #1f4250;
+  --mf-panel-soft: #f0f4fb;
+  --mf-sidebar: #f5f8fd;
+  --mf-border: #dfe7f3;
+  --mf-border-strong: #bccde5;
+  --mf-text: #2b4367;
+  --mf-muted: #637d9c;
+  --mf-faint: #7e91aa;
+  --mf-primary: #476791;
+  --mf-primary-strong: #344d6b;
   --mf-success: #2f7d5b;
   --mf-warning: #a66f1f;
   --mf-danger: #a43d3d;
@@ -87,9 +87,9 @@ button {
   gap: 16px;
   margin: 0 0 14px;
   padding: 10px 12px;
-  border: 1px solid #e3e9ee;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #f8fafb;
+  background: var(--mf-panel-soft);
 }
 
 .release-carousel-version-meta {
@@ -150,7 +150,7 @@ button {
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: #eef2f5;
+  background: var(--mf-border);
   color: var(--mf-muted);
   cursor: pointer;
   font-size: 12px;
@@ -230,7 +230,7 @@ button {
 .release-category-block {
   padding: 14px 18px 12px;
   border-radius: 8px;
-  background: #f6f7f8;
+  background: var(--mf-panel-soft);
 }
 
 .release-category-title {
@@ -599,7 +599,7 @@ button {
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--mf-border);
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .ai-agent-tab-strip {
@@ -669,7 +669,7 @@ button {
 }
 
 .ai-agent-tab-close:hover {
-  background: #e9eef1;
+  background: var(--mf-border);
   color: #20343c;
 }
 
@@ -2906,7 +2906,7 @@ button {
   background:
     linear-gradient(rgba(47,95,115,0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(47,95,115,0.035) 1px, transparent 1px),
-    #fbfcfd;
+    var(--mf-panel-soft);
   background-size: 24px 24px;
 }
 
@@ -3240,7 +3240,7 @@ button {
   background:
     linear-gradient(rgba(47,95,115,0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(47,95,115,0.04) 1px, transparent 1px),
-    #fbfcfd;
+    var(--mf-panel-soft);
   background-size: 24px 24px;
 }
 
@@ -3374,7 +3374,7 @@ button {
 
 .application-directory-card .ant-card-head,
 .admin-section-card .ant-card-head {
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .application-card {
@@ -3820,7 +3820,7 @@ button {
 }
 
 .semantic-flow-node strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 13px;
   line-height: 18px;
 }
@@ -3898,7 +3898,7 @@ button {
 .semantic-mapping-kv strong {
   min-width: 0;
   overflow: hidden;
-  color: #172026;
+  color: var(--mf-text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3993,7 +3993,7 @@ button {
   color: #223843;
   font-size: 13px;
   text-align: left;
-  border: 1px solid #e3eaee;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
@@ -4046,7 +4046,7 @@ button {
   grid-template-columns: 72px 1fr;
   gap: 6px 10px;
   padding: 10px;
-  border: 1px solid #e3eaee;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #f8fbfc;
 }
@@ -4691,7 +4691,7 @@ button {
 }
 
 .source-connection-label {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 13px;
   line-height: 32px;
   text-align: right;
@@ -4820,7 +4820,7 @@ button {
   min-height: 34px;
   margin-inline-start: 0 !important;
   padding: 7px 9px;
-  border: 1px solid #e3eaee;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #fff;
   font-size: 12px;
@@ -4841,7 +4841,7 @@ button {
   display: grid;
   gap: 10px;
   padding: 11px 12px;
-  border: 1px solid #e3eaee;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: linear-gradient(180deg, #fff 0%, #fbfdfe 100%);
 }
@@ -4887,7 +4887,7 @@ button {
   gap: 10px;
   min-height: 54px;
   padding: 9px 10px;
-  border: 1px solid #e3eaee;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #fbfdfe;
 }
@@ -4902,7 +4902,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #172026;
+  color: var(--mf-text);
   font-size: 13px;
   font-weight: 600;
 }
@@ -4943,7 +4943,7 @@ button {
 .graph-asset-detail-panel,
 .graph-asset-governance {
   min-width: 0;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -4991,7 +4991,7 @@ button {
   justify-content: space-between;
   gap: 10px;
   padding: 12px;
-  border-bottom: 1px solid #e5ebef;
+  border-bottom: 1px solid var(--mf-border);
 }
 
 .graph-asset-toolbar .ant-segmented {
@@ -5004,7 +5004,7 @@ button {
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 12px;
-  border-bottom: 1px solid #e5ebef;
+  border-bottom: 1px solid var(--mf-border);
   background: #f8fbfc;
 }
 
@@ -5024,12 +5024,12 @@ button {
   color: #52616b;
   font-size: 12px;
   background: #f6fafb;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 999px;
 }
 
 .graph-asset-stat strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 13px;
 }
 
@@ -5044,9 +5044,9 @@ button {
   flex: 1;
   min-height: 430px;
   background:
-    linear-gradient(#eef2f5 1px, transparent 1px),
-    linear-gradient(90deg, #eef2f5 1px, transparent 1px),
-    #fbfcfd;
+    linear-gradient(var(--mf-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mf-border) 1px, transparent 1px),
+    var(--mf-panel-soft);
   background-size: 28px 28px;
 }
 
@@ -5106,9 +5106,9 @@ button {
   flex-direction: column;
   gap: 2px;
   padding: 9px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 7px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .graph-asset-evidence-item small {
@@ -5687,7 +5687,7 @@ button {
   padding: 16px;
   border: 1px solid rgba(28, 76, 96, 0.12);
   border-radius: 8px;
-  background: #f8fafb;
+  background: var(--mf-panel-soft);
 }
 
 .knowledge-flow-box strong {
@@ -5860,7 +5860,7 @@ button {
   padding: 10px 12px;
   border: 1px solid rgba(28, 76, 96, 0.1);
   border-radius: 8px;
-  background: #f8fafb;
+  background: var(--mf-panel-soft);
 }
 
 .knowledge-ocr-table .ant-table-cell {
@@ -6480,7 +6480,7 @@ button {
 }
 
 .config-editor-card .ant-card-head {
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .config-editor-stack {
@@ -7190,7 +7190,7 @@ button {
   padding: 12px;
   border: 1px solid var(--mf-border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 
@@ -7208,7 +7208,7 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -7305,7 +7305,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   padding: 16px 18px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -7342,7 +7342,7 @@ button {
 .closed-loop-right,
 .closed-loop-canvas-panel,
 .closed-loop-governance {
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -7358,10 +7358,10 @@ button {
   width: 100%;
   margin-top: 10px;
   padding: 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
-  color: #172026;
+  background: var(--mf-panel-soft);
+  color: var(--mf-text);
   cursor: pointer;
   text-align: left;
 }
@@ -7400,7 +7400,7 @@ button {
   justify-content: space-between;
   gap: 10px;
   padding: 12px;
-  border-bottom: 1px solid #e5ebef;
+  border-bottom: 1px solid var(--mf-border);
 }
 
 .closed-loop-toolbar > .ant-space {
@@ -7417,9 +7417,9 @@ button {
   flex: 1;
   min-height: 430px;
   background:
-    linear-gradient(#eef2f5 1px, transparent 1px),
-    linear-gradient(90deg, #eef2f5 1px, transparent 1px),
-    #fbfcfd;
+    linear-gradient(var(--mf-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mf-border) 1px, transparent 1px),
+    var(--mf-panel-soft);
   background-size: 28px 28px;
 }
 
@@ -7671,7 +7671,7 @@ button {
 .user-preview-panel {
   min-width: 0;
   min-height: 0;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -7813,9 +7813,9 @@ button {
 .user-readonly-field strong {
   min-height: 31px;
   padding: 5px 9px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
-  color: #172026;
+  color: var(--mf-text);
   background: #f8fbfc;
   font-size: 13px;
   font-weight: 500;
@@ -7831,7 +7831,7 @@ button {
 .user-section-card {
   min-width: 0;
   padding: 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -7850,7 +7850,7 @@ button {
 
 .user-preview-stats > div {
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -7864,7 +7864,7 @@ button {
 .user-preview-stats strong {
   display: block;
   margin-top: 2px;
-  color: #172026;
+  color: var(--mf-text);
   font-size: 20px;
   line-height: 1.15;
 }
@@ -7907,9 +7907,9 @@ button {
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .user-org-list span,
@@ -7958,7 +7958,7 @@ button {
 .role-preview-panel {
   min-width: 0;
   min-height: 0;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8072,7 +8072,7 @@ button {
 .role-section-card {
   min-width: 0;
   padding: 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8092,7 +8092,7 @@ button {
 .role-preview-stats > div,
 .role-scope-list > div {
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -8108,7 +8108,7 @@ button {
 .role-scope-list strong {
   display: block;
   margin-top: 2px;
-  color: #172026;
+  color: var(--mf-text);
   font-size: 20px;
   line-height: 1.15;
 }
@@ -8133,9 +8133,9 @@ button {
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .role-user-row strong,
@@ -8157,9 +8157,9 @@ button {
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .role-rule-item > span:first-child {
@@ -8220,7 +8220,7 @@ button {
 .role-permission-rule-card {
   min-width: 0;
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8262,7 +8262,7 @@ button {
   gap: 6px;
   min-width: 0;
   padding: 9px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 7px;
   background: #f8fbfc;
 }
@@ -8287,9 +8287,9 @@ button {
 .role-permission-action-grid .ant-form-item {
   min-width: 0;
   padding: 8px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 7px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .role-permission-business-grid {
@@ -8304,9 +8304,9 @@ button {
   gap: 5px;
   min-width: 0;
   padding: 8px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 7px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .role-permission-business-block.object {
@@ -8410,7 +8410,7 @@ button {
 .org-preview-stats strong {
   display: block;
   margin-top: 2px;
-  color: #172026;
+  color: var(--mf-text);
   font-size: 20px;
   line-height: 1.15;
 }
@@ -8430,7 +8430,7 @@ button {
 .org-preview-panel {
   min-width: 0;
   min-height: 0;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8454,7 +8454,7 @@ button {
   justify-content: space-between;
   gap: 10px;
   padding: 12px;
-  border-bottom: 1px solid #e5ebef;
+  border-bottom: 1px solid var(--mf-border);
 }
 
 .org-list-panel .ant-table-wrapper {
@@ -8610,7 +8610,7 @@ button {
 .org-section-card {
   min-width: 0;
   padding: 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8679,7 +8679,7 @@ button {
 }
 
 .org-impact-list strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 16px;
 }
 
@@ -8705,7 +8705,7 @@ button {
 
 .org-preview-stats > div {
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -8731,7 +8731,7 @@ button {
 
 .org-member-summary > div {
   padding: 8px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #f8fbfc;
 }
@@ -8742,7 +8742,7 @@ button {
 }
 
 .org-member-summary strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 18px;
   line-height: 1.1;
 }
@@ -8766,7 +8766,7 @@ button {
   align-items: center;
   min-height: 48px;
   padding: 8px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -8789,7 +8789,7 @@ button {
   padding: 7px 10px;
   border: 1px dashed #c9d8df;
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
   color: #2f5f73;
   cursor: pointer;
   text-align: center;
@@ -8804,7 +8804,7 @@ button {
   display: grid;
   gap: 0;
   margin-top: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -8848,9 +8848,9 @@ button {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .org-audit-list {
@@ -8906,10 +8906,10 @@ button {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   color: #273640;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 @media (max-width: 1180px) {
@@ -9033,7 +9033,7 @@ button {
   min-height: 34px;
   padding: 8px 10px;
   background: #f7fafb;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
 }
 
@@ -9055,7 +9055,7 @@ button {
   line-height: 1.5;
   white-space: pre-wrap;
   background: #f7fafb;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
 }
 
@@ -9087,7 +9087,7 @@ button {
   align-items: center;
   gap: 12px;
   padding: 16px 18px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -9124,7 +9124,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   padding: 16px 18px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #fff;
 }
@@ -9152,7 +9152,7 @@ button {
   gap: 5px;
   min-height: 62px;
   padding: 10px 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -9163,7 +9163,7 @@ button {
 }
 
 .ai-status-tile strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 13px;
 }
 
@@ -9197,7 +9197,7 @@ button {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -9210,9 +9210,9 @@ button {
   display: grid;
   gap: 10px;
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .ai-connection-head,
@@ -9323,7 +9323,7 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
   background: #f8fbfc;
 }
@@ -9341,9 +9341,9 @@ button {
   display: grid;
   gap: 10px;
   padding: 10px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .ai-policy-section-head,
@@ -9440,9 +9440,9 @@ button {
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
-  border: 1px solid #e5ebef;
+  border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .ai-role-policy-row > div:first-child {
@@ -9549,7 +9549,7 @@ button {
 .simple-workbench-head h4,
 .favorite-center-panel h4 {
   margin: 0 0 4px !important;
-  color: #111827;
+  color: var(--mf-text);
   font-size: 18px !important;
 }
 
@@ -9611,14 +9611,14 @@ button {
 
 .todo-metric-item strong {
   display: block;
-  color: #111827;
+  color: var(--mf-text);
   font-size: 15px;
   line-height: 20px;
 }
 
 .todo-metric-item em {
   margin-right: 7px;
-  color: #111827;
+  color: var(--mf-text);
   font-size: 24px;
   font-style: normal;
   font-weight: 800;
@@ -9657,7 +9657,7 @@ button {
   gap: 10px;
   border: 0;
   background: transparent;
-  color: #111827;
+  color: var(--mf-text);
   cursor: pointer;
 }
 
@@ -9675,7 +9675,7 @@ button {
 }
 
 .favorite-app-entry strong {
-  color: #111827;
+  color: var(--mf-text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -9840,7 +9840,7 @@ button {
   gap: 6px 10px;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .recent-activity-item span {
@@ -10141,7 +10141,7 @@ button {
   gap: 10px;
   align-items: center;
   padding: 8px 10px;
-  border: 1px solid #edf1f4;
+  border: 1px solid var(--mf-border);
   border-radius: 6px;
   background: #f8fbfc;
 }
@@ -10368,7 +10368,7 @@ button {
 }
 
 .workflow-approval-tabs .ant-tabs-nav::before {
-  border-bottom-color: #edf1f4;
+  border-bottom-color: var(--mf-border);
 }
 
 .workflow-approval-tabs .ant-tabs-tab {
@@ -10391,7 +10391,7 @@ button {
 }
 
 .workflow-approval-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: #172026;
+  color: var(--mf-text);
 }
 
 .workflow-approval-tabs .ant-tabs-ink-bar {
@@ -10442,7 +10442,7 @@ button {
   align-items: center;
   border: 1px solid #e7edf1;
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
   text-align: left;
   cursor: pointer;
 }
@@ -10460,7 +10460,7 @@ button {
 }
 
 .workflow-approval-card-title strong {
-  color: #172026;
+  color: var(--mf-text);
   font-size: 15px;
   line-height: 22px;
 }
@@ -10499,7 +10499,7 @@ button {
 .workflow-approval-card-primary strong {
   overflow: hidden;
   max-width: 100%;
-  color: #172026;
+  color: var(--mf-text);
   font-size: 14px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -10701,7 +10701,7 @@ button {
 
 .workflow-approval-drawer .ant-drawer-header {
   padding: 16px 24px;
-  border-bottom-color: #edf1f4;
+  border-bottom-color: var(--mf-border);
 }
 
 .workflow-approval-drawer .ant-drawer-body {
@@ -10883,8 +10883,8 @@ button {
 .workflow-business-sheet-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-top: 1px solid #eef2f5;
-  border-left: 1px solid #eef2f5;
+  border-top: 1px solid var(--mf-border);
+  border-left: 1px solid var(--mf-border);
 }
 
 .workflow-business-sheet-cell {
@@ -10894,8 +10894,8 @@ button {
   flex-direction: column;
   justify-content: center;
   gap: 10px;
-  border-right: 1px solid #eef2f5;
-  border-bottom: 1px solid #eef2f5;
+  border-right: 1px solid var(--mf-border);
+  border-bottom: 1px solid var(--mf-border);
   background: rgba(255, 255, 255, 0.78);
 }
 
@@ -11291,7 +11291,7 @@ button {
   align-items: center;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
@@ -11332,7 +11332,7 @@ button {
   padding: 11px 12px;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .workbench-watch-row strong,
@@ -11367,7 +11367,7 @@ button {
   align-content: start;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
   text-align: left;
 }
 
@@ -11412,7 +11412,7 @@ button {
   padding: 14px;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .palantir-blueprint-item span {
@@ -11461,7 +11461,7 @@ button {
 
 .quality-workspace-event:hover {
   border-color: #8fb7c4;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .quality-workspace-event span {
@@ -11495,7 +11495,7 @@ button {
   padding: 10px;
   border: 1px solid var(--mf-border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .closure-step-row > span {
@@ -11667,7 +11667,7 @@ button {
   padding: 10px 12px;
   border: 1px solid var(--mf-border);
   border-radius: 7px;
-  background: #fbfcfd;
+  background: var(--mf-panel-soft);
 }
 
 .quality-role-row strong,

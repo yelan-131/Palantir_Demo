@@ -82,6 +82,8 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+    volumes:
+      - form_files:/data/form_files
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -108,6 +110,7 @@ services:
         condition: service_healthy
 
 volumes:
+  form_files:
   postgres_data:
   neo4j_data:
   redis_data:

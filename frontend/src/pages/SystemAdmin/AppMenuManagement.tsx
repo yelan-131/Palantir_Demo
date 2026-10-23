@@ -32,10 +32,10 @@ import {
   Modal,
   Form,
   Input,
-  List,
   Popconfirm,
   Row,
   Select,
+  Segmented,
   Space,
   Switch,
   Tag,
@@ -1197,7 +1197,12 @@ function AssemblyWorkspace({
   const selectedApp = apps.find((item) => item.id === selectedAppId) ?? apps[0];
   const currentAppForms = forms.filter((form) => boundFormIds.has(form.id));
   const otherForms = forms.filter((form) => !boundFormIds.has(form.id));
-  const formCountLabel = `全部 ${forms.length} / 已绑定 ${currentAppForms.length}`;
+  const [resourceQuery, setResourceQuery] = useState('');
+  const [resourceScope, setResourceScope] = useState<'bound' | 'available'>('bound');
+  const visibleForms = (resourceScope === 'bound' ? currentAppForms : otherForms).filter(form => {
+    const alias = configs.find(config => config.formId === form.id)?.alias || '';
+    return `${form.name} ${alias}`.toLowerCase().includes(resourceQuery.trim().toLowerCase());
+  });
   const [mouseDraggingFormId, setMouseDraggingFormId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1239,7 +1244,8 @@ function AssemblyWorkspace({
         onKeyDown={event => { if (!propertySaving && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpenFormConfig(form.id); setPropertyTarget('form'); } }}
       >
         {form.category === 'analytics' ? <BarChartOutlined className="assembly-row-icon" /> : <FormOutlined className="assembly-row-icon" />}
-        <Typography.Text strong ellipsis>{config?.alias ?? form.name}</Typography.Text>
+        <div className="assembly-resource-copy"><Typography.Text strong ellipsis>{config?.alias ?? form.name}</Typography.Text><small>{form.category === 'analytics' ? '数据看板' : '业务表单'}</small></div>
+        <Tooltip title="添加到菜单"><Button type="text" size="small" aria-label={`添加${form.name}到菜单`} icon={<PlusOutlined />} disabled={propertySaving} onMouseDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onAddFormToMenu(form); setPropertyTarget('menu'); }} /></Tooltip>
       </div>
     );
   };
@@ -1255,37 +1261,30 @@ function AssemblyWorkspace({
 
   return (
     <div className="app-assembly-workspace">
+      <header className="assembly-page-heading">
+        <div><h2>应用管理</h2><p>选择应用，管理表单、看板与菜单入口。</p></div>
+        <Button icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateApp(); setPropertyTarget('app'); }}>新增应用</Button>
+      </header>
+      <section className="assembly-app-switcher" aria-label="选择应用">
+        <div className="assembly-app-tabs">{apps.map(app => <button key={app.id} type="button" disabled={propertySaving} aria-pressed={app.id === selectedAppId}
+          className={`assembly-app-tab${app.id === selectedAppId ? ' is-active' : ''}`}
+          onClick={() => { onSelectApp(app.id); setPropertyTarget('app'); setResourceQuery(''); setResourceScope('bound'); }}>
+          <span className="application-icon">{renderIcon(app.icon)}</span><span>{app.name}</span>
+        </button>)}</div>
+        <Button type="text" disabled={propertySaving} icon={<ToolOutlined />} onClick={() => setPropertyTarget('app')}>应用设置</Button>
+      </section>
       <Row className="assembly-grid">
         <Col>
-          <Card title="应用" className="assembly-column-card" extra={<Tooltip title="新增应用"><Button type="text" size="small" aria-label="新增应用" icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateApp(); setPropertyTarget('app'); }} /></Tooltip>}>
-            <List
-              dataSource={apps}
-              renderItem={(app) => (
-                <List.Item
-                  className={`admin-app-list-item ${app.id === selectedAppId ? 'active' : ''}`}
-                  onClick={() => { if (!propertySaving) { onSelectApp(app.id); setPropertyTarget('app'); } }}
-                >
-                  <span className="application-icon">{renderIcon(app.icon)}</span>
-                  <div>
-                    <strong>{app.name}</strong>
-                  </div>
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-
-        <Col>
-          <Card title="表单/看板" className="assembly-column-card" extra={<Space size={4}><Tag>{formCountLabel}</Tag><Tooltip title="新增表单/看板"><Button type="text" size="small" aria-label="新增表单或看板" icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateForm(); setPropertyTarget('form'); }} /></Tooltip></Space>}>
-            <div className="assembly-form-list">
-              <div className="assembly-form-section-title">当前应用表单/看板</div>
-              {currentAppForms.map(renderFormCard)}
-              {!currentAppForms.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已绑定表单" />}
-              <div className="assembly-form-section-title">其他可用表单/看板</div>
-              {otherForms.map(renderFormCard)}
-              {!otherForms.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无其他可用表单/看板" />}
-
+          <Card title={<Space><FormOutlined />表单与看板</Space>} className="assembly-column-card assembly-resources-card" extra={<Tooltip title="新增表单或看板"><Button type="text" size="small" aria-label="新增表单或看板" icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateForm(); setPropertyTarget('form'); }} /></Tooltip>}>
+            <div className="assembly-resource-tools">
+              <Input.Search aria-label="搜索表单或看板" placeholder="搜索名称" allowClear value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} />
+              <Segmented block aria-label="资源范围" value={resourceScope} onChange={value => setResourceScope(value as 'bound' | 'available')} options={[{ label: `已绑定 ${currentAppForms.length}`, value: 'bound' }, { label: `资源库 ${otherForms.length}`, value: 'available' }]} />
             </div>
+            <div className="assembly-form-list">
+              {visibleForms.map(renderFormCard)}
+              {!visibleForms.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={resourceQuery ? '没有匹配的表单或看板' : resourceScope === 'bound' ? '暂无已绑定表单或看板' : '暂无其他可用资源'} />}
+            </div>
+            <p className="assembly-resource-hint">点击编辑属性，或点 ＋ 添加到菜单。</p>
           </Card>
         </Col>
 
@@ -1297,6 +1296,7 @@ function AssemblyWorkspace({
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={dropFormIntoMenu}
               >
+                <p className="assembly-menu-hint">拖动调整顺序与层级，点击设置入口属性。</p>
                 {menus.length ? (
                   <div
                     className="assembly-menu-dropzone"
@@ -1316,12 +1316,12 @@ function AssemblyWorkspace({
                     />
                   </div>
                 ) : (
-                  <Empty description="把中间表单加到菜单结构里" />
+                  <Empty description="从左侧添加表单或看板，建立应用菜单" />
                 )}
               </Card>
         </Col>
         <Col>
-              <Card title="属性" className="assembly-property-card" extra={propertyTarget === 'menu'
+              <Card title={propertyTarget === 'app' ? '应用属性' : propertyTarget === 'form' ? '资源属性' : '菜单属性'} className="assembly-property-card" extra={propertyTarget === 'menu'
                 ? <Tag>菜单节点</Tag>
                 : <PropertyStatus status={propertyTarget === 'app' ? selectedApp.status : selectedForm?.status || 'draft'} />} >
                 {propertyTarget === 'app' ? <fieldset disabled={propertySaving} className="assembly-property-editor">

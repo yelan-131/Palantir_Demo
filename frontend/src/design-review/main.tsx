@@ -1,0 +1,18 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { createHashRouter, RouterProvider } from 'react-router-dom';
+import { App, ConfigProvider } from 'antd';
+import type { ThemeConfig } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import { TECH_WHITE_PALETTE as palette, TECH_WHITE_TYPOGRAPHY as typography, SHELL_COLOR_VARIABLES } from '@/theme/techWhite';
+import { installReviewAdapter } from './data';
+import ReviewApp from './ReviewApp';
+import '@/index.css';
+import './review.css';
+import './three-column.css';
+installReviewAdapter();
+for(const [key,value] of Object.entries(SHELL_COLOR_VARIABLES))document.documentElement.style.setProperty(key,value);
+const theme:ThemeConfig={token:{colorPrimary:palette.primaryStrong,colorText:palette.text,colorTextSecondary:palette.muted,colorBorder:palette.border,colorSuccess:palette.success,colorWarning:palette.warning,colorError:palette.danger,fontFamily:typography.fontFamily,fontSize:13,borderRadius:6,controlHeight:34,boxShadowSecondary:'0 12px 45px rgba(23,39,54,.12)'},components:{Button:{primaryShadow:'none',defaultShadow:'none'},Table:{headerBg:'#f7f9fb',headerColor:'#7e8b97',headerBorderRadius:0,cellPaddingBlock:16,borderColor:palette.border},Tabs:{itemSelectedColor:palette.primaryStrong,inkBarColor:palette.primaryStrong},Input:{activeShadow:'0 0 0 2px rgba(82,107,134,.09)'},Drawer:{footerPaddingInline:24},Segmented:{itemSelectedBg:'#fff',trackBg:'#eef1f4'}}};
+ConfigProvider.config({holderRender:children=><ConfigProvider theme={theme} locale={zhCN}>{children}</ConfigProvider>});
+const router=createHashRouter([{path:'*',element:<ReviewApp/>}]);
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><ConfigProvider theme={theme} locale={zhCN}><App><RouterProvider router={router}/></App></ConfigProvider></React.StrictMode>);

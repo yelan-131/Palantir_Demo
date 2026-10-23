@@ -1,18 +1,27 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import FormImport from '@/components/FormImport';
+import FieldProtection, {protectCopy, type FieldPolicy} from '@/components/FieldProtection';
+import FieldControl from '@/components/FormWidgets/FieldControl';
+import { enumOptions, type ControlSettings } from '@/utils/formControls';
+import FormLayout from '@/components/FormLayout';
+import type { FormLayoutNode } from '@/utils/formLayout';
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
+import { useAuthStore } from '@/stores/authStore';
+import { canConfigureWorkspace, reconcilePublishedViewState } from './workspaceState';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
-  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline, Tabs, Alert,
+  Row, Col, Tooltip, Empty, Drawer, Descriptions, Timeline, Tabs, Alert, Progress, Dropdown,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined,
-  ReloadOutlined, DownloadOutlined, SettingOutlined,
+  ReloadOutlined, DownloadOutlined, UploadOutlined, DownOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   getPlatformForm,
+  getFormReferenceOptions,
   getPlatformFormByCode,
   listPlatformForms,
   listPlatformDynamicRecords,
@@ -26,6 +35,7 @@ import {
   type PlatformForm,
   type PlatformFormField,
   evaluateFormRules,
+  exportPlatformDynamicRecords,
 } from '@/services/api';
 import RelationPicker from '@/components/FormWidgets/RelationPicker';
 import {
@@ -36,6 +46,9 @@ import {
 } from '@/utils/viewConfig';
 import '../AppPrograms/style.css';
 import './style.css';
+
+const EmbeddedFormSettings = lazy(() => import('../FormSettings'));
+type WorkspaceEditorTab = 'form' | 'filter' | 'flow' | 'permission';
 
 interface FieldDef {
   field_name: string;
@@ -48,7 +61,12 @@ interface FieldDef {
   visible_in_form: boolean;
   enum_values?: string | string[] | Record<string, unknown> | null;
   relation_config?: string;
+  defaultValue?: unknown;
   generated_code?: boolean;
+  controlType?: string;
+  typeSettings?: ControlSettings;
+  placeholder?: string;
+  helpText?: string;
 }
 
 interface PageConfig {
@@ -79,6 +97,7 @@ function getPublishedViewConfig(config?: Record<string, unknown> | null): ViewCo
 function isAnalysisAssembly(config?: Record<string, unknown> | null, codeValue?: unknown) {
   const kind = String(config?.assemblyKind || config?.kind || config?.type || '').toLowerCase();
   const code = String(codeValue || '').toLowerCase();
+  if(kind)return ['analysis','analytics','dashboard','report','bi_report','metric_dashboard','list_analysis'].includes(kind);
   return (
     ['analysis', 'analytics', 'dashboard', 'report', 'bi_report', 'metric_dashboard', 'list_analysis'].includes(kind)
     || code.includes('dashboard')
@@ -136,12 +155,13 @@ function normalizeRuntimeViewConfig(config: unknown, fields: FieldDef[]): ViewCo
     filters,
     table: {
       columns,
-      defaultSort: isRecord(table.defaultSort) ? table.defaultSort as ViewConfig['table']['defaultSort'] : undefined,
+      defaultSort: isRecord(table.defaultSort) && columns.some(column => column.enabled && column.sortable && column.fieldName === table.defaultSort.fieldName)
+        ? table.defaultSort as ViewConfig['table']['defaultSort'] : undefined,
       pageSize: Number.isFinite(table.pageSize) ? Number(table.pageSize) : 20,
       density,
       rowClickAction: ['detail', 'edit', 'none'].includes(String(table.rowClickAction)) ? table.rowClickAction as ViewConfig['table']['rowClickAction'] : 'detail',
-      toolbarActions: Array.isArray(table.toolbarActions) ? table.toolbarActions.map(String) : [],
-      rowActions: Array.isArray(table.rowActions) ? table.rowActions.map(String) : [],
+      toolbarActions: Array.isArray(table.toolbarActions) ? table.toolbarActions.map(String) : ['create','refresh','settings'],
+      rowActions: Array.isArray(table.rowActions) ? table.rowActions.map(String) : ['detail','edit','delete'],
     },
   };
 }
@@ -170,16 +190,18 @@ const dynamicProgramRouteAliases: Record<string, string> = {
   'supplier-scorecard': '/program/supplier-scorecard',
 };
 
-type FieldRuntime = { formId?: number; data?: Record<string, unknown>; states?: Record<string, { visible: boolean; required: boolean; readonly: boolean }> };
+type FieldRuntime = { recordId?: number; formId?: number; data?: Record<string, unknown>; states?: Record<string, { visible: boolean; required: boolean; readonly: boolean } & FieldPolicy> };
 
 function renderFormField(field: FieldDef, runtime: FieldRuntime = {}) {
   const state = runtime.states?.[field.field_name];
   if (state?.visible === false) return null;
+  if(runtime.recordId&&state?.masked)return <Form.Item key={field.field_name} name={field.field_name} label={field.label}><FieldControl type="text" masked copyMode={state.copyMode} copyText={state.copyText} label={field.label}/></Form.Item>;
   const item = renderFormFieldControl({ ...field, required: state?.required ?? field.required }, runtime);
   if (!React.isValidElement(item)) return item;
   const child = (item.props as any).children;
   return React.isValidElement(child) ? React.cloneElement(item, {}, React.cloneElement(child as React.ReactElement<any>, {
     disabled: Boolean(state?.readonly || (child.props as any).disabled),
+    masked:runtime.recordId?state?.masked:false,copyMode:state?.copyMode,copyText:state?.copyText,
   })) : item;
 }
 
@@ -188,89 +210,18 @@ function renderFormFieldControl(field: FieldDef, runtime: FieldRuntime) {
     return <Form.Item key={field.field_name} name={field.field_name} label={field.label}
       extra="保存时按编码规则自动生成"><Input disabled placeholder="保存后自动生成" /></Form.Item>;
   }
+  if (field.field_type !== 'relation') {
+    const type = field.controlType || ({enum:'select',boolean:'switch',date:'datetime',datetime:'datetime',text:'textarea',int:'number',integer:'number',float:'number',decimal:'number',number:'number'} as Record<string,string>)[field.field_type] || 'text';
+    return <Form.Item key={field.field_name} name={field.field_name} label={field.label} extra={field.helpText}
+      rules={[{required:field.required,message:`请填写${field.label}`}]}><FieldControl type={type} settings={{...(field.field_type==='date'?{dateMode:'date'}:{}),...field.typeSettings}} options={field.enum_values} placeholder={field.placeholder||`请填写${field.label}`} formId={runtime.formId} fieldName={field.field_name} recordId={runtime.recordId} label={field.label}/></Form.Item>;
+  }
   switch (field.field_type) {
-    case 'int':
-    case 'float':
-    case 'integer':
-    case 'number':
-    case 'decimal':
-      return (
-        <Form.Item
-          key={field.field_name}
-          name={field.field_name}
-          label={field.label}
-          rules={[{ required: field.required, message: `请输入${field.label}` }]}
-        >
-          <InputNumber style={{ width: '100%' }} placeholder={`请输入${field.label}`} />
-        </Form.Item>
-      );
-    case 'enum': {
-      let opts: { label: string; value: string }[] = [];
-      if (field.enum_values) {
-        const parsed = typeof field.enum_values === 'string' ? (() => {
-          try { return JSON.parse(field.enum_values || '[]'); } catch { return []; }
-        })() : field.enum_values;
-        const values = Array.isArray(parsed)
-          ? parsed
-          : Object.entries(parsed ?? {}).map(([value, label]) => ({ value, label }));
-        opts = values.map((item: any) => (
-          typeof item === 'string'
-            ? { label: item, value: item }
-            : { label: String(item.label ?? item.value), value: String(item.value ?? item.label) }
-        ));
-      }
-      return (
-        <Form.Item
-          key={field.field_name}
-          name={field.field_name}
-          label={field.label}
-          rules={[{ required: field.required, message: `请选择${field.label}` }]}
-        >
-          <Select options={opts} placeholder={`请选择${field.label}`} allowClear />
-        </Form.Item>
-      );
-    }
-    case 'date':
-    case 'datetime':
-      return (
-        <Form.Item
-          key={field.field_name}
-          name={field.field_name}
-          label={field.label}
-          rules={[{ required: field.required, message: `请选择${field.label}` }]}
-          getValueProps={(v) => ({ value: v ? dayjs(v) : undefined })}
-        >
-          <DatePicker showTime={field.field_type === 'datetime'} style={{ width: '100%' }} placeholder={`请选择${field.label}`} />
-        </Form.Item>
-      );
-    case 'boolean':
-      return (
-        <Form.Item
-          key={field.field_name}
-          name={field.field_name}
-          label={field.label}
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-      );
-    case 'text':
-      return (
-        <Form.Item
-          key={field.field_name}
-          name={field.field_name}
-          label={field.label}
-          rules={[{ required: field.required, message: `请输入${field.label}` }]}
-        >
-          <Input.TextArea rows={3} placeholder={`请输入${field.label}`} />
-        </Form.Item>
-      );
     case 'relation': {
       let targetModel = '';
       if (field.relation_config) {
         try {
           const config = JSON.parse(field.relation_config);
-          targetModel = config.target_form_code || config.target_model || config.target_table || '';
+          targetModel = config.source_kind || config.target_form_code || config.target_model || config.target_table || '';
         } catch { /* ignore */ }
       }
       if (!targetModel) {
@@ -294,6 +245,8 @@ function renderFormFieldControl(field: FieldDef, runtime: FieldRuntime) {
         >
           <RelationPicker
             modelName={targetModel}
+            allowClear={field.typeSettings?.allowClear!==false}
+            showSearch={field.typeSettings?.displayMode!=='dropdown'}
             formId={runtime.formId}
             fieldName={field.field_name}
             contextData={runtime.data}
@@ -347,7 +300,9 @@ function mapPlatformField(field: PlatformFormField): FieldDef {
     sortable: field.sortable,
     visible_in_list: field.visible_in_list,
     visible_in_form: field.visible_in_form,
+    defaultValue: ui.defaultRule?.enabled === false || ui.defaultRule?.conditions?.length ? undefined : field.default_value,
     enum_values: field.enum_values,
+    controlType: ui.controlType==='field'?undefined:ui.controlType, typeSettings: ui.typeSettings, placeholder: ui.placeholder, helpText: ui.helpText,
     relation_config: typeof ui.relation_config === 'object' ? JSON.stringify(ui.relation_config) : ui.relation_config,
     generated_code: Boolean(codeField && encoding.enabled !== false && encoding.generationMode !== 'manual'
       && !(encoding.allowManualOverride || encoding.allow_manual_override)),
@@ -382,16 +337,28 @@ function unwrapApiList<T>(payload: unknown): T[] {
   return Array.isArray(data) ? data as T[] : [];
 }
 
-export default function DynamicPage() {
-  const { slug } = useParams<{ slug: string }>();
+export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
+  const params = useParams<{ slug: string }>();
+  const slug=formSlug||params.slug;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const linkedRecordId = searchParams.get('recordId');
   const aliasProgramRoute = slug ? dynamicProgramRouteAliases[slug] : undefined;
+  const user = useAuthStore(state => state.user);
+  const [editorTab, setEditorTab] = useState<WorkspaceEditorTab | null>(null);
+  const [configRevision, setConfigRevision] = useState(0);
+  const [configRefreshing, setConfigRefreshing] = useState(true);
+  const configRequest = useRef(0);
+  const configPending = useRef(true);
+  const schemaSlug = useRef<string>();
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
-  useShellPageTitle(pageConfig?.title);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
+  const workspaceTitle = pageConfig?.title || platformForm?.name;
+  useShellPageTitle(editorTab && workspaceTitle ? `${workspaceTitle} · 编辑表单` : workspaceTitle);
   const [fields, setFields] = useState<FieldDef[]>([]);
+  const [referenceLabels,setReferenceLabels]=useState<Record<string,Record<string,string>>>({});
+  const [mutationLayout, setMutationLayout] = useState<FormLayoutNode[] | null>(null);
+  const [mutationGap,setMutationGap]=useState(12);
   const [mutationFields, setMutationFields] = useState<FieldDef[]>([]);
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [total, setTotal] = useState(0);
@@ -399,8 +366,19 @@ export default function DynamicPage() {
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState('');
   const [search, setSearch] = useState('');
+  const [advancedFiltersOpen,setAdvancedFiltersOpen]=useState(false);
+  const [exporting,setExporting]=useState(false);
+  const [importOpen,setImportOpen]=useState(false);
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
   const [sortState, setSortState] = useState<{ field?: string; order?: 'asc' | 'desc' }>({});
+
+  useEffect(()=>{
+    let active=true;
+    const sources=fields.filter(field=>{try{return ['dictionary','externalApi'].includes(JSON.parse(field.relation_config||'{}').source_kind);}catch{return false;}});
+    if(!platformForm||!data.length){setReferenceLabels({});return;}
+    Promise.allSettled(sources.map(async field=>{const dependencies=(field.typeSettings?.search?.filters||[]).filter(item=>item.source==='field'&&item.sourceField).map(item=>item.sourceField!);const contexts=[...new Map(data.map(row=>{const context=Object.fromEntries(dependencies.filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));return [JSON.stringify(context),context];})).values()];const responses=await Promise.all(contexts.map(context=>getFormReferenceOptions(platformForm.id,field.field_name,context)));return [field.field_name,Object.fromEntries(responses.flatMap(response=>(response.data.data||[]).map((option:any)=>[String(option.id),String(option.label)])))] as const;})).then(results=>{if(active)setReferenceLabels(Object.fromEntries(results.flatMap(result=>result.status==='fulfilled'?[result.value]:[])));});
+    return()=>{active=false;};
+  },[platformForm?.id,fields,data]);
 
   const [detailRecord, setDetailRecord] = useState<Record<string, any> | null>(null);
   const [submittingApproval, setSubmittingApproval] = useState(false);
@@ -430,7 +408,7 @@ export default function DynamicPage() {
         const nextValues = { ...result.data };
         mutationFields.forEach(field => {
           const value = nextValues[field.field_name];
-          if (value && ['date', 'datetime'].includes(field.field_type)) nextValues[field.field_name] = dayjs(String(value));
+          if(value===undefined)delete nextValues[field.field_name];
         });
         form.setFieldsValue(nextValues);
         setRuleData(result.data);
@@ -454,6 +432,8 @@ export default function DynamicPage() {
     () => normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields),
     [fields, activeViewTab, pageConfig?.config?.viewConfig],
   );
+  const runtimeViewState = useRef({ selectedViewTab: '', viewConfig, filterValues, sortState });
+  runtimeViewState.current = { selectedViewTab: activeViewTab?.id || '', viewConfig, filterValues, sortState };
   const switchViewTab = (id: string) => {
     requestIdRef.current += 1;
     setSelectedViewTab(id);
@@ -469,15 +449,15 @@ export default function DynamicPage() {
   const activeFilters = useMemo(() => viewConfig ? sortByOrder(viewConfig.filters).filter((filter) => filter.enabled) : [], [viewConfig]);
   const tableConfigColumns = useMemo(() => viewConfig ? sortByOrder(viewConfig.table.columns).filter((column) => column.enabled) : [], [viewConfig]);
   const structuredFilters = useMemo(() => activeFilters
-    .map((filter) => filterValueToPayload(filter, filterValues[filter.id] ?? filter.defaultValue))
+    .map((filter) => filterValueToPayload(filter, Object.prototype.hasOwnProperty.call(filterValues,filter.id) ? filterValues[filter.id] : filter.defaultValue))
     .filter(Boolean), [activeFilters, filterValues]);
 
   useEffect(() => {
-    if (aliasProgramRoute) navigate(aliasProgramRoute, { replace: true });
+  if (aliasProgramRoute) navigate(aliasProgramRoute, { replace: true });
   }, [aliasProgramRoute, navigate]);
 
   const loadData = useCallback(async () => {
-    if (!slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig) return;
+    if (!slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig || configPending.current || configRefreshing || configError) return;
     const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
@@ -491,15 +471,39 @@ export default function DynamicPage() {
       });
       if (requestId !== requestIdRef.current) return;
       const records = unwrapApiList<any>(res);
+      const nextTotal = res.data?.total ?? records.length;
+      const lastPage = Math.max(1, Math.ceil(nextTotal / viewConfig.table.pageSize));
+      if (page > lastPage) { setPage(lastPage); return; }
       setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval, _fieldStates: record.field_states })));
-      setTotal(res.data?.total ?? records.length);
-    } catch { message.error('加载数据失败'); }
+      setTotal(nextTotal);
+    } catch { if (requestId === requestIdRef.current) message.error('加载数据失败'); }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
-  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters]);
+  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError]);
 
   useEffect(() => {
+    if (!slug || aliasProgramRoute) return;
+    const request = ++configRequest.current;
+    let active = true;
+    const isCurrent = () => active && request === configRequest.current;
+    configPending.current = true;
+    requestIdRef.current += 1;
+    setConfigRefreshing(true);
+    if (schemaSlug.current !== slug) {
+      schemaSlug.current = slug;
+      setEditorTab(null);
+      setPageConfig(null);
+      setPlatformForm(null);
+      setFields([]);
+      setData([]);
+      setTotal(0);
+      setPage(1);
+      setSearch('');
+      setFilterValues({});
+      setSortState({});
+      setSelectedViewTab('');
+      filterForm.resetFields();
+    }
     (async () => {
-      if (!slug || aliasProgramRoute) return;
       try {
         setConfigError('');
         const numericFormId = Number(slug);
@@ -510,12 +514,15 @@ export default function DynamicPage() {
           try {
             dbForm = unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope: 'list' }));
           } catch {
+            if (!isCurrent()) return;
             const matchedForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
+            if (!isCurrent()) return;
             dbForm = matchedForm
               ? unwrapApiData<PlatformForm>(await getPlatformForm(matchedForm.id, { schema: 'published', scope: 'list' }))
               : null;
           }
         }
+        if (!isCurrent()) return;
         if (dbForm) {
           if (isAnalysisAssembly(dbForm.config, dbForm.code)) {
             setPlatformForm(dbForm);
@@ -526,6 +533,18 @@ export default function DynamicPage() {
           }
           const runtimeFields = (dbForm.fields ?? []).filter((field) => !field.archived).map(mapPlatformField);
           const publishedViewConfig = getPublishedViewConfig(dbForm.config);
+          const previous = runtimeViewState.current;
+          const nextTab = publishedViewConfig?.tabs?.find(tab => tab.id === previous.selectedViewTab) || publishedViewConfig?.tabs?.[0];
+          const nextView = normalizeRuntimeViewConfig(nextTab || publishedViewConfig, runtimeFields);
+          const reconciled = reconcilePublishedViewState(previous.viewConfig, nextView, previous.filterValues, previous.sortState);
+          setFilterValues(reconciled.filterValues);
+          setSortState(reconciled.sortState);
+          setSelectedViewTab(nextTab?.id || '');
+          if (previous.viewConfig) {
+            const inputValues = filterForm.getFieldsValue(true);
+            const nextInput = reconcilePublishedViewState(previous.viewConfig, nextView, inputValues, previous.sortState).filterValues;
+            filterForm.setFields([...new Set([...Object.keys(inputValues), ...Object.keys(nextInput)])].map(name => ({ name, value: nextInput[name] })));
+          }
           setPlatformForm(dbForm);
           setFields(runtimeFields);
           setPageConfig({
@@ -556,14 +575,21 @@ export default function DynamicPage() {
         setConfigError('未找到平台表单配置，动态页面不再回退旧模型页面。');
         setLoading(false);
       } catch {
+        if (!isCurrent()) return;
         setConfigError('页面配置加载失败，请检查表单是否存在并已发布。');
         setLoading(false);
         message.error('页面配置不存在');
+      } finally {
+        if (isCurrent()) {
+          configPending.current = false;
+          setConfigRefreshing(false);
+        }
       }
     })();
-  }, [slug, aliasProgramRoute]);
+    return () => { active = false; requestIdRef.current += 1; };
+  }, [slug, aliasProgramRoute, configRevision, filterForm]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { void loadData(); return () => { requestIdRef.current += 1; }; }, [loadData]);
 
   const listFields = tableConfigColumns.map((column) => column.fieldName);
 
@@ -587,11 +613,22 @@ export default function DynamicPage() {
       width: viewColumn?.width,
       fixed: viewColumn?.fixed,
       ellipsis: true,
-      sorter: viewColumn?.sortable || f?.sortable ? true : undefined,
-      render: (val: any) => {
+      sorter: (viewColumn ? viewColumn.sortable : f?.sortable) ? true : undefined,
+      sortOrder: sortState.field === field_name ? (sortState.order === 'asc' ? 'ascend' : 'descend') as 'ascend' | 'descend'
+        : !sortState.field && viewConfig?.table.defaultSort?.fieldName === field_name ? viewConfig.table.defaultSort.order : null,
+      render: (val: any, record: any) => {
+        const protect=(content:React.ReactNode)=><FieldProtection {...record._fieldStates?.[field_name]}>{content}</FieldProtection>;
+        const content=()=>{
+        if(!record._fieldStates?.[field_name]?.masked&&referenceLabels[field_name]?.[String(val)])return referenceLabels[field_name][String(val)];
         if (typeof val === 'boolean') return val ? '是' : '否';
         if (val === undefined || val === null || val === '') return viewColumn?.emptyText || '-';
-        if (typeof val === 'boolean') return val ? '是' : '否';
+        if (Array.isArray(val)) return f?.controlType==='upload'?val.map(item=>item?.name||'附件').join('、'):f?.controlType?.includes('table')?`${val.length} 条明细`:val.map(item=>typeof item==='object'?JSON.stringify(item):String(item)).join('、');
+        if (typeof val==='object') return JSON.stringify(val);
+        if (!record._fieldStates?.[field_name]?.masked) {
+          if(viewColumn?.renderType==='number' && Number.isFinite(Number(val)))return Number(val).toLocaleString('zh-CN',{maximumFractionDigits:12});
+          if(viewColumn?.renderType==='date' && dayjs(val).isValid())return dayjs(val).format('YYYY-MM-DD HH:mm');
+          if(viewColumn?.renderType==='progress' && Number.isFinite(Number(val)))return <Progress size="small" percent={Math.max(0,Math.min(100,Number(val)))}/>;
+        }
         if ((viewColumn?.renderType === 'tag' || f?.field_type === 'enum') && val) return <Tag>{String(val)}</Tag>;
         if (field_name === 'status') {
           const colorMap: Record<string, string> = {
@@ -602,6 +639,7 @@ export default function DynamicPage() {
           return <Tag color={colorMap[val] || 'default'}>{String(val)}</Tag>;
         }
         return String(val ?? '');
+        };return protect(content());
       },
     };
   });
@@ -648,14 +686,43 @@ export default function DynamicPage() {
         ? <Tag color={record._approval.status === 'rejected' ? 'red' : 'blue'}>{approvalStatusLabels[record._approval.status] || record._approval.status}</Tag> : '历史记录',
     });
   }
-  if (platformForm || canRunAction('edit') || canRunAction('delete')) {
+  const rowActions=viewConfig?.table.rowActions||[];
+  const configuredToolbarActions = activeViewTab?.table?.toolbarActions || pageConfig?.config.viewConfig?.table?.toolbarActions;
+  const toolbarActions = viewConfig?.table.toolbarActions || configuredToolbarActions || ['settings'];
+  const canConfigureForm = Boolean(platformForm) && canConfigureWorkspace(Boolean(user?.is_admin), canRunAction('configure'), toolbarActions);
+  useEffect(() => { if (editorTab && !canConfigureForm) setEditorTab(null); }, [editorTab, canConfigureForm]);
+  const openWorkspace = (tab: WorkspaceEditorTab) => {
+    if (canConfigureForm && !modalOpen && !importOpen && !detailRecord && !schemaLoading) setEditorTab(tab);
+  };
+  const workspaceEntry = canConfigureForm ? <div className="form-workspace-entry">
+    <Button icon={<EditOutlined />} onClick={() => openWorkspace('form')}>编辑表单</Button>
+    <Dropdown trigger={['click']} menu={{ items: [
+      { key: 'filter', label: '列表与筛选' },
+      { key: 'flow', label: '流程与审批' },
+      { key: 'permission', label: '权限管理' },
+    ], onClick: ({ key }) => openWorkspace(key as WorkspaceEditorTab) }}>
+      <Button aria-label="更多表单设置" title="更多表单设置" icon={<DownOutlined />} />
+    </Dropdown>
+  </div> : null;
+  const refreshPublishedConfig = () => {
+    configPending.current = true;
+    requestIdRef.current += 1;
+    setConfigRevision(revision => revision + 1);
+  };
+  const renderWorkspace = (runtime: React.ReactNode) => <div className={`form-workspace${editorTab ? ' form-workspace-editing' : ''}`}>
+    {editorTab && platformForm && canConfigureForm && <div className="form-workspace-editor"><Suspense fallback={<div className="form-workspace-loading"><Spin /><span>正在打开表单编辑器</span></div>}>
+      <EmbeddedFormSettings formId={String(platformForm.id)} embedded initialTab={editorTab} onExit={() => setEditorTab(null)} onPublished={refreshPublishedConfig} />
+    </Suspense></div>}
+    <div className="form-workspace-runtime" hidden={Boolean(editorTab)} style={editorTab ? { display: 'none' } : undefined}>{runtime}</div>
+  </div>;
+  if (rowActions.length) {
     (tableColumns as any[]).push({
       title: '操作', width: 180, fixed: 'right',
       render: (_val: any, record: any) => (
         <Space size={4}>
-          <Button size="small" onClick={() => openDetail(record)}>详情</Button>
-          {canRunAction('edit') && (!record._approval || record._approval.can_edit) && <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)} />}
-          {canRunAction('delete') && (!record._approval || record._approval.can_edit) && (
+          {rowActions.includes('detail')&&<Button size="small" onClick={() => openDetail(record)}>详情</Button>}
+          {rowActions.includes('edit') && canRunAction('edit') && (!record._approval || record._approval.can_edit) && <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)} />}
+          {rowActions.includes('delete') && canRunAction('delete') && (!record._approval || record._approval.can_edit) && (
             <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
               <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
@@ -673,6 +740,9 @@ export default function DynamicPage() {
       const detail = !Number.isNaN(numericFormId)
         ? unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope }))
         : unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope }));
+      const nodes = (detail?.config?.formLayout as { version?: number; nodes?: FormLayoutNode[] } | undefined);
+      setMutationGap(Number((detail?.config?.canvasSettings as any)?.gap)||12);
+      setMutationLayout(nodes?.version === 2 && Array.isArray(nodes.nodes) ? nodes.nodes : null);
       return (detail?.fields ?? []).filter((field) => !field.archived).map(mapPlatformField);
     } finally {
       setSchemaLoading(false);
@@ -686,6 +756,13 @@ export default function DynamicPage() {
       const nextFields = await loadMutationSchema('create');
       setMutationFields(nextFields);
       form.resetFields();
+      const defaults:Record<string,unknown>={};
+      for(const field of nextFields){const settings=field.typeSettings||{};
+        if(field.defaultValue!==undefined&&field.defaultValue!==null&&field.defaultValue!==''){let value=field.defaultValue;if(['int','integer','number','float','decimal','json','boolean'].includes(field.field_type)||settings.selectionMode==='multiple'||settings.displayMode==='tags'){try{value=JSON.parse(String(value));}catch{}}else value=String(value);defaults[field.field_name]=value;}
+        else if(field.controlType==='switch')defaults[field.field_name]=Boolean(settings.defaultChecked);
+        else if(field.controlType==='datetime'&&settings.defaultDate&&settings.defaultDate!=='none'&&settings.dateMode!=='range')defaults[field.field_name]=dayjs().format(settings.dateMode==='date'?'YYYY-MM-DD':'YYYY-MM-DDTHH:mm:ss');
+      }
+      form.setFieldsValue(defaults);
       setModalOpen(true);
     } catch {
       message.error('新增表单配置加载失败');
@@ -700,6 +777,7 @@ export default function DynamicPage() {
       if (record._approval && !record._approval.can_edit) { message.warning('当前审批状态不能修改'); return; }
     } catch (error: any) { message.error(error?.response?.data?.detail || '记录加载失败'); return; }
     setEditingRecord(record);
+    setRuleStates(record._fieldStates||{});
     form.resetFields();
     let nextFields: FieldDef[] = [];
     try {
@@ -712,11 +790,7 @@ export default function DynamicPage() {
     const formValues: Record<string, any> = {};
     for (const f of nextFields) {
       const fn = f.field_name;
-      if (['date', 'datetime'].includes(f.field_type) && record[fn]) {
-        formValues[fn] = dayjs(record[fn]);
-      } else {
-        formValues[fn] = record[fn] ?? undefined;
-      }
+      formValues[fn] = record[fn] ?? undefined;
     }
     form.setFieldsValue(formValues);
     setModalOpen(true);
@@ -727,9 +801,10 @@ export default function DynamicPage() {
       if (rulesLoading || ruleError) return;
       const values = usesDraftLifecycle ? form.getFieldsValue() : await form.validateFields();
       const payload = formFieldsToPayload(values, formFields);
+      if(editingRecord)for(const key of Object.keys(payload))if(ruleStates?.[key]?.masked)delete payload[key];
       setConfirmLoading(true);
       if (platformForm && editingRecord) {
-        const expected = Object.fromEntries(Object.keys(payload).map(key => [key, editingRecord[key] ?? null]));
+        const expected = Object.fromEntries(Object.keys(payload).filter(key=>!editingRecord._fieldStates?.[key]?.masked).map(key => [key, editingRecord[key] ?? null]));
         const item = unwrapApiData<any>(await updatePlatformDynamicRecord(platformForm.id, editingRecord.id, payload, expected));
         setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
         message.success(item._approval ? '草稿已保存' : '已保存');
@@ -769,85 +844,72 @@ export default function DynamicPage() {
     } catch { message.error('删除失败'); }
   };
 
+    const renderDetailValue=(field:FieldDef)=>{
+    const value=detailRecord?.[field.field_name];const policy=detailRecord?._fieldStates?.[field.field_name]||{};
+    return <FieldProtection {...policy}>{!policy.masked&&referenceLabels[field.field_name]?.[String(value)]?referenceLabels[field.field_name][String(value)]:['upload','editable-table','readonly-table'].includes(field.controlType||'')&&!policy.masked?<FieldControl disabled type={field.controlType!} value={value} settings={field.typeSettings} formId={platformForm?.id} fieldName={field.field_name} recordId={detailRecord?.id} label={field.label}/>:value==null?'—':typeof value==='object'?JSON.stringify(value):String(value)}</FieldProtection>;
+  };
   const renderDynamicFilterControl = (filter: ViewFilterConfig) => {
     const field = fields.find((item) => item.field_name === filter.fieldName);
     const placeholder = filter.placeholder || filter.label;
     if (filter.controlType === 'dateRange') return <DatePicker.RangePicker style={{ width: '100%' }} />;
     if (filter.controlType === 'date') return <DatePicker style={{ width: '100%' }} placeholder={placeholder} />;
+    if(filter.controlType==='relation'&&field?.relation_config&&platformForm)return <RelationPicker formId={platformForm.id} fieldName={field.field_name} contextData={{}} modelName="" placeholder={placeholder}/>;
     if (filter.controlType === 'number') return <InputNumber style={{ width: '100%' }} placeholder={placeholder} />;
     if (filter.controlType === 'select' || field?.field_type === 'enum') {
-      let opts: { label: string; value: string }[] = [];
-      if (field?.enum_values) {
-        const parsed = typeof field.enum_values === 'string' ? (() => {
-          try { return JSON.parse(field.enum_values || '[]'); } catch { return []; }
-        })() : field.enum_values;
-        const values = Array.isArray(parsed)
-          ? parsed
-          : Object.entries(parsed ?? {}).map(([value, label]) => ({ value, label }));
-        opts = values.map((item: any) => (
-          typeof item === 'string'
-            ? { label: item, value: item }
-            : { label: String(item.label ?? item.value), value: String(item.value ?? item.label) }
-        ));
-      }
+      const opts = enumOptions(field?.enum_values);
       return <Select allowClear placeholder={placeholder} options={opts} />;
     }
     return <Input allowClear prefix={filter.controlType === 'keyword' ? <SearchOutlined /> : undefined} placeholder={placeholder} />;
   };
 
   if (aliasProgramRoute || (!pageConfig && !configError)) {
-    return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
+    return renderWorkspace(<div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>);
   }
 
   if (!pageConfig || !viewConfig) {
-    return (
-      <div className="app-business-page dynamic-business-page">
+    return renderWorkspace(
+      <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className="app-business-page dynamic-business-page">
         <div className="app-business-content dynamic-business-content">
           <div className="app-business-title-row dynamic-business-title-row">
             <Space size={10} align="center" wrap>
               <Tag color="warning">缺少视图配置</Tag>
             </Space>
-            {platformForm ? (
-              <Tooltip title="表单配置">
-                <Button aria-label="表单配置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
-              </Tooltip>
-            ) : null}
+            {workspaceEntry}
           </div>
           <Empty
             description={configError || '当前表单缺少已发布的数据视图配置'}
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-          >
-            {platformForm ? (
-              <Button type="primary" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)}>
-                进入表单设置
-              </Button>
-            ) : null}
-          </Empty>
+          />
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="app-business-page dynamic-business-page">
+  return renderWorkspace(
+    <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className="app-business-page dynamic-business-page">
       <div className="app-business-content dynamic-business-content">
       <div className="app-business-title-row dynamic-business-title-row">
         <Space size={8} wrap>
-          {canRunAction('create') && (
+          {toolbarActions.includes('create') && canRunAction('create') && (
             <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
               <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal}>{platformForm?.runtime_submission_available ? '填写申请' : '新增'}</Button>
             </Tooltip>
           )}
-          <Tooltip title="刷新">
+          {toolbarActions.includes('refresh')&&<Tooltip title="刷新">
             <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} onClick={loadData} />
-          </Tooltip>
-          {platformForm ? (
-            <Tooltip title="表单配置">
-              <Button aria-label="表单配置" icon={<SettingOutlined />} onClick={() => navigate(`/form-settings/${platformForm.code || platformForm.id}`)} />
-            </Tooltip>
-          ) : null}
+          </Tooltip>}
+          {toolbarActions.includes('import')&&canRunAction('import')&&canRunAction('create')&&<Button aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>批量导入</Button>}
+      {toolbarActions.includes('export')&&canRunAction('export')&&<Button icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
+        if(!platformForm)return;setExporting(true);
+        try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:search||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:sortState.field||viewConfig.table.defaultSort?.fieldName,sort_order:sortState.order||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
+          const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+        }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
+      }}>导出当前页</Button>}
         </Space>
+        {workspaceEntry}
       </div>
+
+      {configError && <Alert type="warning" showIcon message={configError} action={<Button size="small" onClick={refreshPublishedConfig}>重新加载配置</Button>} />}
 
       {runtimeViewTabs && runtimeViewTabs.length > 0 && <Tabs activeKey={activeViewTab?.id} onChange={switchViewTab}
         items={runtimeViewTabs.map((tab) => ({ key: tab.id, label: tab.name }))} />}
@@ -866,7 +928,7 @@ export default function DynamicPage() {
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索业务记录" />
         </Form.Item>
         {activeFilters.map((filter) => (
-          <Form.Item key={filter.id} name={filter.id} label={filter.label} initialValue={filter.defaultValue}>
+          <Form.Item key={filter.id} name={filter.id} label={filter.label} style={filter.advanced&&!advancedFiltersOpen?{display:'none'}:undefined} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
             {renderDynamicFilterControl(filter)}
           </Form.Item>
         ))}
@@ -879,6 +941,7 @@ export default function DynamicPage() {
               setPage(1);
             }}>重置</Button>
             <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>查询</Button>
+            {activeFilters.some(f=>f.advanced)&&<Button type="link" onClick={()=>setAdvancedFiltersOpen(v=>!v)}>{advancedFiltersOpen?'收起筛选':'更多筛选'}</Button>}
           </Space>
         </Form.Item>
       </Form>
@@ -893,7 +956,12 @@ export default function DynamicPage() {
         dataSource={data}
         columns={tableColumns}
         rowKey="id"
-        loading={loading}
+        onRow={record=>({onClick:event=>{
+          if((event.target as HTMLElement).closest('button,a,input,.ant-select,.ant-popover'))return;
+          if(viewConfig.table.rowClickAction==='detail')void openDetail(record);
+          if(viewConfig.table.rowClickAction==='edit'&&canRunAction('edit')&&(!record._approval||record._approval.can_edit))void openEditModal(record);
+        }})}
+        loading={loading || configRefreshing}
         size={viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
         scroll={{ x: 'max-content', y: '100%' }}
         onChange={(_pagination, _filters, sorter: any) => {
@@ -917,14 +985,15 @@ export default function DynamicPage() {
       />
       </div>
 
-      <Drawer title={`${pageConfig.title} · 记录详情`} open={Boolean(detailRecord)} onClose={() => setDetailRecord(null)} width={560}
+      {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen && !editorTab} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();}}/>}
+      <Drawer title={`${pageConfig.title} · 记录详情`} open={Boolean(detailRecord) && !editorTab} onClose={() => setDetailRecord(null)} width={560}
         extra={<Space>
           {(detailRecord?._approval ? detailRecord._approval.can_edit : canRunAction('edit')) && <Button onClick={() => detailRecord && openEditModal(detailRecord)}>编辑</Button>}
           {detailRecord?._approval?.can_submit && <Button type="primary" loading={submittingApproval} onClick={submitApproval}>{detailRecord._approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
         </Space>}>
         {detailRecord && <>
           {detailRecord._approval && <Typography.Paragraph>审批状态：<Tag>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</Tag></Typography.Paragraph>}
-          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false).map(f => ({ key: f.field_name, label: f.label, children: detailRecord[f.field_name] == null ? '—' : typeof detailRecord[f.field_name] === 'object' ? JSON.stringify(detailRecord[f.field_name]) : String(detailRecord[f.field_name]) }))} />
+          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false).map(f => ({ key: f.field_name, label: f.label, children: renderDetailValue(f) }))} />
           {detailRecord._approval && <>
             <Typography.Title level={5}>审批与修改记录</Typography.Title>
             <Timeline items={(detailRecord._approval.history || []).map((entry: Record<string, unknown>) => ({ children: <Space direction="vertical" size={0}>
@@ -937,11 +1006,11 @@ export default function DynamicPage() {
       <Modal
         className="dynamic-business-modal"
         title={editingRecord ? `编辑${pageConfig.title}` : `${platformForm?.runtime_submission_available ? '填写申请：' : '新增'}${pageConfig.title}`}
-        open={modalOpen}
+        open={modalOpen && !editorTab}
         onOk={handleModalOk}
         onCancel={() => setModalOpen(false)}
         confirmLoading={confirmLoading || rulesLoading}
-        okButtonProps={{ disabled: Boolean(ruleError) }}
+        okButtonProps={{ disabled: Boolean(ruleError)||(usesDraftLifecycle&&!canRunAction('saveDraft')) }}
         okText={usesDraftLifecycle ? '保存草稿' : '保存'}
         cancelText="取消"
         width={820}
@@ -956,13 +1025,18 @@ export default function DynamicPage() {
           onValuesChange={() => { ruleRequest.current += 1; setRuleRevision(value => value + 1); }}
         >
           {ruleError && <Alert type="error" showIcon message={ruleError} style={{ marginBottom: 16 }} />}
-          <Row gutter={12}>
+          {mutationLayout ? <FormLayout gap={mutationGap} nodes={mutationLayout} isFieldVisible={name => formFields.some(field => field.field_name === name) && ruleStates?.[name]?.visible !== false} renderField={node => {
+            const field = formFields.find(item => item.field_name === node.fieldName);
+            if (!field || ruleStates?.[field.field_name]?.visible === false) return null;
+            const states = { ...ruleStates, [field.field_name]: { visible: true, required: field.required, ...ruleStates?.[field.field_name], readonly: ruleStates?.[field.field_name]?.readonly ?? Boolean(node.readonly) } };
+            return renderFormField(field, { formId: platformForm?.id, recordId: editingRecord?.id, data: ruleData, states });
+          }} /> : <Row gutter={12}>
             {formFields.filter(f => ruleStates?.[f.field_name]?.visible !== false).map(f => (
               <Col key={f.field_name} xs={24} md={isWideFormField(f) ? 24 : 12}>
-                {renderFormField(f, { formId: platformForm?.id, data: ruleData, states: ruleStates })}
+                {renderFormField(f, { formId: platformForm?.id, recordId: editingRecord?.id, data: ruleData, states: ruleStates })}
               </Col>
             ))}
-          </Row>
+          </Row>}
         </Form>
       </Modal>
     </div>

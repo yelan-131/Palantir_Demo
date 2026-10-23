@@ -80,5 +80,5 @@ test('byte size is explicit, persisted and distinct from character limits',()=>{
  assert.equal(assemblyFieldPayload({label:'字段',code:'name',type:'string',maxBytes:255},0).validation.maxBytes,255);
  assert.throws(()=>assemblyFieldPayload({label:'字段',code:'name',type:'string',maxBytes:1.5},0),/字节上限/);
  assert.equal(fieldStorageSize('integer'),'4 字节');assert.equal(fieldStorageSize('decimal'),'8 字节');
- assert.equal(fieldStorageSize('string',255),'最多 255 字节');assert.match(fieldStorageSize('text'),/变长/);
+ assert.equal(fieldStorageSize('string',255),'最多 255 字节');assert.equal(fieldStorageSize('string'),'默认最多 1024 字节');assert.equal(fieldStorageSize('text'),'默认最多 65536 字节');assert.equal(fieldStorageSize('json'),'默认最多 1048576 字节');
 });

@@ -67,7 +67,7 @@ def _physical_record_payload(row, form, fields: list, *, visible_fields: Optiona
         value = data.get(name)
         if name not in data or value is None:
             continue
-        if str(field.field_type).lower() == "json" and isinstance(value, str):
+        if (str(field.field_type).lower() == "json" or (str(field.field_type).lower() == 'enum' and (((getattr(field, 'ui_config', None) or {}).get('typeSettings') or {}).get('selectionMode') == 'multiple' or ((getattr(field, 'ui_config', None) or {}).get('typeSettings') or {}).get('displayMode') == 'tags'))) and isinstance(value, str):
             try:
                 data[name] = json.loads(value)
             except (ValueError, TypeError):

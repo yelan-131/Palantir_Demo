@@ -15,12 +15,13 @@ export function ShellPageTitleProvider({ fallback, children }: { fallback: strin
 }
 
 // Configured forms publish their actual name to the shared heading instead of adding a second heading.
-export function useShellPageTitle(title?: string) {
+export function useShellPageTitle(title?: string, enabled = true) {
   const { setTitle } = useContext(PageTitleContext);
   useEffect(() => {
+    if (!enabled) return;
     setTitle(title);
     return () => setTitle(undefined);
-  }, [title, setTitle]);
+  }, [title, setTitle, enabled]);
 }
 
 export default function ShellPageTitle() {

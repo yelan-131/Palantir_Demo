@@ -156,12 +156,11 @@ export default function Scheduler() {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor(null)}>新建任务</Button>
         </Space>
       </div>
-      <Alert type="info" showIcon message="当前页面管理任务配置；后端手动触发接口仅记录日志，配置启用不代表已接入自动执行引擎。" style={{ marginBottom: 16 }} />
       {fallback && <Alert type="warning" showIcon message="后端数据库不可用，正在使用临时回退数据；修改可能在服务重启后丢失。" style={{ marginBottom: 16 }} />}
       {loadError && <Alert type="error" showIcon message={loadError} action={<Button size="small" onClick={() => void reload()}>重试</Button>} style={{ marginBottom: 16 }} />}
       <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 12 }}>
         <Space wrap style={{ marginBottom: 20 }}>
-          <Input prefix={<SearchOutlined />} placeholder="搜索任务、类型或 Cron" aria-label="搜索定时任务" allowClear value={query} onChange={(event) => setQuery(event.target.value)} style={{ width: 280 }} />
+          <Input prefix={<SearchOutlined />} placeholder="搜索任务、类型或 Cron" aria-label="搜索日常任务" allowClear value={query} onChange={(event) => setQuery(event.target.value)} style={{ width: 280 }} />
           <Select aria-label="任务状态筛选" value={status} onChange={setStatus} style={{ width: 130 }} options={[{ value: 'all', label: '全部状态' }, { value: 'active', label: '启用' }, { value: 'paused', label: '暂停' }]} />
           <Typography.Text type="secondary">共 {visibleJobs.length} 项</Typography.Text>
         </Space>

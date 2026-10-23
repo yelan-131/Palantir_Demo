@@ -1,5 +1,17 @@
+import { previewFieldPermission, previewFlowNodes as associatedPreviewNodes } from './previewPermissions';
+import { RuleInlineSelect } from './RuleInlineCell';
+import CalculationExpressionEditor from './CalculationExpressionEditor';
+import {PropertyInspectorHeader, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
+import { calculationSources, type CalculationRule } from '@/utils/formCalculations';
+import {protectCopy} from '@/components/FieldProtection';
+import FieldControl from '@/components/FormWidgets/FieldControl';
+import RelationPicker from '@/components/FormWidgets/RelationPicker';
+import { enumOptions, matchesOptionSearch, duplicateFieldBindings, type ControlSettings, type OptionSearchSettings } from '@/utils/formControls';
 import SettingsTabs from '@/components/SettingsTabs';
-import { fieldStorageSize } from '../SystemAdmin/assemblyPersistence';
+import VersionManager from './VersionManager';
+import { isLayoutContainer, layoutSlots, normalizeLayout, placeLayoutControl, unwrapLayoutControl, cloneLayoutSubtree, layoutDescendants, buildRuntimeLayout, getControlAppearance, getControlPresentation, getControlColumnSpan, type LayoutPlacement, type ControlPresentation } from '@/utils/formLayout';
+import { DEFAULT_FIELD_BYTES, DEFAULT_FORM_LIMITS, fieldStorageSize } from '../SystemAdmin/assemblyPersistence';
+import { defaultRuleErrors, defaultRuleSummary, newDefaultPart, type DefaultValueRule } from '@/utils/formDefaults';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -26,6 +38,7 @@ import {
   NumberOutlined,
   PaperClipOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   SaveOutlined,
   SearchOutlined,
   SelectOutlined,
@@ -34,14 +47,19 @@ import {
   TabletOutlined,
   TableOutlined,
   TagsOutlined,
+  RedoOutlined,
   UndoOutlined,
   UserOutlined,
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Alert, Dropdown, Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Form, Tag, Table, Tooltip, Typography, message } from 'antd';
+import { useNavigate, useParams, useSearchParams, useBlocker } from 'react-router-dom';
 import {
+  previewDesignerRules,
+  getFormOptionSources,
+  previewFormReferenceOptions, previewOptionSearchSchema,
+  restorePlatformFormDraft,
   adminListUsers,
   adminListOrgUnits,
   adminListRoles,
@@ -95,11 +113,12 @@ import ProfessionalFlowDesigner, {
 } from './ProfessionalFlowDesigner';
 import ViewTabsEditor from './ViewTabsEditor';
 import './style.css';
+import './designer-dialog.css';
 
 type DesignerTab = 'form' | 'dataset' | 'dashboard' | 'filter' | 'style' | 'flow' | 'approval' | 'permission';
 type ComponentPanel = 'components' | 'fieldTypes';
 type ControlSource = 'field' | 'component';
-type ControlWidth = 'quarter' | 'half' | 'threeQuarter' | 'full';
+type ControlWidth = 'third' | 'quarter' | 'half' | 'twoThird' | 'threeQuarter' | 'full';
 type FlowPortSide = 'top' | 'right' | 'bottom' | 'left';
 type DropPosition = 'before' | 'after';
 type ControlRuleKey =
@@ -110,8 +129,6 @@ type ControlRuleKey =
   | 'masked'
   | 'copyable'
   | 'optionSort';
-type PreviewMode = 'create' | 'edit' | 'list';
-type PreviewDevice = 'desktop' | 'tablet' | 'mobile';
 type PublishCheckLevel = 'error' | 'warning' | 'suggestion';
 type EncodingResetCycle = 'none' | 'day' | 'month' | 'year' | 'dependency';
 type EncodingSegmentType = 'fixed' | 'date' | 'field' | 'masterData' | 'organization' | 'sequence';
@@ -140,6 +157,7 @@ interface AnalyticsDataset {
   sourceType: 'businessForm' | 'ontology' | 'sql' | 'api';
   source: string;
   refreshMode: 'realtime' | 'scheduled' | 'manual';
+  refreshInterval?: number;
   dimensions: string[];
   measures: string[];
 }
@@ -207,6 +225,10 @@ interface ControlRuleCondition {
   value?: string;
   strategy?: string;
   parameter?: string;
+  fields?: string[];
+  roleIds?: number[];
+  keepStart?: number;
+  keepEnd?: number;
   note?: string;
 }
 
@@ -260,32 +282,10 @@ interface EncodingRule {
   uniquenessScope?: EncodingUniquenessScope;
 }
 
-interface ControlTypeSettings {
-  minLength?: number;
-  maxLength?: number;
-  textFormat?: string;
-  trimMode?: string;
-  caseMode?: string;
-  rows?: number;
-  min?: number;
-  max?: number;
-  precision?: number;
-  unit?: string;
-  thousandSeparator?: boolean;
-  selectionMode?: string;
-  displayMode?: string;
-  allowClear?: boolean;
-  allowCreateOption?: boolean;
-  dateMode?: string;
-  defaultDate?: string;
-  disablePast?: boolean;
-  maxFiles?: number;
-  maxFileSize?: number;
-  fileTypes?: string;
-  defaultChecked?: boolean;
-  checkedText?: string;
-  uncheckedText?: string;
-}
+interface ControlTypeSettings extends ControlSettings {}
+interface OptionSearchSchema { kind: string; fields: Array<{value: string; label: string}>; defaultField: string; note?: string }
+interface SearchSettingsDraft { tested?: boolean; controlId: string; settings: OptionSearchSettings; query: string; schema?: OptionSearchSchema; metaLoading: boolean; loading: boolean; error: string; rows: Array<{id: string | number; label: string; matchedFields: string[]}>; page: number; hasMore: boolean; context: Record<string, string> }
+
 
 interface AssignmentRule {
   id: string;
@@ -294,8 +294,12 @@ interface AssignmentRule {
 }
 
 interface DesignerField {
+  enumValues?: unknown;
   storageType?: string;
   maxBytes?: number;
+  defaultRule?: DefaultValueRule;
+  computed?: boolean;
+  calculationRule?: CalculationRule;
   key: string;
   name: string;
   type: string;
@@ -339,7 +343,7 @@ interface ComponentDefinition {
   defaultWidth?: ControlWidth;
 }
 
-interface LayoutControl {
+interface LayoutControl extends LayoutPlacement {
   id: string;
   source: ControlSource;
   controlType: string;
@@ -349,9 +353,18 @@ interface LayoutControl {
   placeholder?: string;
   helpText?: string;
   optionSource?: string;
+  referenceLabelField?: string;
+  referenceValueField?: string;
+  referenceItemsPath?: string;
   dataSourceKind?: ReferenceSourceKind;
   encodingRule?: EncodingRule;
   assignmentRules?: AssignmentRule[];
+  assignmentRulesEnabled?: boolean;
+  defaultRule?: DefaultValueRule;
+  computed?: CalculationRule | null;
+  calculationRulesEnabled?: boolean;
+  inactiveCalculationRule?: CalculationRule;
+  storageMaxBytes?: number;
   typeSettings?: ControlTypeSettings;
   width: ControlWidth;
   rules: ControlRules;
@@ -456,7 +469,6 @@ interface ViewConfigMeta {
   status?: 'draft' | 'published';
 }
 
-type VersionPanelSelection = 'draft' | 'published' | 'previous';
 
 interface PermissionDesignDraft {
   page: Record<string, boolean>;
@@ -561,7 +573,7 @@ function makePermissionDesignDraft(roleKind: 'system' | 'manager' | 'operator', 
 }
 
 function permissionDraftsFromConfig(config?: Record<string, unknown> | null): PermissionDraftMap {
-  const permissionDesign = config?.permissionDesign;
+  const permissionDesign = config?.permissionDesignDraft || config?.permissionDesign;
   if (!permissionDesign || typeof permissionDesign !== 'object') return {};
   const roles = (permissionDesign as { roles?: unknown }).roles;
   return roles && typeof roles === 'object' ? roles as PermissionDraftMap : {};
@@ -618,7 +630,7 @@ function permissionDraftsFromRows(
     if (row.action === 'view') current.visible = enabled;
     if (row.action === 'edit') current.editable = enabled;
     if (row.action === 'export') current.exportable = enabled;
-    if (row.action === 'create') current.required = enabled;
+    if (row.action === 'create') current.editable = current.editable && enabled;
     draft.fields[row.field_name] = current;
     drafts[roleName] = draft;
   }
@@ -658,21 +670,11 @@ function sanitizePermissionDesignDraft(draft: PermissionDesignDraft): Permission
 
 const controlWidthOptions = [
   { value: 'quarter', label: '25%' },
+  { value: 'third', label: '33%' },
   { value: 'half', label: '50%' },
+  { value: 'twoThird', label: '67%' },
   { value: 'threeQuarter', label: '75%' },
   { value: 'full', label: '100%' },
-];
-
-const previewModeOptions = [
-  { value: 'create', label: '新建记录' },
-  { value: 'edit', label: '编辑记录' },
-  { value: 'list', label: '列表页' },
-];
-
-const previewDeviceOptions = [
-  { value: 'desktop', label: '桌面', icon: <LayoutOutlined /> },
-  { value: 'tablet', label: '平板', icon: <TabletOutlined /> },
-  { value: 'mobile', label: '手机', icon: <MobileOutlined /> },
 ];
 
 const defaultControlTypeOptions = [
@@ -793,7 +795,7 @@ const encodingGenerationTimingOptions: Array<{ value: EncodingGenerationTiming; 
 
 const encodingUniquenessScopeOptions: Array<{ value: EncodingUniquenessScope; label: string }> = [
   { value: 'form', label: '当前表单唯一' },
-  { value: 'global', label: '全局唯一' },
+  { value: 'global', label: '同租户同编码字段唯一' },
   { value: 'organization', label: '组织内唯一' },
   { value: 'dependency', label: '依赖范围内唯一' },
 ];
@@ -840,11 +842,10 @@ const referenceSourceRegistry: Record<ReferenceSourceKind, {
     setup: '系统管理 / 数据字典与基础档案 / 基础档案',
     placeholder: '选择基础档案，例如 equipment_master',
     objects: [
-      { value: 'equipment_master', label: '设备档案' },
-      { value: 'production_line_master', label: '产线档案' },
+      { value: 'equipment', label: '设备档案' },
+      { value: 'production_lines', label: '产线档案' },
       { value: 'material_master', label: '物料档案' },
       { value: 'supplier_master', label: '供应商档案' },
-      { value: 'alert_type_master', label: '告警类型档案' },
     ],
     valueFields: [
       { value: 'id', label: '内部 ID' },
@@ -853,7 +854,7 @@ const referenceSourceRegistry: Record<ReferenceSourceKind, {
     ],
     labelFields: [
       { value: 'name', label: '档案名称' },
-      { value: 'equipment_name', label: '设备名称' },
+
     ],
     preview: ['SMT-03 回流焊', '空压站 2#', 'Assembly-A 主线'],
   },
@@ -877,8 +878,8 @@ const referenceSourceRegistry: Record<ReferenceSourceKind, {
       { value: 'roles', label: '角色' },
       { value: 'org_units', label: '组织' },
     ],
-    valueFields: [{ value: 'user_id', label: '用户 ID' }, { value: 'role_id', label: '角色 ID' }],
-    labelFields: [{ value: 'display_name', label: '姓名' }, { value: 'role_label', label: '角色名称' }],
+    valueFields: [{ value: 'id', label: '记录 ID' }],
+    labelFields: [{ value: 'name', label: '名称（人员显示姓名）' }],
     preview: ['李明', '孙浩', '周强'],
   },
   externalApi: {
@@ -914,7 +915,7 @@ const ruleOperatorOptions = [
 const ruleStrategyOptions: Partial<Record<ControlRuleKey, Array<{ value: string; label: string }>>> = {
   unique: [
     { value: 'form', label: '当前表单唯一' },
-    { value: 'global', label: '全局唯一' },
+    { value: 'global', label: '同租户同编码字段唯一' },
     { value: 'compound', label: '组合字段唯一' },
   ],
   masked: [
@@ -1195,6 +1196,14 @@ function fitSegmentSample(value: string, length: number, padding?: EncodingPaddi
   return value;
 }
 
+function encodingSegmentLengthError(segment: EncodingSegment) {
+  const raw = segment.type === 'fixed' ? segment.value || ''
+    : segment.type === 'date' ? renderDateSample(segment.datePattern)
+    : segment.type === 'sequence' ? String(segment.sequenceStart ?? 1) : '';
+  const size = Array.from(raw).length;
+  return size > segment.length && segment.padding !== 'truncate' ? `内容 ${size} 个字符，超过 ${segment.length} 位` : '';
+}
+
 function renderEncodingSegmentSample(segment: EncodingSegment, fields: DesignerField[] = []) {
   const length = segment.length || 0;
   if (segment.type === 'fixed') return fitSegmentSample(segment.value || '', length, segment.padding);
@@ -1391,60 +1400,23 @@ function inferFormDesignerKind(form: PlatformForm): DesignerConfig['kind'] {
 }
 
 function makeDefaultAnalyticsDesign(config: DesignerConfig): AnalyticsDesign {
-  const dimensionFields = config.fields.filter((field) => field.searchable || field.businessType === 'enum').slice(0, 4);
-  const measureFields = config.fields.filter((field) => field.businessType === 'number' || field.type.includes('数值')).slice(0, 4);
-  const firstDimension = dimensionFields[0]?.key || 'category';
-  const primaryDatasetId = `${config.id}-dataset`;
-  const metrics: AnalyticsMetric[] = [
-    {
-      id: 'metric-total',
-      name: `${config.name}总数`,
-      expression: 'count(*)',
-      datasetId: primaryDatasetId,
-      format: 'number',
-      threshold: '正常 >= 0',
-    },
-    {
-      id: 'metric-risk',
-      name: '高风险项',
-      expression: `${firstDimension} = 高`,
-      datasetId: primaryDatasetId,
-      format: 'number',
-      threshold: '红色 > 0',
-    },
-    {
-      id: 'metric-rate',
-      name: '完成率',
-      expression: 'closed / total',
-      datasetId: primaryDatasetId,
-      format: 'percent',
-      threshold: '绿色 >= 90%',
-    },
-  ];
+  const dimensions = config.fields.filter(field => field.businessType !== 'number').slice(0, 8).map(field => field.key);
+  const measures = config.fields.filter(field => field.businessType === 'number' || field.type.includes('数值')).map(field => field.key);
+  const dimension = dimensions.includes('date') ? 'date' : dimensions[0];
+  const datasetId = `${config.id}-dataset`;
+  const metrics: AnalyticsMetric[] = [{ id: 'metric-total', name: '记录数', expression: 'count(*)', datasetId, format: 'number', threshold: '正常 >= 0' }];
+  if (measures.length) metrics.push({ id: 'metric-primary', name: `${measures[0]}合计`, expression: `sum(${measures[0]})`, datasetId, format: 'number', threshold: '正常 >= 0' });
+  if (dimensions.includes('status')) metrics.push({ id: 'metric-rate', name: '已关闭占比', expression: 'count_if(status == "已关闭") / count(*)', datasetId, format: 'percent', threshold: '绿色 >= 90%' });
+  const widgets: AnalyticsWidget[] = [{ id: 'widget-total', title: '核心指标', type: 'metric-card', datasetId, metricIds: metrics.map(metric => metric.id), width: 'full', interaction: 'none' }];
+  if (dimension) widgets.push(
+    { id: 'widget-trend', title: '分组分析', type: 'line', datasetId, metricIds: ['metric-total'], dimension, width: 'half', interaction: 'filter' },
+    { id: 'widget-rank', title: '数量排行', type: 'rank-table', datasetId, metricIds: ['metric-total'], dimension, width: 'half', interaction: 'drilldown' },
+  );
+  widgets.push({ id: 'widget-detail', title: '明细列表', type: 'detail-table', datasetId, metricIds: ['metric-total'], dimension, width: 'full', interaction: 'navigate' });
   return {
-    datasets: [
-      {
-        id: primaryDatasetId,
-        name: `${config.name}数据集`,
-        sourceType: 'businessForm',
-        source: config.id,
-        refreshMode: 'realtime',
-        dimensions: dimensionFields.length ? dimensionFields.map((field) => field.key) : ['category', 'status', 'owner'],
-        measures: measureFields.length ? measureFields.map((field) => field.key) : ['count', 'rate', 'duration'],
-      },
-    ],
-    metrics,
-    widgets: [
-      { id: 'widget-total', title: '核心指标', type: 'metric-card', datasetId: primaryDatasetId, metricIds: ['metric-total', 'metric-risk', 'metric-rate'], width: 'full', interaction: 'none' },
-      { id: 'widget-trend', title: '趋势分析', type: 'line', datasetId: primaryDatasetId, metricIds: ['metric-total'], dimension: 'date', width: 'half', interaction: 'filter' },
-      { id: 'widget-rank', title: '风险排行', type: 'rank-table', datasetId: primaryDatasetId, metricIds: ['metric-risk'], dimension: firstDimension, width: 'half', interaction: 'drilldown' },
-      { id: 'widget-detail', title: '明细列表', type: 'detail-table', datasetId: primaryDatasetId, metricIds: ['metric-total'], dimension: firstDimension, width: 'full', interaction: 'navigate' },
-    ],
-    globalFilters: ['dateRange', firstDimension, 'owner'].filter(Boolean),
-    interactions: [
-      { sourceWidgetId: 'widget-trend', targetWidgetId: 'widget-detail', action: 'filter' },
-      { sourceWidgetId: 'widget-rank', targetWidgetId: 'widget-detail', action: 'drilldown' },
-    ],
+    datasets: [{ id: datasetId, name: `${config.name}数据集`, sourceType: 'businessForm', source: config.id, refreshMode: 'realtime', dimensions, measures }],
+    metrics, widgets, globalFilters: dimensions.slice(0, 3),
+    interactions: dimension ? [{ sourceWidgetId: 'widget-trend', targetWidgetId: 'widget-detail', action: 'filter' }, { sourceWidgetId: 'widget-rank', targetWidgetId: 'widget-detail', action: 'drilldown' }] : [],
     style: makeDefaultAnalyticsStyle(),
   };
 }
@@ -1453,9 +1425,9 @@ function normalizeAnalyticsDesign(value: unknown, fallback: AnalyticsDesign): An
   if (!value || typeof value !== 'object') return fallback;
   const draft = value as Partial<AnalyticsDesign>;
   return {
-    datasets: Array.isArray(draft.datasets) && draft.datasets.length ? draft.datasets as AnalyticsDataset[] : fallback.datasets,
-    metrics: Array.isArray(draft.metrics) && draft.metrics.length ? draft.metrics as AnalyticsMetric[] : fallback.metrics,
-    widgets: Array.isArray(draft.widgets) && draft.widgets.length ? draft.widgets as AnalyticsWidget[] : fallback.widgets,
+    datasets: Array.isArray(draft.datasets) ? draft.datasets as AnalyticsDataset[] : fallback.datasets,
+    metrics: Array.isArray(draft.metrics) ? draft.metrics as AnalyticsMetric[] : fallback.metrics,
+    widgets: Array.isArray(draft.widgets) ? draft.widgets as AnalyticsWidget[] : fallback.widgets,
     globalFilters: Array.isArray(draft.globalFilters) ? draft.globalFilters.map(String) : fallback.globalFilters,
     interactions: Array.isArray(draft.interactions) ? draft.interactions as AnalyticsDesign['interactions'] : fallback.interactions,
     style: { ...fallback.style, ...(isRecord(draft.style) ? draft.style : {}) } as AnalyticsStyle,
@@ -1535,7 +1507,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isControlWidth(value: unknown): value is ControlWidth {
-  return value === 'quarter' || value === 'half' || value === 'threeQuarter' || value === 'full';
+  return controlWidthOptions.some(option => option.value === value);
 }
 
 function normalizeDesignerOptions(raw: unknown, fallback: DesignerOption[]): DesignerOption[] {
@@ -1650,12 +1622,16 @@ const fieldTemplates: DesignerField[] = [
   { key: 'templateRemark', name: '备注', type: '多行文本', placeholder: '填写备注说明', listVisible: false },
 ];
 
-const recommendedRules = [
-  '选择关联设备后自动带出产线、设备位置和默认处理人',
-  '告警等级为“严重”时，附件证据和处理时限必填',
-  '告警状态为“已关闭”时，处理结论必填',
-  '超过处理时限时自动标记为逾期并提醒责任人',
-];
+function getRecommendedRules(fields: DesignerField[]) {
+  const suggestions: string[] = [];
+  const has = (name: string) => fields.some(field => field.name.includes(name));
+  if (has('物料编码')) suggestions.push('建议为物料编码配置自动编号与唯一性校验');
+  if (has('安全库存')) suggestions.push('建议将安全库存设置为非负数，防止录入负库存阈值');
+  if (has('计量单位')) suggestions.push('建议将计量单位绑定字典，统一物料的计量口径');
+  if (has('告警等级') && has('附件') && has('处理时限')) suggestions.push('建议在告警等级为严重时，将附件证据和处理时限设为必填');
+  if (has('告警状态') && has('处理结论')) suggestions.push('建议在告警状态为已关闭时，将处理结论设为必填');
+  return suggestions;
+}
 
 function getFlowNodeAssigneeLabel(node?: FlowDesignerNode) {
   if (!node) return '未选择流程节点';
@@ -1694,6 +1670,7 @@ function inferFieldControlType(field?: DesignerField) {
   if (businessType === 'date' || businessType === 'datetime') return 'datetime';
   if (businessType === 'attachment') return 'upload';
   if (businessType === 'longText') return 'textarea';
+  if (field.storageType==='boolean') return 'switch';
   if (businessType === 'number') return 'number';
   return 'text';
 }
@@ -1715,7 +1692,7 @@ function inferReferenceSourceKind(field?: DesignerField, controlType?: string): 
     if (field?.optionSource?.includes('组织') || field?.optionSource?.includes('人员')) return 'organization';
     return 'masterData';
   }
-  if (businessType === 'enum') return 'dictionary';
+  if (businessType === 'enum') return 'static';
   return 'static';
 }
 
@@ -1724,31 +1701,8 @@ function getReferenceConfig(kind?: ReferenceSourceKind) {
 }
 
 function fieldInput(field: DesignerField, placeholderOverride?: string, disabled = false, optionSourceOverride?: string, controlTypeOverride?: string, typeSettings?: ControlTypeSettings) {
-  const placeholder = placeholderOverride || field.placeholder;
-  const controlType = controlTypeOverride && controlTypeOverride !== 'field' ? controlTypeOverride : inferFieldControlType(field);
-  if (controlType === 'select' || controlType === 'relation') {
-    return <Select disabled={disabled} placeholder={placeholder} options={optionSourceToOptions(optionSourceOverride || field.optionSource, placeholder)} />;
-  }
-  if (controlType === 'datetime') {
-    return <Input disabled={disabled} placeholder={placeholder} prefix={<CalendarOutlined />} />;
-  }
-  if (controlType === 'upload') {
-    return <Button disabled={disabled} icon={<PaperClipOutlined />}>{placeholder || '选择文件'}</Button>;
-  }
-  if (controlType === 'textarea') {
-    const rows = typeSettings?.rows || 2;
-    return <Input.TextArea disabled={disabled} maxLength={typeSettings?.maxLength} placeholder={placeholder} autoSize={{ minRows: rows, maxRows: Math.max(rows, 4) }} />;
-  }
-  if (controlType === 'number') {
-    return <Input disabled={disabled} placeholder={placeholder} suffix={typeSettings?.unit || '#'} />;
-  }
-  if (controlType === 'switch') {
-    return <Segmented disabled={disabled} options={['否', '是']} value="否" />;
-  }
-  if (controlType === 'readonly-text' || controlType === 'code') {
-    return <Input disabled value={placeholder || field.name} />;
-  }
-  return <Input disabled={disabled} maxLength={typeSettings?.maxLength} placeholder={placeholder} />;
+  const type=controlTypeOverride && controlTypeOverride!=='field'?controlTypeOverride:inferFieldControlType(field);
+  return <FieldControl preview type={type} disabled={disabled} label={field.name} placeholder={placeholderOverride||field.placeholder} settings={typeSettings} options={field.enumValues&&optionSourceOverride===field.optionSource?field.enumValues:optionSourceOverride?optionSourceToOptions(optionSourceOverride):field.enumValues||optionSourceToOptions(field.optionSource)} />;
 }
 
 function designerFieldsToViewFields(fields: DesignerField[]) {
@@ -1773,8 +1727,7 @@ function getPlatformFieldString(field: PlatformFormField, key: 'business_type' |
 }
 
 function getPlatformEnumValues(field: PlatformFormField) {
-  const values = field.enum_values?.values;
-  return Array.isArray(values) ? values.map(String).filter(Boolean) : [];
+  return enumOptions(field.enum_values).map(item=>String(item.value));
 }
 
 function getPlatformValidationText(field: PlatformFormField) {
@@ -1868,8 +1821,12 @@ function platformFieldsToDesignerFields(fields?: PlatformFormField[]) {
       const mapped = mapPlatformFieldType(field);
       return {
         key: field.field_name,
+        enumValues: field.enum_values,
         storageType: field.field_type,
         maxBytes: typeof field.validation?.maxBytes === 'number' ? field.validation.maxBytes : undefined,
+        defaultRule: field.ui_config?.defaultRule as DefaultValueRule | undefined,
+        computed: Boolean(field.ui_config?.computed),
+        calculationRule: field.ui_config?.computed as CalculationRule | undefined,
         name: field.label || field.field_name,
         type: mapped.type,
         businessType: mapped.businessType,
@@ -1897,6 +1854,9 @@ function areDesignerFieldsSame(left?: DesignerField[], right?: DesignerField[]) 
       && field.name === other.name
       && field.storageType === other.storageType
       && field.maxBytes === other.maxBytes
+      && field.computed === other.computed
+      && JSON.stringify(field.calculationRule) === JSON.stringify(other.calculationRule)
+      && JSON.stringify(field.defaultRule) === JSON.stringify(other.defaultRule)
       && field.type === other.type
       && field.businessType === other.businessType
       && field.placeholder === other.placeholder
@@ -2074,36 +2034,14 @@ function getWorkflowDesignerMeta(form?: PlatformForm | null): WorkflowDesignerMe
 
 function makeRuntimeFormLayout(controls: LayoutControl[], fields: DesignerField[]) {
   const fieldByKey = new Map(fields.map((field) => [field.key, field]));
-  const widthToColSpan = (width: ControlWidth) => {
-    if (width === 'quarter') return 0.5;
-    if (width === 'threeQuarter') return 1.5;
-    if (width === 'full') return 2;
-    return 1;
-  };
-  return {
-    sections: [
-      {
-        id: 'section-business-info',
-        title: '业务信息',
-        fields: controls
-          .filter((control) => Boolean(control.fieldKey) && control.rules.visible.enabled)
-          .map((control) => {
-            const field = fieldByKey.get(String(control.fieldKey));
-            return {
-              fieldName: String(control.fieldKey),
-              label: control.name || field?.name || String(control.fieldKey),
-              width: control.width,
-              colSpan: widthToColSpan(control.width),
-              controlType: getEffectiveControlTypeForControl(control, field),
-              required: Boolean(control.rules.required.enabled),
-              readonly: Boolean(control.rules.readonly.enabled),
-              placeholder: control.placeholder || field?.placeholder,
-              helpText: control.helpText,
-            };
-          }),
-      },
-    ],
-  };
+  const widthToColSpan = (width: ControlWidth) => getControlColumnSpan(width) / 6;
+  return buildRuntimeLayout(controls, (control, inheritedReadonly) => {
+    const field = fieldByKey.get(String(control.fieldKey));
+    return { fieldName: String(control.fieldKey), label: control.name || field?.name || String(control.fieldKey),
+      width: control.width, colSpan: widthToColSpan(control.width), controlType: getEffectiveControlTypeForControl(control, field),
+      required: Boolean(control.rules.required.enabled), readonly: inheritedReadonly,
+      placeholder: control.placeholder || field?.placeholder, helpText: control.helpText };
+  });
 }
 
 function getViewConfigMeta(form?: PlatformForm | null): ViewConfigMeta {
@@ -2177,7 +2115,7 @@ function getDefaultTypeSettings(controlType: string, field?: DesignerField): Con
       rows: controlType === 'textarea' ? 3 : undefined,
     };
   }
-  if (controlType === 'number') return { precision: 0, thousandSeparator: false };
+  if (controlType === 'number') return { precision: field?.storageType==='integer'||field?.storageType==='int'?0:undefined, thousandSeparator: false };
   if (controlType === 'select' || controlType === 'relation') {
     return {
       selectionMode: 'single',
@@ -2186,7 +2124,7 @@ function getDefaultTypeSettings(controlType: string, field?: DesignerField): Con
       allowCreateOption: false,
     };
   }
-  if (controlType === 'datetime') return { dateMode: 'datetime', defaultDate: 'none', disablePast: false };
+  if (controlType === 'datetime') return { dateMode: field?.businessType==='date'?'date':'datetime', defaultDate: 'none', disablePast: false };
   if (controlType === 'upload') return { maxFiles: 5, maxFileSize: 20, fileTypes: '图片、PDF、Office、日志文件' };
   if (controlType === 'switch') return { defaultChecked: false, checkedText: '是', uncheckedText: '否' };
   return {};
@@ -2206,6 +2144,8 @@ function makeFieldControl(field: DesignerField): LayoutControl {
     dataSourceKind: inferReferenceSourceKind(field, controlType),
     encodingRule: isEncodingField(field) ? field.encodingRule || makeEncodingRule(field) : undefined,
     typeSettings: getDefaultTypeSettings(controlType, field),
+    defaultRule: field.defaultRule,
+    computed: field.calculationRule,
     width: getFieldBusinessType(field) === 'longText' ? 'full' : 'half',
     rules: makeControlRules(Boolean(field.required), field),
   };
@@ -2393,8 +2333,17 @@ function getFlowConnectorPath(from: FlowNode, fromSide: FlowPortSide, to: FlowNo
   return roundedOrthogonalPath([start, startLead, ...bridge, endLead, end]);
 }
 
-export default function FormSettingsPage() {
-  const { formId } = useParams();
+export interface FormSettingsPageProps {
+  formId?: string;
+  embedded?: boolean;
+  initialTab?: 'form' | 'filter' | 'flow' | 'permission';
+  onExit?: () => void;
+  onPublished?: () => void;
+}
+
+export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, onExit, onPublished }: FormSettingsPageProps = {}) {
+  const { formId: routeFormId } = useParams();
+  const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const staticBaseConfig = useMemo(
@@ -2434,9 +2383,9 @@ export default function FormSettingsPage() {
       description: databaseMeta?.description || staticBaseConfig.description,
     };
   }, [databaseFieldsByForm, databaseMetaByForm, staticBaseConfig]);
-  useShellPageTitle(`${baseConfig.name}配置`);
+  useShellPageTitle(`${baseConfig.name}配置`, !embedded);
   const [activeTab, setActiveTab] = useState<DesignerTab>(() => (staticBaseConfig.kind === 'analysis' ? 'dashboard' : 'form'));
-  const [componentPanel, setComponentPanel] = useState<ComponentPanel>('components');
+  const [componentPanel, setComponentPanel] = useState<ComponentPanel>(embedded ? 'fieldTypes' : 'components');
   const [version, setVersion] = useState('v1');
   const [storedViewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
   const [activeViewTabId, setActiveViewTabId] = useState('default');
@@ -2445,6 +2394,9 @@ export default function FormSettingsPage() {
   const [identityUsers, setIdentityUsers] = useState<Array<{ id: number; username: string; label: string }>>([]);
   const [analyticsDesign, setAnalyticsDesign] = useState<AnalyticsDesign>(() => makeDefaultAnalyticsDesign(baseConfig));
   const [selectedAnalyticsWidgetId, setSelectedAnalyticsWidgetId] = useState('');
+  const [analyticsLibrarySearch, setAnalyticsLibrarySearch] = useState('');
+  const [analyticsSourceFields, setAnalyticsSourceFields] = useState<Record<string, PlatformFormField[]>>({});
+  const [draggedAnalyticsWidgetId, setDraggedAnalyticsWidgetId] = useState('');
   const [expandedViewRow, setExpandedViewRow] = useState<string>('filter-0');
   const [filterFieldPickerOpen, setFilterFieldPickerOpen] = useState(false);
   const [tableFieldPickerOpen, setTableFieldPickerOpen] = useState(false);
@@ -2452,26 +2404,49 @@ export default function FormSettingsPage() {
   const [draggedViewColumnId, setDraggedViewColumnId] = useState('');
   const [layoutControls, setLayoutControls] = useState<LayoutControl[]>(baseConfig.fields.map(makeFieldControl));
   const [selectedControlId, setSelectedControlId] = useState<string>('');
+  const [defaultValueDraft, setDefaultValueDraft] = useState<{ controlId: string; rule: DefaultValueRule; fixed: string } | null>(null);
+  const [calculationDraft, setCalculationDraft] = useState<{ controlId: string; rule: CalculationRule; samples: Record<string, unknown> } | null>(null);
+  const [calculationBusy, setCalculationBusy] = useState(false);
+  const [calculationError, setCalculationError] = useState('');
+  const [calculationResult, setCalculationResult] = useState<{ value: unknown } | null>(null);
+  const calculationEpoch = useRef(0);
+  const [assignmentDraft, setAssignmentDraft] = useState<{ controlId: string; rules: AssignmentRule[] } | null>(null);
+  const [searchDraft, setSearchDraft] = useState<SearchSettingsDraft | null>(null);
+  const searchRequestEpoch = useRef(0);
   const [selectedAssetKey, setSelectedAssetKey] = useState<string>(baseConfig.fields[0]?.key || '');
+  const [containerTabs, setContainerTabs] = useState<Record<string, string>>({});
+  const [copiedTree, setCopiedTree] = useState<LayoutControl[]>([]);
   const [copiedControl, setCopiedControl] = useState<LayoutControl | null>(null);
   const [history, setHistory] = useState<LayoutControl[][]>([]);
   const [future, setFuture] = useState<LayoutControl[][]>([]);
   const [librarySearch, setLibrarySearch] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [canvasSettings,setCanvasSettings]=useState({columns:2,gap:12});
+  const [previewForm]=Form.useForm();
+  const [previewValues,setPreviewValues]=useState<Record<string,unknown>>({});
+  const [previewStates,setPreviewStates]=useState<Record<string,{visible:boolean;required:boolean;readonly:boolean;masked?:boolean;copyMode?:'normal'|'maskedCopy'|'disabled';copyText?:string}>>({});
+  const [previewRuleError,setPreviewRuleError]=useState('');
+  const previewEpoch=useRef(0);
+  const blocker=useBlocker(hasUnsavedChanges);
+  useEffect(()=>{if(!hasUnsavedChanges)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[hasUnsavedChanges]);
+  useEffect(()=>{if(blocker.state!=='blocked')return;const modal=Modal.confirm({className:'form-designer-dialog',title:'当前有未保存修改',content:'离开后本次修改不会保留。请先保存草稿，或确认放弃修改。',okText:'放弃并离开',cancelText:'继续编辑',onOk:()=>blocker.proceed(),onCancel:()=>blocker.reset()});return()=>modal.destroy();},[blocker]);
   const [flowLoadError, setFlowLoadError] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('create');
-  const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('desktop');
+  const [previewRole, setPreviewRole] = useState('');
+  const [hasAssociatedFlow, setHasAssociatedFlow] = useState(false);
   const [previewFlowNodeId, setPreviewFlowNodeId] = useState('');
   const [publishCheckOpen, setPublishCheckOpen] = useState(false);
+  const [validationOpen, setValidationOpen] = useState(false);
   const [serverPublishReport, setServerPublishReport] = useState<PlatformFormPublishReport | null>(null);
   const [versionPanelOpen, setVersionPanelOpen] = useState(false);
-  const [selectedVersionKey, setSelectedVersionKey] = useState<VersionPanelSelection>('draft');
+  const [designerReloadKey, setDesignerReloadKey] = useState(0);
+  const restoredDesignFormId = useRef<number | null>(null);
+  useEffect(() => { restoredDesignFormId.current = null; }, [staticBaseConfig.id]);
   const [draggedControlId, setDraggedControlId] = useState('');
   const [dropHint, setDropHint] = useState<{ controlId: string; position: DropPosition } | null>(null);
   const [isCanvasDragActive, setCanvasDragActive] = useState(false);
   const [fieldDefaultValueDrafts, setFieldDefaultValueDrafts] = useState<Record<string, string>>({});
-  const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
+  const ruleOpeningValue=useRef<{id:string;key:ControlRuleKey;value:ControlRule}|null>(null);
   const [ruleModal, setRuleModal] = useState<{ controlId: string; ruleKey: ControlRuleKey } | null>(null);
   const [editingRuleGroupTitle, setEditingRuleGroupTitle] = useState<{ ruleKey: ControlRuleKey; groupIndex: number; value: string } | null>(null);
   const [ruleWindowMode, setRuleWindowMode] = useState<'common' | 'custom'>('common');
@@ -2482,7 +2457,16 @@ export default function FormSettingsPage() {
   }>(() => ({ open: false, draft: makeEncodingSegment('fixed', baseConfig.fields) }));
   const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
+  useEffect(() => {
+    const liveAnalytics = platformForm?.config?.analyticsDesign;
+    const hasRuntimeDashboard = Boolean(platformForm?.published_version || platformForm?.config?.publishedSchemaVersion || (liveAnalytics && typeof liveAnalytics === 'object' && !Array.isArray(liveAnalytics)));
+    if (embedded || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
+    const panel = ({dataset: 'data', filter: 'filters', style: 'style'} as Record<string, string>)[searchParams.get('tab') || ''];
+    navigate(`/program/${encodeURIComponent(platformForm.code)}?edit=1${panel ? `&panel=${panel}` : ''}`, {replace: true});
+  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded]);
   const viewConfigMeta = getViewConfigMeta(platformForm);
+  useEffect(()=>{if(!previewOpen||baseConfig.kind==='analysis'||!platformForm?.id)return;const epoch=++previewEpoch.current;let active=true;const timer=setTimeout(()=>{previewDesignerRules(platformForm.id,layoutControls,previewValues).then(response=>{if(!active||epoch!==previewEpoch.current)return;const result=response.data?.data;setPreviewStates(result?.states||{});previewForm.setFieldsValue(result?.data||{});setPreviewRuleError('');}).catch((error)=>{if(active)setPreviewRuleError(error?.response?.data?.detail || '规则预览失败，请检查条件配置或网络连接。');});},250);return()=>{active=false;clearTimeout(timer);};},[previewOpen,platformForm?.id,layoutControls,previewValues,previewForm]);
+
   const [formPermissionRows, setFormPermissionRows] = useState<FormPermissionRow[]>([]);
   const [isResolvingPlatformConfig, setResolvingPlatformConfig] = useState(Boolean(formId));
   const designerMeta = useMemo(() => getDesignerMeta(platformForm), [platformForm]);
@@ -2506,7 +2490,11 @@ export default function FormSettingsPage() {
     [commonControlKeys, componentGroups],
   );
   const [encodingSettingsDraft, setEncodingSettingsDraft] = useState<EncodingRule | null>(null);
+  const [encodingSegmentEditPart, setEncodingSegmentEditPart] = useState<'type' | 'length' | 'value' | 'padding'>('type');
   const encodingEditorRef = useRef<HTMLDivElement>(null);
+  const encodingRuleTargetRef = useRef<{ controlId: string; rule: EncodingRule } | null>(null);
+  const [draggedEncodingSegmentId, setDraggedEncodingSegmentId] = useState<string | null>(null);
+  const encodingSegmentPointer = useRef<{ id: string; x: number; y: number } | null>(null);
   const [workflowMeta, setWorkflowMeta] = useState<WorkflowDesignerMeta>({});
   const [isPersistingFlow, setPersistingFlow] = useState(false);
   const [isPersistingPermissions, setPersistingPermissions] = useState(false);
@@ -2514,6 +2502,7 @@ export default function FormSettingsPage() {
   const [identityRoles, setIdentityRoles] = useState<string[]>([]);
   const [identityOrgUnits, setIdentityOrgUnits] = useState<Array<{ id: number; name: string; code?: string; status?: string }>>([]);
   const [permissionDrafts, setPermissionDrafts] = useState<PermissionDraftMap>({});
+  const [permissionRoleSearch,setPermissionRoleSearch]=useState('');
   const permissionRoles = identityRoles.length ? identityRoles : baseConfig.roles;
   const permissionOrgUnits = identityOrgUnits.filter((org) => org.status !== 'inactive');
   const permissionOrgUnitIds = permissionOrgUnits.map((org) => org.id);
@@ -2523,17 +2512,12 @@ export default function FormSettingsPage() {
     label: org.code ? `${org.name} / ${org.code}` : org.name,
   }));
   useEffect(() => {
-    if (versionPanelOpen) {
-      setSelectedVersionKey('draft');
-    }
-  }, [versionPanelOpen]);
-  useEffect(() => {
     if (!platformForm) return;
     const configDrafts = permissionDraftsFromConfig(platformForm.config);
     const rowDrafts = formPermissionRows.length
       ? permissionDraftsFromRows(formPermissionRows, identityRoleRecords, baseConfig.fields, permissionOrgUnitIds)
       : {};
-    setPermissionDrafts(mergePermissionDraftSources(configDrafts, rowDrafts));
+    setPermissionDrafts(configDrafts);
   }, [baseConfig.fields, formPermissionRows, identityRoleRecords, permissionOrgUnitKey, platformForm]);
   const [selectedPermissionRole, setSelectedPermissionRole] = useState('');
   const [fieldPermissionQuery, setFieldPermissionQuery] = useState('');
@@ -2542,7 +2526,7 @@ export default function FormSettingsPage() {
   const activePermissionRole = selectedPermissionRole || permissionRoles[0] || '未配置角色';
   const activePermissionRoleIndex = Math.max(permissionRoles.indexOf(activePermissionRole), 0);
   const activePermissionRoleKind = activePermissionRoleIndex === 0 ? 'system' : activePermissionRoleIndex < 4 ? 'manager' : 'operator';
-  const activePermissionDraft = permissionDrafts[activePermissionRole] || makePermissionDesignDraft(activePermissionRoleKind, permissionOrgUnitIds);
+  const activePermissionDraft = permissionDrafts[activePermissionRole] || permissionDraftsFromRows(formPermissionRows,identityRoleRecords,baseConfig.fields,permissionOrgUnitIds)[activePermissionRole] || makePermissionDesignDraft(activePermissionRoleKind, permissionOrgUnitIds);
   const getRoleFieldPermission = (field: DesignerField, index: number) => {
     const configured = activePermissionDraft.fields?.[field.key];
     return configured || {
@@ -2579,8 +2563,8 @@ export default function FormSettingsPage() {
     setHasUnsavedChanges(true);
   };
   const previewFlowNodes = useMemo(
-    () => professionalFlowConfig.nodes.filter((node) => node.executable || node.type === 'startEvent' || node.type === 'endEvent'),
-    [professionalFlowConfig.nodes],
+    () => associatedPreviewNodes(professionalFlowConfig.nodes, hasAssociatedFlow),
+    [professionalFlowConfig.nodes, hasAssociatedFlow],
   );
   const selectedPreviewFlowNode = useMemo(
     () => previewFlowNodes.find((node) => node.id === previewFlowNodeId) || previewFlowNodes[0],
@@ -2611,13 +2595,13 @@ export default function FormSettingsPage() {
   const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
 
   useEffect(() => {
-    const requestedTab = (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
+    const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
     if (!requestedTab) return;
     if (designerTabs.some((item) => item.key === requestedTab) && activeTab !== requestedTab) {
       setActiveTab(requestedTab);
       setSelectedControlId('');
     }
-  }, [activeTab, designerTabs, searchParams]);
+  }, [designerTabs, searchParams, embedded, initialTab]);
 
   useEffect(() => {
     if (!designerTabs.some((item) => item.key === activeTab)) {
@@ -2666,7 +2650,7 @@ export default function FormSettingsPage() {
 
   useEffect(() => {
     const nextControls = baseConfig.fields.map(makeFieldControl);
-    const requestedTab = (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
+    const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
     const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : tabs;
     const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
     const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
@@ -2692,11 +2676,12 @@ export default function FormSettingsPage() {
     setPublishCheckOpen(false);
     setVersionPanelOpen(false);
     setPreviewFlowNodeId('');
+    setPreviewRole('');
+    setHasAssociatedFlow(false);
     setDraggedControlId('');
     setDropHint(null);
     setCanvasDragActive(false);
     setFieldDefaultValueDrafts({});
-    setRuleOverrides({});
     setRuleModal(null);
     setProfessionalFlowConfig(makeProfessionalFlowConfig(baseConfig));
     setPlatformForm((current) => {
@@ -2712,7 +2697,7 @@ export default function FormSettingsPage() {
     setFlowNodes(nextFlowNodes);
     setFlowConnections(makeFlowConnections(nextFlowNodes));
     setPendingFlowPort(null);
-  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id]);
+  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, initialTab]);
 
   useEffect(() => {
     if (!previewFlowNodeOptions.length) {
@@ -2749,15 +2734,20 @@ export default function FormSettingsPage() {
           },
         }));
         setPlatformForm(formDetail);
+        const savedCanvas=formDetail.config?.canvasSettings as {columns?:number;gap?:number}|undefined;
+        setCanvasSettings({columns:[1,2,3].includes(Number(savedCanvas?.columns))?Number(savedCanvas?.columns):2,gap:[8,12,16].includes(Number(savedCanvas?.gap))?Number(savedCanvas?.gap):12});
         const savedControls = formDetail.config?.formDesignerControls as LayoutControl[] | undefined;
         if (Array.isArray(savedControls)) {
           const knownFields = new Set(databaseFields.map((field) => field.key));
-          const restoredControls = savedControls.filter((control) => control && typeof control.id === 'string'
+          const restoredControls = normalizeLayout(savedControls.filter((control) => control && typeof control.id === 'string'
             && typeof control.controlType === 'string' && ['field', 'component'].includes(control.source)
             && (control.source !== 'field' || knownFields.has(String(control.fieldKey))))
-            .map((control) => ({ ...control, rules: normalizeControlRules(control.rules) }));
+            .map((control) => ({ ...control, computed: control.computed === undefined ? databaseFields.find(field => field.key === control.fieldKey)?.calculationRule : control.computed, rules: normalizeControlRules(control.rules) })));
           setLayoutControls(restoredControls);
           setSelectedControlId(restoredControls[0]?.id || '');
+        } else {
+          setLayoutControls(databaseFields.map(makeFieldControl));
+          setSelectedControlId('');
         }
         const storedAnalyticsDesign = getStoredAnalyticsDesign(formDetail, {
           ...baseConfig,
@@ -2765,7 +2755,7 @@ export default function FormSettingsPage() {
         });
         setAnalyticsDesign(storedAnalyticsDesign);
         setSelectedAnalyticsWidgetId(storedAnalyticsDesign.widgets[0]?.id || '');
-        setPermissionDrafts(permissionDraftsFromConfig(formDetail.config));
+        setPermissionDrafts(permissionDraftsFromConfig({...formDetail.config,permissionDesign:formDetail.config?.permissionDesignDraft||formDetail.config?.permissionDesign}));
         try {
           const permissionsResponse = await listPlatformFormPermissions(formDetail.id);
           if (!cancelled) {
@@ -2777,7 +2767,7 @@ export default function FormSettingsPage() {
         }
         const viewSourceFields = databaseFields;
         let persistedViewConfig = getStoredViewConfig(formDetail, baseConfig);
-        if (!persistedViewConfig) {
+        if (!persistedViewConfig && restoredDesignFormId.current !== formDetail.id) {
           try {
             const layoutsResponse = await listPlatformFormLayouts(formDetail.id);
             const layouts = (layoutsResponse.data?.data || []) as Array<{ layout_type?: string; config?: Record<string, unknown> }>;
@@ -2795,8 +2785,8 @@ export default function FormSettingsPage() {
             console.warn('view layout load failed', error);
           }
         }
-        if (persistedViewConfig && !cancelled) {
-          setViewConfig(persistedViewConfig);
+        if (!cancelled) {
+          setViewConfig(persistedViewConfig || makeDesignerViewConfig(baseConfig));
         }
         const meta = getWorkflowDesignerMeta(formDetail);
         setWorkflowMeta(meta);
@@ -2808,7 +2798,11 @@ export default function FormSettingsPage() {
           boundTrigger = bindings.find((binding) => binding.enabled && ['submit', 'manual_submit'].includes(binding.trigger_action));
           workflowId = boundTrigger?.workflow_id;
         }
-        if (!workflowId) return;
+        if (!workflowId) {
+          setProfessionalFlowConfig(makeProfessionalFlowConfig(baseConfig));
+          setHasUnsavedChanges(false);
+          return;
+        }
         const definitionResponse = await wfGetDefinition(workflowId);
         if (cancelled) return;
         const definition = definitionResponse.data as WorkflowDefinitionPayload;
@@ -2823,6 +2817,7 @@ export default function FormSettingsPage() {
               ? { ...binding, action: boundTrigger!.trigger_action, enabled: true } : binding);
           }
           setProfessionalFlowConfig(nextConfig);
+          setHasAssociatedFlow(true);
           setVersion(nextConfig.version);
           setHasUnsavedChanges(false);
         }
@@ -2840,7 +2835,7 @@ export default function FormSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [baseConfig.id, baseConfig.name, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, staticBaseConfig.id]);
+  }, [baseConfig.id, baseConfig.name, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, staticBaseConfig.id, designerReloadKey]);
 
   const selectedControl = useMemo(
     () => layoutControls.find((control) => control.id === selectedControlId),
@@ -2864,12 +2859,41 @@ export default function FormSettingsPage() {
   const selectedControlUsesDataSource = Boolean(
     selectedControl && isDataSourceControlType(selectedEffectiveControlType),
   );
-  const selectedControlUsesOptionSort = Boolean(selectedControl && selectedControlUsesDataSource);
   const selectedReferenceSourceKind = selectedControl?.dataSourceKind || inferReferenceSourceKind(selectedField, selectedEffectiveControlType);
   const selectedReferenceConfig = getReferenceConfig(selectedReferenceSourceKind);
   const selectedControlUsesEncoding = Boolean(
     selectedControl && (selectedEffectiveControlType === 'code' || isEncodingField(selectedField)),
   );
+  const [optionCatalog,setOptionCatalog]=useState<{dictionaries:Array<{code:string;name:string}>;externalApis:Array<{id:number;name:string}>}>({dictionaries:[],externalApis:[]});
+  const [testingOptionSource,setTestingOptionSource]=useState(false);
+  useEffect(()=>{getFormOptionSources().then(response=>setOptionCatalog(response.data.data)).catch(()=>message.error('字典与 API 数据源列表加载失败，请刷新重试'));},[]);
+  const [referenceForms,setReferenceForms]=useState<PlatformForm[]>([]);
+  const [referenceLabelOptions,setReferenceLabelOptions]=useState<Array<{value:string;label:string}>>([]);
+  useEffect(()=>{listPlatformForms().then(res=>setReferenceForms(res.data?.data||[])).catch(()=>{});},[]);
+  useEffect(() => {
+    let cancelled = false;
+    const sources = Array.from(new Set(analyticsDesign.datasets.map(dataset => dataset.source)));
+    void Promise.all(sources.map(async source => {
+      if (analyticsSourceFields[source]) return;
+      const form = referenceForms.find(item => item.code === source || String(item.id) === source);
+      if (!form) return;
+      try { const response = await getPlatformForm(form.id); if (!cancelled) setAnalyticsSourceFields(current => ({...current, [source]: response.data.data.fields || []})); }
+      catch { /* The runtime and publish check surface unavailable sources. */ }
+    }));
+    return () => { cancelled = true; };
+  }, [analyticsDesign.datasets.map(dataset => dataset.source).join('|'), referenceForms]);
+
+  useEffect(()=>{
+    let cancelled=false;
+    setReferenceLabelOptions(selectedReferenceConfig.labelFields);
+    if(selectedReferenceSourceKind==='businessForm'&&selectedControl?.optionSource){
+      getPlatformFormByCode(selectedControl.optionSource,{schema:'published',scope:'designer'}).then(res=>{
+        if(!cancelled){const options=(res.data?.data?.fields||[]).filter((field:PlatformFormField)=>!field.archived).map((field:PlatformFormField)=>({value:field.field_name,label:field.label}));setReferenceLabelOptions(options);if(options.length&&!selectedControl.referenceLabelField)updateSelectedControl({referenceLabelField:options[0].value});}
+      }).catch(()=>{if(!cancelled)setReferenceLabelOptions([]);});
+    }
+    return()=>{cancelled=true;};
+  },[selectedReferenceSourceKind,selectedControl?.optionSource]);
+
   const assignmentSourceAttributeOptions = useMemo(() => {
     const options: Array<{ value: string; label: string }> = [
       { value: 'self.value', label: '本字段值' },
@@ -2883,7 +2907,7 @@ export default function FormSettingsPage() {
       );
     }
     if (selectedControlUsesDataSource && selectedReferenceSourceKind !== 'static') {
-      [...selectedReferenceConfig.valueFields, ...selectedReferenceConfig.labelFields].forEach((field) => {
+      [{value:'id',label:'记录 ID'}, ...referenceLabelOptions].forEach((field) => {
         const value = `record.${field.value}`;
         if (!options.some((item) => item.value === value)) {
           options.push({ value, label: `关联记录.${field.label}` });
@@ -2891,7 +2915,7 @@ export default function FormSettingsPage() {
       });
     }
     return options;
-  }, [selectedControlUsesDataSource, selectedField, selectedReferenceConfig, selectedReferenceSourceKind]);
+  }, [selectedControlUsesDataSource, selectedField, selectedReferenceConfig, selectedReferenceSourceKind, referenceLabelOptions]);
   const assignmentTargetFieldOptions = useMemo(() => (
     baseConfig.fields
       .filter((field) => field.key !== selectedField?.key)
@@ -2980,7 +3004,14 @@ export default function FormSettingsPage() {
       ...enabledFilters.filter((filter) => !baseConfig.fields.some((field) => field.key === filter.fieldName)).map((filter) => filter.label),
       ...enabledColumns.filter((column) => !baseConfig.fields.some((field) => field.key === column.fieldName)).map((column) => column.label),
     ];
+    const duplicates=duplicateFieldBindings(layoutControls);
+    const unbound=layoutControls.filter(c=>!c.fieldKey&&!isLayoutContainer(c)&&c.controlType!=='divider');
+    const defaultErrors = defaultRuleErrors(layoutControls, baseConfig.fields);
     const checks: PublishCheckItem[] = [
+      { level: baseConfig.fields.length > DEFAULT_FORM_LIMITS.fields ? 'error' : 'suggestion', title: '表单容量规则', detail: `当前 ${baseConfig.fields.length} 个字段，系统上限 ${DEFAULT_FORM_LIMITS.fields} 个；单条记录最多 2 MiB` },
+      { level: defaultErrors.length ? 'error' : 'suggestion', title: '默认值规则', detail: defaultErrors.length ? defaultErrors.join('；') : '默认值字段引用与依赖关系有效' },
+      {level:duplicates.length?'error':'suggestion',title:'字段绑定唯一性',detail:duplicates.length?`请重新绑定复制控件：${duplicates.join('、')}`:'每个字段仅绑定一个控件'},
+      {level:unbound.length?'error':'suggestion',title:'控件数据绑定',detail:unbound.length?`请绑定字段或移除控件：${unbound.map(c=>c.name).join('、')}`:'所有输入控件都已绑定字段'},
       {
         level: missingRequired.length ? 'error' : 'suggestion',
         title: '必填字段覆盖',
@@ -3026,11 +3057,11 @@ export default function FormSettingsPage() {
         title: '视图字段绑定',
         detail: invalidViewFields.length ? `以下筛选或列绑定字段不存在：${invalidViewFields.join('、')}` : '筛选条件和表格列均已绑定有效字段。',
       },
-      {
-        level: baseConfig.id === 'alert-center' ? 'suggestion' : 'warning',
+      ...(baseConfig.id === 'alert-center' ? [{
+        level: 'suggestion' as const,
         title: '严重告警处理规则',
-        detail: baseConfig.id === 'alert-center' ? '已启用推荐规则：严重告警要求附件证据和处理时限。' : '建议按业务场景配置高风险记录的强制处理规则。',
-      },
+        detail: '建议确认严重告警已配置附件证据和处理时限必填规则。',
+      }] : []),
     ];
     checks.push({
       level: flowErrors.length ? 'error' : flowWarnings.length ? 'warning' : 'suggestion',
@@ -3048,13 +3079,13 @@ export default function FormSettingsPage() {
     const items = serverPublishReport.items.map((item) => ({
       level: item.level === 'blocking' ? 'error' : item.level === 'warning' ? 'warning' : 'suggestion',
       title: item.label ? `${item.label} / ${item.type}` : item.type,
-      detail: `${item.detail}${item.affected_count ? ` (${item.affected_count} affected)` : ''}`,
+      detail: `${item.detail}${item.affected_count ? `（影响 ${item.affected_count} 条记录）` : ''}`,
     } as PublishCheckItem));
     if (!items.length) {
       items.push({
         level: 'suggestion',
-        title: 'Backend impact report',
-        detail: `No blocking schema impact found across ${serverPublishReport.record_count} existing records.`,
+        title: '业务数据影响检查',
+        detail: `已检查 ${serverPublishReport.record_count} 条现有记录，未发现阻断发布的结构变更。`,
       });
     }
     return items;
@@ -3065,6 +3096,11 @@ export default function FormSettingsPage() {
   );
   const publishErrorCount = combinedPublishChecks.filter((item) => item.level === 'error').length;
   const publishWarningCount = combinedPublishChecks.filter((item) => item.level === 'warning').length;
+  const localErrorCount = publishChecks.filter((item) => item.level === 'error').length;
+  const localWarningCount = publishChecks.filter((item) => item.level === 'warning').length;
+  const recommendedRules = getRecommendedRules(baseConfig.fields);
+  const publishedVersion = platformForm?.config?.publishedSchemaVersion || viewConfigMeta.publishedVersion;
+  const draftStatusLabel = hasUnsavedChanges ? '草稿有未保存修改' : viewConfigMeta.status === 'published' ? '草稿无修改' : '草稿已保存 · 待发布';
 
   const updateSelectedControlRule = (ruleKey: ControlRuleKey, patch: Partial<ControlRule>) => {
     if (!selectedControl) return;
@@ -3096,7 +3132,7 @@ export default function FormSettingsPage() {
     if (Array.isArray(rule.conditionGroups) && rule.conditionGroups.length) {
       return rule.conditionGroups.map((group) => (Array.isArray(group) && group.length ? group : [{}]));
     }
-    return rule.conditions ? [[rule.conditions]] : [];
+    return rule.conditions?.sourceField ? [[{sourceField:rule.conditions.sourceField,operator:rule.conditions.operator,value:rule.conditions.value}]] : [];
   };
 
   const getRuleGroupTitle = (rule: ControlRule, groupIndex: number) => {
@@ -3115,7 +3151,7 @@ export default function FormSettingsPage() {
     updateSelectedControlRule(ruleKey, {
       conditionGroups: normalizedGroups,
       conditionGroupTitles: titles.slice(0, normalizedGroups.length),
-      conditions: normalizedGroups[0]?.[0],
+      conditions: { ...normalizeControlRules(selectedControl?.rules,selectedField)[ruleKey].conditions, sourceField:undefined,operator:undefined,value:undefined,...normalizedGroups[0]?.[0] },
     });
   };
 
@@ -3173,29 +3209,6 @@ export default function FormSettingsPage() {
     updateSelectedControlRule(ruleKey, { conditionGroupTitles: titles });
   };
 
-  const genericRuleToggle = (defaultEnabled: boolean, title: string, key = title) => {
-    const scope = selectedControl?.id || selectedField?.key || baseConfig.id;
-    const ruleKey = `${activeTab}:${scope}:${key}`;
-    const enabled = ruleOverrides[ruleKey] ?? defaultEnabled;
-    return (
-      <RuleToggleControl
-        enabled={enabled}
-        onConfig={() => {
-          setRuleOverrides((current) => ({ ...current, [ruleKey]: current[ruleKey] ?? defaultEnabled }));
-          message.info(`已进入「${title}」默认规则配置，可按字段值或流程状态设置规则；角色差异请到权限设计配置`);
-        }}
-        onToggle={() => {
-          setRuleOverrides((current) => {
-            const nextEnabled = !(current[ruleKey] ?? defaultEnabled);
-            message.success(`${title}已${nextEnabled ? '启用' : '关闭'}`);
-            return { ...current, [ruleKey]: nextEnabled };
-          });
-        }}
-        title={title}
-      />
-    );
-  };
-
   const controlRuleToggle = (ruleKey: ControlRuleKey) => {
     if (!selectedControl) return null;
     const rule = normalizeControlRules(selectedControl.rules, selectedField)[ruleKey];
@@ -3203,7 +3216,7 @@ export default function FormSettingsPage() {
     return (
       <RuleToggleControl
         enabled={rule.enabled}
-        onConfig={() => setRuleModal({ controlId: selectedControl.id, ruleKey })}
+        onConfig={() => {ruleOpeningValue.current={id:selectedControl.id,key:ruleKey,value:structuredClone(rule)};setRuleModal({ controlId: selectedControl.id, ruleKey });}}
         onToggle={() => updateSelectedControlRule(ruleKey, { enabled: !rule.enabled })}
         title={title}
       />
@@ -3237,7 +3250,7 @@ export default function FormSettingsPage() {
               />
             </div>
           </label>
-          <label><span>文本格式</span><Select value={typeSettings.textFormat || 'plain'} options={textFormatOptions} onChange={(textFormat) => updateSelectedTypeSettings({ textFormat })} /></label>
+          <label><span>文本格式</span><Select value={typeSettings.textFormat || 'plain'} options={textFormatOptions.filter(option=>['plain','email','phone','url','idNo','password'].includes(String(option.value)))} onChange={(textFormat) => updateSelectedTypeSettings({ textFormat })} /></label>
           <label><span>空格处理</span><Select value={typeSettings.trimMode || 'trim'} options={textTrimModeOptions} onChange={(trimMode) => updateSelectedTypeSettings({ trimMode })} /></label>
           <label><span>大小写</span><Select value={typeSettings.caseMode || 'original'} options={textCaseModeOptions} onChange={(caseMode) => updateSelectedTypeSettings({ caseMode })} /></label>
           {selectedEffectiveControlType === 'textarea' && (
@@ -3266,12 +3279,16 @@ export default function FormSettingsPage() {
     if (selectedEffectiveControlType === 'select' || selectedEffectiveControlType === 'relation') {
       return (
         <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">{selectedEffectiveControlType === 'relation' ? '关联设置' : '选择设置'}</strong>
-          <label><span>选择模式</span><Select value={typeSettings.selectionMode || 'single'} options={selectionModeOptions} onChange={(selectionMode) => updateSelectedTypeSettings({ selectionMode })} /></label>
-          <label><span>展示方式</span><Select value={typeSettings.displayMode || (selectedEffectiveControlType === 'relation' ? 'search' : 'dropdown')} options={selectionDisplayOptions} onChange={(displayMode) => updateSelectedTypeSettings({ displayMode })} /></label>
-          <label><span>允许清空</span><Switch size="small" checked={typeSettings.allowClear !== false} onChange={(allowClear) => updateSelectedTypeSettings({ allowClear })} /></label>
-          {selectedEffectiveControlType === 'select' && (
-            <label><span>允许临时项</span><Switch size="small" checked={Boolean(typeSettings.allowCreateOption)} onChange={(allowCreateOption) => updateSelectedTypeSettings({ allowCreateOption })} /></label>
+          {renderPropertyHeading(selectedEffectiveControlType === 'relation' ? '关联设置' : '选择设置', '设置如何选择和展示选项；候选内容在数据来源中配置。问号可查看每项设置的效果与适用范围。')}
+          <div className="designer-property-rule-row">{renderRuleLabel('选择模式', '单选每次选择一项，多选可同时选择多项。关联对象、字典和 API 来源当前仅支持单选。', true)}<Select aria-label="选择模式" value={typeSettings.selectionMode || 'single'} options={(selectedEffectiveControlType==='relation'||['dictionary','externalApi'].includes(selectedReferenceSourceKind))?selectionModeOptions.filter(option=>option.value==='single'):selectionModeOptions} onChange={(selectionMode) => updateSelectedTypeSettings({ selectionMode })} /></div>
+          <div className="designer-property-rule-row">{renderRuleLabel('展示方式', '下拉适合普通选项；搜索可按选项文字查找；单复选会直接铺开选项；标签按多选方式填写。', true)}<Select aria-label="展示方式" value={typeSettings.displayMode || (selectedEffectiveControlType === 'relation' ? 'search' : 'dropdown')} options={(selectedEffectiveControlType==='relation'||['dictionary','externalApi'].includes(selectedReferenceSourceKind))?selectionDisplayOptions.filter(option=>['dropdown','search'].includes(String(option.value))):selectionDisplayOptions} onChange={(displayMode) => updateSelectedTypeSettings({ displayMode })} /></div>
+          {(typeSettings.displayMode || (selectedEffectiveControlType === 'relation' ? 'search' : 'dropdown')) === 'search' && <div className="designer-property-rule-row">
+            {renderRuleLabel('搜索设置', '配置搜索字段、匹配方式和候选范围；齿轮中可输入关键词试搜。', true)}
+            <div className="designer-rule-toggle"><Button className="designer-rule-config-button" aria-label="设置搜索规则" type="text" size="small" icon={<SettingOutlined />} disabled={!selectedControl?.fieldKey} onClick={openSearchSettings} /></div>
+          </div>}
+          <div className="designer-property-rule-row">{renderRuleLabel('允许清空', '下拉或搜索框中可一键移除已选内容。关闭后隐藏清空按钮；必填字段清空后仍需重新选择才能提交。', true)}<Switch aria-label="允许清空" size="small" checked={typeSettings.allowClear !== false} onChange={(allowClear) => updateSelectedTypeSettings({ allowClear })} /></div>
+          {selectedEffectiveControlType === 'select' && !['dictionary','externalApi'].includes(selectedReferenceSourceKind) && (
+            <div className="designer-property-rule-row">{renderRuleLabel('允许临时项', '多选或标签模式下，可输入候选项以外的新值；单选及单复选展示不支持。新值只保存到当前记录，不会自动新增来源数据。', true)}<Switch aria-label="允许临时项" size="small" checked={Boolean(typeSettings.allowCreateOption)} onChange={(allowCreateOption) => updateSelectedTypeSettings({ allowCreateOption })} /></div>
           )}
         </section>
       );
@@ -3309,21 +3326,34 @@ export default function FormSettingsPage() {
     return null;
   };
 
+  const formatStorageBudget = (bytes: number) => bytes >= 1048576 && bytes % 1048576 === 0 ? `${bytes / 1048576} MiB` : bytes >= 1024 && bytes % 1024 === 0 ? `${bytes / 1024} KiB` : `${bytes} 字节`;
+
+  const renderFieldBindingProperties = () => selectedControl && !isLayoutContainer(selectedControl) ? <>
+    <label className="designer-prop-locked">
+      <span>绑定字段</span>
+      <Select aria-label="绑定字段" allowClear value={selectedControl.fieldKey} placeholder="请选择存储字段" options={baseConfig.fields.map(f => ({ value: f.key, label: `${f.name} (${f.key})` }))} onChange={fieldKey => updateSelectedControl({ fieldKey, source: 'field' })} />
+    </label>
+    <label className="designer-prop-locked"><span>字段类型</span><Input value={getFieldStorageTypeLabel(selectedField)} disabled suffix="数据库字段" /></label>
+    {selectedField && (DEFAULT_FIELD_BYTES[mapDesignerFieldType(selectedField)] ? <label className="designer-prop-locked">
+      {renderRuleLabel('存储上限', '短文本默认 1 KiB（1024 字节），长文本 64 KiB，明细 1 MiB。系统统一管理，设计中不可修改；上限不会预占空间。字符范围在文本设置中单独限制。')}
+      <Input aria-label="存储上限" readOnly value={`${selectedField.maxBytes ? '已设' : '默认'} ${formatStorageBudget(selectedField.maxBytes ?? DEFAULT_FIELD_BYTES[mapDesignerFieldType(selectedField)])}`} />
+    </label> : <label className="designer-prop-locked"><span>字段大小</span><Input value={fieldStorageSize(mapDesignerFieldType(selectedField), selectedField.maxBytes)} readOnly /></label>)}
+  </> : null;
+
   const renderControlIdentityProperties = () => {
     if (!selectedControl) return null;
     return (
-      <section className="designer-prop-section designer-prop-section-identity">
-        <strong className="designer-prop-section-title">控件身份</strong>
-        <label className="designer-prop-row-key">
-          <span>控件名称</span>
+      <PropertyGroup title={embedded ? '基本信息' : '控件身份'} className="designer-prop-section designer-prop-section-identity" titleClassName="designer-prop-section-title">
+        <PropertyRow label={embedded ? '显示名称' : '控件名称'} className="designer-prop-row-key">
           <Input
+            aria-label="显示名称"
             value={selectedControl.name}
             onChange={(event) => updateSelectedControl({ name: event.target.value })}
           />
-        </label>
+        </PropertyRow>
         <label>
-          <span>控件类型</span>
-          <Select
+          <span>{embedded ? '填写方式' : '控件类型'}</span>
+          {isLayoutContainer(selectedControl) ? <Input readOnly value={selectedControl.controlType === 'container' ? '分组容器' : selectedControl.controlType === 'tabs' ? '页签容器' : '多列布局'} /> : <Select
             value={selectedEffectiveControlType}
             options={isEncodingField(selectedField) ? controlTypeOptions.filter((option) => ['code', 'text', 'textarea', 'readonly-text'].includes(String(option.value))) : controlTypeOptions}
             onChange={(controlType) => {
@@ -3334,24 +3364,15 @@ export default function FormSettingsPage() {
                 typeSettings: getDefaultTypeSettings(controlType, selectedField),
               });
             }}
-          />
+          />}
         </label>
-        <label className="designer-prop-locked">
-          <span>绑定字段</span>
-          <Input value={selectedField ? selectedField.name : '未绑定字段'} disabled />
-        </label>
-        <label className="designer-prop-locked">
-          <span>字段类型</span>
-          <Input value={getFieldStorageTypeLabel(selectedField)} disabled suffix="数据库字段" />
-        </label>
-        {selectedField && <label className="designer-prop-locked">
-          <span>字段大小</span>
-          <Input value={fieldStorageSize(mapDesignerFieldType(selectedField), selectedField.maxBytes)} readOnly />
-        </label>}
-      </section>
+        {renderFieldBindingProperties()}
+        {embedded && !isLayoutContainer(selectedControl) && !selectedControl.fieldKey && <Alert type="warning" showIcon message="请先绑定存储字段" description="在下方高级设置中选择字段后，填写内容才能保存。" />}
+      </PropertyGroup>
     );
   };
 
+  const referenceObjectOptions=selectedReferenceSourceKind==='dictionary'?optionCatalog.dictionaries.map(item=>({value:item.code,label:item.name})):selectedReferenceSourceKind==='externalApi'?optionCatalog.externalApis.map(item=>({value:String(item.id),label:item.name})):selectedReferenceSourceKind==='businessForm'?referenceForms.filter(form=>form.id!==platformForm?.id).map(form=>({value:form.code,label:form.name})):selectedReferenceConfig.objects;
   const renderDataSourceProperties = () => {
     if (!selectedControl || !selectedControlUsesDataSource) return null;
     return (
@@ -3366,7 +3387,10 @@ export default function FormSettingsPage() {
               const config = getReferenceConfig(dataSourceKind);
               updateSelectedControl({
                 dataSourceKind,
-                optionSource: config.objects[0]?.value,
+                optionSource: dataSourceKind==='dictionary'?optionCatalog.dictionaries[0]?.code:dataSourceKind==='externalApi'?String(optionCatalog.externalApis[0]?.id||''):dataSourceKind==='businessForm'?referenceForms[0]?.code:config.objects[0]?.value,
+                referenceValueField:undefined,referenceItemsPath:'data',
+                typeSettings:{...selectedControl.typeSettings,search:undefined,...(['dictionary','externalApi'].includes(dataSourceKind)?{selectionMode:'single',displayMode:'search',allowCreateOption:false}:{})},
+                referenceLabelField:undefined,
               });
             }}
           />
@@ -3385,42 +3409,27 @@ export default function FormSettingsPage() {
           <label>
             <span>引用对象</span>
             <Select
-              value={selectedControl.optionSource || selectedReferenceConfig.objects[0]?.value}
-              options={selectedReferenceConfig.objects}
+              value={selectedControl.optionSource || undefined}
+              options={referenceObjectOptions}
               placeholder={selectedReferenceConfig.placeholder}
-              onChange={(optionSource) => updateSelectedControl({ optionSource })}
+              onChange={(optionSource) => updateSelectedControl({ optionSource,referenceLabelField:undefined,typeSettings:{...selectedControl.typeSettings,search:undefined} })}
             />
           </label>
         )}
         <label>
           <span>显示字段</span>
-          <Select
-            value={selectedReferenceConfig.labelFields[0]?.value}
-            options={selectedReferenceConfig.labelFields}
-          />
+          {selectedReferenceSourceKind==='externalApi'?<Input aria-label="API 显示字段" value={selectedControl.referenceLabelField||'name'} onChange={event=>updateSelectedControl({referenceLabelField:event.target.value})}/>:<Select
+            value={selectedControl.referenceLabelField || referenceLabelOptions[0]?.value} onChange={referenceLabelField=>updateSelectedControl({referenceLabelField})}
+            options={referenceLabelOptions} disabled={['static','dictionary'].includes(selectedReferenceSourceKind)}
+          />}
         </label>
         <label>
           <span>值字段</span>
-          <Select
-            value={selectedReferenceConfig.valueFields[0]?.value}
-            options={selectedReferenceConfig.valueFields}
-          />
+          {selectedReferenceSourceKind==='externalApi'?<Input aria-label="API 值字段" value={selectedControl.referenceValueField||'id'} onChange={event=>updateSelectedControl({referenceValueField:event.target.value})}/>:<Input readOnly value={selectedReferenceSourceKind==='dictionary'?'value（字典项编码）':'id（记录 ID）'}/>}
+
         </label>
-        <label>
-          <span>选项预览</span>
-          <Select
-            value={
-              selectedReferenceSourceKind === 'static'
-                ? optionSourceToOptions(selectedControl.optionSource || selectedField?.optionSource, selectedControl.placeholder || selectedField?.placeholder)[0]?.value
-                : selectedReferenceConfig.preview[0]
-            }
-            options={
-              selectedReferenceSourceKind === 'static'
-                ? optionSourceToOptions(selectedControl.optionSource || selectedField?.optionSource, selectedControl.placeholder || selectedField?.placeholder)
-                : selectedReferenceConfig.preview.map((item) => ({ value: item, label: item }))
-            }
-          />
-        </label>
+        {selectedReferenceSourceKind==='externalApi'&&<><label><span>选项数组路径</span><Input aria-label="API 数组路径" placeholder="data.items；根数组留空" value={selectedControl.referenceItemsPath??'data'} onChange={event=>updateSelectedControl({referenceItemsPath:event.target.value})}/></label><small>只读 GET；接口 URL、认证头及内网访问许可在数据连接中维护，表单只保存数据源 ID 和映射。最多 1000 项。</small></>}
+        {selectedReferenceSourceKind!=='static'&&<Button loading={testingOptionSource} disabled={!platformForm||!selectedControl.optionSource} onClick={async()=>{if(!platformForm||!selectedControl.fieldKey)return;setTestingOptionSource(true);try{const response=await previewFormReferenceOptions(platformForm.id,selectedControl.fieldKey,layoutControls,{});const options=response.data.data||[];Modal.info({className:'form-designer-dialog',title:`真实选项预览（${options.length} 项）`,content:<div style={{maxHeight:300,overflow:'auto'}}>{options.slice(0,20).map((option:any)=><div key={String(option.id)}>{option.label} · {String(option.id)}</div>)}{!options.length&&'当前来源没有启用的选项'}</div>});}catch(error:any){message.error(error?.response?.data?.detail||'选项读取失败');}finally{setTestingOptionSource(false);}}}>读取真实选项</Button>}
       </section>
     );
   };
@@ -3432,8 +3441,8 @@ export default function FormSettingsPage() {
         <strong className="designer-prop-section-title">
           <span>编码规则</span>
           <Button className="encoding-heading-add" aria-label="新增编码规则" title="新增编码规则"
-            icon={<PlusOutlined />} onClick={() => setEncodingSettingsDraft({ ...makeEncodingRule(selectedField),
-              id: `rule-${crypto.randomUUID()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] })} size="small" type="text" />
+            icon={<PlusOutlined />} onClick={() => { encodingRuleTargetRef.current = { controlId: selectedControlId, rule: selectedEncodingRule }; setEncodingSettingsDraft({ ...makeEncodingRule(selectedField),
+              id: `rule-${crypto.randomUUID()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] }); }} size="small" type="text" />
         </strong>
         {getEncodingRules(selectedEncodingRule).map((rule, index) => (
           <label key={rule.id || index}>
@@ -3442,7 +3451,7 @@ export default function FormSettingsPage() {
 
               <Button className="designer-rule-config-button" aria-label={`设置编码规则：${rule.name}`}
                 title="设置编码规则" icon={<SettingOutlined />} size="small" type="text"
-                onClick={() => setEncodingSettingsDraft({ ...structuredClone(rule), priority: index + 1 })} />
+                onClick={() => { encodingRuleTargetRef.current = { controlId: selectedControlId, rule: selectedEncodingRule }; setEncodingSettingsDraft(structuredClone(rule)); }} />
               <button type="button" role="switch" aria-label={`启用编码规则：${rule.name}`} aria-checked={rule.enabled !== false}
                 className={`designer-rule-check ${rule.enabled !== false ? 'designer-rule-check-on' : ''}`}
                 title={rule.enabled !== false ? '已启用' : '已停用'}
@@ -3457,90 +3466,379 @@ export default function FormSettingsPage() {
     );
   };
 
+  const renderPropertyHeading = (title: string, help: string) => <strong className="designer-prop-section-title"><span>{title}</span><Tooltip title={help}><button className="designer-property-help" type="button" aria-label={`${title}说明`}><QuestionCircleOutlined /></button></Tooltip></strong>;
+
   const renderDisplayProperties = () => {
     if (!selectedControl) return null;
+    const presentation = getControlPresentation(selectedControl.presentation);
+    const updatePresentation = (patch: Partial<ControlPresentation>) => updateSelectedControl({ presentation: { ...selectedControl.presentation, ...patch } });
+    const hasFieldLabel = Boolean(selectedControl.fieldKey) || ['text', 'textarea', 'number', 'select', 'relation', 'datetime', 'upload', 'switch', 'readonly-text', 'code'].includes(selectedControl.controlType);
     return (
-      <section className="designer-prop-section">
-        <strong className="designer-prop-section-title">布局</strong>
-        <label>
-          <span>控件宽度</span>
-          <div className="designer-width-picker">
-            {controlWidthOptions.map((option) => (
-              <button
-                className={`designer-width-option ${selectedControl.width === option.value ? 'designer-width-option-active' : ''}`}
-                key={option.value}
-                onClick={() => updateSelectedControl({ width: option.value as ControlWidth })}
-                type="button"
-              >
-                <span>{option.label}</span>
-              </button>
-            ))}
-          </div>
-        </label>
-      </section>
+      <PropertyGroup title="布局与外观" className="designer-prop-section designer-layout-properties" titleClassName="designer-prop-section-title">
+        <PropertyRow label="布局占比" hint="宽度相对于所在容器，空间不足时自动换行；外观参数留空时跟随主题。" className="designer-width-setting">
+          <Select aria-label="布局占比" value={selectedControl.width} options={controlWidthOptions}
+            onChange={width => updateSelectedControl({ width: width as ControlWidth, presentation: { ...selectedControl.presentation, startNewRow: false } })} />
+        </PropertyRow>
+        <PropertyAdvanced className="designer-appearance-advanced" key={selectedControl.id}>
+        {hasFieldLabel && <>
+          <label><span>标题位置</span><Select aria-label="标题位置" value={presentation.labelPosition} options={[{ value: 'top', label: '上方' }, { value: 'left', label: '左侧' }]} onChange={labelPosition => updatePresentation({ labelPosition, labelAlign: labelPosition === 'left' ? 'right' : 'left', labelWidth: labelPosition === 'left' ? 80 : presentation.labelWidth })} /></label>
+          <label><span>标题对齐</span><Select aria-label="标题对齐" value={presentation.labelAlign} options={[{ value: 'left', label: '左对齐' }, { value: 'right', label: '右对齐' }]} onChange={labelAlign => updatePresentation({ labelAlign })} /></label>
+          {presentation.labelPosition === 'left' && <label><span>标题宽度</span><InputNumber aria-label="标题宽度" min={64} max={240} step={8} value={presentation.labelWidth} suffix="px" onChange={labelWidth => updatePresentation({ labelWidth: labelWidth ?? 96 })} /></label>}
+        </>}
+        {hasFieldLabel && <>
+          <label><span>输入框高度</span><InputNumber aria-label="输入框高度" min={24} max={64} placeholder="跟随主题" value={presentation.controlHeight} suffix="px" onChange={controlHeight => updatePresentation({ controlHeight: controlHeight ?? undefined })} /></label>
+          <label><span>输入框宽度</span><InputNumber aria-label="输入框宽度" min={80} max={1600} placeholder="填满可用空间" value={presentation.controlWidth} suffix="px" onChange={controlWidth => updatePresentation({ controlWidth: controlWidth ?? undefined })} /></label>
+        </>}
+          <label><span>下方留白</span><InputNumber aria-label="下方留白" min={0} max={48} step={4} value={presentation.spacingAfter} suffix="px" onChange={spacingAfter => updatePresentation({ spacingAfter: spacingAfter ?? 0 })} /></label>
+          {hasFieldLabel && <>
+            <label><span>控件圆角</span><InputNumber aria-label="控件圆角" min={0} max={24} placeholder="跟随主题" value={presentation.borderRadius} suffix="px" onChange={borderRadius => updatePresentation({ borderRadius: borderRadius ?? undefined })} /></label>
+            <label><span>输入字号</span><InputNumber aria-label="输入字号" min={10} max={24} placeholder="跟随主题" value={presentation.fontSize} suffix="px" onChange={fontSize => updatePresentation({ fontSize: fontSize ?? undefined })} /></label>
+            <label><span>标题字号</span><InputNumber aria-label="标题字号" min={10} max={24} placeholder="跟随主题" value={presentation.labelFontSize} suffix="px" onChange={labelFontSize => updatePresentation({ labelFontSize: labelFontSize ?? undefined })} /></label>
+          </>}
+        </PropertyAdvanced>
+      </PropertyGroup>
     );
+  };
+
+  const openSearchSettings = async () => {
+    if (!selectedControl?.fieldKey) return;
+    const epoch = ++searchRequestEpoch.current;
+    const settings: OptionSearchSettings = structuredClone(selectedControl.typeSettings?.search || { fields: [], match: 'contains', filters: [] });
+    setSearchDraft({ controlId: selectedControl.id, settings, query: '', metaLoading: true, loading: false, error: '', rows: [], page: 1, hasMore: false, context: {} });
+    try {
+      const schema: OptionSearchSchema = selectedReferenceSourceKind === 'static'
+        ? { kind: 'static', fields: [{value:'label',label:'选项文字'}], defaultField:'label' }
+        : (await previewOptionSearchSchema(platformForm!.id, selectedControl.fieldKey, layoutControls)).data.data;
+      if (epoch !== searchRequestEpoch.current) return;
+      setSearchDraft(current => current && ({ ...current, schema, metaLoading: false, settings: { ...current.settings, fields: current.settings.fields?.length ? current.settings.fields : [schema.defaultField] } }));
+    } catch (error: any) {
+      if (epoch === searchRequestEpoch.current) setSearchDraft(current => current && ({ ...current, metaLoading: false, error: error?.response?.data?.detail || '无法读取来源字段，请先检查数据来源' }));
+    }
+  };
+  const updateSearchSettings = (patch: Partial<OptionSearchSettings>) => {
+    ++searchRequestEpoch.current;
+    setSearchDraft(current => current && ({ ...current, settings: { ...current.settings, ...patch }, rows: [], hasMore: false, tested: false, error: '', loading: false }));
+  };
+  const searchSettingsError = (draft: SearchSettingsDraft) => {
+    const names = new Set(draft.schema?.fields.map(field => field.value));
+    if (!draft.settings.fields?.length || draft.settings.fields.some(field => !names.has(field))) return '请选择有效的搜索字段';
+    for (const filter of draft.settings.filters || []) {
+      if (!names.has(filter.field)) return '请选择有效的范围字段';
+      if (['isEmpty','notEmpty'].includes(filter.operator)) continue;
+      if (filter.source === 'field' ? !baseConfig.fields.some(field => field.key === filter.sourceField) : !filter.value?.trim()) return '请完善候选范围的条件取值';
+    }
+    return '';
+  };
+  const updateSearchSample = (patch: Partial<SearchSettingsDraft>) => {
+    ++searchRequestEpoch.current;
+    setSearchDraft(current => current && ({ ...current, ...patch, rows: [], hasMore: false, tested: false, loading: false, error: '' }));
+  };
+  const testOptionSearch = async (page = 1) => {
+    if (!searchDraft?.schema || !selectedControl?.fieldKey || searchDraft.controlId !== selectedControl.id) return;
+    const invalid = searchSettingsError(searchDraft);
+    if (invalid) { setSearchDraft(current => current && ({ ...current, error: invalid })); return; }
+    const draft = searchDraft, epoch = ++searchRequestEpoch.current;
+    setSearchDraft(current => current && ({ ...current, loading: true, error: '' }));
+    try {
+      let result: {data: SearchSettingsDraft['rows']; has_more: boolean};
+      if (draft.schema?.kind === 'static') {
+        const values = enumOptions(selectedControl.optionSource ? optionSourceToOptions(selectedControl.optionSource) : selectedField?.enumValues);
+        const options = values.filter(option => matchesOptionSearch(option.label, draft.query, draft.settings.match));
+        result = { data: options.slice((page-1)*20,page*20).map(option => ({id:option.value,label:option.label,matchedFields:draft.query?['label']:[]})), has_more: options.length > page*20 };
+      } else {
+        const controls = layoutControls.map(control => control.id === draft.controlId ? { ...control, typeSettings: { ...control.typeSettings, search: draft.settings } } : control);
+        result = (await previewFormReferenceOptions(platformForm!.id, selectedControl.fieldKey, controls, draft.context, {query:draft.query,page,page_size:20})).data;
+      }
+      if (epoch === searchRequestEpoch.current) setSearchDraft(current => current && ({ ...current, rows: page===1?result.data:[...current.rows,...result.data], hasMore:result.has_more, page, loading:false, tested:true }));
+    } catch (error:any) {
+      if (epoch === searchRequestEpoch.current) setSearchDraft(current => current && ({ ...current, loading:false, error:error?.response?.data?.detail || '试搜失败，请检查来源与范围条件' }));
+    }
+  };
+  const applySearchSettings = () => {
+    if (!searchDraft || !selectedControl || searchDraft.controlId !== selectedControl.id) return;
+    const invalid = searchSettingsError(searchDraft);
+    if (invalid) { setSearchDraft(current => current && ({ ...current,error:invalid })); return; }
+    updateSelectedControl({ typeSettings: { ...selectedControl.typeSettings, search: searchDraft.settings } });
+    ++searchRequestEpoch.current; setSearchDraft(null);
+  };
+  const renderSearchSettingsEditor = () => {
+    if (!searchDraft) return null;
+    const { schema, settings } = searchDraft;
+    const filters = settings.filters || [];
+    const updateFilter = (id:string, patch:Partial<NonNullable<OptionSearchSettings['filters']>[number]>) => updateSearchSettings({filters:filters.map(filter => filter.id===id?{...filter,...patch}:filter)});
+    const linked = [...new Set(filters.filter(filter=>filter.source==='field'&&!['isEmpty','notEmpty'].includes(filter.operator)&&filter.sourceField).map(filter=>filter.sourceField!))];
+    return <div className="encoding-rule-workspace search-rule-workspace">
+      <section className="encoding-editor-section">
+        <div className="encoding-section-title"><strong>搜索内容</strong><span>{selectedControl?.name}</span></div>
+        <div className="search-source-note">数据来源：{schema?.kind==='static'?'当前字段的静态选项':referenceObjectOptions.find(option=>option.value===selectedControl?.optionSource)?.label||selectedControl?.optionSource||'尚未选择来源'}</div>
+        <div className="encoding-basics-fields">
+          <label className="encoding-editor-field"><span>搜索字段（任意字段匹配即可）</span><Select aria-label="搜索字段" mode="multiple" maxCount={8} loading={searchDraft.metaLoading} disabled={!schema||schema.kind==='static'} value={settings.fields} options={schema?.fields||[]} onChange={fields=>updateSearchSettings({fields})}/></label>
+          <label className="encoding-editor-field"><span>匹配方式</span><Select aria-label="搜索匹配方式" disabled={searchDraft.metaLoading} value={settings.match||'contains'} options={[{value:'contains',label:'包含'},{value:'prefix',label:'开头匹配'},{value:'exact',label:'完全匹配'}]} onChange={match=>updateSearchSettings({match})}/></label>
+        </div>
+        {schema?.note&&<p className="encoding-editor-hint">{schema.note}</p>}
+      </section>
+      {schema&&schema.kind!=='static'&&<section className="encoding-editor-section search-range-section">
+        <div className="encoding-section-title"><strong>候选范围 <span className="encoding-section-count">全部条件满足</span></strong><Button type="text" size="small" icon={<PlusOutlined/>} disabled={filters.length>=20} onClick={()=>updateSearchSettings({filters:[...filters,{id:crypto.randomUUID(),field:schema.fields[0]?.value||'',operator:'eq',source:'fixed',value:''}]})}>添加范围条件</Button></div>
+        <p className="encoding-editor-hint">始终限定在当前用户有权查看的数据内；不添加条件时使用全部授权候选。引用字段未填写时，不返回候选。</p>
+        {filters.map((filter,index)=><div key={filter.id} className="search-range-row">
+          <Select aria-label={`范围字段 ${index+1}`} value={filter.field} options={schema.fields} onChange={field=>updateFilter(filter.id,{field})}/>
+          <Select aria-label={`范围条件 ${index+1}`} value={filter.operator} options={[{value:'eq',label:'等于'},{value:'ne',label:'不等于'},{value:'isEmpty',label:'为空'},{value:'notEmpty',label:'不为空'}]} onChange={operator=>updateFilter(filter.id,{operator})}/>
+          {!['isEmpty','notEmpty'].includes(filter.operator)?<><Select aria-label={`范围取值方式 ${index+1}`} value={filter.source} options={[{value:'fixed',label:'固定值'},{value:'field',label:'当前表单字段'}]} onChange={source=>updateFilter(filter.id,{source})}/>
+          {filter.source==='fixed'?<Input aria-label={`范围固定值 ${index+1}`} placeholder="例如：启用" value={filter.value} onChange={event=>updateFilter(filter.id,{value:event.target.value})}/>:<Select aria-label={`范围引用字段 ${index+1}`} placeholder="选择表单字段" value={filter.sourceField} options={baseConfig.fields.filter(field=>field.storageType!=='json'&&field.key!==selectedControl?.fieldKey).map(field=>({value:field.key,label:field.name}))} onChange={sourceField=>updateFilter(filter.id,{sourceField})}/>}</>:<span className="search-range-no-value">无需取值</span>}
+          <Button type="text" size="small" aria-label={`删除范围条件 ${index+1}`} icon={<DeleteOutlined/>} onClick={()=>updateSearchSettings({filters:filters.filter(item=>item.id!==filter.id)})}/>
+        </div>)}
+      </section>}
+      <section className="encoding-editor-section search-test-section">
+        <div className="encoding-section-title"><strong>试搜</strong><span>只读取候选，不创建业务记录</span></div>
+        {linked.length>0&&<div className="search-context-fields">{linked.map(key=><label className="encoding-editor-field" key={key}><span>{baseConfig.fields.find(field=>field.key===key)?.name||key}（试填值）</span><Input aria-label={`搜索试填 ${key}`} value={searchDraft.context[key]||''} onChange={event=>updateSearchSample({context:{...searchDraft.context,[key]:event.target.value}})}/></label>)}</div>}
+        <div className="search-test-input"><Input aria-label="试搜关键词" placeholder="输入关键词，留空可查看首批候选" maxLength={256} value={searchDraft.query} disabled={searchDraft.metaLoading} onChange={event=>updateSearchSample({query:event.target.value})} onPressEnter={()=>void testOptionSearch()}/><Button icon={<SearchOutlined/>} loading={searchDraft.loading} disabled={!schema||searchDraft.metaLoading} onClick={()=>void testOptionSearch()}>试搜</Button></div>
+        {searchDraft.error&&<Alert type="error" showIcon message={searchDraft.error}/>}
+        <Table size="small" rowKey={(row: SearchSettingsDraft['rows'][number])=>String(row.id)} pagination={false} dataSource={searchDraft.rows} locale={{emptyText:searchDraft.tested?'没有符合条件的选项':'输入关键词并点击试搜，查看真实匹配结果'}} columns={[{title:'显示文字',dataIndex:'label'},{title:'保存值',dataIndex:'id'},{title:'匹配字段',dataIndex:'matchedFields',render:(fields:string[])=>fields.map(key=>schema?.fields.find(field=>field.value===key)?.label||key).join('、')||'—'}]}/>
+        {searchDraft.hasMore&&<Button type="text" loading={searchDraft.loading} onClick={()=>void testOptionSearch(searchDraft.page+1)}>加载更多结果</Button>}
+      </section>
+    </div>;
+  };
+
+  const renderAssignmentRules = () => {
+    if (!selectedControl) return null;
+    const enabled = selectedControl.assignmentRulesEnabled ?? Boolean(selectedControl.assignmentRules?.length);
+    return <div className="designer-property-rule-row">
+      {renderRuleLabel('赋值规则', '开启后，将本字段值、选项文本或关联属性写入目标字段。关闭后保留配置，但不执行赋值。', true)}
+      <div className="designer-rule-toggle">
+        {enabled && <Button className="designer-rule-config-button" type="text" size="small" icon={<SettingOutlined />} aria-label="设置赋值规则" onClick={() => setAssignmentDraft({ controlId: selectedControl.id, rules: structuredClone(selectedControl.assignmentRules || []) })} />}
+        <button type="button" role="switch" aria-label="启用赋值规则" aria-checked={enabled} className={`designer-rule-check ${enabled ? 'designer-rule-check-on' : ''}`}
+          onClick={event => { event.preventDefault(); event.stopPropagation(); updateSelectedControl({ assignmentRulesEnabled: !enabled }); }}><span className="designer-rule-check-box" aria-hidden="true" /></button>
+      </div>
+    </div>;
+  };
+
+  const renderAssignmentEditor = () => assignmentDraft && <div className="encoding-rule-workspace assignment-rule-workspace">
+    <div className="encoding-section-title"><strong>赋值映射 <span className="encoding-section-count">{assignmentDraft.rules.length} 条</span></strong><Button type="text" size="small" icon={<PlusOutlined />} onClick={addAssignmentRule}>添加映射</Button></div>
+    {!assignmentDraft.rules.length && <div className="encoding-empty-segments">尚未配置映射，请添加来源属性与目标字段。</div>}
+    {assignmentDraft.rules.map((rule, index) => <div className="assignment-dialog-row" key={rule.id}>
+      <span className="assignment-dialog-index">{index + 1}</span>
+      <Select aria-label={`赋值来源 ${index + 1}`} placeholder="本字段属性" value={rule.sourceAttribute} options={assignmentSourceAttributeOptions} onChange={sourceAttribute => updateAssignmentRule(rule.id, { sourceAttribute })} />
+      <span>赋值给</span>
+      <Select aria-label={`赋值目标 ${index + 1}`} placeholder="目标字段" value={rule.targetField} options={assignmentTargetFieldOptions} onChange={targetField => updateAssignmentRule(rule.id, { targetField })} />
+      <Button type="text" size="small" aria-label={`删除赋值映射 ${index + 1}`} icon={<DeleteOutlined />} onClick={() => removeAssignmentRule(rule.id)} />
+    </div>)}
+    <div className="default-rule-behavior-note"><QuestionCircleOutlined /><span>一个目标字段只保留一个赋值来源；正式填写与试填使用同一套规则。</span></div>
+  </div>;
+
+  const applyAssignmentDraft = () => {
+    if (!assignmentDraft || assignmentDraft.controlId !== selectedControlId) return;
+    const targets = new Set<string>();
+    for (const rule of assignmentDraft.rules) {
+      if (!assignmentSourceAttributeOptions.some(option => option.value === rule.sourceAttribute) || !assignmentTargetFieldOptions.some(option => option.value === rule.targetField)) { message.error('请选择有效的来源属性和目标字段'); return; }
+      if (targets.has(rule.targetField!)) { message.error('同一目标字段不能重复赋值'); return; }
+      targets.add(rule.targetField!);
+    }
+    updateSelectedControl({ assignmentRules: assignmentDraft.rules, assignmentRulesEnabled: true });
+    setAssignmentDraft(null);
   };
 
   const renderDefaultRuleProperties = () => (
     <section className="designer-prop-section">
-      <strong className="designer-prop-section-title">默认交互规则</strong>
-      <label><span>默认显示</span>{controlRuleToggle('visible')}</label>
+      <strong className="designer-prop-section-title">{embedded ? '校验与数据保护' : '默认交互规则'}</strong>
+      {!embedded && <><label><span>默认显示</span>{controlRuleToggle('visible')}</label>
       <label><span>默认只读</span>{controlRuleToggle('readonly')}</label>
-      <label><span>默认必输</span>{controlRuleToggle('required')}</label>
+      {!isLayoutContainer(selectedControl || undefined) && <label><span>默认必输</span>{controlRuleToggle('required')}</label>}</>}
       <label><span>唯一校验</span>{controlRuleToggle('unique')}</label>
       <label><span>默认脱敏</span>{controlRuleToggle('masked')}</label>
       <label><span>允许复制</span>{controlRuleToggle('copyable')}</label>
-      {selectedControlUsesOptionSort && <label><span>选项排序</span>{controlRuleToggle('optionSort')}</label>}
-      <label>
-        <span>默认值</span>
-        <Input
-          allowClear
-          disabled={!selectedField}
-          placeholder="请输入默认值"
-          value={getFieldDefaultValue(selectedField)}
-          onChange={(event) => updateFieldDefaultValue(selectedField, event.target.value)}
-        />
-      </label>
-      <div className="designer-assignment-rules">
-        <div className="designer-assignment-head">
-          <span>赋值规则</span>
-          <Button size="small" type="text" icon={<PlusOutlined />} onClick={addAssignmentRule}>添加</Button>
-        </div>
-        {(selectedControl?.assignmentRules || []).map((rule) => (
-          <div className="designer-assignment-row" key={rule.id}>
-            <Select
-              allowClear
-              placeholder="本字段属性"
-              value={rule.sourceAttribute}
-              options={assignmentSourceAttributeOptions}
-              onChange={(sourceAttribute) => updateAssignmentRule(rule.id, { sourceAttribute })}
-            />
-            <span>赋值给</span>
-            <Select
-              allowClear
-              placeholder="目标字段"
-              value={rule.targetField}
-              options={assignmentTargetFieldOptions}
-              onChange={(targetField) => updateAssignmentRule(rule.id, { targetField })}
-            />
-            <Button
-              aria-label="删除赋值规则"
-              danger
-              size="small"
-              type="text"
-              icon={<DeleteOutlined />}
-              onClick={() => removeAssignmentRule(rule.id)}
-            />
-          </div>
-        ))}
+      <small>唯一校验在保存时由后台执行；脱敏作用于记录读取；复制限制作用于运行页复制和剪切。</small>
+      {!embedded && renderDefaultValueProperties()}
+      {renderAssignmentRules()}
+      {hiddenRequiredControls.length > 0 && <Tag color="red">存在隐藏且必填冲突</Tag>}
+    </section>
+  );
+
+  const renderRuleLabel = (title: string, help: string, clickOnly = false) => <span className="designer-rule-label">{title}<Tooltip title={help} trigger={clickOnly ? ['click'] : ['hover', 'focus']}><button className="designer-property-help" type="button" aria-label={`${title}说明`} onClick={event => event.preventDefault()}><QuestionCircleOutlined /></button></Tooltip></span>;
+
+  const renderDefaultValueProperties = () => {
+    if (!selectedControl) return null;
+    const rule = selectedControl.defaultRule || selectedField?.defaultRule || { mode: 'fixed' as const };
+    const automaticCode = selectedControlUsesEncoding && (selectedControl.encodingRule || selectedField?.encodingRule)?.generationMode !== 'manual';
+    const disabled = !selectedField || automaticCode || Boolean(selectedControl?.computed);
+    const configured = rule.mode === 'template' || String(getFieldDefaultValue(selectedField)) !== '';
+    const enabled = rule.enabled ?? configured;
+    return <div className="designer-default-mode-row">
+      {renderRuleLabel('默认值', '开启后在新增时预填，允许使用者修改；关闭后保留规则但不生成默认值。齿轮用于配置规则。', true)}
+      <div className="designer-rule-toggle">
+        {enabled && <Button className="designer-rule-config-button" size="small" type="text" icon={<SettingOutlined />} aria-label="设置默认值规则" disabled={Boolean(disabled)} onClick={event => { event.preventDefault(); event.stopPropagation(); setDefaultValueDraft({ controlId: selectedControl.id, rule: { ...structuredClone(rule), parts: (rule.parts || []).map(part => ({ ...part, id: part.id || crypto.randomUUID() })) }, fixed: String(getFieldDefaultValue(selectedField)) }); }} />}
+        <button type="button" role="switch" aria-label="启用默认值" aria-checked={enabled} disabled={Boolean(disabled)}
+          className={`designer-rule-check ${enabled ? 'designer-rule-check-on' : ''}`}
+          onClick={event => { event.preventDefault(); event.stopPropagation(); updateSelectedControl({ defaultRule: { ...rule, enabled: !enabled } }); }}>
+          <span className="designer-rule-check-box" aria-hidden="true" />
+        </button>
       </div>
+    </div>;
+  };
+
+  const renderDefaultValueEditor = () => {
+    if (!defaultValueDraft || !selectedControl || defaultValueDraft.controlId !== selectedControl.id) return null;
+    const { rule, fixed } = defaultValueDraft;
+    const parts = rule.parts || [];
+    const canConcatenate = Boolean(selectedField && ['string', 'text', 'code'].includes(mapDesignerFieldType(selectedField)));
+    const setRule = (next: DefaultValueRule) => setDefaultValueDraft(current => current && ({ ...current, rule: next }));
+    const setParts = (next: typeof parts) => setRule({ ...rule, mode: 'template', parts: next });
+    const sourceFields = baseConfig.fields.filter(field => field.key !== selectedField?.key && field.storageType !== 'json' && !field.computed && !isEncodingField(field));
+    const movePart = (index: number, offset: number) => {
+      const next = [...parts];
+      [next[index], next[index + offset]] = [next[index + offset], next[index]];
+      setParts(next);
+    };
+    const errors = defaultRuleErrors(layoutControls.map(control => control.id === selectedControl.id ? { ...control, defaultRule: { ...rule, enabled: true } } : control), baseConfig.fields);
+    const summary = rule.mode === 'template' ? defaultRuleSummary(rule, baseConfig.fields) : fixed;
+    return <div className="encoding-rule-workspace default-rule-workspace">
+      <div className="encoding-rule-editor default-rule-editor">
+        <section className="encoding-editor-section encoding-rule-basics">
+          <div className="encoding-basics-fields">
+            <label className="encoding-editor-field"><span>对应字段</span><Input aria-label="默认值对应字段" readOnly value={selectedControl.name} /></label>
+            <label className="encoding-editor-field"><span>生成方式</span><Select aria-label="默认值方式" value={rule.mode} options={[{ value: 'fixed', label: '固定值' }, { value: 'template', label: '按规则拼接', disabled: !canConcatenate }]} onChange={mode => setRule({ ...rule, mode, parts: mode === 'template' && !parts.length ? [newDefaultPart('text')] : parts })} /></label>
+          </div>
+        </section>
+        <section className="encoding-editor-section encoding-rule-conditions default-rule-conditions">
+          <div className="encoding-section-title encoding-trigger-heading">
+            <strong>何时触发<Tooltip title="不添加条件时不限制预填；添加后，只有全部条件满足时才预填。已填写的内容不会被默认值覆盖。" trigger={['hover','focus']}><button type="button" className="encoding-trigger-help" aria-label="默认值何时触发说明"><QuestionCircleOutlined /></button></Tooltip></strong>
+            <Button size="small" type="text" icon={<PlusOutlined />} aria-label="添加默认值触发条件" disabled={(rule.conditions || []).length >= 20} onClick={() => setRule({...rule, conditions:[...(rule.conditions || []), {sourceField:sourceFields[0]?.key || '',operator:'eq',value:''}]})}>添加触发条件</Button>
+          </div>
+          {(rule.conditions || []).map((condition,index) => <div className="encoding-condition-row" key={index}>
+            <Select aria-label={`默认值条件字段 ${index+1}`} placeholder="选择字段" value={condition.sourceField || undefined} options={sourceFields.map(field => ({value:field.key,label:field.name}))} onChange={sourceField => setRule({...rule,conditions:rule.conditions?.map((item,i) => i === index ? {...item,sourceField} : item)})} />
+            <Select aria-label={`默认值条件运算符 ${index+1}`} value={condition.operator} options={[{value:'eq',label:'等于'},{value:'ne',label:'不等于'},{value:'contains',label:'包含'},{value:'gte',label:'大于等于'},{value:'lte',label:'小于等于'},{value:'isEmpty',label:'为空'},{value:'notEmpty',label:'不为空'}]} onChange={operator => setRule({...rule,conditions:rule.conditions?.map((item,i) => i === index ? {...item,operator} : item)})} />
+            {['isEmpty','notEmpty'].includes(condition.operator) ? <span className="encoding-no-value">无需填写值</span> : <Input aria-label={`默认值条件值 ${index+1}`} placeholder="填写匹配值" value={condition.value} onChange={event => setRule({...rule,conditions:rule.conditions?.map((item,i) => i === index ? {...item,value:event.target.value} : item)})} />}
+            <Button type="text" aria-label={`删除默认值条件 ${index+1}`} icon={<DeleteOutlined />} onClick={() => setRule({...rule,conditions:rule.conditions?.filter((_,i) => i !== index)})} />
+          </div>)}
+        </section>
+        {rule.mode === 'fixed' ? <section className="encoding-editor-section">
+          <div className="encoding-section-title encoding-composition-heading"><strong>预填内容</strong><div className="encoding-heading-preview" aria-label="默认值结果预览" aria-live="polite"><span>生成结果预览</span><code>{summary || '—'}</code></div></div>
+          <Input.TextArea aria-label="固定默认值" placeholder="留空则不预填" autoSize={{ minRows: 1, maxRows: 4 }} value={fixed} onChange={event => setDefaultValueDraft(current => current && ({ ...current, fixed: event.target.value }))} />
+        </section> : <section className="encoding-editor-section encoding-rule-composition">
+          <div className="encoding-section-title encoding-composition-heading">
+            <strong>默认值片段 <span className="encoding-section-count">{parts.length} / 20 段</span></strong>
+            <div className="encoding-heading-preview" aria-label="默认值结果预览" aria-live="polite"><span>生成结果预览</span><code>{summary || '—'}</code></div>
+            <Space size={4}><Button type="text" size="small" icon={<PlusOutlined />} disabled={parts.length >= 20} onClick={() => setParts([...parts, newDefaultPart('text')])}>固定文字</Button><Button type="text" size="small" icon={<PlusOutlined />} disabled={parts.length >= 20 || !sourceFields.length} onClick={() => setParts([...parts, newDefaultPart('field')])}>引用字段</Button></Space>
+          </div>
+          <div className="encoding-segment-list default-rule-parts">
+            {parts.map((part, index) => <div key={part.id} className="encoding-segment-item default-rule-part">
+              <span className="default-rule-part-index">{index + 1}</span>
+              <Select aria-label={`默认值片段 ${index + 1} 类型`} value={part.kind} options={[{ value: 'text', label: '固定文字' }, { value: 'field', label: '引用字段' }]} onChange={kind => setParts(parts.map(item => item.id === part.id ? { ...item, kind, value: '' } : item))} />
+              {part.kind === 'text' ? <Input aria-label={`默认值片段 ${index + 1} 内容`} maxLength={4096} placeholder="例如：MAT- 或分隔符" value={part.value} onChange={event => setParts(parts.map(item => item.id === part.id ? { ...item, value: event.target.value } : item))} /> : <Select aria-label={`默认值片段 ${index + 1} 字段`} placeholder="选择来源字段" value={part.value || undefined} options={sourceFields.map(field => ({ value: field.key, label: field.name }))} onChange={value => setParts(parts.map(item => item.id === part.id ? { ...item, value } : item))} />}
+              <div className="default-rule-part-actions">
+                <Button type="text" size="small" aria-label={`上移默认值片段 ${index + 1}`} disabled={index === 0} onClick={() => movePart(index, -1)}>↑</Button>
+                <Button type="text" size="small" aria-label={`下移默认值片段 ${index + 1}`} disabled={index === parts.length - 1} onClick={() => movePart(index, 1)}>↓</Button>
+                <Button type="text" size="small" aria-label={`删除默认值片段 ${index + 1}`} icon={<DeleteOutlined />} onClick={() => setParts(parts.filter(item => item.id !== part.id))} />
+              </div>
+            </div>)}
+          </div>
+        </section>}
+        {errors.length > 0 && <p className="default-rule-error" role="alert">{errors.join('；')}</p>}
+      </div>
+    </div>;
+  };
+
+  const applyDefaultValueDraft = () => {
+    if (!defaultValueDraft || !selectedControl || defaultValueDraft.controlId !== selectedControl.id || !selectedField) return;
+    const errors = defaultRuleErrors(layoutControls.map(control => control.id === selectedControl.id ? { ...control, defaultRule: { ...defaultValueDraft.rule, enabled: true } } : control), baseConfig.fields);
+    if (errors.length) { message.error(errors.join('；')); return; }
+    updateSelectedControl({ defaultRule: { ...defaultValueDraft.rule, enabled: true } });
+    updateFieldDefaultValue(selectedField, defaultValueDraft.rule.mode === 'fixed' ? defaultValueDraft.fixed : '');
+    setDefaultValueDraft(null);
+  };
+
+  const closeCalculationEditor = () => {
+    calculationEpoch.current += 1;
+    setCalculationDraft(null); setCalculationError(''); setCalculationResult(null); setCalculationBusy(false);
+  };
+  const updateCalculationDraft = (patch: Partial<CalculationRule>, samples?: Record<string, unknown>) => {
+    calculationEpoch.current += 1;
+    setCalculationBusy(false); setCalculationError(''); setCalculationResult(null);
+    setCalculationDraft(current => current && ({ ...current, rule: { ...current.rule, ...patch }, samples: samples ?? current.samples }));
+  };
+  const calculationControls = () => layoutControls.map(control => control.id === calculationDraft?.controlId
+    ? { ...control, computed: calculationDraft.rule, calculationRulesEnabled: true, inactiveCalculationRule: undefined, typeSettings: { ...control.typeSettings, precision: calculationDraft.rule.precision ?? undefined }, defaultRule: { ...(control.defaultRule || { mode: 'fixed' as const }), enabled: false } }
+    : control);
+  const checkCalculation = async (save: boolean) => {
+    if (!calculationDraft || !platformForm) return;
+    if (!calculationDraft.rule.expression.trim()) { setCalculationError('请填写计算公式'); return; }
+    const epoch = ++calculationEpoch.current;
+    setCalculationBusy(true); setCalculationError('');
+    try {
+      const controls = calculationControls();
+      const response = await previewDesignerRules(platformForm.id, controls, calculationDraft.samples, false, save);
+      if (epoch !== calculationEpoch.current) return;
+      const target = controls.find(control => control.id === calculationDraft.controlId);
+      if (!target?.fieldKey) return;
+      if (save) {
+        commitLayoutChange(() => controls);
+        closeCalculationEditor();
+      } else setCalculationResult({ value: response.data?.data?.data?.[target.fieldKey] });
+    } catch (error: any) {
+      if (epoch === calculationEpoch.current) setCalculationError(error?.response?.data?.detail || '公式检查失败，请稍后重试');
+    } finally { if (epoch === calculationEpoch.current) setCalculationBusy(false); }
+  };
+  const renderCalculationProperties = () => {
+    if (!selectedControl || !selectedField || isEncodingField(selectedField) || !['string','text','int','integer','number','float','decimal'].includes(selectedField.storageType || 'string') || ['relation','upload','editable-table','readonly-table','datetime','switch','select'].includes(selectedControl.controlType)) return null;
+    const enabled = selectedControl.calculationRulesEnabled ?? Boolean(selectedControl.computed);
+    return <div className="designer-property-rule-row">
+      {renderRuleLabel('计算规则', '开启后可通过齿轮配置计算公式；关闭后保留配置并停止计算。来源字段变化时自动计算，结果只读。', true)}
+      <div className="designer-rule-toggle">
+        {enabled && <Button className="designer-rule-config-button" type="text" size="small" icon={<SettingOutlined />} aria-label="设置计算规则" disabled={!platformForm} onClick={() => {
+          setCalculationError(''); setCalculationResult(null);
+          setCalculationDraft({ controlId: selectedControl.id, rule: structuredClone(selectedControl.computed || selectedControl.inactiveCalculationRule || { expression: '', precision: ['int','integer'].includes(selectedField.storageType || '') ? 0 : null, emptyBehavior: 'empty' }), samples: {} });
+        }} />}
+        <button type="button" role="switch" aria-label="启用计算规则" aria-checked={enabled} className={`designer-rule-check ${enabled ? 'designer-rule-check-on' : ''}`} onClick={event => {
+          event.preventDefault(); event.stopPropagation();
+          const rule = selectedControl.computed || selectedControl.inactiveCalculationRule;
+          updateSelectedControl(enabled
+            ? { calculationRulesEnabled: false, inactiveCalculationRule: rule, computed: null }
+            : { calculationRulesEnabled: true, computed: rule || null, ...(rule ? { defaultRule: { ...(selectedControl.defaultRule || { mode: 'fixed' as const }), enabled: false } } : {}) });
+        }}><span className="designer-rule-check-box" aria-hidden="true" /></button>
+      </div>
+    </div>;
+  };
+
+  const renderCalculationEditor = () => {
+    if (!calculationDraft) return null;
+    const target = layoutControls.find(control => control.id === calculationDraft.controlId);
+    const numericResult = ['int','integer','number','float','decimal'].includes(baseConfig.fields.find(field => field.key === target?.fieldKey)?.storageType || '');
+    const fields = baseConfig.fields.filter(field => field.key !== target?.fieldKey && field.storageType !== 'json' && !isEncodingField(field));
+    const rules = Object.fromEntries(baseConfig.fields.map(field => {
+      const control = layoutControls.find(control => control.fieldKey === field.key);
+      return [field.key, control?.computed === undefined ? field.calculationRule : control.computed];
+    }));
+    const sources = calculationSources(calculationDraft.rule.expression, fields, rules);
+    return <div className="calculation-editor">
+      <div className="encoding-basics-fields"><label className="encoding-editor-field"><span>结果字段</span><span className="calculation-target-name">{target?.name}</span></label><span className="calculation-readonly-note">{numericResult ? '数值结果 · 自动计算 · 只读' : '文本结果 · 可拼接文字和字段 · 只读'}</span></div>
+      <section><div className="encoding-section-title"><strong>计算方式</strong><Tooltip title="数值支持算术运算；文本支持字段和固定文字拼接；条件判断可按字段值选择不同结果。复杂表达式可使用高级公式。"><button className="encoding-trigger-help" aria-label="计算公式说明"><QuestionCircleOutlined /></button></Tooltip></div>
+        <CalculationExpressionEditor key={calculationDraft.controlId} expression={calculationDraft.rule.expression} onChange={expression => updateCalculationDraft({ expression })} fields={fields} numericResult={numericResult} targetName={target?.name || '结果'} />
+      </section>
+      <section className="calculation-options">{numericResult && <label><span>小数位数</span><RuleInlineSelect aria-label="计算结果小数位数" value={calculationDraft.rule.precision ?? 'auto'} options={[{ value: 'auto', label: '不额外舍入' }, ...Array.from({ length: 7 }, (_, value) => ({ value, label: `${value} 位（四舍五入）` }))]} onChange={value => updateCalculationDraft({ precision: value === 'auto' ? null : Number(value) })} /></label>}<label><span>来源为空</span><RuleInlineSelect aria-label="计算空值处理" value={calculationDraft.rule.emptyBehavior || 'empty'} options={[{ value: 'empty', label: '结果留空' }, { value: 'zero', label: '按 0 计算' }]} onChange={emptyBehavior => updateCalculationDraft({ emptyBehavior })} /></label></section>
+      <section><div className="encoding-section-title"><strong>试算</strong><Button size="small" type="text" loading={calculationBusy} onClick={() => checkCalculation(false)}>计算预览</Button></div>
+        {sources.length > 0 && <div className="calculation-samples">{sources.map(field => <label key={field.key}><span>{field.name}</span>{['int','integer','float','number','decimal'].includes(field.storageType || '') ? <InputNumber aria-label={`试算值：${field.name}`} value={calculationDraft.samples[field.key] as number | undefined} onChange={value => updateCalculationDraft({}, { ...calculationDraft.samples, [field.key]: value })} /> : <Input aria-label={`试算值：${field.name}`} value={String(calculationDraft.samples[field.key] ?? '')} onChange={event => updateCalculationDraft({}, { ...calculationDraft.samples, [field.key]: event.target.value })} />}</label>)}</div>}
+        <div className="calculation-result" aria-label="计算预览结果" aria-live="polite"><span>结果</span><code>{calculationResult ? calculationResult.value == null ? '—（来源为空）' : String(calculationResult.value) : '填写测试值后点击计算预览'}</code></div>
+      </section>
+      {calculationError && <Alert type="error" showIcon message={calculationError} />}
+    </div>;
+  };
+
+  const renderCommonRuleProperties = () => (
+    <section className="designer-prop-section designer-common-rules">
+      {renderPropertyHeading('填写规则', '唯一性校验在正式保存时执行；脱敏控制记录读取，复制限制作用于运行页的复制和剪切。齿轮可配置条件规则。')}
+      <label>{renderRuleLabel('必填', '开启后，此字段必须填写才能提交。通过齿轮可设置必填条件。')}{controlRuleToggle('required')}</label>
+      <label>{renderRuleLabel('只读', '开启后，使用者可查看此字段，但不能修改。通过齿轮可设置只读条件。')}{controlRuleToggle('readonly')}</label>
+      <label>{renderRuleLabel('显示字段', '开启后，字段在表单中显示；关闭后隐藏。通过齿轮可设置显示条件。')}{controlRuleToggle('visible')}</label>
+      <label>{renderRuleLabel('唯一校验', '开启后，保存时检查字段值是否已存在，重复值不能保存。')}{controlRuleToggle('unique')}</label>
+      <label>{renderRuleLabel('数据脱敏', '开启后，读取记录时按脱敏规则隐藏部分内容，保护敏感数据。')}{controlRuleToggle('masked')}</label>
+      <label>{renderRuleLabel('允许复制', '开启后，使用者可以在运行表单中复制或剪切字段内容。')}{controlRuleToggle('copyable')}</label>
+      {renderDefaultValueProperties()}
       {hiddenRequiredControls.length > 0 && <Tag color="red">存在隐藏且必填冲突</Tag>}
     </section>
   );
 
   const renderAutomationProperties = () => (
     <section className="designer-prop-section">
-      <strong className="designer-prop-section-title">提示与联动</strong>
+      {renderPropertyHeading('提示与联动', '占位提示显示在输入框内，帮助说明显示在字段下方；赋值规则可在关联字段变化后回填其他字段。')}
       <label>
         <span>占位提示</span>
         <Input
@@ -3559,10 +3857,12 @@ export default function FormSettingsPage() {
           onChange={(event) => updateSelectedControl({ helpText: event.target.value })}
         />
       </label>
-      <label><span>变更触发</span>{genericRuleToggle(false, '变更触发')}</label>
+      {renderCalculationProperties()}
+      {embedded && renderAssignmentRules()}
+      {!embedded && <><small>关联字段变更后，按下方已保存的赋值规则执行回填。</small>
       <label><span>联动刷新</span><Input value="未绑定联动规则" readOnly /></label>
       <label><span>异常提示</span><Input value="使用字段校验提示" readOnly /></label>
-      <label><span>角色差异</span><Input value="在权限设计中统一配置" readOnly /></label>
+      <label><span>角色差异</span><Input value="在权限设计中统一配置" readOnly /></label></>}
     </section>
   );
 
@@ -3785,78 +4085,9 @@ export default function FormSettingsPage() {
   };
 
   const savePermissionDesign = async () => {
-    const role = identityRoleRecords.find((item) => item.label === activePermissionRole || item.name === activePermissionRole);
-    if (!role) {
-      message.warning('请先在用户与权限中创建并同步角色');
-      return;
-    }
     setPersistingPermissions(true);
-    try {
-      const form = await ensurePlatformForm();
-      const existingResponse = await listPlatformFormPermissions(form.id);
-      const existing = (existingResponse.data?.data || []) as Array<{ id: number; role_id: number }>;
-      await Promise.all(
-        existing
-          .filter((permission) => permission.role_id === role.id)
-          .map((permission) => deletePlatformFormPermission(form.id, permission.id)),
-      );
-
-      const draft = activePermissionDraft;
-      const actionPermissions = permissionActionDefinitions.map((definition) => {
-        const enabled = draft.actions[definition.key] !== false;
-        return [definition.key, enabled] as const;
-      });
-      await Promise.all(actionPermissions.map(([action, enabled]) => (
-        upsertPlatformFormPermission(form.id, {
-          role_id: role.id,
-          action,
-          effect: enabled ? 'allow' : 'deny',
-        })
-      )));
-
-      const fieldPermissions = baseConfig.fields.flatMap((field, index) => {
-        const permission = getRoleFieldPermission(field, index);
-        const permissions = [
-          { action: 'view', effect: permission.visible ? 'allow' : 'deny' },
-          { action: 'edit', effect: permission.visible && permission.editable && !field.locked ? 'allow' : 'deny' },
-          { action: 'export', effect: permission.visible && permission.exportable ? 'allow' : 'deny' },
-        ];
-        if (permission.required) permissions.push({ action: 'create', effect: 'allow' });
-        return permissions.map((permission) => ({
-          role_id: role.id,
-          action: permission.action,
-          effect: permission.effect,
-          field_name: field.key,
-        }));
-      });
-      await Promise.all(fieldPermissions.map((permission) => upsertPlatformFormPermission(form.id, permission)));
-      const refreshedPermissions = await listPlatformFormPermissions(form.id);
-      setFormPermissionRows((refreshedPermissions.data?.data || []) as FormPermissionRow[]);
-      const nextPermissionDrafts = Object.fromEntries(
-        Object.entries({ ...permissionDrafts, [activePermissionRole]: draft })
-          .map(([roleName, roleDraft]) => [roleName, sanitizePermissionDesignDraft(roleDraft)]),
-      ) as PermissionDraftMap;
-      const nextConfig = {
-        ...(form.config || {}),
-        permissionDesign: {
-          ...((form.config?.permissionDesign as Record<string, unknown>) || {}),
-          version: 1,
-          updatedAt: new Date().toISOString(),
-          roles: nextPermissionDrafts,
-        },
-      };
-      const updatedResponse = await updatePlatformForm(form.id, { config: nextConfig });
-      const updatedForm = (updatedResponse.data?.data || { ...form, config: nextConfig }) as PlatformForm;
-      setPlatformForm(updatedForm);
-      setPermissionDrafts(nextPermissionDrafts);
-      setHasUnsavedChanges(false);
-      message.success('权限配置已保存到后台数据库');
-    } catch (error) {
-      console.error('save permissions failed', error);
-      message.error('保存权限失败');
-    } finally {
-      setPersistingPermissions(false);
-    }
+    try {await saveDraft();}
+    finally{setPersistingPermissions(false);}
   };
 
   const updateFormWorkflowMeta = async (form: PlatformForm, nextMeta: WorkflowDesignerMeta) => {
@@ -3899,7 +4130,9 @@ export default function FormSettingsPage() {
           ...currentConfig,
           viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
+          permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
+          canvasSettings,
           viewConfigMeta: nextMeta,
         }
       : {
@@ -3907,7 +4140,9 @@ export default function FormSettingsPage() {
           viewConfig: nextViewConfig,
           viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
+          permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
+          canvasSettings,
           viewConfigMeta: nextMeta,
         };
     const response = await updatePlatformForm(form.id, { config: nextConfig });
@@ -4005,58 +4240,53 @@ export default function FormSettingsPage() {
     };
   };
 
+  const persistDesignerDraft = async () => {
+    const form = await ensurePlatformForm();
+    await syncFieldDefaultValues(form);
+    const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
+    let updatedForm: PlatformForm;
+    if (isAnalysisDesigner) {
+      updatedForm = await updateFormAnalyticsDesign(formWithView, analyticsDesign, 'draft');
+    } else {
+      const meta = getWorkflowDesignerMeta(formWithView);
+      const saved = await saveWorkflowDefinition('draft', formWithView, meta.draftWorkflowId === meta.publishedWorkflowId ? undefined : meta.draftWorkflowId);
+      updatedForm = await updateFormWorkflowMeta(formWithView, { ...meta, draftWorkflowId: saved.id });
+    }
+    setHasUnsavedChanges(false);
+    return updatedForm;
+  };
+
   const saveDraft = async () => {
-    if (flowLoadError) { message.error(flowLoadError); return; }
-    if (isPersistingFlow) return;
+    if (flowLoadError) { message.error(flowLoadError); return false; }
+    if (isPersistingFlow) return false;
     setPersistingFlow(true);
     try {
-      const form = await ensurePlatformForm();
-      await syncFieldDefaultValues(form);
-      if (isAnalysisDesigner) {
-        await updateFormViewConfig(form, storedViewConfig, 'draft');
-        const updatedForm = await updateFormAnalyticsDesign(form, analyticsDesign, 'draft');
-        const meta = ((updatedForm.config || {}).analyticsDesignMeta || {}) as Record<string, unknown>;
-        setVersion(`v${Number(meta.draftVersion || 1)}`);
-        setHasUnsavedChanges(false);
-        message.success('BI 看板草稿已保存，数据集、指标、画布和联动配置不会影响已发布页面');
-        return;
-      }
-      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
-      const meta = getWorkflowDesignerMeta(formWithView);
-      const saved = await saveWorkflowDefinition('draft', formWithView, meta.draftWorkflowId);
-      await updateFormWorkflowMeta(formWithView, { ...meta, draftWorkflowId: saved.id });
-      setVersion(`v${saved.version}`);
-      setHasUnsavedChanges(false);
-      message.success('草稿已保存，数据筛选配置和流程草稿都不会影响已发布运行页');
+      await persistDesignerDraft();
+      message.success('草稿已保存，发布后会同步到业务页面');
+      return true;
     } catch (error) {
       console.error('workflow draft save failed', error);
       message.error('草稿保存失败，请检查后端服务或登录状态');
+      return false;
     } finally {
       setPersistingFlow(false);
     }
   };
 
   const publishConfig = async () => {
-    if (flowLoadError) { message.error(flowLoadError); return; }
-    if (isPersistingFlow) return;
+    if (flowLoadError) { message.error(flowLoadError); return false; }
+    if (isPersistingFlow) return false;
     setPersistingFlow(true);
     try {
-      const form = await ensurePlatformForm();
-      await syncFieldDefaultValues(form);
-      if (isAnalysisDesigner) {
-        const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
-        await updateFormAnalyticsDesign(formWithView, analyticsDesign, 'draft');
-        setServerPublishReport(null);
-        setPublishCheckOpen(true);
-        return;
-      }
-      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
-      const response = await previewPlatformFormPublish(formWithView.id);
+      const savedForm = await persistDesignerDraft();
+      const response = await previewPlatformFormPublish(savedForm.id);
       setServerPublishReport(response.data?.data as PlatformFormPublishReport);
       setPublishCheckOpen(true);
+      return true;
     } catch (error) {
       console.error('form publish preview failed', error);
-      message.error('发布影响报告生成失败，请检查后端服务或登录状态');
+      message.error('发布检查未完成，当前修改仍保留，请重试');
+      return false;
     } finally {
       setPersistingFlow(false);
     }
@@ -4076,9 +4306,11 @@ export default function FormSettingsPage() {
       if (isAnalysisDesigner) {
         const formWithViewDraft = await updateFormViewConfig(form, storedViewConfig, 'draft');
         const formWithAnalyticsDraft = await updateFormAnalyticsDesign(formWithViewDraft, analyticsDesign, 'draft');
-        const formWithViewPublished = await updateFormViewConfig(formWithAnalyticsDraft, storedViewConfig, 'published');
-        const updatedForm = await updateFormAnalyticsDesign(formWithViewPublished, analyticsDesign, 'published');
+        const updatedForm = formWithAnalyticsDraft;
         const formVersionResponse = await publishPlatformForm(updatedForm.id);
+        onPublished?.();
+      const publishedDetail=await getPlatformForm(updatedForm.id,{schema:'draft',scope:'designer'});
+      setPlatformForm(publishedDetail.data.data);
         const schemaVersion = Number(formVersionResponse.data?.data?.version || ((updatedForm.config || {}).analyticsDesignMeta as any)?.publishedVersion || 1);
         setServerPublishReport((formVersionResponse.data?.data?.impact_report || null) as PlatformFormPublishReport | null);
         setVersion(`v${schemaVersion}`);
@@ -4118,6 +4350,9 @@ export default function FormSettingsPage() {
           : upsertWorkflowBinding(updatedForm.id, payload);
       }));
       const formVersionResponse = await publishPlatformForm(updatedForm.id);
+      onPublished?.();
+      const publishedDetail=await getPlatformForm(updatedForm.id,{schema:'draft',scope:'designer'});
+      setPlatformForm(publishedDetail.data.data);
       const schemaVersion = Number(formVersionResponse.data?.data?.version || saved.version);
       setServerPublishReport((formVersionResponse.data?.data?.impact_report || null) as PlatformFormPublishReport | null);
       setVersion(`v${schemaVersion}`);
@@ -4139,16 +4374,33 @@ export default function FormSettingsPage() {
   };
 
   const warnBeforeLeave = () => {
-    if (!hasUnsavedChanges) {
+    if (!embedded || !onExit) {
       navigate(`/program/${baseConfig.id}`);
       return;
     }
-    Modal.confirm({
-      title: '当前有未保存修改',
-      content: '离开后本次表单设置调整将不会保留。建议先保存草稿或发布配置。',
-      okText: '仍然离开',
-      cancelText: '继续配置',
-      onOk: () => navigate(`/program/${baseConfig.id}`),
+    if (isPersistingFlow) return;
+    if (!hasUnsavedChanges) { onExit(); return; }
+    let savingBeforeExit = false;
+    const confirmation = Modal.confirm({
+      className: 'form-designer-dialog',
+      title: '返回前，保留这次修改吗？',
+      content: '保存为配置草稿后，可以下次继续编辑。发布前，业务页面仍使用当前版本。',
+      okText: '保存草稿并返回',
+      cancelText: '继续编辑',
+      onOk: async () => {
+        savingBeforeExit = true;
+        confirmation.update({ cancelButtonProps: { disabled: true }, keyboard: false, maskClosable: false });
+        if (!await saveDraft()) {
+          savingBeforeExit = false;
+          confirmation.update({ cancelButtonProps: { disabled: false }, keyboard: true });
+          throw new Error('草稿保存失败，请重试');
+        }
+        onExit();
+      },
+      footer: (_, { OkBtn, CancelBtn }) => <Space wrap>
+        <Button type="text" danger disabled={savingBeforeExit} onClick={() => { if (savingBeforeExit) return; confirmation.destroy(); onExit(); }}>放弃修改并返回</Button>
+        <CancelBtn /><OkBtn />
+      </Space>,
     });
   };
 
@@ -4205,7 +4457,11 @@ export default function FormSettingsPage() {
   const addTemplateField = (template: DesignerField) => {
     const field = { ...template, key: `${template.key}-${Date.now()}` };
     const control = makeFieldControl(field);
-    commitLayoutChange((current) => [...current, control]);
+    const target = layoutControls.find(item => item.id === selectedControlId);
+    const parentId = isLayoutContainer(target) ? target!.id : target?.parentId;
+    const parent = layoutControls.find(item => item.id === parentId);
+    const slotId = parent ? (isLayoutContainer(target) ? containerTabs[parent.id] || layoutSlots(parent)[0].id : target?.slotId) : undefined;
+    commitLayoutChange((current) => [...current, { ...control, parentId, slotId, width:parentId?control.width:canvasSettings.columns===1?'full':canvasSettings.columns===3?'third':'half' }]);
     setSelectedControlId(control.id);
     message.success(`已添加常用字段模板：${template.name}`);
   };
@@ -4302,7 +4558,7 @@ export default function FormSettingsPage() {
 
   const commitLayoutChange = (updater: (current: LayoutControl[]) => LayoutControl[]) => {
     setLayoutControls((current) => {
-      const next = updater(current);
+      const next = normalizeLayout(updater(current));
       setHistory((previous) => [...previous.slice(-19), current]);
       setFuture([]);
       markUnsaved();
@@ -4325,14 +4581,22 @@ export default function FormSettingsPage() {
 
   const addFieldToCanvas = (field: DesignerField) => {
     const control = makeFieldControl(field);
-    commitLayoutChange((current) => [...current, control]);
+    const target = layoutControls.find(item => item.id === selectedControlId);
+    const parentId = isLayoutContainer(target) ? target!.id : target?.parentId;
+    const parent = layoutControls.find(item => item.id === parentId);
+    const slotId = parent ? (isLayoutContainer(target) ? containerTabs[parent.id] || layoutSlots(parent)[0].id : target?.slotId) : undefined;
+    commitLayoutChange((current) => [...current, { ...control, parentId, slotId, width:parentId?control.width:canvasSettings.columns===1?'full':canvasSettings.columns===3?'third':'half' }]);
     setSelectedControlId(control.id);
     setSelectedAssetKey(field.key);
   };
 
   const addComponentToCanvas = (component: ComponentDefinition) => {
     const control = makeComponentControl(component);
-    commitLayoutChange((current) => [...current, control]);
+    const target = layoutControls.find(item => item.id === selectedControlId);
+    const parentId = isLayoutContainer(target) ? target!.id : target?.parentId;
+    const parent = layoutControls.find(item => item.id === parentId);
+    const slotId = parent ? (isLayoutContainer(target) ? containerTabs[parent.id] || layoutSlots(parent)[0].id : target?.slotId) : undefined;
+    commitLayoutChange((current) => [...current, { ...control, parentId, slotId, width:parentId?control.width:canvasSettings.columns===1?'full':canvasSettings.columns===3?'third':'half' }]);
     setSelectedControlId(control.id);
     message.success(`已添加${component.name}`);
   };
@@ -4344,31 +4608,9 @@ export default function FormSettingsPage() {
     )));
   };
 
-  const addAssignmentRule = () => {
-    if (!selectedControl) return;
-    updateSelectedControl({
-      assignmentRules: [
-        ...(selectedControl.assignmentRules || []),
-        { id: `assign-${Date.now()}`, sourceAttribute: assignmentSourceAttributeOptions[0]?.value || 'self.value' },
-      ],
-    });
-  };
-
-  const updateAssignmentRule = (ruleId: string, patch: Partial<AssignmentRule>) => {
-    if (!selectedControl) return;
-    updateSelectedControl({
-      assignmentRules: (selectedControl.assignmentRules || []).map((rule) => (
-        rule.id === ruleId ? { ...rule, ...patch } : rule
-      )),
-    });
-  };
-
-  const removeAssignmentRule = (ruleId: string) => {
-    if (!selectedControl) return;
-    updateSelectedControl({
-      assignmentRules: (selectedControl.assignmentRules || []).filter((rule) => rule.id !== ruleId),
-    });
-  };
+  const addAssignmentRule = () => setAssignmentDraft(current => current && ({ ...current, rules: [...current.rules, { id: `assign-${crypto.randomUUID()}`, sourceAttribute: assignmentSourceAttributeOptions[0]?.value || 'self.value' }] }));
+  const updateAssignmentRule = (ruleId: string, patch: Partial<AssignmentRule>) => setAssignmentDraft(current => current && ({ ...current, rules: current.rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule) }));
+  const removeAssignmentRule = (ruleId: string) => setAssignmentDraft(current => current && ({ ...current, rules: current.rules.filter(rule => rule.id !== ruleId) }));
 
   const updateSelectedEncodingRule = (patch: Partial<EncodingRule>) => {
     if (!selectedControlId) return;
@@ -4405,12 +4647,12 @@ export default function FormSettingsPage() {
     }) : current);
   };
 
-  const openEncodingSegmentEditor = (segment?: EncodingSegment, index?: number) => {
-    setEncodingSegmentEditor({
-      open: true,
-      index,
-      draft: segment ? { ...segment } : makeEncodingSegment('fixed', baseConfig.fields),
-    });
+  const openEncodingSegmentEditor = (segment?: EncodingSegment, index?: number, part: 'type' | 'length' | 'value' | 'padding' = 'type') => {
+    setEncodingSegmentEditPart(part);
+    const draft = segment ? { ...segment, name: segment.name || getEncodingSegmentTypeLabel(segment.type) } : makeEncodingSegment('fixed', baseConfig.fields);
+    const targetIndex = typeof index === 'number' ? index : selectedEncodingSegments.length;
+    if (!segment) syncEncodingSegments([...selectedEncodingSegments, draft]);
+    setEncodingSegmentEditor({ open: true, index: targetIndex, draft });
   };
 
   const closeEncodingSegmentEditor = () => {
@@ -4418,10 +4660,11 @@ export default function FormSettingsPage() {
   };
 
   const updateEncodingSegmentDraft = (patch: Partial<EncodingSegment>) => {
-    setEncodingSegmentEditor((current) => ({
-      ...current,
-      draft: { ...current.draft, ...patch },
-    }));
+    const draft = { ...encodingSegmentEditor.draft, ...patch };
+    setEncodingSegmentEditor(current => ({ ...current, draft }));
+    if (typeof encodingSegmentEditor.index === 'number') {
+      syncEncodingSegments(selectedEncodingSegments.map((segment, index) => index === encodingSegmentEditor.index ? draft : segment));
+    }
   };
 
   const saveEncodingSegmentDraft = () => {
@@ -4445,54 +4688,126 @@ export default function FormSettingsPage() {
     closeEncodingSegmentEditor();
   };
 
+  const dismissEncodingSettings = () => {
+    closeEncodingSegmentEditor();
+    setEncodingSettingsDraft(null);
+    encodingRuleTargetRef.current = null;
+  };
+
+  const deleteEncodingSettings = () => {
+    const target = encodingRuleTargetRef.current;
+    if (!target || !encodingSettingsDraft) return;
+    const rules = getEncodingRules(target.rule).filter(rule => rule.id !== encodingSettingsDraft.id);
+    commitLayoutChange(controls => controls.map(control => control.id === target.controlId
+      ? { ...control, encodingRule: { ...target.rule, enabled: rules.length > 0 && target.rule.enabled !== false, rules } }
+      : control));
+    dismissEncodingSettings();
+  };
+
+  const commitEncodingSettings = () => {
+          if (!encodingSettingsDraft || !encodingSettingsDraft.name?.trim()) { message.warning('请填写规则名称'); return; }
+          const invalidSegment = selectedEncodingSegments.find(segment => encodingSegmentLengthError(segment));
+          if (invalidSegment) { message.warning(`${getEncodingSegmentTypeLabel(invalidSegment.type)}：${encodingSegmentLengthError(invalidSegment)}，请调整内容、位数或选择超长截断`); return; }
+          if (encodingSettingsDraft.generationMode !== 'manual' && !selectedEncodingSegments.length) { message.warning('请添加编码段'); return; }
+          if ((encodingSettingsDraft.conditions || []).some((c) => !c.sourceField || (!['isEmpty', 'notEmpty'].includes(c.operator || '') && !c.value?.trim()))) {
+            message.warning('请完整填写触发条件'); return;
+          }
+          const target = encodingRuleTargetRef.current;
+          if (!target) { message.warning('请重新打开编码规则配置'); return; }
+          const rules = [...getEncodingRules(target.rule)];
+          if (rules.some((r) => r.id !== encodingSettingsDraft.id && r.name?.trim() === encodingSettingsDraft.name?.trim())) {
+            message.warning('规则名称不能重复'); return;
+          }
+          const { priority, ...savedRule } = encodingSettingsDraft;
+          const existingIndex = rules.findIndex((rule) => rule.id === savedRule.id);
+          const nextRules = [...rules];
+          if (existingIndex >= 0) nextRules[existingIndex] = savedRule;
+          else nextRules.push(savedRule);
+          commitLayoutChange(controls => controls.map(control => control.id === target.controlId ? { ...control, encodingRule: { ...target.rule, rules: nextRules } } : control));
+          dismissEncodingSettings();
+  };
+
+  const renderEncodingSegmentForm = () => {
+    const draft = encodingSegmentEditor.draft;
+    const update = updateEncodingSegmentDraft;
+    return <div className="encoding-segment-cell-inputs" onDoubleClick={event => event.stopPropagation()}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && !(event.relatedTarget as HTMLElement)?.closest?.('.ant-select-dropdown')) closeEncodingSegmentEditor(); }}
+      onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') saveEncodingSegmentDraft(); }}>
+      {draft.type === 'fixed' && <Input autoFocus size="small" aria-label="固定值" status={encodingSegmentLengthError(draft) ? 'error' : undefined} value={draft.value || ''} onChange={event => update({value:event.target.value})} />}
+      {draft.type === 'date' && <Select autoFocus size="small" aria-label="日期格式" value={draft.datePattern || 'YYMM'} options={encodingDatePatternOptions} onChange={datePattern => update({datePattern,length:getDateSegmentLength(datePattern) || draft.length})} />}
+      {(draft.type === 'field' || draft.type === 'masterData') && <Select autoFocus size="small" aria-label="依据字段" value={draft.sourceField} options={baseConfig.fields.filter(field => field.key !== selectedField?.key).map(field => ({value:field.key,label:field.name}))} onChange={sourceField => update({sourceField,regenerateOnChange:Boolean(sourceField)})} />}
+      {(draft.type === 'field' || draft.type === 'masterData' || draft.type === 'organization') && <Select size="small" aria-label="取值属性" value={draft.sourceAttribute || (draft.type === 'organization' ? 'org_code' : 'code')} options={draft.type === 'organization' ? [{value:'org_code',label:'组织编码'},{value:'factory_code',label:'工厂编码'},{value:'department_code',label:'部门编码'},{value:'org_name',label:'组织简称'}] : [{value:'code',label:'编码'},{value:'id',label:'ID'},{value:'shortName',label:'简称'},{value:'custom',label:'自定义属性'}]} onChange={sourceAttribute => update({sourceAttribute})} />}
+      {draft.type === 'sequence' && <><InputNumber autoFocus size="small" aria-label="起始值" min={0} value={draft.sequenceStart ?? 1} onChange={value => update({sequenceStart:Number(value ?? 1)})} /><InputNumber size="small" aria-label="步长" min={1} value={draft.sequenceStep || 1} onChange={value => update({sequenceStep:Number(value || 1)})} /><Select size="small" aria-label="重置周期" value={draft.resetCycle || 'month'} options={encodingResetCycleOptions} onChange={resetCycle => update({resetCycle})} /></>}
+    </div>;
+  };
+
+  const renderEncodingSegmentContents = (segment: EncodingSegment, index: number) => {
+    const editing = encodingSegmentEditor.open && encodingSegmentEditor.index === index;
+    const draft = editing ? encodingSegmentEditor.draft : segment;
+    const start = (part: 'type' | 'length' | 'value' | 'padding') => openEncodingSegmentEditor(segment,index,part);
+    const value = segment.type === 'fixed' ? segment.value || '设置固定值'
+      : segment.type === 'date' ? segment.datePattern || 'YYMM'
+      : segment.type === 'sequence' ? `起始 ${segment.sequenceStart ?? 1} · 步长 ${segment.sequenceStep || 1} · ${encodingResetCycleOptions.find(option => option.value === (segment.resetCycle || 'month'))?.label || segment.resetCycle || '按月重置'}`
+      : `${baseConfig.fields.find(field => field.key === segment.sourceField)?.name || segment.sourceField || segment.sourceAttribute || '选择来源'}${segment.sourceAttribute ? ` / ${segment.sourceAttribute}` : ''}`;
+    const cellButton = (part: 'type' | 'length' | 'value' | 'padding', label: string, content: React.ReactNode) => <button type="button" className="encoding-cell-display" aria-label={label}
+      onDoubleClick={event => { event.stopPropagation(); start(part); }}
+      onClick={event => { event.stopPropagation(); if (event.detail === 0) start(part); }}>{content}</button>;
+    return <div className="encoding-segment-description encoding-segment-property-row">
+      <div className="encoding-property-cell encoding-property-type">
+        {editing && encodingSegmentEditPart === 'type' ? <Select autoFocus size="small" aria-label="段类型" value={draft.type} options={encodingSegmentTypeOptions}
+          onBlur={closeEncodingSegmentEditor} onChange={type => { updateEncodingSegmentDraft({...makeEncodingSegment(type, baseConfig.fields),id:draft.id}); closeEncodingSegmentEditor(); }} />
+          : cellButton('type',`编辑编码段类型：${getEncodingSegmentTypeLabel(segment.type)}`,<strong>{segment.name || getEncodingSegmentTypeLabel(segment.type)}</strong>)}
+      </div>
+      <div className="encoding-property-cell encoding-property-length">
+        {editing && encodingSegmentEditPart === 'length' ? <InputNumber autoFocus size="small" aria-label="位数" min={1} max={64} suffix="位" value={draft.length}
+          onChange={length => updateEncodingSegmentDraft({length:Number(length || 1)})} onBlur={closeEncodingSegmentEditor} onPressEnter={closeEncodingSegmentEditor} />
+          : cellButton('length',`编辑${getEncodingSegmentTypeLabel(segment.type)}位数`,<span>{segment.length} 位</span>)}
+      </div>
+      <div className="encoding-property-cell encoding-property-value">
+        {editing && encodingSegmentEditPart === 'value' ? renderEncodingSegmentForm() : cellButton('value',`编辑${getEncodingSegmentTypeLabel(segment.type)}内容`,<code>{value}</code>)}
+        {encodingSegmentLengthError(segment) && <span className="encoding-segment-error" role="alert">{encodingSegmentLengthError(segment)}</span>}
+      </div>
+      <div className="encoding-property-cell encoding-property-padding">
+        {editing && encodingSegmentEditPart === 'padding' ? <Select autoFocus size="small" aria-label={`${getEncodingSegmentTypeLabel(segment.type)}补位方式`} value={draft.padding || (draft.type === 'sequence' ? 'leftZero' : 'none')} options={encodingPaddingOptions}
+          onBlur={closeEncodingSegmentEditor} onChange={padding => { updateEncodingSegmentDraft({padding}); closeEncodingSegmentEditor(); }} />
+          : cellButton('padding',`编辑${getEncodingSegmentTypeLabel(segment.type)}补位方式`,<span>{encodingPaddingOptions.find(option => option.value === (segment.padding || (segment.type === 'sequence' ? 'leftZero' : 'none')))?.label}</span>)}
+
+      </div>
+    </div>;
+  };
+
   const removeEncodingSegment = (index: number) => {
+    closeEncodingSegmentEditor();
     syncEncodingSegments(selectedEncodingSegments.filter((_, segmentIndex) => segmentIndex !== index));
   };
 
   const moveLayoutControl = (sourceId: string, targetId: string, position: DropPosition = 'before') => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
-    commitLayoutChange((current) => {
-      const sourceIndex = current.findIndex((control) => control.id === sourceId);
-      const targetIndex = current.findIndex((control) => control.id === targetId);
-      if (sourceIndex < 0 || targetIndex < 0) return current;
-      const next = [...current];
-      const [source] = next.splice(sourceIndex, 1);
-      const nextTargetIndex = next.findIndex((control) => control.id === targetId);
-      const insertIndex = position === 'after' ? nextTargetIndex + 1 : nextTargetIndex;
-      next.splice(Math.max(0, insertIndex), 0, source);
-      return next;
+    const target = layoutControls.find(item => item.id === targetId);
+    if (!target || layoutDescendants(layoutControls, sourceId).has(targetId)) return;
+    commitLayoutChange(current => {
+      const siblings = current.filter(item => item.parentId === target.parentId && item.slotId === target.slotId && item.id !== sourceId);
+      const nextSibling = siblings[siblings.findIndex(item => item.id === targetId) + 1];
+      return placeLayoutControl(current, sourceId, target.parentId, target.slotId, position === 'before' ? target.id : nextSibling?.id);
     });
     setSelectedControlId(sourceId);
-    const source = layoutControls.find((control) => control.id === sourceId);
-    if (source?.fieldKey) setSelectedAssetKey(source.fieldKey);
   };
-
   const moveLayoutControlToEnd = (sourceId: string) => {
-    if (!sourceId) return;
-    commitLayoutChange((current) => {
-      const sourceIndex = current.findIndex((control) => control.id === sourceId);
-      if (sourceIndex < 0 || sourceIndex === current.length - 1) return current;
-      const next = [...current];
-      const [source] = next.splice(sourceIndex, 1);
-      next.push(source);
-      return next;
-    });
+    commitLayoutChange(current => placeLayoutControl(current, sourceId));
     setSelectedControlId(sourceId);
-    const source = layoutControls.find((control) => control.id === sourceId);
-    if (source?.fieldKey) setSelectedAssetKey(source.fieldKey);
   };
 
   const duplicateControl = (control?: LayoutControl | null) => {
     if (!control) return;
-    const copied = cloneControl(control);
-    setCopiedControl(control);
-    commitLayoutChange((current) => [...current, copied]);
+    const tree = cloneLayoutSubtree(layoutControls, control.id, () => `control-${crypto.randomUUID()}`);
+    const copied = tree.find(item => item.parentId === control.parentId) || tree[0];
+    setCopiedControl(control); setCopiedTree(layoutControls.filter(item => layoutDescendants(layoutControls, control.id).has(item.id)));
+    commitLayoutChange((current) => [...current, ...tree]);
     setSelectedControlId(copied.id);
   };
 
   const copyControlToClipboard = (control?: LayoutControl | null) => {
     if (!control) return;
-    setCopiedControl(control);
+    setCopiedControl(control); setCopiedTree(layoutControls.filter(item => layoutDescendants(layoutControls, control.id).has(item.id)));
     message.success('已复制控件，可使用 Ctrl+V 粘贴');
   };
 
@@ -4501,9 +4816,9 @@ export default function FormSettingsPage() {
       message.warning('还没有复制控件');
       return;
     }
-    const pasted = cloneControl(copiedControl);
-    commitLayoutChange((current) => [...current, pasted]);
-    setSelectedControlId(pasted.id);
+    const tree = cloneLayoutSubtree(copiedTree.length ? copiedTree : [copiedControl], copiedControl.id, () => `control-${crypto.randomUUID()}`);
+    commitLayoutChange((current) => [...current, ...tree]);
+    setSelectedControlId(tree.find(item => item.parentId === copiedControl.parentId)?.id || tree[0]?.id);
   };
 
   const removeControl = (controlId?: string) => {
@@ -4513,14 +4828,14 @@ export default function FormSettingsPage() {
       message.warning('请先选择画布控件');
       return;
     }
-    commitLayoutChange((current) => current.filter((control) => control.id !== targetId));
+    commitLayoutChange((current) => unwrapLayoutControl(current, targetId));
     setSelectedControlId('');
-    message.success('已从画布移出控件，字段资产仍然保留');
+    message.success(isLayoutContainer(target) ? '容器已移除，内部控件已移到上一级' : '已从画布移出控件，字段资产仍然保留');
   };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (activeTab !== 'form' || isEditableTarget(event.target)) return;
+      if (activeTab !== 'form' || isEditableTarget(event.target) || (event.target instanceof Element && event.target.closest('.ant-modal, .ant-drawer'))) return;
       const metaKey = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (metaKey && key === 'c') {
@@ -4546,18 +4861,29 @@ export default function FormSettingsPage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, copiedControl, selectedControl, selectedControlId, layoutControls]);
+  }, [activeTab, copiedControl, copiedTree, selectedControl, selectedControlId, layoutControls]);
 
   const renderControlActions = (control: LayoutControl) => (
     <span className="designer-control-actions" onClick={(event) => event.stopPropagation()}>
-      <Button size="small" type="text" title="复制" icon={<CopyOutlined />} onClick={() => duplicateControl(control)} />
-      <Button size="small" type="text" danger title="移出画布" icon={<DeleteOutlined />} onClick={() => removeControl(control.id)} />
+      <HolderOutlined className="designer-drag-handle" title="拖动调整位置" />
+      <Button size="small" type="text" title="复制" aria-label={`复制${control.name}`} icon={<CopyOutlined />} onClick={() => duplicateControl(control)} />
+      <Button size="small" type="text" danger title="移出画布" aria-label={`移出${control.name}`} icon={<DeleteOutlined />} onClick={() => removeControl(control.id)} />
     </span>
   );
 
   const getCanvasControlDragProps = (control: LayoutControl) => ({
+    tabIndex: embedded ? 0 : undefined,
+    role: embedded ? 'group' : undefined,
+    'aria-label': embedded ? `编辑字段：${control.name}` : undefined,
+    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!embedded || event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      setSelectedControlId(control.id);
+      setSelectedAssetKey(control.fieldKey || '');
+    },
     draggable: true,
     onDragStart: (event: React.DragEvent<HTMLDivElement>) => {
+      event.stopPropagation();
       event.dataTransfer.setData('layoutControlId', control.id);
       event.dataTransfer.effectAllowed = 'move';
       setDraggedControlId(control.id);
@@ -4587,7 +4913,13 @@ export default function FormSettingsPage() {
       event.preventDefault();
       event.stopPropagation();
       const sourceId = event.dataTransfer.getData('layoutControlId');
-      moveLayoutControl(sourceId, control.id, dropHint?.controlId === control.id ? dropHint.position : 'before');
+      if (sourceId) moveLayoutControl(sourceId, control.id, dropHint?.controlId === control.id ? dropHint.position : 'before');
+      else {
+        const field = baseConfig.fields.find(item => item.key === event.dataTransfer.getData('fieldKey'));
+        const component = componentGroups.flatMap(group => group.items).find(item => item.key === event.dataTransfer.getData('componentKey'));
+        const added = field ? makeFieldControl(field) : component ? makeComponentControl(component) : null;
+        if (added) { commitLayoutChange(current => placeLayoutControl([...current, added], added.id, control.parentId, control.slotId, control.id)); setSelectedControlId(added.id); }
+      }
       setDraggedControlId('');
       setDropHint(null);
       setCanvasDragActive(false);
@@ -4595,61 +4927,84 @@ export default function FormSettingsPage() {
   });
 
   const renderControlLabel = (control: LayoutControl) => (
-    <span className={control.rules.required.enabled ? 'designer-required-label' : undefined}>{control.name}</span>
+    <span className={`designer-field-title ${control.rules.required.enabled ? 'designer-required-label' : ''}`}>{control.name}</span>
   );
 
-  const renderComponentInput = (control: LayoutControl) => {
-    const disabled = control.rules.readonly.enabled;
-    const placeholder = control.placeholder || control.desc || `请输入${control.name}`;
-    const typeSettings = {
-      ...getDefaultTypeSettings(control.controlType),
-      ...(control.typeSettings || {}),
-    };
-    if (control.controlType === 'textarea') {
-      const rows = typeSettings.rows || 2;
-      return <Input.TextArea disabled={disabled} maxLength={typeSettings.maxLength} placeholder={placeholder} autoSize={{ minRows: rows, maxRows: Math.max(rows, 4) }} />;
-    }
-    if (control.controlType === 'number') {
-      return <Input disabled={disabled} placeholder={placeholder} suffix={typeSettings.unit || '#'} />;
-    }
-    if (['select', 'relation'].includes(control.controlType)) {
-      return <Select disabled={disabled} placeholder={placeholder} options={optionSourceToOptions(control.optionSource, placeholder)} />;
-    }
-    if (control.controlType === 'datetime') {
-      return <Input disabled={disabled} placeholder={placeholder} prefix={<CalendarOutlined />} />;
-    }
-    if (control.controlType === 'upload') {
-      return <Button disabled={disabled} icon={<PaperClipOutlined />}>选择文件</Button>;
-    }
-    if (control.controlType === 'switch') {
-      return <Segmented disabled={disabled} options={[typeSettings.uncheckedText || '否', typeSettings.checkedText || '是']} value={typeSettings.defaultChecked ? typeSettings.checkedText || '是' : typeSettings.uncheckedText || '否'} />;
-    }
-    if (control.controlType === 'readonly-text' || control.controlType === 'code') {
-      return <Input disabled value={control.controlType === 'code' ? '自动生成编号' : '系统计算或引用值'} />;
-    }
-    return <Input disabled={disabled} maxLength={typeSettings.maxLength} placeholder={placeholder} />;
+  const renderComponentInput = (control: LayoutControl) => <FieldControl preview type={control.controlType} label={control.name} disabled={embedded || control.rules.readonly.enabled} placeholder={control.placeholder} settings={control.typeSettings} options={optionSourceToOptions(control.optionSource)} />;
+
+  const handleContainerDrop=(event:React.DragEvent, parentId:string,slotId:string)=>{
+    event.preventDefault();event.stopPropagation();
+    let id=event.dataTransfer.getData('layoutControlId');
+    const field=baseConfig.fields.find(f=>f.key===event.dataTransfer.getData('fieldKey'));
+    const component=componentGroups.flatMap(g=>g.items).find(c=>c.key===event.dataTransfer.getData('componentKey'));
+    const added=!id?(field?makeFieldControl(field):component?makeComponentControl(component):null):null;
+    if(added)id=added.id;if(!id)return;
+    commitLayoutChange(current=>placeLayoutControl(added?[...current,added]:current,id,parentId,slotId));
+    setSelectedControlId(id);setCanvasDragActive(false);setDraggedControlId('');setDropHint(null);
   };
 
-  const renderCanvasControl = (control: LayoutControl) => {
+  const renderContainerProperties = () => {
+    if (!selectedControl) return null;
+    const control = selectedControl;
+    const updateLayout = (patch: NonNullable<LayoutControl['layout']>) => updateSelectedControl({ layout: { ...control.layout, ...patch } });
+    const parentOptions = layoutControls.filter(item => isLayoutContainer(item) && !layoutDescendants(layoutControls, control.id).has(item.id));
+    const parent = layoutControls.find(item => item.id === control.parentId);
+    return <section className="designer-prop-section"><strong className="designer-prop-section-title">{isLayoutContainer(control) ? '容器配置' : '所在位置'}</strong>
+      <label><span>所属容器</span><Select aria-label="所属容器" value={control.parentId || 'root'} options={[{ value: 'root', label: '画布顶层' }, ...parentOptions.map(item => ({ value: item.id, label: item.name }))]} onChange={value => commitLayoutChange(current => placeLayoutControl(current, control.id, value === 'root' ? undefined : value))} /></label>
+      {parent && <label><span>容器位置</span><Select aria-label="容器位置" value={control.slotId} options={layoutSlots(parent).map(slot => ({ value: slot.id, label: slot.label }))} onChange={value => { commitLayoutChange(current => placeLayoutControl(current, control.id, parent.id, value)); if (parent.controlType === 'tabs') setContainerTabs(current => ({ ...current, [parent.id]: value })); }} /></label>}
+      {isLayoutContainer(control) && <>
+        <label><span>内容间距</span><InputNumber aria-label="内容间距" min={0} max={40} value={control.layout?.gap ?? 12} onChange={gap => updateLayout({ gap: gap ?? 12 })} suffix="px" /></label>
+        {control.controlType === 'container' && <><label><span>允许折叠</span><Switch size="small" checked={Boolean(control.layout?.collapsible)} onChange={collapsible => updateLayout({ collapsible })} /></label>{control.layout?.collapsible && <label><span>默认收起</span><Switch size="small" checked={Boolean(control.layout.defaultCollapsed)} onChange={defaultCollapsed => updateLayout({ defaultCollapsed })} /></label>}</>}
+        {control.controlType === 'two-columns' && <><label><span>列数</span><Select aria-label="列数" value={control.layout?.columns || 2} options={[2,3,4].map(value => ({ value, label: `${value} 列` }))} onChange={columns => updateLayout({ columns, ratios: Array.from({ length: columns }, (_, i) => control.layout?.ratios?.[i] || 1) })} /></label><small>减少列数时，原列中的控件会移至第一列。</small>{layoutSlots(control).map((slot, index) => <label key={slot.id}><span>{slot.label}比例</span><InputNumber min={1} max={12} value={control.layout?.ratios?.[index] || 1} onChange={value => updateLayout({ ratios: layoutSlots(control).map((_, i) => i === index ? value || 1 : control.layout?.ratios?.[i] || 1) })} /></label>)}</>}
+        {control.controlType === 'tabs' && <><div className="designer-container-tab-settings">{layoutSlots(control).map(slot => <div key={slot.id}><Input aria-label={`页签名称：${slot.label}`} value={slot.label} onChange={event => updateLayout({ tabs: layoutSlots(control).map(tab => tab.id === slot.id ? { ...tab, label: event.target.value } : tab) })} /><Button danger size="small" disabled={layoutSlots(control).length < 2} onClick={() => { const remaining = layoutSlots(control).filter(tab => tab.id !== slot.id); updateLayout({ tabs: remaining }); setContainerTabs(current => ({ ...current, [control.id]: remaining[0].id })); }}>移除</Button></div>)}</div><Button size="small" icon={<PlusOutlined />} onClick={() => updateLayout({ tabs: [...layoutSlots(control), { id: `tab-${crypto.randomUUID()}`, label: `页签 ${layoutSlots(control).length + 1}` }] })}>新增页签</Button><small>移除页签后，其控件会保留在第一个页签。</small></>}
+      </>}
+    </section>;
+  };
+
+  const renderCanvasControl = (control: LayoutControl, trial = false, inheritedReadonly = false): React.ReactNode => {
+    const permission = trial ? getPreviewFieldPermission(control.fieldKey) : undefined;
+    const state = trial ? previewStates[String(control.fieldKey)] : undefined;
+    if (trial && (permission?.visible === false || (state?.visible ?? control.rules.visible.enabled) === false)) return null;
+    const readonly = inheritedReadonly || control.rules.readonly.enabled || Boolean(state?.readonly || (permission && !permission.editable));
     const field = baseConfig.fields.find((item) => item.key === control.fieldKey);
     const effectiveControlType = getEffectiveControlTypeForControl(control, field);
-    const dragClass = `${draggedControlId === control.id ? 'canvas-control-dragging' : ''} ${dropHint?.controlId === control.id ? `canvas-drop-${dropHint.position}` : ''}`;
-    const ruleClass = `${!control.rules.visible.enabled ? 'canvas-control-hidden-preview' : ''} ${control.rules.readonly.enabled ? 'canvas-control-readonly-preview' : ''}`;
+    const presentation = getControlPresentation(control.presentation);
+    const appearance = getControlAppearance(control.presentation);
+    const placementStyle = { ...appearance.style, '--layout-span': getControlColumnSpan(control.width), marginBottom: presentation.spacingAfter } as React.CSSProperties;
+    const labelProps = {
+      className: `designer-field-label ${presentation.labelPosition === 'left' ? 'is-label-left' : ''} ${presentation.labelAlign === 'right' ? 'is-label-right' : ''}`,
+      style: { '--designer-label-width': `${presentation.labelWidth}px` } as React.CSSProperties,
+    };
+    const renderTrialInput = () => {
+      const encoding = control.encodingRule || field?.encodingRule;
+      const generatedCode = (isEncodingField(field) || control.controlType === 'code') && encoding?.enabled !== false && encoding?.generationMode !== 'manual' && !encoding?.allowManualOverride;
+      const placeholder = control.placeholder || field?.placeholder;
+      if (generatedCode) return <Input aria-label={control.name} disabled placeholder={placeholder} />;
+      return <Form.Item name={control.fieldKey || control.id} rules={[{ required: permission?.required || state?.required || control.rules.required.enabled, message: `请填写${control.name}` }]}>
+        {platformForm && control.dataSourceKind && control.dataSourceKind !== 'static' && control.fieldKey && !state?.masked
+          ? <RelationPicker formId={platformForm.id} fieldName={control.fieldKey} draftControls={layoutControls} contextData={previewValues} modelName={control.optionSource || ''} placeholder={placeholder || `请选择${control.name}`} disabled={readonly} allowClear={control.typeSettings?.allowClear !== false} showSearch={control.typeSettings?.displayMode !== 'dropdown'} copyMode={state?.copyMode} copyText={state?.copyText} />
+          : <FieldControl preview masked={state?.masked} copyMode={state?.copyMode} copyText={state?.copyText} type={effectiveControlType} label={control.name} settings={control.typeSettings} options={field?.enumValues && control.optionSource === field.optionSource ? field.enumValues : control.optionSource ? optionSourceToOptions(control.optionSource) : field?.enumValues} placeholder={placeholder} disabled={readonly} />}
+      </Form.Item>;
+    };
+    const dragClass = `${presentation.startNewRow ? 'is-start-new-row' : ''} ${!trial && draggedControlId === control.id ? 'canvas-control-dragging' : ''} ${!trial && dropHint?.controlId === control.id ? `canvas-drop-${dropHint.position}` : ''}`;
+    const ruleClass = `${!trial && !control.rules.visible.enabled ? 'canvas-control-hidden-preview' : ''} ${(trial ? readonly : control.rules.readonly.enabled) ? 'canvas-control-readonly-preview' : ''}`;
     if (control.source === 'field' && field) {
       return (
         <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-field-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+          {...(trial ? {} : getCanvasControlDragProps(control))}
+          style={placementStyle}
+          className={`designer-field-control ${appearance.className} ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
           key={control.id}
-          onClick={() => {
+          onClick={(event) => {
+            event.stopPropagation(); if (trial) return;
             setSelectedControlId(control.id);
             setSelectedAssetKey(field.key);
           }}
         >
-          {renderControlActions(control)}
-          <label>
-            {renderControlLabel(control)}
-            {fieldInput(field, control.placeholder, control.rules.readonly.enabled, control.optionSource, effectiveControlType, control.typeSettings)}
+          {!trial && renderControlActions(control)}
+          <label {...labelProps}>
+            {renderControlLabel(trial ? { ...control, rules: { ...control.rules, required: { ...control.rules.required, enabled: Boolean(permission?.required || state?.required || control.rules.required.enabled) } } } : control)}
+            <div className="designer-field-input">{trial ? renderTrialInput() : fieldInput(field, control.placeholder, embedded || control.rules.readonly.enabled, control.optionSource, effectiveControlType, control.typeSettings)}</div>
             {control.helpText && <small className="designer-control-help">{control.helpText}</small>}
           </label>
         </div>
@@ -4659,59 +5014,57 @@ export default function FormSettingsPage() {
     if (['text', 'textarea', 'number', 'select', 'relation', 'datetime', 'upload', 'switch', 'readonly-text', 'code'].includes(control.controlType)) {
       return (
         <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-field-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+          {...(trial ? {} : getCanvasControlDragProps(control))}
+          style={placementStyle}
+          className={`designer-field-control ${appearance.className} ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
           key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
+          onClick={(event) => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}
         >
-          {renderControlActions(control)}
-          <label>
-            {renderControlLabel(control)}
-            {renderComponentInput(control)}
+          {!trial && renderControlActions(control)}
+          <label {...labelProps}>
+            {renderControlLabel(trial ? { ...control, rules: { ...control.rules, required: { ...control.rules.required, enabled: Boolean(permission?.required || state?.required || control.rules.required.enabled) } } } : control)}
+            <div className="designer-field-input">{trial ? renderTrialInput() : renderComponentInput(control)}</div>
             {control.helpText && <small className="designer-control-help">{control.helpText}</small>}
           </label>
         </div>
       );
     }
 
-    if (control.controlType === 'container' || control.controlType === 'two-columns') {
-      const isColumns = control.controlType === 'two-columns';
-      return (
-        <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-layout-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
-          key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
-        >
-          {renderControlActions(control)}
-          <div className="designer-layout-control-head">
-            <strong>{control.name}</strong>
-            <small>{isColumns ? '多列字段区域' : '字段分组容器'}</small>
-          </div>
-          <div className={isColumns ? 'designer-layout-columns-preview' : 'designer-layout-container-preview'}>
-            {isColumns ? (
-              <>
-                <span>左列字段</span>
-                <span>右列字段</span>
-              </>
-            ) : (
-              <span>拖入字段或控件到该分组</span>
-            )}
-          </div>
-          <small>{control.desc}</small>
+    if (isLayoutContainer(control)) {
+      const slots = layoutSlots(control);
+      const activeTab = containerTabs[control.id] || slots[0].id;
+      const renderedSlots = control.controlType === 'tabs' ? slots.filter(slot => slot.id === activeTab) : slots;
+      return <div {...(trial ? {} : getCanvasControlDragProps(control))} style={placementStyle} key={control.id} data-layout-id={control.id}
+        className={`designer-layout-control ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+        onClick={event => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}>
+        {!trial && renderControlActions(control)}
+        <div className="designer-layout-control-head"><strong>{control.name}</strong><small>{control.controlType === 'tabs' ? '页签容器' : control.controlType === 'two-columns' ? `${slots.length} 列布局` : '字段分组'}</small></div>
+        {control.controlType === 'tabs' && <div className="designer-container-tabbar">{slots.map(slot => <Button size="small" key={slot.id} type={slot.id === activeTab ? 'primary' : 'text'} onClick={event => { event.stopPropagation(); setContainerTabs(current => ({ ...current, [control.id]: slot.id })); setSelectedControlId(control.id); }}>{slot.label}</Button>)}</div>}
+        <div className={control.controlType === 'two-columns' ? 'designer-container-columns' : ''} style={{ gap: control.layout?.gap ?? 12, gridTemplateColumns: slots.map((_, index) => `${control.layout?.ratios?.[index] || 1}fr`).join(' ') }}>
+          {renderedSlots.map(slot => {
+            const children = layoutControls.filter(child => child.parentId === control.id && child.slotId === slot.id);
+            return <div className="designer-container-slot" key={slot.id} data-container-id={control.id} data-slot-id={slot.id}
+              onDragOver={event => { event.preventDefault(); event.stopPropagation(); if (trial) return; event.dataTransfer.dropEffect = 'move'; }}
+              onDrop={trial ? undefined : event => handleContainerDrop(event, control.id, slot.id)}>
+              {control.controlType === 'two-columns' && <small className="designer-slot-title">{slot.label}</small>}
+              <div className="create-form-grid">{children.map(child => renderCanvasControl(child, trial, readonly))}</div>
+              {!trial && !children.length && <div className="designer-container-empty">拖入字段或控件到{slot.label}</div>}
+            </div>;
+          })}
         </div>
-      );
+      </div>;
     }
 
     if (control.controlType === 'editable-table' || control.controlType === 'readonly-table') {
       return (
         <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-table-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+          {...(trial ? {} : getCanvasControlDragProps(control))}
+          style={placementStyle}
+          className={`designer-table-control ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
           key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
+          onClick={(event) => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}
         >
-          {renderControlActions(control)}
+          {!trial && renderControlActions(control)}
           <strong className={control.rules.required.enabled ? 'designer-required-label' : undefined}>{control.name}</strong>
           <div className="designer-mini-table">
             <span>列配置</span>
@@ -4725,32 +5078,14 @@ export default function FormSettingsPage() {
     if (control.controlType === 'divider') {
       return (
         <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-divider-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+          {...(trial ? {} : getCanvasControlDragProps(control))}
+          style={placementStyle}
+          className={`designer-divider-control ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
           key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
+          onClick={(event) => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}
         >
-          {renderControlActions(control)}
+          {!trial && renderControlActions(control)}
           <span>{control.name}</span>
-        </div>
-      );
-    }
-
-    if (control.controlType === 'tabs') {
-      return (
-        <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-tabs-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
-          key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
-        >
-          {renderControlActions(control)}
-          <div className="designer-tabs-preview">
-            <span className="designer-tab-active">基础信息</span>
-            <span>扩展信息</span>
-            <span>操作记录</span>
-          </div>
-          <small>{control.desc}</small>
         </div>
       );
     }
@@ -4758,12 +5093,13 @@ export default function FormSettingsPage() {
     if (['summary-card', 'status-tag', 'file-preview', 'approval-comment', 'operation-log', 'status-flow', 'risk-level'].includes(control.controlType)) {
       return (
         <div
-          {...getCanvasControlDragProps(control)}
-          className={`designer-business-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+          {...(trial ? {} : getCanvasControlDragProps(control))}
+          style={placementStyle}
+          className={`designer-business-control ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
           key={control.id}
-          onClick={() => setSelectedControlId(control.id)}
+          onClick={(event) => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}
         >
-          {renderControlActions(control)}
+          {!trial && renderControlActions(control)}
           <strong>{control.name}</strong>
           <span>{control.desc}</span>
         </div>
@@ -4772,12 +5108,13 @@ export default function FormSettingsPage() {
 
     return (
       <div
-        {...getCanvasControlDragProps(control)}
-        className={`designer-placeholder-control ${controlWidthClass(control.width)} ${selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
+        {...(trial ? {} : getCanvasControlDragProps(control))}
+        style={placementStyle}
+        className={`designer-placeholder-control ${controlWidthClass(control.width)} ${!trial && selectedControlId === control.id ? 'canvas-field-active' : ''} ${dragClass} ${ruleClass}`}
         key={control.id}
-        onClick={() => setSelectedControlId(control.id)}
+        onClick={(event) => { event.stopPropagation(); if (trial) return; setSelectedControlId(control.id); }}
       >
-        {renderControlActions(control)}
+        {!trial && renderControlActions(control)}
         <strong className={control.rules.required.enabled ? 'designer-required-label' : undefined}>{control.name}</strong>
         <span>{control.desc || '纯 UI 控件，可在右侧绑定字段或配置展示方式。'}</span>
       </div>
@@ -4785,18 +5122,21 @@ export default function FormSettingsPage() {
   };
 
   const renderTableProperties = () => {
-    if (!selectedControl || !['editable-table', 'readonly-table'].includes(selectedControl.controlType)) return null;
-    const editable = selectedControl.controlType === 'editable-table';
-    return (
-      <section className="designer-prop-section">
-        <strong className="designer-prop-section-title">{editable ? '子表属性' : '关联表属性'}</strong>
-        <label><span>数据来源</span><Input value={editable ? `${baseConfig.dataSource}_items` : 'related_records'} readOnly /></label>
-        <label><span>{editable ? '列配置' : '展示列'}</span><Input value={editable ? '物料、数量、单位、备注' : '编号、名称、状态、时间'} readOnly /></label>
-        <label><span>{editable ? '允许新增行' : '分页显示'}</span>{genericRuleToggle(true, editable ? '新增行' : '分页')}</label>
-        <label><span>{editable ? '允许删除行' : '点击查看详情'}</span>{genericRuleToggle(true, editable ? '删除行' : '详情')}</label>
-        <label><span>{editable ? '行校验规则' : '排序规则'}</span><Input value={editable ? '明细行不能为空，数量必须大于 0' : '按时间倒序'} readOnly /></label>
-      </section>
-    );
+    if (!selectedControl || !['editable-table','readonly-table'].includes(selectedControl.controlType)) return null;
+    const editable=selectedControl.controlType==='editable-table';const settings=selectedControl.typeSettings||{};const columns=settings.columns||[];
+    return <section className="designer-prop-section"><strong className="designer-prop-section-title">{editable?'明细表配置':'关联表配置'}</strong>
+      <small>{editable?'绑定 JSON 字段后，明细随主记录一起保存。':'绑定 JSON 字段并填写来源表单 ID，按当前用户权限读取关联记录。'}</small>
+      {!editable&&<label><span>来源表单 ID</span><InputNumber min={1} value={settings.sourceFormId} onChange={value=>updateSelectedTypeSettings({sourceFormId:value||undefined})}/></label>}
+      {columns.map((column,index)=><div className="designer-detail-column" key={index}>
+        <Input aria-label={`第 ${index+1} 列名称`} placeholder="列名称" value={column.label} onChange={e=>updateSelectedTypeSettings({columns:columns.map((c,i)=>i===index?{...c,label:e.target.value}:c)})}/>
+        <Input aria-label={`第 ${index+1} 列编码`} placeholder="字段编码" value={column.key} onChange={e=>updateSelectedTypeSettings({columns:columns.map((c,i)=>i===index?{...c,key:e.target.value}:c)})}/>
+        <Select value={column.type} options={[{value:'string',label:'文本'},{value:'number',label:'数值'},{value:'boolean',label:'开关'}]} onChange={type=>updateSelectedTypeSettings({columns:columns.map((c,i)=>i===index?{...c,type}:c)})}/>
+        {editable&&<Checkbox checked={column.required} onChange={e=>updateSelectedTypeSettings({columns:columns.map((c,i)=>i===index?{...c,required:e.target.checked}:c)})}>必填</Checkbox>}
+        <Button danger size="small" onClick={()=>updateSelectedTypeSettings({columns:columns.filter((_,i)=>i!==index)})}>移除列</Button>
+      </div>)}
+      <Button size="small" icon={<PlusOutlined/>} onClick={()=>updateSelectedTypeSettings({columns:[...columns,{key:`column_${columns.length+1}`,label:`字段 ${columns.length+1}`,type:'string'}]})}>新增明细列</Button>
+      {editable&&<><label><span>允许新增行</span><Switch size="small" checked={settings.allowAdd!==false} onChange={allowAdd=>updateSelectedTypeSettings({allowAdd})}/></label><label><span>允许删除行</span><Switch size="small" checked={settings.allowDelete!==false} onChange={allowDelete=>updateSelectedTypeSettings({allowDelete})}/></label><label><span>最少行数</span><InputNumber min={0} max={200} value={settings.minRows||0} onChange={value=>updateSelectedTypeSettings({minRows:value||0})}/></label><label><span>最多行数</span><InputNumber min={1} max={200} value={settings.maxRows||200} onChange={value=>updateSelectedTypeSettings({maxRows:value||200})}/></label></>}
+    </section>;
   };
 
   const activeRule = ruleModal && selectedControl?.id === ruleModal.controlId
@@ -4858,136 +5198,42 @@ export default function FormSettingsPage() {
       />
     );
   };
-  const getPreviewFieldPermission = (fieldKey?: string) => (
-    fieldKey ? selectedPreviewFlowNode?.fieldPermissions?.[fieldKey] : undefined
-  );
+  const activePreviewRole = permissionRoles.includes(previewRole) ? previewRole : permissionRoles[0];
+  const previewRoleRecord = identityRoleRecords.find(role => role.label === activePreviewRole || role.name === activePreviewRole);
+  const previewRoleIndex = Math.max(permissionRoles.indexOf(activePreviewRole), 0);
+  const previewRoleKind = previewRoleIndex === 0 ? 'system' : previewRoleIndex < 4 ? 'manager' : 'operator';
+  const previewRoleDraft = permissionDrafts[activePreviewRole] || permissionDrafts[previewRoleRecord?.name || '']
+    || permissionDraftsFromRows(formPermissionRows, identityRoleRecords, baseConfig.fields, permissionOrgUnitIds)[activePreviewRole]
+    || makePermissionDesignDraft(previewRoleKind, permissionOrgUnitIds);
+  const previewRoleCanView = previewRoleDraft.page.enter !== false && previewRoleDraft.actions.view !== false;
+  const previewRoleCanFill = selectedPreviewFlowNode?.type === 'endEvent' ? false
+    : previewRoleDraft.actions[selectedPreviewFlowNode && selectedPreviewFlowNode.type !== 'startEvent' ? 'approve' : 'create'] !== false;
+  const getPreviewFieldPermission = (fieldKey?: string) => {
+    if (!fieldKey) return undefined;
+    const fieldIndex = baseConfig.fields.findIndex(field => field.key === fieldKey);
+    const field = baseConfig.fields[fieldIndex];
+    const rolePermission = field ? previewRoleDraft.fields[fieldKey] || defaultRoleFieldPermission(field, fieldIndex, previewRoleKind) : undefined;
+    return previewFieldPermission(selectedPreviewFlowNode?.fieldPermissions?.[fieldKey], rolePermission, previewRoleCanView, previewRoleCanFill);
+  };
   const previewControls = layoutControls.filter((control) => {
-    if (!control.rules.visible.enabled) return false;
     if (control.source !== 'field') return true;
     const permission = getPreviewFieldPermission(control.fieldKey);
     return permission?.visible !== false;
   });
   const renderPreviewContent = () => {
-    if (previewMode === 'list') {
-      const columns = baseConfig.fields.filter((field) => field.listVisible).slice(0, previewDevice === 'mobile' ? 3 : 6);
-      return (
-        <div className="designer-preview-table">
-          <div className="designer-preview-table-head">
-            {columns.map((field) => <span key={field.key}>{field.name}</span>)}
-          </div>
-          {[1, 2, 3].map((row) => (
-            <div className="designer-preview-table-row" key={row}>
-              {columns.map((field) => <span key={field.key}>{field.placeholder || field.name}</span>)}
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return (
-      <div className="designer-preview-form">
-        {previewControls.map((control) => {
-          const field = baseConfig.fields.find((item) => item.key === control.fieldKey);
-          const permission = getPreviewFieldPermission(control.fieldKey);
-          const readonlyByNode = permission ? !permission.editable : false;
-          const requiredByNode = permission?.required ?? false;
-          const required = control.rules.required.enabled || requiredByNode;
-          const readonly = control.rules.readonly.enabled || readonlyByNode;
-          return (
-            <div className={`designer-preview-control ${controlWidthClass(previewDevice === 'mobile' ? 'full' : control.width)}`} key={control.id}>
-              <span className={required ? 'designer-required-label' : undefined}>{control.name}</span>
-              {control.source === 'field' && field
-                ? fieldInput(field, control.placeholder, readonly, control.optionSource, control.controlType, control.typeSettings)
-                : renderComponentInput({ ...control, rules: { ...control.rules, readonly: { ...control.rules.readonly, enabled: readonly } } })}
-              {field && permission && (
-                <small className="designer-preview-node-permission">
-                  {permission.editable ? '当前节点可编辑' : '当前节点只读'}{permission.required ? ' / 必填' : ''}
-                </small>
-              )}
-              {control.helpText && <small>{control.helpText}</small>}
-            </div>
-          );
-        })}
+    return <Form onCopyCapture={protectCopy} onCutCapture={protectCopy} form={previewForm} layout="vertical" onValuesChange={(_,values)=>setPreviewValues(values)}>
+      {previewRuleError&&<small role="alert">{previewRuleError}</small>}
+      <div className="create-form-grid" style={{ gap: canvasSettings.gap }}>
+        {previewControls.filter(control => !control.parentId).map(control => renderCanvasControl(control, true))}
       </div>
-    );
+    </Form>;
   };
+
 
   const viewFieldOptions = baseConfig.fields.map((field) => ({ value: field.key, label: `${field.name} (${field.key})` }));
   const sortedViewFilters = sortByOrder(viewConfig.filters);
   const sortedViewColumns = sortByOrder(viewConfig.table.columns);
   const enabledViewColumns = sortedViewColumns.filter((column) => column.enabled);
-  const versionListItems = useMemo(() => {
-    const draftVersion = Number(viewConfigMeta.draftVersion || 1);
-    const publishedVersion = Number(viewConfigMeta.publishedVersion || 0);
-    const draftHasChanges = hasUnsavedChanges || viewConfigMeta.status === 'draft';
-    return [
-      {
-        key: 'draft',
-        name: `当前草稿 v${draftVersion}`,
-        type: '草稿',
-        status: draftHasChanges ? '待发布' : '无差异',
-        date: viewConfigMeta.draftSavedAt ? viewConfigMeta.draftSavedAt.slice(0, 10) : '本地编辑中',
-        note: draftHasChanges ? '存在未发布修改' : '与线上版本一致',
-        tone: draftHasChanges ? 'warning' : 'success',
-        active: selectedVersionKey === 'draft',
-      },
-      {
-        key: 'published',
-        name: publishedVersion ? `已发布 v${publishedVersion}` : '尚未发布',
-        type: '线上',
-        status: publishedVersion ? '线上生效' : '无线上版本',
-        date: viewConfigMeta.publishedAt ? viewConfigMeta.publishedAt.slice(0, 10) : '暂无发布时间',
-        note: publishedVersion ? '当前线上可见版本' : '发布后生成线上版本',
-        tone: publishedVersion ? 'published' : 'muted',
-        active: selectedVersionKey === 'published',
-      },
-      ...(publishedVersion > 1 ? [{
-        key: 'previous',
-        name: `上一发布 v${publishedVersion - 1}`,
-        type: '历史',
-        status: '可回滚目标',
-        date: '历史快照',
-        note: `可恢复到 v${publishedVersion - 1}`,
-        tone: 'history',
-        active: selectedVersionKey === 'previous',
-      }] : []),
-    ] as Array<{
-      key: VersionPanelSelection;
-      name: string;
-      type: string;
-      status: string;
-      date: string;
-      note: string;
-      tone: string;
-      active: boolean;
-    }>;
-  }, [hasUnsavedChanges, selectedVersionKey, viewConfigMeta.draftSavedAt, viewConfigMeta.draftVersion, viewConfigMeta.publishedAt, viewConfigMeta.publishedVersion, viewConfigMeta.status]);
-  const selectedVersionItem = versionListItems.find((item) => item.key === selectedVersionKey) || versionListItems[0];
-  const selectedVersionDetails = useMemo(() => {
-    const draftVersion = Number(viewConfigMeta.draftVersion || 1);
-    const publishedVersion = Number(viewConfigMeta.publishedVersion || 0);
-    if (selectedVersionItem?.key === 'published') {
-      return [
-        ['版本类型', '已发布版本'],
-        ['版本号', publishedVersion ? `v${publishedVersion}` : '尚未发布'],
-        ['生效状态', publishedVersion ? '线上生效' : '未生效'],
-        ['发布时间', viewConfigMeta.publishedAt ? viewConfigMeta.publishedAt.slice(0, 10) : '暂无'],
-      ];
-    }
-    if (selectedVersionItem?.key === 'previous') {
-      return [
-        ['版本类型', '历史发布版本'],
-        ['版本号', `v${Math.max(publishedVersion - 1, 1)}`],
-        ['生效状态', '可回滚目标'],
-        ['发布时间', '历史快照'],
-      ];
-    }
-    return [
-      ['版本类型', '当前草稿'],
-      ['版本号', `v${draftVersion}`],
-      ['草稿状态', hasUnsavedChanges || viewConfigMeta.status === 'draft' ? '待发布' : '无差异'],
-      ['保存时间', viewConfigMeta.draftSavedAt ? viewConfigMeta.draftSavedAt.slice(0, 10) : '本地编辑中'],
-    ];
-  }, [hasUnsavedChanges, selectedVersionItem?.key, viewConfigMeta.draftSavedAt, viewConfigMeta.draftVersion, viewConfigMeta.publishedAt, viewConfigMeta.publishedVersion, viewConfigMeta.status]);
 
   const renderViewFilterControl = (filter: ViewFilterConfig) => {
     const placeholder = filter.placeholder || filter.label;
@@ -5064,7 +5310,7 @@ export default function FormSettingsPage() {
             <label><span>渲染类型</span><Select value={column.renderType} options={viewColumnRenderOptions} onChange={(renderType) => updateViewColumn(column.id, { renderType })} /></label>
             <label><span>固定列</span><Select value={column.fixed || 'none'} options={[{ value: 'none', label: '不固定' }, { value: 'left', label: '固定左侧' }, { value: 'right', label: '固定右侧' }]} onChange={(value) => updateViewColumn(column.id, { fixed: value === 'none' ? undefined : value as 'left' | 'right' })} /></label>
             <label><span>空值展示</span><Input value={column.emptyText} onChange={(event) => updateViewColumn(column.id, { emptyText: event.target.value })} /></label>
-            <label><span>允许排序</span><Switch checked={column.sortable} onChange={(sortable) => updateViewColumn(column.id, { sortable })} /></label>
+            <label><span>允许排序</span><Switch size="small" checked={column.sortable} onChange={(sortable) => updateViewColumn(column.id, { sortable })} /></label>
           </div>
         )}
       </div>
@@ -5095,8 +5341,8 @@ export default function FormSettingsPage() {
             {sortedViewFilters.map(renderViewFilterRow)}
           </div>
           <Space className="view-config-filter-actions">
-            <Button size="small">重置</Button>
-            <Button icon={<SearchOutlined />} size="small" type="primary">查询</Button>
+            <Button size="small" disabled title="设计预览，不执行查询">重置</Button>
+            <Button icon={<SearchOutlined />} size="small" type="primary" disabled title="发布后在运行页查询">查询</Button>
           </Space>
         </div>
       </section>
@@ -5113,6 +5359,7 @@ export default function FormSettingsPage() {
             type="text"
           />
         </div>
+        <Space wrap style={{marginBottom:12}}><Checkbox checked={viewConfig.table.toolbarActions.includes('import')} onChange={event=>updateViewConfig(current=>({...current,table:{...current.table,toolbarActions:event.target.checked?[...new Set([...current.table.toolbarActions,'import'])]:current.table.toolbarActions.filter(action=>action!=='import')}}))}>显示批量导入入口</Checkbox><Typography.Text type="secondary">发布后生效；导入还需角色具有“导入”和“新增”权限。</Typography.Text></Space>
         <div className="view-config-table-shell">
           <div className="view-config-table-preview">
             <div
@@ -5199,10 +5446,10 @@ export default function FormSettingsPage() {
           id: datasetId,
           name: '新数据集',
           sourceType: 'businessForm',
-          source: baseConfig.id,
+          source: platformForm?.code || baseConfig.id,
           refreshMode: 'realtime',
-          dimensions: ['date', 'status'],
-          measures: ['count'],
+          dimensions: [],
+          measures: [],
         },
       ],
     }));
@@ -5249,7 +5496,6 @@ export default function FormSettingsPage() {
     setSelectedAnalyticsWidgetId(widgetId);
   };
 
-  const analyticsMetricOptions = analyticsDesign.metrics.map((metric) => ({ value: metric.id, label: metric.name }));
   const analyticsDatasetOptions = analyticsDesign.datasets.map((dataset) => ({ value: dataset.id, label: dataset.name }));
   const analyticsWidgetOptions = analyticsDesign.widgets.map((widget) => ({ value: widget.id, label: widget.title }));
   const selectedAnalyticsWidget = analyticsDesign.widgets.find((widget) => widget.id === selectedAnalyticsWidgetId) || analyticsDesign.widgets[0];
@@ -5281,25 +5527,30 @@ export default function FormSettingsPage() {
             <div className="analytics-dataset-card" key={dataset.id}>
               <div className="analytics-card-title">
                 <DatabaseOutlined />
-                <Input value={dataset.name} onChange={(event) => updateAnalyticsDataset(dataset.id, { name: event.target.value })} />
+                <Input aria-label="数据集名称" value={dataset.name} onChange={(event) => updateAnalyticsDataset(dataset.id, { name: event.target.value })} />
+                <Button size="small" danger title="删除数据集" icon={<DeleteOutlined />} onClick={() => {
+                  if (analyticsDesign.metrics.some(metric => metric.datasetId === dataset.id) || analyticsDesign.widgets.some(widget => widget.datasetId === dataset.id)) { message.warning('请先删除或重新绑定引用此数据集的指标和组件'); return; }
+                  updateAnalyticsDesign(current => ({...current, datasets: current.datasets.filter(item => item.id !== dataset.id)}));
+                }} />
               </div>
               <div className="analytics-card-form-grid">
                 <label><span>来源类型</span><Select value={dataset.sourceType} options={[
                   { value: 'businessForm', label: '业务表单' },
-                  { value: 'ontology', label: '本体对象' },
-                  { value: 'sql', label: 'SQL 数据集' },
-                  { value: 'api', label: 'API 数据源' },
+                  { value: 'ontology', label: '本体对象（暂未接入）', disabled: true },
+                  { value: 'sql', label: 'SQL 数据集（暂未接入）', disabled: true },
+                  { value: 'api', label: 'API 数据源（暂未接入）', disabled: true },
                 ]} onChange={(sourceType) => updateAnalyticsDataset(dataset.id, { sourceType })} /></label>
-                <label><span>来源</span><Input value={dataset.source} onChange={(event) => updateAnalyticsDataset(dataset.id, { source: event.target.value })} /></label>
+                <label><span>来源表单编码</span><Select showSearch value={dataset.source} optionFilterProp="label" options={referenceForms.map(form => ({ value: form.code, label: `${form.name} (${form.code})` }))} onChange={(source) => updateAnalyticsDataset(dataset.id, { source, dimensions: [], measures: [] })} /><small>切换来源后请重新配置该表单的维度与数值字段。</small></label>
                 <label><span>刷新策略</span><Select value={dataset.refreshMode} options={[
-                  { value: 'realtime', label: '实时读取' },
+                  { value: 'realtime', label: '自动读取（每 30 秒）' },
                   { value: 'scheduled', label: '定时刷新' },
                   { value: 'manual', label: '手动刷新' },
                 ]} onChange={(refreshMode) => updateAnalyticsDataset(dataset.id, { refreshMode })} /></label>
+                {dataset.refreshMode === 'scheduled' && <label><span>刷新间隔（秒）</span><InputNumber min={10} max={86400} value={dataset.refreshInterval || 60} onChange={value => updateAnalyticsDataset(dataset.id, { refreshInterval: Number(value || 60) })} /></label>}
               </div>
               <div className="analytics-card-form-grid analytics-card-form-grid-wide">
-                <label><span>维度字段</span><Select mode="tags" value={dataset.dimensions} onChange={(dimensions) => updateAnalyticsDataset(dataset.id, { dimensions })} /></label>
-                <label><span>指标字段</span><Select mode="tags" value={dataset.measures} onChange={(measures) => updateAnalyticsDataset(dataset.id, { measures })} /></label>
+                <label><span>维度字段</span><Select mode="multiple" options={(analyticsSourceFields[dataset.source] || []).filter(field => !field.archived).map(field => ({value: field.field_name, label: `${field.label} (${field.field_name})`}))} value={dataset.dimensions} onChange={(dimensions) => updateAnalyticsDataset(dataset.id, { dimensions })} /></label>
+                <label><span>指标字段</span><Select mode="multiple" options={(analyticsSourceFields[dataset.source] || []).filter(field => !field.archived && /number|int|float|decimal|numeric|double|currency/.test(field.field_type)).map(field => ({value: field.field_name, label: `${field.label} (${field.field_name})`}))} value={dataset.measures} onChange={(measures) => updateAnalyticsDataset(dataset.id, { measures })} /></label>
               </div>
             </div>
           ))}
@@ -5310,7 +5561,7 @@ export default function FormSettingsPage() {
         <div className="analytics-section-head">
           <div>
             <strong>指标口径</strong>
-            <span>定义聚合公式、格式、阈值和所属数据集，供看板组件引用。</span>
+            <span>支持 count(*)、sum(actual)、avg(actual)、count_distinct(subject)、count_if(status == "已关闭")。百分比公式返回比例，例如 sum(actual) / sum(target)，展示时乘以 100；分母为零显示 —。</span>
           </div>
           <Button size="small" icon={<PlusOutlined />} onClick={addAnalyticsMetric}>新增指标</Button>
         </div>
@@ -5326,7 +5577,8 @@ export default function FormSettingsPage() {
                 { value: 'currency', label: '金额' },
                 { value: 'duration', label: '时长' },
               ]} onChange={(format) => updateAnalyticsMetric(metric.id, { format })} />
-              <Input value={metric.threshold} onChange={(event) => updateAnalyticsMetric(metric.id, { threshold: event.target.value })} />
+              <Input aria-label="指标阈值" value={metric.threshold} onChange={(event) => updateAnalyticsMetric(metric.id, { threshold: event.target.value })} />
+              <Button danger size="small" title="删除指标" icon={<DeleteOutlined />} onClick={() => updateAnalyticsDesign(current => ({...current, metrics: current.metrics.filter(item => item.id !== metric.id), widgets: current.widgets.map(widget => ({...widget, metricIds: widget.metricIds.filter(id => id !== metric.id)}))}))} />
             </div>
           ))}
         </div>
@@ -5339,7 +5591,7 @@ export default function FormSettingsPage() {
       return (
         <div className="analytics-widget-metrics">
           {widget.metricIds.map((metricId) => analyticsDesign.metrics.find((metric) => metric.id === metricId)).filter(Boolean).map((metric) => (
-            <div key={metric!.id}><span>{metric!.name}</span><strong>{metric!.format === 'percent' ? '93.4%' : '360'}</strong></div>
+            <div key={metric!.id}><span>{metric!.name}</span><strong>{'—'}</strong></div>
           ))}
         </div>
       );
@@ -5348,7 +5600,7 @@ export default function FormSettingsPage() {
       return (
         <div className="analytics-widget-table">
           <div><span>对象</span><span>指标</span><span>状态</span></div>
-          {[1, 2, 3].map((row) => <div key={row}><span>样例 {row}</span><span>{row * 12}</span><span>正常</span></div>)}
+          {[1, 2, 3].map((row) => <div key={row}><span>示意行 {row}</span><span>—</span><span>—</span></div>)}
         </div>
       );
     }
@@ -5370,8 +5622,8 @@ export default function FormSettingsPage() {
           <span>BI 组件库</span>
         </div>
         <div className="designer-library-search">
-          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索图表、指标或筛选器" />
-          <small>拖拽式控件入口，点击即可添加到中间看板画布。</small>
+          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索组件类型" value={analyticsLibrarySearch} onChange={event => setAnalyticsLibrarySearch(event.target.value)} />
+          <small>点击添加组件；拖动画布中的组件可调整顺序。画布为布局示意，真实数据请到运行页查看。</small>
         </div>
         <div className="designer-component-library">
           <section className="designer-component-group">
@@ -5381,13 +5633,13 @@ export default function FormSettingsPage() {
             </div>
             <div className="designer-component-list analytics-control-list">
               {[
-                { type: 'metric-card' as const, name: '指标卡', desc: '展示核心 KPI 和同比环比' },
+                { type: 'metric-card' as const, name: '指标卡', desc: '展示核心 KPI 与阈值状态' },
                 { type: 'line' as const, name: '折线图', desc: '展示时间趋势' },
                 { type: 'bar' as const, name: '柱状图', desc: '展示分类对比' },
                 { type: 'pie' as const, name: '饼图', desc: '展示占比结构' },
                 { type: 'rank-table' as const, name: '排行表', desc: '展示 Top N 排名' },
                 { type: 'detail-table' as const, name: '明细表', desc: '承接下钻和跳转' },
-              ].map((item) => (
+              ].filter(item => item.name.includes(analyticsLibrarySearch.trim()) || item.desc.includes(analyticsLibrarySearch.trim())).map((item) => (
                 <button className="designer-component analytics-control-item" data-desc={item.desc} title={`${item.name} / ${item.desc}`} key={item.type} type="button" onClick={() => addAnalyticsWidget(item.type)}>
                   <span>{item.name}</span>
                 </button>
@@ -5407,6 +5659,11 @@ export default function FormSettingsPage() {
                   key={widget.id}
                   style={analyticsWidgetStyle}
                   type="button"
+                  draggable
+                  onDragStart={() => setDraggedAnalyticsWidgetId(widget.id)}
+                  onDragEnd={() => setDraggedAnalyticsWidgetId('')}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={event => { event.preventDefault(); if (!draggedAnalyticsWidgetId || draggedAnalyticsWidgetId === widget.id) return; updateAnalyticsDesign(current => { const widgets = [...current.widgets]; const from = widgets.findIndex(item => item.id === draggedAnalyticsWidgetId); const to = widgets.findIndex(item => item.id === widget.id); if (from < 0 || to < 0) return current; widgets.splice(to, 0, widgets.splice(from, 1)[0]); return {...current, widgets}; }); setDraggedAnalyticsWidgetId(''); }}
                   onClick={() => setSelectedAnalyticsWidgetId(widget.id)}
                 >
                   <div className="analytics-widget-head">
@@ -5436,6 +5693,9 @@ export default function FormSettingsPage() {
           {selectedAnalyticsWidget && (
             <section className="designer-prop-section designer-prop-section-primary">
               <strong className="designer-prop-section-title">组件属性</strong>
+              <Space wrap><Button size="small" disabled={analyticsDesign.widgets[0]?.id === selectedAnalyticsWidget.id} onClick={() => updateAnalyticsDesign(current => { const widgets = [...current.widgets]; const index = widgets.findIndex(item => item.id === selectedAnalyticsWidget.id); if(index > 0) [widgets[index - 1], widgets[index]] = [widgets[index], widgets[index - 1]]; return {...current, widgets}; })}>上移</Button>
+              <Button size="small" disabled={analyticsDesign.widgets[analyticsDesign.widgets.length - 1]?.id === selectedAnalyticsWidget.id} onClick={() => updateAnalyticsDesign(current => { const widgets = [...current.widgets]; const index = widgets.findIndex(item => item.id === selectedAnalyticsWidget.id); if(index >= 0 && index < widgets.length - 1) [widgets[index + 1], widgets[index]] = [widgets[index], widgets[index + 1]]; return {...current, widgets}; })}>下移</Button>
+              <Button size="small" danger onClick={() => { updateAnalyticsDesign(current => ({...current, widgets: current.widgets.filter(item => item.id !== selectedAnalyticsWidget.id), interactions: current.interactions.filter(link => link.sourceWidgetId !== selectedAnalyticsWidget.id && link.targetWidgetId !== selectedAnalyticsWidget.id)})); setSelectedAnalyticsWidgetId(''); }}>删除组件</Button></Space>
               <label><span>标题</span><Input value={selectedAnalyticsWidget.title} onChange={(event) => updateAnalyticsWidget(selectedAnalyticsWidget.id, { title: event.target.value })} /></label>
               <label><span>图表类型</span><Select value={selectedAnalyticsWidget.type} options={[
                 { value: 'metric-card', label: '指标卡' },
@@ -5452,18 +5712,18 @@ export default function FormSettingsPage() {
           {selectedAnalyticsWidget && (
             <section className="designer-prop-section">
               <strong className="designer-prop-section-title">数据绑定</strong>
-              <label><span>数据集</span><Select value={selectedAnalyticsWidget.datasetId} options={analyticsDatasetOptions} onChange={(datasetId) => updateAnalyticsWidget(selectedAnalyticsWidget.id, { datasetId })} /></label>
+              <label><span>数据集</span><Select value={selectedAnalyticsWidget.datasetId} options={analyticsDatasetOptions} onChange={(datasetId) => updateAnalyticsWidget(selectedAnalyticsWidget.id, { datasetId, metricIds: [], dimension: analyticsDesign.datasets.find(item => item.id === datasetId)?.dimensions[0] })} /></label>
               <label>
                 <span>指标</span>
                 <Select
                   mode="multiple"
                   value={selectedAnalyticsWidget.metricIds}
-                  options={analyticsMetricOptions}
+                  options={analyticsDesign.metrics.filter(metric => metric.datasetId === selectedAnalyticsWidget.datasetId).map(metric => ({value: metric.id, label: metric.name}))}
                   onChange={(metricIds) => updateAnalyticsWidget(selectedAnalyticsWidget.id, { metricIds })}
                   placeholder="选择当前组件指标"
                 />
               </label>
-              <label><span>维度</span><Input value={selectedAnalyticsWidget.dimension || ''} onChange={(event) => updateAnalyticsWidget(selectedAnalyticsWidget.id, { dimension: event.target.value })} /></label>
+              <label><span>维度</span><Select allowClear value={selectedAnalyticsWidget.dimension} options={(analyticsDesign.datasets.find(item => item.id === selectedAnalyticsWidget.datasetId)?.dimensions || []).map(value => ({value, label: value}))} onChange={dimension => updateAnalyticsWidget(selectedAnalyticsWidget.id, { dimension })} /></label>
             </section>
           )}
 
@@ -5495,7 +5755,8 @@ export default function FormSettingsPage() {
           <Tag color="blue">{analyticsDesign.globalFilters.length} 个筛选器</Tag>
         </div>
         <Select
-          mode="tags"
+          mode="multiple"
+          options={Array.from(new Set(analyticsDesign.datasets.flatMap(dataset => dataset.dimensions).concat(analyticsDesign.datasets.some(dataset => dataset.dimensions.includes('date')) ? ['dateRange'] : []))).map(value => ({value, label: value}))}
           className="analytics-full-control"
           value={analyticsDesign.globalFilters}
           onChange={(globalFilters) => updateAnalyticsDesign((current) => ({ ...current, globalFilters }))}
@@ -5535,10 +5796,10 @@ export default function FormSettingsPage() {
                 ...current,
                 interactions: current.interactions.map((item, itemIndex) => itemIndex === index ? { ...item, action } : item),
               }))} />
-              <Select value={interaction.targetWidgetId} options={analyticsWidgetOptions} onChange={(targetWidgetId) => updateAnalyticsDesign((current) => ({
+              <Select value={interaction.targetWidgetId} options={analyticsWidgetOptions.filter(item => item.value !== interaction.sourceWidgetId)} onChange={(targetWidgetId) => updateAnalyticsDesign((current) => ({
                 ...current,
                 interactions: current.interactions.map((item, itemIndex) => itemIndex === index ? { ...item, targetWidgetId } : item),
-              }))} />
+              }))} /><Button danger size="small" title="删除联动" icon={<DeleteOutlined />} onClick={() => updateAnalyticsDesign(current => ({...current, interactions: current.interactions.filter((_, itemIndex) => itemIndex !== index)}))} />
             </div>
           ))}
         </div>
@@ -5554,7 +5815,7 @@ export default function FormSettingsPage() {
             <strong>主题预设</strong>
             <span>先选择看板整体气质，再按业务场景微调组件与图表样式。</span>
           </div>
-          <Tag color="blue">组件样式优先于看板主题</Tag>
+          <Tag color="blue">主题应用于整张看板</Tag>
         </div>
         <div className="analytics-style-preset-grid">
           {[
@@ -5567,7 +5828,7 @@ export default function FormSettingsPage() {
               className={`analytics-style-preset ${analyticsStyle.preset === preset.value ? 'analytics-style-preset-active' : ''}`}
               key={preset.value}
               type="button"
-              onClick={() => updateAnalyticsStyle({ preset: preset.value })}
+              onClick={() => updateAnalyticsStyle({ preset: preset.value, background: preset.value === 'dark' ? '#101c26' : preset.value === 'factory' ? '#edf4f5' : preset.value === 'executive' ? '#f1f3f8' : '#f6f8fa', cardBorder: preset.value === 'executive' ? 'strong' : 'light', chartPalette: preset.value === 'executive' ? 'business' : 'manufacturing' })}
             >
               <strong>{preset.label}</strong>
               <span>{preset.desc}</span>
@@ -5666,7 +5927,7 @@ export default function FormSettingsPage() {
 
   if (shouldWaitForDatabaseConfig) {
     return (
-      <div className="form-designer-page">
+      <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}`}>
         <div className="form-designer-loading-state">
           <Spin />
           <Typography.Text type="secondary">正在加载数据库表单配置...</Typography.Text>
@@ -5676,10 +5937,23 @@ export default function FormSettingsPage() {
   }
 
   return (
-    <div className="form-designer-page">
+    <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}`}>
       <header className="form-designer-toolbar">
         <div className="form-designer-title">
-          <span className="designer-title-meta">{baseConfig.status}</span>
+          {embedded ? <>
+            <Tooltip title="返回数据列表"><Button className="form-editor-back" aria-label="返回数据" icon={<ArrowLeftOutlined />} disabled={isPersistingFlow} onClick={warnBeforeLeave} /></Tooltip>
+            <div className="form-editor-identity">
+              <strong>表单编辑</strong>
+              <div className="form-editor-version-status">
+                <span className="designer-release-status">{publishedVersion || viewConfigMeta.status === 'published' ? `线上 v${publishedVersion || 1}` : '尚未发布'}</span>
+                <span className={`designer-draft-status ${hasUnsavedChanges ? 'is-unsaved' : ''}`}>{hasUnsavedChanges ? '有未保存修改' : viewConfigMeta.status === 'published' ? '已与线上同步' : '草稿待发布'}</span>
+              </div>
+            </div>
+          </> :
+          <div className="form-editor-version-status">
+          <span className="designer-release-status">{publishedVersion || viewConfigMeta.status === 'published' ? `已发布 v${publishedVersion || 1}` : '尚未发布'}</span>
+          <span className={`designer-draft-status ${hasUnsavedChanges ? 'is-unsaved' : ''}`}>{draftStatusLabel}</span>
+          </div>}
         </div>
         <SettingsTabs
           className="form-designer-tabs"
@@ -5688,12 +5962,12 @@ export default function FormSettingsPage() {
             setActiveTab(key as DesignerTab);
             setSelectedControlId('');
           }}
-          items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{item.label}</span> }))}
+          items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', filter: '列表与筛选', flow: '流程与审批', permission: '权限管理' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
         />
         <Space className="form-designer-actions" size={4} wrap={false}>
-          {hasUnsavedChanges && <Tag className="designer-unsaved-tag" color="orange">未保存</Tag>}
-          <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave} />
-          <Button size="small" type="text" title="预览" aria-label="预览" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)} />
+          {!embedded && <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>返回表单</Button>}
+          {embedded && activeTab === 'form' && <><Tooltip title="撤销布局修改"><Button size="small" type="text" aria-label="撤销布局修改" disabled={!history.length} icon={<UndoOutlined />} onClick={undoLayoutChange} /></Tooltip><Tooltip title="重做布局修改"><Button size="small" type="text" aria-label="重做布局修改" disabled={!future.length} icon={<RedoOutlined />} onClick={redoLayoutChange} /></Tooltip></>}
+          <Button size="small" type="text" title={embedded ? '试填表单' : '预览'} aria-label={embedded ? '试填表单' : '预览'} icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>{embedded ? '试填表单' : '预览'}</Button>
           <Button
             className="designer-version-action"
             size="small"
@@ -5702,10 +5976,10 @@ export default function FormSettingsPage() {
             icon={<HistoryOutlined />}
             onClick={() => setVersionPanelOpen(true)}
           >
-            {version} 当前草稿
+            版本管理
           </Button>
-          {<Button size="small" type="text" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft} />}
-          {<Button className="designer-publish-button" size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>发布配置</Button>}
+          {<Button size="small" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft}>保存草稿</Button>}
+          {<Button className="designer-publish-button" size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>{embedded ? '发布更改' : '发布配置'}</Button>}
         </Space>
       </header>
 
@@ -5713,7 +5987,7 @@ export default function FormSettingsPage() {
         {!isNoLeftTab && (
           <aside className="form-designer-left">
             <div className="designer-panel-head">
-              <strong>控件</strong>
+              <strong>{embedded && <LayoutOutlined />}{embedded ? '字段与布局' : '控件'}</strong>
               {activeTab !== 'form' && (
                 <span>{currentDesignerTabLabel}</span>
               )}
@@ -5739,11 +6013,11 @@ export default function FormSettingsPage() {
                 onChange={(value) => setComponentPanel(value as ComponentPanel)}
                 options={[
                   {
-                    label: <Tooltip title="控件库负责展示和布局，可拖入画布组成表单界面。"><span>控件库</span></Tooltip>,
+                    label: <Tooltip title="点击或拖入填写控件、分组和布局容器。"><span>{embedded ? '添加控件' : '控件库'}</span></Tooltip>,
                     value: 'components',
                   },
                   {
-                    label: <Tooltip title="字段库来自当前表单数据表，可复用已有字段和业务字段。"><span>字段库</span></Tooltip>,
+                    label: <Tooltip title="点击已使用的字段进行设置；点击未使用的字段添加到表单。"><span>{embedded ? '表单字段' : '字段库'}</span></Tooltip>,
                     value: 'fieldTypes',
                   },
                 ]}
@@ -5781,9 +6055,10 @@ export default function FormSettingsPage() {
               {componentPanel === 'components' ? (
                 <div className="designer-component-library">
                   <section className="designer-component-group">
-                    <div className="designer-group-title">快捷添加</div>
+                    <div className="designer-group-title">常用控件</div>
+                    <small className="designer-library-hint">点击添加，也可拖入画布</small>
                     <div className="designer-component-list">
-                      {filteredCommonControls.map((item) => (
+                      {filteredCommonControls.slice(0, 2).map((item) => (
                         <div
                           className="designer-component"
                           draggable
@@ -5797,19 +6072,19 @@ export default function FormSettingsPage() {
                           }}
                           title={`${item.name} / ${item.desc}`}
                         >
-                          <span>{item.name}</span>
+                          <span className="designer-component-icon">{item.icon}</span><span>{item.name}</span>
                         </div>
                       ))}
                     </div>
                   </section>
                   {filteredComponentGroups.map((group) => (
-                    <details className="designer-component-group designer-component-collapse" key={group.category} open={!normalizedLibrarySearch}>
+                    <details className="designer-component-group designer-component-collapse" key={group.category} open>
                       <summary className="designer-group-title">
                         <span>{group.category}</span>
-                        <small>{group.items.length} 个</small>
+                        <small>{group.items.filter(item=>!['summary-card','status-tag','file-preview','approval-comment','operation-log','status-flow','risk-level'].includes(item.controlType)).length} 个</small>
                       </summary>
                       <div className="designer-component-list">
-                        {group.items.map((item) => (
+                        {group.items.filter(item=>!['summary-card','status-tag','file-preview','approval-comment','operation-log','status-flow','risk-level'].includes(item.controlType)).map((item) => (
                           <div
                             className="designer-component"
                             draggable
@@ -5823,7 +6098,7 @@ export default function FormSettingsPage() {
                             }}
                             title={`${item.name} / ${item.desc}`}
                           >
-                            <span>{item.name}</span>
+                            <span className="designer-component-icon">{item.icon}</span><span>{item.name}</span>
                           </div>
                         ))}
                       </div>
@@ -5845,14 +6120,16 @@ export default function FormSettingsPage() {
                           draggable={activeTab === 'form'}
                           key={field.key}
                           onClick={() => {
+                            if (embedded && activeTab === 'form' && !isFieldOnCanvas) { addFieldToCanvas(field); return; }
                             setSelectedAssetKey(field.key);
-                            setSelectedControlId('');
+                            setSelectedControlId(layoutControls.find(control => control.fieldKey === field.key)?.id || '');
                           }}
                           onDragStart={(event) => activeTab === 'form' && event.dataTransfer.setData('fieldKey', field.key)}
                           title={`${field.name} / ${field.key} / ${field.type}`}
                         >
                           <span>{field.name}</span>
                           {isFieldOnCanvas && <CheckCircleOutlined className="designer-field-check" />}
+                          {embedded && !isFieldOnCanvas && <PlusOutlined />}
                         </div>
                       );
                     })}
@@ -5886,7 +6163,7 @@ export default function FormSettingsPage() {
           {activeTabKey === 'form' && (
             <div
               className="canvas-board create-form-canvas"
-              onClick={() => setSelectedControlId('')}
+              onClick={() => { setSelectedControlId(''); setSelectedAssetKey(''); }}
               onDragEnter={() => setCanvasDragActive(true)}
               onDragLeave={(event) => {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -5917,17 +6194,23 @@ export default function FormSettingsPage() {
                 setCanvasDragActive(false);
               }}
             >
-              <div className="create-form-modal" onClick={(event) => event.stopPropagation()}>
-                <div className={`create-form-grid ${isCanvasDragActive ? 'canvas-drag-active' : ''}`}>
-                  {layoutControls.map(renderCanvasControl)}
+              <div className="designer-canvas-context" onClick={event => event.stopPropagation()}>
+                <button type="button" onClick={() => { setSelectedControlId(''); setSelectedAssetKey(''); }}><LayoutOutlined /> 表单画布</button>
+                <span>{layoutControls.filter(control => !isLayoutContainer(control)).length} 个控件 · 点击选择，拖动排序</span>
+              </div>
+              <div className="create-form-modal" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
+                {embedded && <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>}
+                <div style={{gap:canvasSettings.gap}} className={`create-form-grid ${isCanvasDragActive ? 'canvas-drag-active' : ''}`} onClick={event => { if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
+                  {layoutControls.filter(control => !control.parentId).map(control => renderCanvasControl(control))}
                   {isCanvasDragActive && !dropHint && <div className="canvas-drop-end-indicator">拖到这里放在末尾</div>}
                 </div>
                 <div className="create-form-actions">
-                  <div className="create-form-action-buttons">
-                    <Button>取消</Button>
-                    <Button>保存草稿</Button>
-                    <Button type="primary">提交</Button>
-                  </div>
+                  <span className="designer-business-actions-note">{embedded ? '调整完成后，先试填检查效果' : '业务表单按钮区 · 预览时可体验'}</span>
+                  {embedded ? <Button className="form-editor-preview-action" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>试填表单</Button> : <div className="create-form-action-buttons">
+                    <Button disabled title="表单设计预览">取消</Button>
+                    <Button disabled title="设计预览，不写入业务数据">保存草稿</Button>
+                    <Button type="primary" disabled title="设计预览，不提交业务数据">提交</Button>
+                  </div>}
                 </div>
               </div>
             </div>
@@ -5960,6 +6243,7 @@ export default function FormSettingsPage() {
               users={identityUsers.map((user) => ({ value: String(user.id), label: user.label }))}
               onChange={(nextConfig) => {
                 setProfessionalFlowConfig(nextConfig);
+                setHasAssociatedFlow(true);
                 markUnsaved();
               }}
             />
@@ -5977,18 +6261,18 @@ export default function FormSettingsPage() {
                     <Space size={6}>
                       <Tag>{permissionRoles.length}</Tag>
                       <Button
-                        aria-label="保存权限"
+                        aria-label="保存权限草稿"
                         icon={<SaveOutlined />}
                         loading={isPersistingPermissions}
                         onClick={savePermissionDesign}
                         size="small"
-                        title="保存权限"
+                        title="保存权限草稿（发布后生效）"
                         type="text"
                       />
                     </Space>
                   </div>
-                  <Input size="small" prefix={<SearchOutlined />} placeholder="搜索角色" />
-                  {permissionRoles.map((role, index) => (
+                  <Input size="small" prefix={<SearchOutlined />} placeholder="搜索角色" value={permissionRoleSearch} onChange={event=>setPermissionRoleSearch(event.target.value)} />
+                  {permissionRoles.filter(role=>role.toLowerCase().includes(permissionRoleSearch.toLowerCase())).map((role, index) => (
                     <button
                       className={`permission-role-card ${role === activePermissionRole ? 'permission-role-active' : ''}`}
                       key={role}
@@ -6034,10 +6318,11 @@ export default function FormSettingsPage() {
                         />
                       </label>
                       <label>
-                        <span>组织来源</span>
+                        <span>自定义组织范围</span>
                         <Select
                           mode="multiple"
                           size="small"
+                          disabled={activePermissionDraft.data.scope!=='custom'}
                           value={(activePermissionDraft.data.orgUnits || [])
                             .map((value) => Number(value))
                             .filter((value) => Number.isInteger(value) && value > 0)}
@@ -6059,7 +6344,7 @@ export default function FormSettingsPage() {
                             data: { ...draft.data, sensitiveFields },
                           }))}
                           options={[
-                            { value: 'full', label: '完整显示' },
+                            { value: 'full', label: '遵循字段自身的脱敏规则' },
                             { value: 'mask', label: '详情与导出脱敏' },
                             { value: 'hide', label: '完全隐藏' },
                           ]}
@@ -6148,7 +6433,10 @@ export default function FormSettingsPage() {
                         <Tag color="green">字段 {baseConfig.fields.length}</Tag>
                         <Tag color="blue">可编辑 {editablePermissionFieldCount}</Tag>
                         <Tag color="orange">角色必填 {requiredPermissionFieldCount}</Tag>
-                        <Button size="small">批量设置</Button>
+                        <Dropdown disabled={!filteredPermissionFields.length} menu={{items:[{key:'visible',label:'可见'},{key:'editable',label:'可编辑'},{key:'required',label:'角色必填'},{key:'exportable',label:'允许导出'}].map(item=>({...item,children:[{key:`${item.key}:1`,label:'全部启用'},{key:`${item.key}:0`,label:'全部关闭'}]})),onClick:({key})=>{
+                          const [property,flag]=key.split(':');const enabled=flag==='1';
+                          updateActivePermissionDraft(draft=>{const fields={...draft.fields};for(const {field,permission} of filteredPermissionFields){if(property==='editable'&&field.locked)continue;fields[field.key]={...permission,[property]:enabled,...(property==='visible'&&!enabled?{editable:false,required:false,exportable:false}:{}),...(property!=='visible'&&enabled?{visible:true}:{})};}return {...draft,fields};});
+                        }}}><Button size="small">批量设置</Button></Dropdown>
                       </Space>
                     </div>
                     <div className="permission-field-tools">
@@ -6252,98 +6540,114 @@ export default function FormSettingsPage() {
         </main>
 
         {!isAnalysisDesigner && !(['permission', 'filter', 'flow', 'approval'] as DesignerTab[]).includes(activeTab) && (
-        <aside className="form-designer-right">
-          <div className="designer-panel-head">
-            <strong>属性</strong>
-            <span>当前：{selectedControl ? '控件' : selectedField ? '字段' : '画布'}</span>
-          </div>
+        <aside className="form-designer-right property-inspector">
+          <PropertyInspectorHeader title={selectedControl ? `${isLayoutContainer(selectedControl) ? '容器' : selectedControl.fieldKey ? '字段' : '控件'}属性` : '画布属性'} context={selectedControl?.name || baseConfig.name} />
           {selectedControl ? (
             <div className="designer-props">
               {renderControlIdentityProperties()}
               {renderDisplayProperties()}
-              {renderDefaultRuleProperties()}
-              {renderAutomationProperties()}
-              {renderTypeSpecificProperties()}
-              {renderDataSourceProperties()}
-              {renderEncodingProperties()}
-              {renderTableProperties()}
+              {embedded ? <>
+                {isLayoutContainer(selectedControl) ? <>{renderContainerProperties()}<section className="designer-prop-section"><strong className="designer-prop-section-title">容器交互</strong><label><span>显示容器</span>{controlRuleToggle('visible')}</label><label><span>只读</span>{controlRuleToggle('readonly')}</label><small>同时作用于容器内的字段。</small></section></> : <>{renderCommonRuleProperties()}{renderTypeSpecificProperties()}{renderAutomationProperties()}{renderDataSourceProperties()}</>}
+                {!isLayoutContainer(selectedControl) && <>
+                  {renderContainerProperties()}
+                  {renderEncodingProperties()}
+                  {renderTableProperties()}
+                </>}
+              </> : <>
+                {renderContainerProperties()}
+                {isLayoutContainer(selectedControl) ? <section className="designer-prop-section"><strong className="designer-prop-section-title">容器交互</strong><label><span>默认显示</span>{controlRuleToggle('visible')}</label><label><span>默认只读</span>{controlRuleToggle('readonly')}</label><small>容器的显示和只读规则同时作用于内部控件。</small></section> : renderDefaultRuleProperties()}
+                {renderTypeSpecificProperties()}
+                {!isLayoutContainer(selectedControl) && renderAutomationProperties()}
+                {renderDataSourceProperties()}
+                {renderEncodingProperties()}
+                {renderTableProperties()}
+              </>}
             </div>
           ) : (
             <div className="designer-props">
-              <section className="designer-prop-section">
-                <strong className="designer-prop-section-title">画布属性</strong>
+              <button type="button" className={`designer-validation-summary ${localErrorCount ? 'has-errors' : ''}`} onClick={() => setValidationOpen(true)}>
+                <span><CheckCircleOutlined /> 本地配置检查 <span>查看规则 →</span></span>
+                <small>{localErrorCount} 个阻断项 · {localWarningCount} 个提醒</small>
+                <small className="designer-validation-trigger">随配置修改自动更新 · 发布时另做服务器检查</small>
+              </button>
+              <details className="designer-prop-section designer-canvas-property-group" open>
+                <summary className="designer-prop-section-title">基本信息</summary>
                 <label><span>表单名称</span><Input value={baseConfig.name} readOnly /></label>
                 <label><span>新增标题</span><Input value={baseConfig.createTitle} readOnly /></label>
+                <label className="designer-description-row"><span>表单说明</span><Input.TextArea value={baseConfig.description} readOnly autoSize={{ minRows: 2, maxRows: 5 }} /></label>
+              </details>
+              <details className="designer-prop-section designer-canvas-property-group" open>
+                <summary className="designer-prop-section-title">布局设置</summary>
+                <label><span>默认列数</span><Select value={String(canvasSettings.columns)} onChange={value=>{const columns=Number(value);setCanvasSettings(current=>({...current,columns}));commitLayoutChange(current=>current.map(c=>!c.parentId&&!isLayoutContainer(c)&&c.controlType!=='divider'?{...c,width:columns===1?'full':columns===3?'third':'half'}:c));}} options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></label>
+                <label><span>字段间距</span><Select value={String(canvasSettings.gap)} onChange={value=>{setCanvasSettings(current=>({...current,gap:Number(value)}));setHasUnsavedChanges(true);}} options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></label>
+              </details>
+              <details className="designer-prop-section designer-canvas-property-group" open>
+                <summary className="designer-prop-section-title">数据绑定</summary>
                 <label><span>数据表</span><Input value={baseConfig.dataSource} readOnly /></label>
                 <label><span>主键字段</span><Input value={baseConfig.primaryKey} readOnly /></label>
-                <label><span>默认列数</span><Select value="2" options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></label>
-                <label><span>字段间距</span><Select value="12" options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></label>
-                <label><span>表单说明</span><Input value={baseConfig.description} readOnly /></label>
-                <label><span>发布状态</span><Input value={hasUnsavedChanges ? '当前草稿有未保存修改' : '草稿与已发布版本一致'} readOnly /></label>
-                <label><span>发布校验</span><Input value={`${publishErrorCount} 个阻断项 / ${publishWarningCount} 个提醒`} readOnly /></label>
-              </section>
-              <section className="designer-prop-section">
-                <strong className="designer-prop-section-title">推荐联动</strong>
+              </details>
+              <details className="designer-prop-section designer-canvas-property-group">
+                <summary className="designer-prop-section-title">系统容量规则</summary>
+                <label><span>字段数量</span><Input aria-label="表单字段数量上限" readOnly value={`${baseConfig.fields.length} / ${DEFAULT_FORM_LIMITS.fields} 个`} /></label>
+                <label><span>单条记录</span><Input aria-label="单条记录容量上限" readOnly value="2 MiB" /></label>
+                <small className="designer-capacity-note">系统默认，设计中不可修改。按实际填写的数据校验，不预占空间；附件文件不计入记录正文。</small>
+              </details>
+              {recommendedRules.length > 0 && <details className="designer-prop-section designer-canvas-property-group" open>
+                <summary className="designer-prop-section-title">内置配置参考</summary>
+                <small className="designer-recommendation-note"><strong>来源：平台预置规则</strong><span>按字段名称匹配，仅供参考；需手动配置后生效。</span></small>
                 {recommendedRules.map((rule) => <div className="designer-rule-pill" key={rule}>{rule}</div>)}
-              </section>
+              </details>}
+
             </div>
           )}
         </aside>
         )}
       </section>
 
-      <Modal centered className="encoding-rule-modal" title="编码规则设置" open={Boolean(encodingSettingsDraft)}
+      <Modal centered className="form-designer-dialog encoding-rule-modal search-rule-modal" title={<div className="encoding-dialog-title"><SearchOutlined/><span>搜索设置</span></div>} width={980} open={Boolean(searchDraft)} okText="应用设置" cancelText="取消" onCancel={()=>{++searchRequestEpoch.current;setSearchDraft(null);}} onOk={applySearchSettings} okButtonProps={{disabled:!searchDraft?.schema||searchDraft.metaLoading}}>
+        {renderSearchSettingsEditor()}
+      </Modal>
+
+      <Modal centered className="form-designer-dialog encoding-rule-modal calculation-rule-modal" title={<div className="encoding-dialog-title"><NumberOutlined /><span>计算规则</span></div>} width={860} open={Boolean(calculationDraft)} onCancel={closeCalculationEditor}
+        footer={<div className="encoding-rule-footer"><Button type="text" danger icon={<DeleteOutlined />} disabled={!layoutControls.find(control => control.id === calculationDraft?.controlId)?.computed || calculationBusy} onClick={() => {
+          commitLayoutChange(controls => controls.map(control => control.id === calculationDraft?.controlId ? { ...control, computed: null, calculationRulesEnabled: false, inactiveCalculationRule: undefined } : control)); closeCalculationEditor();
+        }}>删除规则</Button><Space size={8}><Button type="text" onClick={closeCalculationEditor}>取消</Button><Button type="primary" loading={calculationBusy} onClick={() => checkCalculation(true)}>保存规则</Button></Space></div>}>
+        {renderCalculationEditor()}
+      </Modal>
+
+      <Modal centered className="form-designer-dialog encoding-rule-modal assignment-rule-modal" title={<div className="encoding-dialog-title"><SettingOutlined /><span>赋值规则</span></div>} width={860} open={Boolean(assignmentDraft)} onCancel={() => setAssignmentDraft(null)} onOk={applyAssignmentDraft} okText="应用规则" cancelText="取消">
+        {renderAssignmentEditor()}
+      </Modal>
+
+      <Modal centered className="form-designer-dialog encoding-rule-modal default-rule-modal" title={<div className="encoding-dialog-title"><SettingOutlined /><span>默认值规则</span><span className="default-rule-title-note">新增时预填一次，允许手动修改；编辑已有记录不重算。</span></div>} open={Boolean(defaultValueDraft)} width={980}
+        okText="应用规则" cancelText="取消" onCancel={() => setDefaultValueDraft(null)} onOk={applyDefaultValueDraft}>
+        {renderDefaultValueEditor()}
+      </Modal>
+
+      <Modal centered className="form-designer-dialog encoding-rule-modal encoding-scheme-modal" title={<div className="encoding-dialog-title"><NumberOutlined /><span>编码规则</span></div>} open={Boolean(encodingSettingsDraft)}
         afterOpenChange={(open) => { if (open) encodingEditorRef.current?.scrollTo({ top: 0 }); }}
-        onCancel={() => setEncodingSettingsDraft(null)} okText="保存规则" cancelText="取消" width={980}
-        footer={(_, { OkBtn, CancelBtn }) => <div className="encoding-rule-footer">
-          <div>{encodingSettingsDraft && getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) &&
-            <Tooltip title={getEncodingRules(selectedEncodingRule).length <= 1 ? '至少保留一条规则，可在列表中停用' : '从当前表单配置中移除此规则'}>
-              <Button type="text" danger disabled={getEncodingRules(selectedEncodingRule).length <= 1} icon={<DeleteOutlined />}
-                onClick={() => { updateSelectedEncodingRule({ rules: getEncodingRules(selectedEncodingRule).filter((r) => r.id !== encodingSettingsDraft.id) }); setEncodingSettingsDraft(null); }}>删除规则</Button>
-            </Tooltip>}</div>
-          <Space><CancelBtn /><OkBtn /></Space>
-        </div>}
-        onOk={() => {
-          if (!encodingSettingsDraft || !encodingSettingsDraft.name?.trim()) { message.warning('请填写规则名称'); return; }
-          if (encodingSettingsDraft.generationMode !== 'manual' && !selectedEncodingSegments.length) { message.warning('请添加编码段'); return; }
-          if ((encodingSettingsDraft.conditions || []).some((c) => !c.sourceField || (!['isEmpty', 'notEmpty'].includes(c.operator || '') && !c.value?.trim()))) {
-            message.warning('请完整填写触发条件'); return;
-          }
-          const rules = [...getEncodingRules(selectedEncodingRule)];
-          if (rules.some((r) => r.id !== encodingSettingsDraft.id && r.name?.trim() === encodingSettingsDraft.name?.trim())) {
-            message.warning('规则名称不能重复'); return;
-          }
-          const { priority, ...savedRule } = encodingSettingsDraft;
-          const nextRules = rules.filter((r) => r.id !== savedRule.id);
-          nextRules.splice(Math.max(0, Math.min(nextRules.length, (priority || 1) - 1)), 0, savedRule);
-          updateSelectedEncodingRule({ rules: nextRules }); setEncodingSettingsDraft(null);
-        }}>
+        onCancel={dismissEncodingSettings} footer={<div className="encoding-rule-footer">
+          <Button className="encoding-rule-delete" danger type="text" icon={<DeleteOutlined />} disabled={!encodingSettingsDraft || !getEncodingRules(encodingRuleTargetRef.current?.rule).some(rule => rule.id === encodingSettingsDraft.id)} onClick={deleteEncodingSettings}>删除规则</Button>
+          <Space size={8}><Button type="text" className="encoding-rule-cancel" onClick={dismissEncodingSettings}>取消</Button><Button type="primary" className="encoding-rule-save" onClick={commitEncodingSettings}>保存规则</Button></Space>
+        </div>} width={980}>
         {encodingSettingsDraft && <div className="encoding-rule-workspace">
           <div className="encoding-rule-editor" ref={encodingEditorRef}>
-            <section className="encoding-editor-section">
-              <div className="encoding-section-title"><strong>规则信息</strong><span>一条规则对应一种编码方案</span></div>
-              <label className="encoding-editor-field"><span>规则名称</span><Input aria-label="编码规则名称" value={encodingSettingsDraft.name}
+            <section className="encoding-editor-section encoding-rule-basics">
+              <div className="encoding-basics-fields"><label className="encoding-editor-field"><span>规则名称</span><Input aria-label="编码规则名称" value={encodingSettingsDraft.name}
                 placeholder="例如：成品物料编码" maxLength={60}
                 onChange={(e) => setEncodingSettingsDraft({ ...encodingSettingsDraft, name: e.target.value })} /></label>
-              <div className="encoding-editor-grid">
                 <label className="encoding-editor-field"><span>生成方式</span><Select aria-label="编码生成方式" value={encodingSettingsDraft.generationMode || 'auto'} options={encodingGenerationModeOptions}
                   onChange={(generationMode) => setEncodingSettingsDraft({ ...encodingSettingsDraft, generationMode,
                     allowManualOverride: generationMode === 'autoEditable' || generationMode === 'manual' })} /></label>
-                <label className="encoding-editor-field"><span>匹配顺序 <Tooltip title="数字越小越先匹配，只使用第一条满足条件且已启用的规则。"><span className="encoding-inline-hint">ⓘ</span></Tooltip></span>
-                  <InputNumber aria-label="编码规则匹配顺序" min={1} precision={0}
-                    max={getEncodingRules(selectedEncodingRule).length + (getEncodingRules(selectedEncodingRule).some((r) => r.id === encodingSettingsDraft.id) ? 0 : 1)}
-                    value={encodingSettingsDraft.priority || 1} onChange={(priority) => setEncodingSettingsDraft({ ...encodingSettingsDraft, priority: Number(priority || 1) })} /></label>
               </div>
             </section>
-            <section className="encoding-editor-section">
-              <div className="encoding-section-title"><strong>何时使用这条规则</strong></div>
-              <Segmented aria-label="编码规则适用条件" value={encodingSettingsDraft.conditions?.length ? 'conditional' : 'always'}
-                options={[{label:'无条件匹配',value:'always'},{label:'满足条件时匹配',value:'conditional'}]}
-                onChange={(value) => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: value === 'always' ? [] : [{sourceField: assignmentTargetFieldOptions[0]?.value, operator:'eq',value:''}] })} />
-              {!encodingSettingsDraft.conditions?.length ? <p className="encoding-editor-hint">轮到本规则时直接使用，适合作为最后一条兜底规则。</p> : <>
-                <div className="encoding-condition-caption"><span>同时满足以下所有条件</span><Button size="small" type="text" icon={<PlusOutlined />} onClick={() =>
-                  setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: [...(encodingSettingsDraft.conditions || []), {sourceField: assignmentTargetFieldOptions[0]?.value,operator:'eq',value:''}] })}>添加条件</Button></div>
-                {encodingSettingsDraft.conditions.map((condition,index) => <div className="encoding-condition-row" key={index}>
+            <section className="encoding-editor-section encoding-rule-conditions">
+              <div className="encoding-section-title encoding-trigger-heading">
+                <strong>何时触发<Tooltip title="不添加条件时不限制触发；点击右侧加号添加条件，只有全部条件满足时才使用此编码规则。删除全部条件可恢复无限制触发。" trigger={['hover','focus']}><button type="button" className="encoding-trigger-help" aria-label="何时触发说明"><QuestionCircleOutlined /></button></Tooltip></strong>
+                <Button size="small" type="text" icon={<PlusOutlined />} aria-label="添加触发条件" title="添加触发条件" onClick={() => setEncodingSettingsDraft({ ...encodingSettingsDraft, conditions: [...(encodingSettingsDraft.conditions || []), {sourceField: assignmentTargetFieldOptions.find(option => option.value !== selectedField?.key)?.value, operator:'eq',value:''}] })}>添加触发条件</Button>
+              </div>
+              {Boolean(encodingSettingsDraft.conditions?.length) && <>
+                {encodingSettingsDraft.conditions?.map((condition,index) => <div className="encoding-condition-row" key={index}>
                   <Select aria-label={`条件字段 ${index + 1}`} placeholder="选择字段" value={condition.sourceField} options={assignmentTargetFieldOptions}
                     onChange={(sourceField) => setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.map((c,i)=>i===index?{...c,sourceField}:c)})} />
                   <Select aria-label={`条件运算符 ${index + 1}`} value={condition.operator} options={[
@@ -6353,218 +6657,83 @@ export default function FormSettingsPage() {
                   {['isEmpty','notEmpty'].includes(condition.operator || '') ? <span className="encoding-no-value">无需填写值</span> :
                     <Input aria-label={`条件值 ${index + 1}`} placeholder="填写匹配值" value={condition.value}
                       onChange={(e)=>setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.map((c,i)=>i===index?{...c,value:e.target.value}:c)})} />}
-                  <Button aria-label={`删除条件 ${index + 1}`} disabled={encodingSettingsDraft.conditions?.length === 1} type="text" icon={<DeleteOutlined />}
+                  <Button aria-label={`删除条件 ${index + 1}`} type="text" icon={<DeleteOutlined />}
                     onClick={()=>setEncodingSettingsDraft({...encodingSettingsDraft,conditions:encodingSettingsDraft.conditions?.filter((_,i)=>i!==index)})} />
                 </div>)}
               </>}
             </section>
-            <section className="encoding-editor-section">
-              <div className="encoding-section-title"><strong>如何组成编码 <span className="encoding-section-count">{selectedEncodingSegments.length} 段</span></strong>
-                {encodingSettingsDraft.generationMode !== 'manual' && <Button size="small" type="text" icon={<PlusOutlined />} onClick={()=>openEncodingSegmentEditor()}>添加编码段</Button>}</div>
+            <section className="encoding-editor-section encoding-rule-composition">
+              <div className="encoding-section-title encoding-composition-heading">
+                <strong>编码段配置 <span className="encoding-section-count">{selectedEncodingSegments.length} 段</span></strong>
+                <div className="encoding-heading-preview" aria-label="生成结果预览" aria-live="polite"><span>生成结果预览</span><code>{encodingSettingsDraft.generationMode === 'manual' ? '手工录入' : selectedEncodingSegments.some(segment => encodingSegmentLengthError(segment)) ? '存在超长编码段，请调整' : selectedEncodingSegments.length ? renderEncodingSample({...encodingSettingsDraft,enabled:true},baseConfig.fields) : '—'}</code></div>
+                {encodingSettingsDraft.generationMode !== 'manual' && <Button size="small" type="text" icon={<PlusOutlined />} onClick={()=>openEncodingSegmentEditor()}>添加编码段</Button>}
+              </div>
               {encodingSettingsDraft.generationMode === 'manual' ? <p className="encoding-editor-hint">由使用者录入完整编码，不使用自动编码段。</p> : <>
-                <p className="encoding-editor-hint">按从上到下的顺序拼接；点击设置编辑每段内容。</p>
                 {!selectedEncodingSegments.length && <div className="encoding-empty-segments">尚未配置编码段，请点击右上角添加。</div>}
-                <div className="encoding-segment-list">{selectedEncodingSegments.map((segment,index)=><div className="encoding-segment-item" key={segment.id}>
-                  <span className="encoding-segment-index">{index+1}</span>
-                  <div className="encoding-segment-description"><strong>{segment.name}</strong><span>{getEncodingSegmentTypeLabel(segment.type)} · {segment.length} 位</span></div>
-                  <code title="段示例">{renderEncodingSegmentSample(segment,baseConfig.fields) || '—'}</code>
-                  <div className="encoding-segment-actions">
-                    <Button size="small" type="text" title="上移" aria-label={`上移编码段：${segment.name}`} disabled={index===0} onClick={()=>{const next=[...selectedEncodingSegments];[next[index-1],next[index]]=[next[index],next[index-1]];syncEncodingSegments(next);}}>↑</Button>
-                    <Button size="small" type="text" title="下移" aria-label={`下移编码段：${segment.name}`} disabled={index===selectedEncodingSegments.length-1} onClick={()=>{const next=[...selectedEncodingSegments];[next[index+1],next[index]]=[next[index],next[index+1]];syncEncodingSegments(next);}}>↓</Button>
-                    <Button size="small" type="text" title="设置编码段" aria-label={`设置编码段：${segment.name}`} icon={<SettingOutlined />} onClick={()=>openEncodingSegmentEditor(segment,index)} />
-                    <Button size="small" type="text" title="删除编码段" aria-label={`删除编码段：${segment.name}`} icon={<DeleteOutlined />} onClick={()=>removeEncodingSegment(index)} />
+                <div className="encoding-segment-flow-scroll"><div className="encoding-segment-flow">
+                  <div className="encoding-segment-list">
+                    {selectedEncodingSegments.map((segment,index) => <div
+                      className={`encoding-segment-item ${draggedEncodingSegmentId === String(index) ? 'is-dragging' : ''}`}
+                      key={segment.id || index} data-encoding-segment-id={index} role={encodingSegmentEditor.open && encodingSegmentEditor.index === index ? undefined : "button"} tabIndex={0}
+                      aria-label={`编辑编码段：${segment.name || getEncodingSegmentTypeLabel(segment.type)}`}
+                      title="双击编辑，拖拽调整顺序"
+                      onKeyDown={event => {
+                        if (encodingSegmentEditor.open || event.target !== event.currentTarget) return;
+                        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEncodingSegmentEditor(segment,index); }
+                        if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+                          event.preventDefault();
+                          const target = index + (event.key === 'ArrowUp' ? -1 : 1);
+                          if (target < 0 || target >= selectedEncodingSegments.length) return;
+                          const next = [...selectedEncodingSegments]; next.splice(index,1); next.splice(target,0,segment); syncEncodingSegments(next);
+                        }
+                      }}
+                      onPointerDown={event => {
+                        if (encodingSegmentEditor.open || event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, .ant-select, .ant-select-dropdown, .ant-input-number')) return;
+                        encodingSegmentPointer.current = { id: String(index), x: event.clientX, y: event.clientY };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={event => {
+                        const pointer = encodingSegmentPointer.current;
+                        if (pointer && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 5) setDraggedEncodingSegmentId(pointer.id);
+                      }}
+                      onPointerUp={event => {
+                        const pointer = encodingSegmentPointer.current;
+                        if (!pointer) return;
+                        if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 5) {
+                          const target = event.currentTarget.ownerDocument.elementFromPoint(event.clientX, event.clientY)?.closest('[data-encoding-segment-id]');
+                          const sourceIndex = Number(pointer.id);
+                          const targetIndex = target ? Number(target.getAttribute('data-encoding-segment-id')) : -1;
+                          if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex !== targetIndex) {
+                            const next = [...selectedEncodingSegments]; const [moved] = next.splice(sourceIndex,1); next.splice(targetIndex,0,moved); syncEncodingSegments(next);
+                          }
+                        }
+                        encodingSegmentPointer.current = null; setDraggedEncodingSegmentId(null);
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                      }}
+                      onPointerCancel={() => { encodingSegmentPointer.current = null; setDraggedEncodingSegmentId(null); }}
+
+                    >
+                      <HolderOutlined className="encoding-segment-grip" />
+                      {renderEncodingSegmentContents(segment,index)}
+                      <div className="encoding-segment-actions">
+                        <Button size="small" type="text" title="删除编码段" aria-label={`删除编码段：${segment.name || getEncodingSegmentTypeLabel(segment.type)}`} icon={<DeleteOutlined />} onClick={event => { event.stopPropagation(); removeEncodingSegment(index); }} />
+                      </div>
+
+                    </div>)}
                   </div>
-                </div>)}</div>
+                </div></div>
               </>}
             </section>
           </div>
-          <aside className="encoding-preview-panel" aria-label="编码规则预览">
-            <div className="encoding-section-title"><strong>生成结果预览</strong><Tag>示例</Tag></div>
-            {encodingSettingsDraft.generationMode === 'manual' ? <div className="encoding-preview-code">手工录入</div> : <>
-              <div className="encoding-preview-code">{selectedEncodingSegments.length ? renderEncodingSample({...encodingSettingsDraft,enabled:true},baseConfig.fields) : '等待添加编码段'}</div>
-              <div className="encoding-preview-parts">{selectedEncodingSegments.map((segment)=><div key={segment.id}><span>{segment.name}</span><code>{renderEncodingSegmentSample(segment,baseConfig.fields) || '—'}</code></div>)}</div>
-              <div className="encoding-preview-total">{selectedEncodingSegments.length} 个编码段 · 配置长度 {selectedEncodingSegments.reduce((total,segment)=>total+(segment.length||0),0)} 位</div>
-            </>}
-            <p className="encoding-editor-hint">预览使用示例值，实际编码根据记录内容和流水号生成。</p>
-            <div className="encoding-preview-status"><span>当前状态</span><strong>{encodingSettingsDraft.enabled === false ? '已停用' : '已启用'}</strong></div>
-          </aside>
         </div>}
 
       </Modal>
 
-      <Modal
-        centered
-        className="encoding-segment-modal"
-        okText="保存编码段"
-        onCancel={closeEncodingSegmentEditor}
-        onOk={saveEncodingSegmentDraft}
-        open={encodingSegmentEditor.open}
-        title={typeof encodingSegmentEditor.index === 'number' ? '编辑编码段' : '新增编码段'}
-        width={520}
-      >
-        <div className="encoding-segment-form">
-          <label>
-            <span>段类型</span>
-            <Select
-              value={encodingSegmentEditor.draft.type}
-              options={encodingSegmentTypeOptions}
-              onChange={(type) => {
-                const nextSegment = makeEncodingSegment(type, baseConfig.fields);
-                updateEncodingSegmentDraft({
-                  ...nextSegment,
-                  id: encodingSegmentEditor.draft.id,
-                  name: encodingSegmentEditor.draft.name || nextSegment.name,
-                });
-              }}
-            />
-          </label>
-          <label>
-            <span>段名称</span>
-            <Input
-              value={encodingSegmentEditor.draft.name}
-              onChange={(event) => updateEncodingSegmentDraft({ name: event.target.value })}
-            />
-          </label>
-          <label>
-            <span>位数</span>
-            <InputNumber
-              min={1}
-              max={64}
-              value={encodingSegmentEditor.draft.length}
-              onChange={(length) => updateEncodingSegmentDraft({ length: Number(length || 1) })}
-            />
-          </label>
-          <label>
-            <span>补位方式</span>
-            <Select
-              value={encodingSegmentEditor.draft.padding || 'none'}
-              options={encodingPaddingOptions}
-              onChange={(padding) => updateEncodingSegmentDraft({ padding })}
-            />
-          </label>
-          {encodingSegmentEditor.draft.type === 'fixed' && (
-            <label>
-              <span>固定值</span>
-              <Input
-                value={encodingSegmentEditor.draft.value || ''}
-                placeholder="例如 AL、WO、QC"
-                onChange={(event) => updateEncodingSegmentDraft({ value: event.target.value })}
-              />
-            </label>
-          )}
-          {encodingSegmentEditor.draft.type === 'date' && (
-            <label>
-              <span>日期格式</span>
-              <Select
-                value={encodingSegmentEditor.draft.datePattern || 'YYMM'}
-                options={encodingDatePatternOptions}
-                onChange={(datePattern) => updateEncodingSegmentDraft({
-                  datePattern,
-                  length: getDateSegmentLength(datePattern) || encodingSegmentEditor.draft.length,
-                })}
-              />
-            </label>
-          )}
-          {(encodingSegmentEditor.draft.type === 'field' || encodingSegmentEditor.draft.type === 'masterData') && (
-            <>
-              <label>
-                <span>依据字段</span>
-                <Select
-                  allowClear
-                  value={encodingSegmentEditor.draft.sourceField}
-                  options={baseConfig.fields
-                    .filter((field) => field.key !== selectedField?.key)
-                    .map((field) => ({ value: field.key, label: `${field.name} / ${field.key}` }))}
-                  placeholder="选择字段变化时影响编码"
-                  onChange={(sourceField) => updateEncodingSegmentDraft({ sourceField, regenerateOnChange: Boolean(sourceField) })}
-                />
-              </label>
-              <label>
-                <span>取值属性</span>
-                <Select
-                  value={encodingSegmentEditor.draft.sourceAttribute || 'code'}
-                  options={[
-                    { value: 'code', label: '编码' },
-                    { value: 'id', label: 'ID' },
-                    { value: 'shortName', label: '简称' },
-                    { value: 'custom', label: '自定义属性' },
-                  ]}
-                  onChange={(sourceAttribute) => updateEncodingSegmentDraft({ sourceAttribute })}
-                />
-              </label>
-            </>
-          )}
-          {encodingSegmentEditor.draft.type === 'organization' && (
-            <label>
-              <span>组织属性</span>
-              <Select
-                value={encodingSegmentEditor.draft.sourceAttribute || 'org_code'}
-                options={[
-                  { value: 'org_code', label: '组织编码' },
-                  { value: 'factory_code', label: '工厂编码' },
-                  { value: 'department_code', label: '部门编码' },
-                  { value: 'org_name', label: '组织简称' },
-                ]}
-                onChange={(sourceAttribute) => updateEncodingSegmentDraft({ sourceAttribute })}
-              />
-            </label>
-          )}
-          {encodingSegmentEditor.draft.type === 'sequence' && (
-            <>
-              <label>
-                <span>起始值</span>
-                <InputNumber
-                  min={0}
-                  max={999999}
-                  value={encodingSegmentEditor.draft.sequenceStart || 1}
-                  onChange={(sequenceStart) => updateEncodingSegmentDraft({ sequenceStart: Number(sequenceStart || 1) })}
-                />
-              </label>
-              <label>
-                <span>步长</span>
-                <InputNumber
-                  min={1}
-                  max={100}
-                  value={encodingSegmentEditor.draft.sequenceStep || 1}
-                  onChange={(sequenceStep) => updateEncodingSegmentDraft({ sequenceStep: Number(sequenceStep || 1) })}
-                />
-              </label>
-              <label>
-                <span>重置周期</span>
-                <Select
-                  value={encodingSegmentEditor.draft.resetCycle || 'month'}
-                  options={encodingResetCycleOptions}
-                  onChange={(resetCycle) => updateEncodingSegmentDraft({ resetCycle })}
-                />
-              </label>
-            </>
-          )}
-          <div className="encoding-segment-meta">
-            <div className="encoding-segment-options">
-              <Checkbox
-                checked={Boolean(encodingSegmentEditor.draft.regenerateOnChange)}
-                onChange={(event) => updateEncodingSegmentDraft({ regenerateOnChange: event.target.checked })}
-              >
-                字段变化时重新计算
-              </Checkbox>
-              <Checkbox
-                checked={encodingSegmentEditor.draft.lockAfterGenerated !== false}
-                onChange={(event) => updateEncodingSegmentDraft({ lockAfterGenerated: event.target.checked })}
-              >
-                生成后锁定
-              </Checkbox>
-            </div>
-            <div className="encoding-segment-preview">
-              <span>段示例</span>
-              <strong>{renderEncodingSegmentSample(encodingSegmentEditor.draft, baseConfig.fields) || '-'}</strong>
-            </div>
-          </div>
-        </div>
-      </Modal>
+
 
       <Modal
         centered
-        className="view-filter-field-modal"
+        className="form-designer-dialog view-filter-field-modal"
         okText="完成"
         onCancel={() => setFilterFieldPickerOpen(false)}
         onOk={() => setFilterFieldPickerOpen(false)}
@@ -6592,7 +6761,7 @@ export default function FormSettingsPage() {
 
       <Modal
         centered
-        className="view-filter-field-modal"
+        className="form-designer-dialog view-filter-field-modal"
         okText="完成"
         onCancel={() => setTableFieldPickerOpen(false)}
         onOk={() => setTableFieldPickerOpen(false)}
@@ -6620,39 +6789,69 @@ export default function FormSettingsPage() {
 
       <Modal
         centered
-        className="designer-preview-modal"
-        footer={null}
+        className="form-designer-dialog designer-preview-modal"
+        footer={<div className="trial-footer">
+          <span><LockOutlined /> {isAnalysisDesigner ? '示意数据 · 仅预览布局' : '试填内容不会保存为业务记录'}</span>
+          <Space size={10}>
+            <Button onClick={() => setPreviewOpen(false)}>返回设计</Button>
+            {!isAnalysisDesigner && <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => previewForm.validateFields().then(() => message.success('预览必填校验通过；数值、格式及字节限制以运行页保存校验为准')).catch(() => {})}>检查必填项</Button>}
+          </Space>
+        </div>}
         onCancel={() => setPreviewOpen(false)}
         open={previewOpen}
-        title="表单预览"
-        width={980}
-      >
-        <div className="designer-preview-toolbar">
-          <Segmented value={previewMode} onChange={(value) => setPreviewMode(value as PreviewMode)} options={previewModeOptions} />
-          <Segmented value={previewDevice} onChange={(value) => setPreviewDevice(value as PreviewDevice)} options={previewDeviceOptions.map((item) => ({ value: item.value, label: <span>{item.icon}{item.label}</span> }))} />
-          <Select
-            className="designer-preview-node-select"
-            value={selectedPreviewFlowNode?.id}
-            onChange={setPreviewFlowNodeId}
-            options={previewFlowNodeOptions}
-            placeholder="选择流程节点"
-          />
-        </div>
-        <div className="designer-role-note">{getPreviewNodeNote(selectedPreviewFlowNode)}</div>
-        <div className={`designer-preview-shell designer-preview-${previewDevice}`}>
-          <div className="designer-preview-surface">
-            <div className="designer-preview-head">
-              <strong>{baseConfig.createTitle}</strong>
-              <Tag color="blue">{previewModeOptions.find((item) => item.value === previewMode)?.label}</Tag>
-            </div>
-            {renderPreviewContent()}
+        title={<div className="trial-title">
+          <span className="trial-title-icon"><EyeOutlined /></span>
+          <div><div className="trial-title-line"><span>{isAnalysisDesigner ? '看板布局预览' : embedded ? '试填表单' : '表单预览'}</span><Tag>当前草稿</Tag></div>
+            <p>{isAnalysisDesigner ? '检查组件布局，真实数据请在发布后的运行页验证。' : '体验填写过程，检查表单布局、必填规则与节点权限。'}</p>
           </div>
+        </div>}
+        width={1120}
+      >
+        {!isAnalysisDesigner && <div className="trial-controls">
+          <div className="trial-scenario">
+            <label className="trial-context-field"><span className="trial-control-label"><ApartmentOutlined /> 流程节点</span>
+              <Select className="designer-preview-node-select" aria-label="试填流程节点"
+                value={selectedPreviewFlowNode?.id} onChange={setPreviewFlowNodeId} options={previewFlowNodeOptions}
+                disabled={!previewFlowNodeOptions.length || isResolvingPlatformConfig} loading={isResolvingPlatformConfig}
+                placeholder="请先关联流程" notFoundContent="请在流程与审批中关联流程" />
+            </label>
+            <label className="trial-context-field"><span className="trial-control-label"><UserSwitchOutlined /> 预览角色</span>
+              <Select className="designer-preview-role-select" aria-label="试填角色" value={activePreviewRole}
+                onChange={setPreviewRole} options={permissionRoles.map(role => ({ value: role, label: role }))}
+                disabled={!permissionRoles.length} placeholder="请先配置角色" />
+            </label>
+            <Button type="link" className="trial-flow-link" onClick={() => { setPreviewOpen(false); setActiveTab('flow'); }}>流程与审批 <ArrowLeftOutlined rotate={180} /></Button>
+          </div>
+          <div className="trial-context-note">
+            {flowLoadError || (hasAssociatedFlow ? `流程：${professionalFlowConfig.name}。${getPreviewNodeNote(selectedPreviewFlowNode)}` : '尚未关联流程，请在「流程与审批」中配置。')}
+            <span>角色权限与「权限管理」保持同步。{!previewRoleCanView ? '该角色无权查看此表单。' : !previewRoleCanFill ? '当前角色或节点仅可查看。' : ''}</span>
+          </div>
+        </div>}
+        <div className="trial-stage">
+        <div className="trial-stage-label"><span className="trial-live-dot" />表单预览<span>·</span><span>{isAnalysisDesigner ? '示意布局' : '与当前草稿同步'}</span></div>
+        <div className="designer-preview-shell designer-preview-desktop">
+          <div className={`designer-preview-surface trial-canvas ${embedded ? 'form-designer-embedded' : ''}`}>
+            <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>
+            <div className="trial-form-body">{isAnalysisDesigner ? <><p>此处仅预览组件布局。真实数据、筛选和交互请在发布后的运行页验证。</p><div className="analytics-dashboard-canvas" style={{...analyticsCanvasStyle, display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))'}}>{analyticsDesign.widgets.map(widget => <div key={widget.id} className={`analytics-widget analytics-widget-${widget.width}`} style={analyticsWidgetStyle}><strong>{widget.title}</strong>{renderAnalyticsWidgetPreview(widget)}</div>)}</div></> : renderPreviewContent()}</div>
+          </div>
+        </div>
+        </div>
+      </Modal>
+
+      <Modal centered className="form-designer-dialog" title="本地配置检查" open={validationOpen} onCancel={() => setValidationOpen(false)} footer={<Button onClick={() => setValidationOpen(false)}>关闭</Button>}>
+        <p className="designer-publish-note">来源：平台内置配置规则。修改字段、布局、列表或流程时自动更新；本窗口展示当前草稿的检查结果。</p>
+        <p className="designer-publish-note">点击“{embedded ? '发布更改' : '发布配置'}”后，服务器还会检查现有业务数据的影响，再进入发布确认。</p>
+        <div className="designer-check-list">
+          {publishChecks.map((item, index) => <div className={`designer-check-item designer-check-${item.level}`} key={`${item.title}-${index}`}>
+            <span>{item.level === 'error' ? <AlertOutlined /> : item.level === 'warning' ? <WarningOutlined /> : <CheckCircleOutlined />}</span>
+            <div><strong>{item.title}</strong><small>{item.detail}</small></div>
+          </div>)}
         </div>
       </Modal>
 
       <Modal
         centered
-        className="designer-check-modal"
+        className="form-designer-dialog designer-check-modal"
         okText={publishErrorCount ? '处理阻断项' : '确认发布'}
         onCancel={() => setPublishCheckOpen(false)}
         onOk={confirmPublish}
@@ -6681,112 +6880,52 @@ export default function FormSettingsPage() {
         </div>
       </Modal>
 
-      <Modal
-        centered
-        className="designer-version-modal"
-        footer={null}
-        onCancel={() => setVersionPanelOpen(false)}
+      <VersionManager
         open={versionPanelOpen}
-        title="草稿与已发布版本"
-        width={900}
-      >
-        <div className="designer-version-layout">
-          <aside className="designer-version-list">
-            <div className="designer-version-list-head">
-              <div>
-                <strong>版本列表</strong>
-                <small>选择一个版本查看详情</small>
-              </div>
-              <span>{versionListItems.length} 个</span>
-            </div>
-            <div className="designer-version-list-columns">
-              <span>版本</span>
-              <span>类型</span>
-              <span>状态</span>
-              <span>时间</span>
-            </div>
-            {versionListItems.map((item) => (
-              <button
-                className={`designer-version-list-item ${item.active ? 'designer-version-list-item-active' : ''}`}
-                key={item.key}
-                onClick={() => setSelectedVersionKey(item.key)}
-                type="button"
-              >
-                <span>{item.name}</span>
-                <small>{item.type}</small>
-                <em className={`designer-version-status designer-version-status-${item.tone}`}>{item.status}</em>
-                <i>{item.date}</i>
-                <b>{item.note}</b>
-              </button>
-            ))}
-          </aside>
-
-          <div className="designer-version-detail">
-            <div className="designer-version-detail-head">
-              <div>
-                <span>当前选中版本</span>
-                <strong>{selectedVersionItem?.name}</strong>
-                <small>{selectedVersionItem?.note}</small>
-              </div>
-              <Tag color={selectedVersionItem?.tone === 'warning' ? 'orange' : selectedVersionItem?.tone === 'published' ? 'green' : 'default'}>
-                {selectedVersionItem?.status}
-              </Tag>
-            </div>
-            <div className="designer-version-summary">
-              <div>
-                <span>线上版本</span>
-                <strong>v{viewConfigMeta.publishedVersion || 0}</strong>
-              </div>
-              <div>
-                <span>草稿版本</span>
-                <strong>v{viewConfigMeta.draftVersion || 1}</strong>
-              </div>
-              <div>
-                <span>发布影响</span>
-                <strong>{publishErrorCount ? `${publishErrorCount} 阻断` : `${publishWarningCount} 提醒`}</strong>
-              </div>
-            </div>
-            <div className="designer-version-detail-table">
-              {selectedVersionDetails.map(([label, value]) => (
-                <div key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </div>
-              ))}
-              <div>
-                <span>包含内容</span>
-                <strong>数据视图、流程、权限规则</strong>
-              </div>
-            </div>
-            <div className="designer-version-actions">
-              <Button
-                danger
-                disabled={!viewConfigMeta.publishedVersion}
-                onClick={() => {
-                  setHasUnsavedChanges(false);
-                  setVersionPanelOpen(false);
-                  message.success('已回滚到上一发布版本');
-                }}
-              >
-                丢弃草稿，恢复到已发布 v{viewConfigMeta.publishedVersion || 0}
-              </Button>
-              <Space size={8} wrap>
-                <Button onClick={saveDraft} loading={isPersistingFlow} icon={<SaveOutlined />}>保存草稿</Button>
-                <Button type="primary" onClick={() => { setVersionPanelOpen(false); void publishConfig(); }}>发布草稿</Button>
-              </Space>
-            </div>
-          </div>
-        </div>
-      </Modal>
+        form={platformForm}
+        name={baseConfig.name}
+        hasUnsavedChanges={hasUnsavedChanges}
+        draftStatus={viewConfigMeta.status}
+        savedAt={viewConfigMeta.draftSavedAt}
+        busy={isPersistingFlow || isResolvingPlatformConfig}
+        loadError={flowLoadError}
+        onClose={() => setVersionPanelOpen(false)}
+        onEdit={() => setVersionPanelOpen(false)}
+        onSave={saveDraft}
+        onPublish={publishConfig}
+        onRestore={async () => {
+          if (!platformForm || isPersistingFlow) return false;
+          setPersistingFlow(true);
+          try {
+            await restorePlatformFormDraft(platformForm.id);
+            restoredDesignFormId.current = platformForm.id;
+            setServerPublishReport(null);
+            setFieldDefaultValueDrafts({});
+            setCopiedControl(null);
+            setCopiedTree([]);
+            setHistory([]);
+            setFuture([]);
+            setHasUnsavedChanges(false);
+            setDesignerReloadKey(key => key + 1);
+            message.success('已用线上配置重置草稿，可继续编辑后重新发布');
+            return true;
+          } catch {
+            message.error('重置草稿失败，请重试');
+            return false;
+          } finally {
+            setPersistingFlow(false);
+          }
+        }}
+      />
 
       <Modal
         centered
-        className="designer-rule-modal"
+        className="form-designer-dialog designer-rule-modal"
         destroyOnClose
         okText="保存规则"
         onCancel={() => {
-          setEditingRuleGroupTitle(null);
-          setRuleModal(null);
+          const opening=ruleOpeningValue.current;if(opening&&selectedControl?.id===opening.id)updateSelectedControl({rules:{...selectedControl.rules,[opening.key]:opening.value}});
+          setEditingRuleGroupTitle(null);setRuleModal(null);ruleOpeningValue.current=null;
         }}
         onOk={() => {
           message.success(`${activeRuleLabel}规则已保存`);
@@ -6956,26 +7095,20 @@ export default function FormSettingsPage() {
             </label>
             )}
             {activeRuleStrategyOptions.length > 0 && (
-              <label>
+              <label className="designer-policy-setting">
                 <span>规则策略</span>
                 <Select
-                  value={activeRule.conditions?.strategy || activeRuleStrategyOptions[0]?.value}
+                  aria-label="规则策略" value={activeRule.conditions?.strategy || activeRuleStrategyOptions[0]?.value}
                   onChange={(value) => updateSelectedRuleCondition(ruleModal.ruleKey, { strategy: value })}
                   options={activeRuleStrategyOptions}
                 />
               </label>
             )}
-            {activeRuleStrategyOptions.length > 0 && (
-              <label>
-                <span>策略参数</span>
-                <Input
-                  allowClear
-                  placeholder="例如：组合唯一字段、脱敏保留位数、导出审批说明"
-                  value={activeRule.conditions?.parameter || ''}
-                  onChange={(event) => updateSelectedRuleCondition(ruleModal.ruleKey, { parameter: event.target.value })}
-                />
-              </label>
-            )}
+            {ruleModal.ruleKey==='unique'&&activeRule.conditions?.strategy==='compound'&&<label className="designer-policy-setting"><span>组合字段</span><Select mode="multiple" aria-label="组合唯一字段" value={activeRule.conditions?.fields||[]} options={conditionFieldOptions.filter(option=>option.value!==selectedControl?.fieldKey)} onChange={fields=>updateSelectedRuleCondition('unique',{fields})}/><small>当前字段与所选字段的组合必须唯一；空值不参与检查。</small></label>}
+            {ruleModal.ruleKey==='unique'&&<small>范围限当前租户；删除的记录不参与校验，编辑时排除记录自身。发布前会检查已有重复数据。</small>}
+            {ruleModal.ruleKey==='masked'&&(activeRule.conditions?.strategy||'role')==='role'&&<label className="designer-policy-setting"><span>可查看原文的角色</span><Select mode="multiple" aria-label="可查看原文的角色" options={identityRoleRecords.map(role=>({value:role.id,label:role.label||role.name}))} value={activeRule.conditions?.roleIds||[]} onChange={roleIds=>updateSelectedRuleCondition('masked',{roleIds})}/><small>未选角色时所有人均脱敏；只影响字段展示，不授予表单访问权限。</small></label>}
+            {ruleModal.ruleKey==='masked'&&activeRule.conditions?.strategy!=='hidden'&&<Space><label><span>保留开头字符</span><InputNumber aria-label="保留开头字符" min={0} max={20} value={activeRule.conditions?.keepStart??1} onChange={value=>updateSelectedRuleCondition('masked',{keepStart:value??1})}/></label><label><span>保留结尾字符</span><InputNumber aria-label="保留结尾字符" min={0} max={20} value={activeRule.conditions?.keepEnd??1} onChange={value=>updateSelectedRuleCondition('masked',{keepEnd:value??1})}/></label></Space>}
+            {ruleModal.ruleKey==='copyable'&&<small>禁止复制会阻止运行页的复制、剪切与拖出操作；复制时脱敏保留首尾字符。此设置不是下载、截图或接口访问权限。</small>}
             <label>
               <span>条件来源字段</span>
               <Select

@@ -41,7 +41,7 @@ export default function WorkflowList() {
         <div style={{ marginTop: 16 }}>
           <div style={{
             position: 'relative', minHeight: 200,
-            background: '#fafafa', borderRadius: 8, padding: 20, border: '1px solid #e8e8e8',
+            background: 'var(--mf-panel-soft)', borderRadius: 8, padding: 20, border: '1px solid #e8e8e8',
           }}>
             {nodes.map((node: any) => {
               const colors: Record<string, string> = {

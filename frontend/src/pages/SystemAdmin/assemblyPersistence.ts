@@ -94,10 +94,14 @@ export function assemblyFieldUpdatePayload(values: { label: string; maxBytes?: n
 export function supportsFieldByteLimit(type?: string) {
   return ['string', 'text', 'enum', 'code', 'person'].includes(type || '');
 }
+export const DEFAULT_FORM_LIMITS = { fields: 200, recordBytes: 2 * 1024 * 1024 } as const;
+
+export const DEFAULT_FIELD_BYTES: Record<string, number> = { string: 1024, code: 1024, person: 1024, enum: 1024, text: 65536, json: 1048576 };
 export function fieldStorageSize(type?: string, maxBytes?: unknown): string {
   const fixed: Record<string, number> = { integer: 4, int: 4, number: 8, decimal: 8, float: 8, boolean: 1, date: 4, datetime: 8 };
   if (type && fixed[type]) return `${fixed[type]} 字节`;
-  return typeof maxBytes === 'number' && maxBytes > 0 ? `最多 ${maxBytes} 字节` : '变长 · 未设上限';
+  if (typeof maxBytes === 'number' && maxBytes > 0) return `最多 ${maxBytes} 字节`;
+  return `默认最多 ${DEFAULT_FIELD_BYTES[type || 'string'] || 1024} 字节`;
 }
 function fieldByteValidation(current: Record<string, unknown>, maxBytes?: number | null) {
   const validation = { ...current };

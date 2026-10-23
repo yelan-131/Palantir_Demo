@@ -1,3 +1,4 @@
+import './designer-dialog.css';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useState } from 'react';
 import { Button, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
@@ -51,7 +52,7 @@ export default function ViewTabsEditor({ config, activeId, onSelect, onChange, r
       <Typography.Text type="secondary">{active.audience.mode === 'everyone' ? '所有具有本表单访问权限的用户可见' : `指定范围可见：${active.audience.roleIds.length} 个角色、${active.audience.userIds.length} 位用户、${active.audience.orgIds.length} 个组织（满足任一项）`}。各 Tab 独立配置筛选与列表，保存草稿后发布生效。</Typography.Text>
       <Button danger type="text" size="small" disabled={tabs.length <= 1} onClick={remove}>删除当前 Tab</Button>
     </div>
-    <Modal title={creating ? '新建数据视图 Tab' : 'Tab 设置'} open={Boolean(editing)} onCancel={() => setEditing(null)} onOk={commit} okText="确认" cancelText="取消" destroyOnClose>
+    <Modal className="form-designer-dialog" title={creating ? '新建数据视图 Tab' : 'Tab 设置'} open={Boolean(editing)} onCancel={() => setEditing(null)} onOk={commit} okText="确认" cancelText="取消" destroyOnClose>
       {editing && <Form layout="vertical">
         <Form.Item label="Tab 名称" required><Input aria-label="Tab 名称" maxLength={40} value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></Form.Item>
         <Form.Item label="可见范围"><Select aria-label="Tab 可见范围" value={editing.audience.mode} options={[{ value: 'everyone', label: '所有可访问本表单的用户' }, { value: 'restricted', label: '绑定角色 / 用户 / 组织' }]} onChange={(mode) => setEditing({ ...editing, audience: { ...editing.audience, mode } })} /></Form.Item>

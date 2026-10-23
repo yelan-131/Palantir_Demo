@@ -1,12 +1,8 @@
 import { useMemo } from 'react';
-import {
-  LogoutOutlined,
-  SafetyCertificateOutlined,
-  UserOutlined,
-} from '@ant-design/icons';
-import { PERSONAL_SETTINGS_ENTRIES, visibleNavigationEntries } from '../../config/navigation';
-import { Avatar, Dropdown, Space, Tag } from 'antd';
+import { UserOutlined } from '@ant-design/icons';
+import { Avatar, Dropdown, Space } from 'antd';
 import type { MenuProps } from 'antd';
+import { settingsNavigationGroups } from '../../config/navigation';
 
 interface AccountMenuRole {
   name: string;
@@ -17,6 +13,7 @@ export interface AccountMenuUser {
   username?: string;
   display_name?: string;
   email?: string;
+  avatar_url?: string;
   is_admin?: boolean;
   roles?: AccountMenuRole[];
 }
@@ -30,8 +27,6 @@ interface AccountMenuProps {
 }
 
 export default function AccountMenu({ user, onNavigate, onLogout, compact = false, active = false }: AccountMenuProps) {
-  const roleLabel = user?.is_admin ? '系统管理员' : user?.roles?.[0]?.label || '业务用户';
-
   const menu = useMemo<MenuProps>(() => ({
     items: [
       {
@@ -39,48 +34,32 @@ export default function AccountMenu({ user, onNavigate, onLogout, compact = fals
         disabled: true,
         label: (
           <div className="user-menu-header">
-            <Avatar size={40} icon={<UserOutlined />} style={{ backgroundColor: 'var(--shell-avatar-background, #697586)' }} />
+            <Avatar size={36} src={user?.avatar_url} icon={<UserOutlined />} />
             <div>
               <strong>{user?.display_name || user?.username || '用户'}</strong>
               <span>{user?.email || user?.username || ''}</span>
-              <Tag color={user?.is_admin ? 'gold' : 'blue'}>{roleLabel}</Tag>
             </div>
           </div>
         ),
       },
       { type: 'divider' },
-      {
-        key: 'personal-settings',
-        type: 'group' as const,
-        label: '个人设置',
-        children: PERSONAL_SETTINGS_ENTRIES.map(entry => ({
-          key: entry.path, label: entry.label,
-          onClick: () => onNavigate(entry.path),
-        })),
-      },
-      {
-        key: 'application-settings',
-        type: 'group' as const,
-        label: '应用配置',
-        children: visibleNavigationEntries('studio', Boolean(user?.is_admin)).map(entry => ({
-          key: entry.path, label: entry.label,
-          onClick: () => onNavigate(entry.path),
-        })),
-      },
-      ...(user?.is_admin ? [{ key: 'platform-settings', label: '平台管理', icon: <SafetyCertificateOutlined />, onClick: () => onNavigate('/admin') }] : []),
+      ...settingsNavigationGroups(Boolean(user?.is_admin)).map(group => ({
+        key: group.key,
+        label: group.label,
+        onClick: () => onNavigate(group.entries[0].path),
+      })),
       { type: 'divider' as const },
       {
         key: 'logout',
         label: '退出登录',
-        icon: <LogoutOutlined />,
         danger: true,
         onClick: onLogout,
       },
     ],
-  }), [onLogout, onNavigate, roleLabel, user]);
+  }), [onLogout, onNavigate, user]);
 
   return (
-    <Dropdown menu={menu} trigger={['click']} placement={compact ? 'topRight' : 'bottomRight'}>
+    <Dropdown overlayClassName="shell-settings-popup" menu={menu} trigger={['click']} placement={compact ? 'topRight' : 'bottomRight'}>
       <button
         type="button"
         className={`${compact ? 'shell-account-button' : 'account-menu-button'}${active ? ' is-active' : ''}`}

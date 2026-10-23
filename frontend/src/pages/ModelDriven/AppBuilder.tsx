@@ -15,7 +15,7 @@ import {
   TableOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Checkbox, Col, Empty, Form, Input, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
 import { getSemanticPageContract } from '@/services/api';
 
 type FieldContract = {
@@ -160,15 +160,16 @@ export default function AppBuilder() {
           <Button icon={<EyeOutlined />} onClick={() => navigate(targetPage)}>
             返回页面
           </Button>
-          <Button icon={<SaveOutlined />} onClick={() => message.success('已保存为草稿')}>
+          <Button icon={<SaveOutlined />} disabled>
             保存草稿
           </Button>
-          <Button type="primary" icon={<SendOutlined />} onClick={() => message.success('页面配置已发布')}>
+          <Button type="primary" icon={<SendOutlined />} disabled>
             发布配置
           </Button>
         </Space>
       </section>
 
+      <Alert type="info" showIcon message="配置预览：此旧版构建器尚未接入保存与发布，请在应用、表单与菜单中配置正式表单。" style={{ marginBottom: 16 }} />
       <Row gutter={[16, 16]} className="semantic-contract-summary">
         <Col xs={24} lg={8}>
           <SummaryCard icon={<NodeIndexOutlined />} label="绑定对象" value={contract.entity_detail?.name ?? contract.entity} detail={contract.entity_detail?.source ?? '-'} />

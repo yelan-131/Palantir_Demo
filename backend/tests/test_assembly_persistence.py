@@ -103,9 +103,16 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 assert draft['fields'][1]['visible_in_list'] is False
                 assert draft['fields'][1]['enum_values']['values'] == ['待处理','已完成']
                 config = {**draft['config'], 'ownerLabel':'测试负责人'}
+                def analytics_design(title):
+                    return {'title': title,
+                            'datasets': [{'id': 'source', 'name': '物料', 'sourceType': 'businessForm',
+                                          'source': f'test-{kind}', 'dimensions': ['part_no'], 'measures': [], 'refreshMode': 'manual'}],
+                            'metrics': [{'id': 'total', 'name': '记录数', 'datasetId': 'source', 'expression': 'count(*)'}],
+                            'widgets': [{'id': 'count', 'title': '记录数', 'type': 'metric-card', 'datasetId': 'source', 'metricIds': ['total']}],
+                            'globalFilters': [], 'interactions': []}
                 if kind == 'analysis':
-                    config.update(analyticsDesign={'title':'旧画布'},
-                                  analyticsDesignDraft={'title':'新画布'}, analyticsDesignMeta={'status':'draft'})
+                    config.update(analyticsDesign=analytics_design('旧画布'),
+                                  analyticsDesignDraft=analytics_design('新画布'), analyticsDesignMeta={'status':'draft'})
                 await request(client, 'PUT', f'/forms/{fid}', {'name':'已保存表单','config':config,'owner_id':999})
                 published = await request(client, 'POST', f'/forms/{fid}/publish')
                 assert published['version'] == 1
@@ -123,7 +130,7 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 await request(client, 'PUT', f'/forms/{fid}', {'status':'disabled'})
                 assert (await request(client,'GET',f'/forms/{fid}?schema=draft&scope=designer'))['status'] == 'disabled'
                 if kind == 'analysis':
-                    newer_config = {**loaded['config'], 'analyticsDesignDraft':{'title':'第二版画布'}}
+                    newer_config = {**loaded['config'], 'analyticsDesignDraft':analytics_design('第二版画布')}
                     await request(client, 'PUT', f'/forms/{fid}', {'config':newer_config})
                 assert (await request(client, 'POST', f'/forms/{fid}/publish'))['version'] == 2
                 if kind == 'analysis':
@@ -217,5 +224,57 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 listed = await request(client, 'GET', f'/forms/{design_id}?schema=published&scope=list')
                 assert listed['config']['viewConfig']['table']['columns'][0]['enabled'] is True
                 await request(client, 'POST', f'/forms/{design_id}/records', {'data':{'quantity':2}})
+            # Hierarchy is saved in the draft and published runtime payload;
+            # later draft moves must not mutate the current published tree.
+            container_form = await request(client, 'POST', '/forms', {'name':'容器往返验证','code':'container-roundtrip'})
+            cfid = container_form['id']
+            await request(client, 'POST', f'/forms/{cfid}/fields', {'field_name':'name','label':'名称','field_type':'string','validation':{'maxBytes':64}})
+            controls = [
+                {'id':'group','source':'component','controlType':'container','name':'基础信息','layout':{'collapsible':True,'gap':16},'rules':{'visible':{'enabled':True},'readonly':{'enabled':True}}},
+                {'id':'tabs','source':'component','controlType':'tabs','parentId':'group','slotId':'body','layout':{'tabs':[{'id':'a','label':'常规'},{'id':'b','label':'扩展'}]},'rules':{'visible':{'enabled':True}}},
+                {'id':'name-control','source':'field','controlType':'field','fieldKey':'name','parentId':'tabs','slotId':'b','rules':{'visible':{'enabled':True},'required':{'enabled':False}}},
+            ]
+            tree = [{'id':'group','kind':'container','label':'基础信息','layout':controls[0]['layout'],'children':[{'id':'tabs','kind':'tabs','layout':controls[1]['layout'],'children':[{'id':'name-control','kind':'field','fieldName':'name','slotId':'b','readonly':True}]}]}]
+            config = {'formDesignerControls':controls,'formLayout':{'version':2,'nodes':tree,'sections':[{'fields':[{'fieldName':'name'}]}]}}
+            await request(client, 'PUT', f'/forms/{cfid}', {'config':config})
+            await request(client, 'POST', f'/forms/{cfid}/publish')
+            for schema in ['draft','published']:
+                restored = await request(client, 'GET', f'/forms/{cfid}?schema={schema}&scope=designer')
+                assert restored['config']['formDesignerControls'][2]['slotId'] == 'b'
+                assert restored['config']['formLayout']['nodes'] == tree
+                assert restored['fields'][0]['validation']['maxBytes'] == 64
+            runtime = await request(client, 'GET', f'/forms/{cfid}?schema=published&scope=create')
+            assert runtime['config']['formLayout']['nodes'] == tree
+            assert runtime['fields'][0]['ui_config']['layoutAncestors'][1]['readonly']['enabled']
+            config['formDesignerControls'][2]['slotId'] = 'a'
+            config['formLayout']['nodes'][0]['children'][0]['children'][0]['slotId'] = 'a'
+            await request(client, 'PUT', f'/forms/{cfid}', {'config':config})
+            published_old = await request(client, 'GET', f'/forms/{cfid}?schema=published&scope=create')
+            assert published_old['config']['formLayout']['nodes'][0]['children'][0]['children'][0]['slotId'] == 'b'
+            # Designer controls survive draft save, rule preview, publication and fresh requests.
+            f = await request(client,'POST','/forms',{'name':'控件持久化','code':'controls-roundtrip'})
+            fid=f['id']
+            await request(client,'POST',f'/forms/{fid}/fields',{'field_name':'note','label':'说明','field_type':'string','validation':{'maxBytes':32}})
+            await request(client,'POST',f'/forms/{fid}/fields',{'field_name':'items','label':'明细','field_type':'json'})
+            controls=[{'id':'note','source':'field','fieldKey':'note','controlType':'text','name':'说明','typeSettings':{'minLength':2,'maxLength':8,'trimMode':'trim','caseMode':'upper'},'rules':{'visible':{'enabled':True}}},
+                      {'id':'items','source':'field','fieldKey':'items','controlType':'editable-table','typeSettings':{'maxRows':2,'columns':[{'key':'qty','label':'数量','type':'number','required':True}]}}]
+            config={'formDesignerControls':controls,'canvasSettings':{'columns':3,'gap':16}}
+            await request(client,'PUT',f'/forms/{fid}',{'config':config})
+            preview=await request(client,'POST',f'/forms/{fid}/rules/preview',{'controls':controls,'data':{'note':' ab '}})
+            assert preview['data']['note']=='AB'
+            loaded=await request(client,'GET',f'/forms/{fid}?schema=draft&scope=designer')
+            assert loaded['config']==config
+            await request(client,'POST',f'/forms/{fid}/publish')
+            published=await request(client,'GET',f'/forms/{fid}?schema=published&scope=create')
+            assert published['config']['canvasSettings']==config['canvasSettings']
+            assert published['fields'][0]['ui_config']['typeSettings']['maxLength']==8
+            assert published['fields'][0]['validation']['maxBytes']==32
+            await request(client,'POST',f'/forms/{fid}/records',{'data':{'note':'x'}},expected=422)
+            record=await request(client,'POST',f'/forms/{fid}/records',{'data':{'note':' ab ','items':[{'qty':3}]}})
+            restored=await request(client,'GET',f"/forms/{fid}/records/{record['id']}")
+            assert restored['data']=={'note':'AB','items':[{'qty':3}]}
+            controls.append({**controls[0],'id':'copy-note'})
+            await request(client,'PUT',f'/forms/{fid}',{'config':{'formDesignerControls':controls}})
+            await request(client,'POST',f'/forms/{fid}/publish',expected=409)
     finally:
         await engine.dispose()

@@ -1,3 +1,4 @@
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Button, Modal, Form, Input, Select, InputNumber,
@@ -8,8 +9,8 @@ import { listRules, createRule, updateRule, deleteRule, validateRule } from '@/s
 import { listModels } from '@/services/api';
 
 const RULE_TYPE_MAP: Record<string, { label: string; color: string }> = {
-  validation: { label: '校验规则', color: '#1677ff' },
-  trigger: { label: '触发规则', color: '#722ed1' },
+  validation: { label: '校验规则', color: colors.primary },
+  trigger: { label: '触发规则', color: '#877394' },
 };
 
 const OPERATOR_OPTIONS = [
@@ -171,7 +172,7 @@ export default function RuleEngine() {
       key: 'rule_type',
       width: 100,
       render: (type: string) => {
-        const cfg = RULE_TYPE_MAP[type] || { label: type, color: '#8c8c8c' };
+        const cfg = RULE_TYPE_MAP[type] || { label: type, color: colors.muted };
         return <Tag color={cfg.color}>{cfg.label}</Tag>;
       },
     },
@@ -222,8 +223,8 @@ export default function RuleEngine() {
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+    <div className="catalog-page">
+      <div className="page-list-toolbar">
         <Space>
           <Select
             allowClear

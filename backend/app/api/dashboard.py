@@ -7,17 +7,65 @@ from datetime import datetime, timedelta
 from typing import Any
 from types import SimpleNamespace
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, text
+from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._model_driven_shared import assert_safe_identifier
-from app.api.deps import current_tenant_id, get_current_user, get_db
+from app.api.deps import current_tenant_id, get_current_user, get_db, require_admin
 from app.core.db import safe_db_call as _try_db
 from app.models.relational import DynamicRecord, Form
 from app.services.alert_service import is_material_request
+from app.services.analytics_data import load_data as load_analytics_data, read_filters
+from app.services.analytics_editor import AnalyticsPreviewRequest, AnalyticsWriteRequest
 
 router = APIRouter()
+
+
+# Library endpoints precede program routes and share the same admin boundary.
+from app.services.analytics_metric_library import SharedMetricDefinition, SharedMetricWrite, SharedMetricPublish
+
+
+@router.get('/analytics/metrics')
+async def list_shared_metrics(db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import list_metrics
+    return await list_metrics(db, user)
+
+
+@router.post('/analytics/metrics')
+async def create_shared_metric(body: SharedMetricDefinition, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import create_metric
+    return await create_metric(db, user, body)
+
+
+@router.get('/analytics/metrics/{metric_id}')
+async def get_shared_metric(metric_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import get_metric
+    return await get_metric(db, user, metric_id)
+
+
+@router.put('/analytics/metrics/{metric_id}/draft')
+async def save_shared_metric(metric_id: str, body: SharedMetricWrite, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import save_metric
+    return await save_metric(db, user, metric_id, body)
+
+
+@router.get('/analytics/metrics/{metric_id}/references')
+async def shared_metric_references(metric_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import references
+    return await references(db, user, metric_id)
+
+
+@router.post('/analytics/metrics/{metric_id}/impact')
+async def shared_metric_impact(metric_id: str, body: SharedMetricWrite, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import impact
+    return await impact(db, user, metric_id, body)
+
+
+@router.post('/analytics/metrics/{metric_id}/publish')
+async def publish_shared_metric(metric_id: str, body: SharedMetricPublish, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_metric_library import publish_metric
+    return await publish_metric(db, user, metric_id, body)
 
 MOCK_OVERVIEW = {
     "factories": {"count": 0},
@@ -85,15 +133,57 @@ async def get_alerts(limit: int = Query(20, ge=1, le=100), user: dict = Depends(
 async def get_program_data(
     program_id: str,
     limit: int = Query(500, ge=1, le=1000),
+    filters: str | None = Query(None, max_length=8192),
+    widget_filters: str | None = Query(None, max_length=8192),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     tenant_id = current_tenant_id(user)
-    result = await _query_form_program(db, tenant_id, program_id, limit, user=user)
+    result = await _query_form_program(db, tenant_id, program_id, limit, user=user,
+        filters=read_filters(filters), widget_filters=read_filters(widget_filters, True))
     if result is None:
         return {"data": None, "source": "unsupported", "program_id": program_id}
     result["program_id"] = program_id
     return result
+
+
+@router.get("/programs/{program_id}/analytics/editor")
+async def get_analytics_editor(program_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import get_editor
+    return await get_editor(db, user, program_id)
+
+
+@router.get("/programs/{program_id}/analytics/versions")
+async def list_analytics_versions(program_id: str, limit: int = Query(20, ge=1, le=100),
+                                  offset: int = Query(0, ge=0), db: AsyncSession = Depends(get_db),
+                                  user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import list_versions
+    return await list_versions(db, user, program_id, limit=limit, offset=offset)
+
+
+@router.get("/programs/{program_id}/analytics/versions/{version_number}")
+async def get_analytics_version(program_id: str, version_number: int,
+                                db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import get_version
+    return await get_version(db, user, program_id, version_number)
+
+
+@router.post("/programs/{program_id}/analytics/preview")
+async def preview_analytics(program_id: str, body: AnalyticsPreviewRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import preview
+    return await preview(db, user, program_id, body)
+
+
+@router.put("/programs/{program_id}/analytics/draft")
+async def save_analytics_draft(program_id: str, body: AnalyticsWriteRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import write_design
+    return await write_design(db, user, program_id, body)
+
+
+@router.post("/programs/{program_id}/analytics/publish")
+async def publish_analytics(program_id: str, body: AnalyticsWriteRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(require_admin)):
+    from app.services.analytics_editor import write_design
+    return await write_design(db, user, program_id, body, publish=True)
 
 
 def _metric(label: str, value: int | float | str, tone: str, suffix: str | None = None) -> dict:
@@ -128,7 +218,7 @@ async def _dashboard_records(db, table_name, tenant_id, user):
         return []
     if not (await evaluate_form_permission(user, form.id, "view", db))["allowed"]:
         return []
-    records = await authorized_records(db, user, form, decorate=False)
+    records = await authorized_records(db, user, form, decorate=False,statistics=True)
     records.sort(key=lambda record: record["id"], reverse=True)
     return [{**record["data"], "id": record["id"]} for record in records
         if table_name != "business_alert_center" or not is_material_request(record["data"])]
@@ -252,12 +342,16 @@ async def _query_alerts(db: AsyncSession, tenant_id: int, limit: int, *, user: d
     return {"data": alerts, "total": len(alerts), "tenant_id": tenant_id, "source": "physical_table"}
 
 
-async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str, limit: int, *, user: dict):
+async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str, limit: int, *, user: dict, filters=None, widget_filters=None):
     form = await db.scalar(select(Form).where(Form.tenant_id == tenant_id, Form.code == program_id))
     if form is None:
         return None
-    form_config = form.config or {}
-
+    from app.services.form_runtime import _latest_form_version
+    version=await _latest_form_version(db,tenant_id,form.id)
+    form_config=(((version.snapshot or {}).get('form') or {}).get('config') or {}) if version else (form.config or {})
+    from app.services.designer_permissions import role_configs
+    configs=await role_configs(db,user,form)
+    statistics_allowed=not configs or any(((value.get('data') or {}).get('ownership') or {}).get('statistics',True) for value in configs)
     from app.services.records import authorized_records
     records = await authorized_records(db, user, form)
     records.sort(key=lambda record: record["id"], reverse=True)
@@ -272,23 +366,33 @@ async def _query_form_program(db: AsyncSession, tenant_id: int, program_id: str,
     source = "physical_table" if form.table_name and form.storage_mode in {"physical_table", "business_table"} else "dynamic_records"
 
     analytics_design = form_config.get("analyticsDesign")
-    if not isinstance(analytics_design, dict):
-        analytics_design = form_config.get("analyticsDesignDraft")
+    if not statistics_allowed:analytics_design=None
+    analytics_data = None
+    analytics_published_version = None
+    analytics_published_at = None
+    if isinstance(analytics_design, dict):
+        analytics_data = await load_analytics_data(db, tenant_id, form, analytics_design,
+            user=user, filters=filters, widget_filters=widget_filters, limit=limit)
+        analytics_published_version = version.version if version else None
+        analytics_published_at = version.published_at.isoformat() if version and version.published_at else (
+            (form_config.get("analyticsDesignMeta") or {}).get("publishedAt") or form_config.get("publishedAt"))
     high = sum(1 for row in all_rows if row.get("level") in {"高", "critical", "high", "严重"})
     closed = sum(1 for row in all_rows if row.get("status") in {"已关闭", "closed", "completed"})
     return {
-        "metrics": [
+        "metrics": ([
             _metric("表单记录", int(total), "blue"),
             _metric("待处理", max(int(total) - closed, 0), "orange"),
             _metric("高风险", high, "red"),
             _metric("已关闭", closed, "green"),
-        ],
+        ] if statistics_allowed else []),
         "rows": rows,
         "total": int(total),
         "viewConfig": form_config.get("viewConfig"),
         "analyticsDesign": analytics_design if isinstance(analytics_design, dict) else None,
-        "analyticsData": _dynamic_analytics_data(all_rows, analytics_design, int(total)) if isinstance(analytics_design, dict) else None,
-        "analyticsDesignState": "draft" if isinstance(form_config.get("analyticsDesignDraft"), dict) else ("published" if isinstance(form_config.get("analyticsDesign"), dict) else None),
+        "analyticsData": analytics_data,
+        "analyticsDesignState": "published" if isinstance(analytics_design,dict) else None,
+        "analyticsPublishedVersion": analytics_published_version,
+        "analyticsPublishedAt": analytics_published_at,
         "form": {"id": form.id, "code": form.code, "name": form.name, "kind": form_config.get("assemblyKind")},
         "source": source,
     }
@@ -349,28 +453,11 @@ def _dynamic_record_row(record: DynamicRecord, form: Form) -> dict:
 
 
 def _dynamic_analytics_data(rows: list[dict], analytics_design: dict, total: int) -> dict:
-    actual_total = sum(_safe_float(row.get("actual")) for row in rows)
-    target_total = sum(_safe_float(row.get("target")) for row in rows)
-    rate = round((actual_total / target_total) * 100, 1) if target_total else 0
-    metric_values = {
-        "metric-total": total,
-        "metric-actual": round(actual_total, 2),
-        "metric-rate": rate,
-    }
-    for metric in analytics_design.get("metrics") or []:
-        metric_id = metric.get("id")
-        if not metric_id or metric_id in metric_values:
-            continue
-        expression = str(metric.get("expression") or "").lower()
-        if "count" in expression:
-            metric_values[metric_id] = total
-        elif "rate" in expression or "/" in expression:
-            metric_values[metric_id] = rate
-        elif "sum" in expression or "actual" in expression:
-            metric_values[metric_id] = round(actual_total, 2)
-        else:
-            metric_values[metric_id] = len(rows)
-    return {"metricValues": metric_values, "rows": rows}
+    # Compatibility helper; production loads each dataset through the record permission boundary.
+    from app.services.analytics_runtime import build_data
+    datasets = {item['id']: rows for item in analytics_design.get('datasets') or []}
+    fields = {key: set().union(*(row.keys() for row in rows)) for key in datasets}
+    return build_data(analytics_design, datasets, fields)
 
 
 def _safe_float(value) -> float:

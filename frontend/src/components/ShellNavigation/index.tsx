@@ -40,9 +40,9 @@ function RailIcon({ name, selected }: { name: string; selected: boolean }) {
 }
 
 export const fixedShellApps = [
-  { id: 'home', name: '首页', icon: 'HomeOutlined', path: '/' },
+  { id: 'home', name: '工作台', icon: 'HomeOutlined', path: '/' },
   { id: 'workflow', name: '流程与待办', icon: 'CheckOutlined', path: '/workflow' },
-  { id: 'scheduler', name: '定时任务', icon: 'ClockCircleOutlined', path: '/scheduler' },
+  { id: 'scheduler', name: '日常任务', icon: 'ClockCircleOutlined', path: '/scheduler' },
   { id: 'more', name: '更多', icon: '', path: '/more' },
 ];
 
@@ -64,15 +64,15 @@ export function useApplicationLibrary(applications: ShellApplication[]) {
 }
 
 interface ApplicationRailProps {
-  activeKey: string;
   library: LibraryApp[];
-  user: AccountMenuUser | null;
   onOpen: (app: LibraryApp) => void;
+  activeKey: string;
+  user: AccountMenuUser | null;
   onLogout: () => void;
   onHome: () => void;
 }
 
-export function ApplicationRail({ activeKey, library, user, onOpen, onLogout, onHome }: ApplicationRailProps) {
+export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, onHome }: ApplicationRailProps) {
   const navigate = useNavigate();
   const railButton = (id: string, name: string, icon: React.ReactNode, onClick: () => void) => (
     <Tooltip title={name} placement="right" key={id}>
@@ -82,7 +82,8 @@ export function ApplicationRail({ activeKey, library, user, onOpen, onLogout, on
   return <nav className="shell-app-rail" aria-label="应用栏">
     <div className="shell-rail-scroll">
       {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => app.id === 'home' ? onHome() : navigate(app.path)))}
-      {library.filter(app => !fixedShellApps.some(fixed => fixed.id === app.id) && (app.pinned || app.id === activeKey)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
+      {library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
+      {user?.is_admin && railButton('knowledge', '知识库', <BookOutlined />, () => navigate('/data-center/knowledge'))}
       {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => navigate(app.path)))}
     </div>
     <div className="shell-rail-user"><AccountMenu compact active={activeKey === 'account'} user={user} onNavigate={navigate} onLogout={onLogout} /></div>
@@ -105,11 +106,11 @@ export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[];
     setEditing(undefined);
   };
   return <section className="shell-library-page">
-    <p className="page-intro">打开应用，或将常用应用固定到左侧导航。</p>
+    <p className="page-intro">从左侧主菜单切换业务应用，常用应用优先显示。</p>
     <Input.Search aria-label="搜索应用" placeholder="搜索应用名称或用途" value={query} onChange={event => setQuery(event.target.value)} allowClear className="shell-library-search" />
-    {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon)}</span><Tag>{app.pinned ? '已固定' : '可添加'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '添加到应用栏'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
+    {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon)}</span><Tag>{app.pinned ? '常用应用' : '业务应用'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '设为常用'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
     <Modal title="自定义应用入口" open={Boolean(editing)} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" destroyOnClose>
-      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.keys(shellIcons).map(value => ({ value, label: <Space>{shellIcon(value)}{({ HomeOutlined: '首页', FolderOutlined: '空间', ClockCircleOutlined: '任务', AppstoreOutlined: '应用', DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量', ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识' } as Record<string, string>)[value]}</Space> }))} /></Form.Item><Form.Item name="pinned" label="固定到应用栏" valuePropName="checked"><Switch /></Form.Item></Form>
+      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.keys(shellIcons).map(value => ({ value, label: <Space>{shellIcon(value)}{({ HomeOutlined: '首页', FolderOutlined: '空间', ClockCircleOutlined: '任务', AppstoreOutlined: '应用', DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量', ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识' } as Record<string, string>)[value]}</Space> }))} /></Form.Item><Form.Item name="pinned" label="在主菜单优先显示" valuePropName="checked"><Switch /></Form.Item></Form>
       <Typography.Text type="secondary">仅调整你的应用入口显示，业务应用配置与权限仍沿用现有设置。</Typography.Text>
     </Modal>
   </section>;

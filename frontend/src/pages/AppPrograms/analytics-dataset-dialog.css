@@ -1,0 +1,40 @@
+.analytics-dataset-dialog { max-width:calc(100vw - 40px); }
+.analytics-dataset-dialog .ant-modal-content { padding:0; overflow:hidden; }
+.analytics-dataset-dialog .ant-modal-header { padding:20px 24px 16px; margin:0; border-bottom:1px solid var(--mf-border,#e1e9ee); }
+.dataset-dialog-title { display:flex; align-items:center; gap:10px; padding-right:25px; }
+.dataset-dialog-title small { color:var(--mf-muted,#718592); font-size:12px; font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dataset-dialog-content { padding:0 24px 20px; background:var(--mf-surface,#fff); }
+.dataset-dialog-content>.ant-alert { margin-top:12px; }
+.dataset-dialog-content .ant-tabs-nav { margin-bottom:18px; }
+.dataset-dialog-content .ant-tabs-tab { padding:14px 8px; }
+.dataset-dialog-content .ant-tabs-tabpane { height:460px; max-height:calc(100vh - 260px); overflow:auto; padding:0 4px 4px 0; }
+.dataset-dialog-content .property-inspector-group { max-width:none; margin-bottom:16px; }
+.dataset-dialog-content .property-inspector-row { grid-template-columns:120px minmax(0,1fr); min-height:44px; padding:8px 14px; }
+.dataset-dialog-content .property-inspector-row>.ant-input,.dataset-dialog-content .property-inspector-row>.ant-select,.dataset-dialog-content .property-inspector-row>.ant-input-number { width:100%; }
+.dataset-dialog-content .property-inspector-row>.ant-switch { justify-self:end; }
+.dataset-dialog-content .property-inspector-advanced { padding:10px 14px; }
+.dataset-dialog-content .property-inspector-advanced .property-inspector-row { padding-left:0; padding-right:0; }
+.dataset-note { color:var(--mf-muted,#718592); font-size:12px; line-height:1.8; margin:12px 14px; }
+.dataset-next { display:flex; justify-content:flex-end; }
+.dataset-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; margin-bottom:16px; }
+.dataset-section-heading p { color:var(--mf-muted,#718592); font-size:12px; line-height:1.8; margin:6px 0 0; }
+.dataset-section-heading>.ant-input-affix-wrapper { max-width:250px; }
+.dataset-field-count { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:12px 0; color:var(--mf-muted,#718592); font-size:12px; }
+.dataset-field-code { display:block; color:var(--mf-muted,#718592); font-size:11px; margin-top:3px; }
+.dataset-condition { display:grid; grid-template-columns:24px minmax(120px,1fr) 135px minmax(120px,1fr) 32px; align-items:center; gap:10px; padding:10px 12px; background:var(--mf-bg,#f6f8fa); border:1px solid var(--mf-border,#e1e9ee); border-radius:6px; margin-bottom:10px; }
+.dataset-condition-index,.dataset-condition-empty { color:var(--mf-muted,#718592); font-size:12px; }
+.dataset-conditions { margin-bottom:12px; }
+.dataset-formula-fields { display:flex; gap:6px; flex-wrap:wrap; padding:8px 14px; }
+.dataset-formula-fields code { padding:3px 6px; background:var(--mf-bg,#f6f8fa); border-radius:4px; font-size:12px; }
+.dataset-dialog-content .ant-alert { margin-bottom:14px; }
+.dataset-preview-stats,.dataset-preview-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.dataset-preview-stats>div,.dataset-preview-metrics>div { display:flex; flex-direction:column; gap:5px; padding:12px 16px; border:1px solid var(--mf-border,#e1e9ee); border-radius:6px; }
+.dataset-preview-stats span,.dataset-preview-metrics span { font-size:12px; color:var(--mf-muted,#718592); }
+.dataset-preview-stats strong,.dataset-preview-metrics strong { font-size:22px; color:var(--mf-text,#304f60); }
+.dataset-preview-metrics code { font-size:11px; overflow-wrap:anywhere; color:var(--mf-muted,#718592); }
+.analytics-dataset-dialog .ant-modal-footer { margin:0; padding:14px 24px; background:var(--mf-bg,#f6f8fa); border-top:1px solid var(--mf-border,#e1e9ee); }
+.dataset-dialog-footer { display:flex; justify-content:space-between; gap:14px; align-items:center; }
+.dataset-dialog-footer>span { font-size:12px; color:var(--mf-muted,#718592); }
+@media(max-width:700px) { .dataset-dialog-footer,.dataset-section-heading { flex-direction:column; align-items:stretch; } .dataset-dialog-content { padding:0 14px 14px; } .dataset-condition { grid-template-columns:24px minmax(0,1fr) 32px; } .dataset-condition>.ant-select,.dataset-condition>.ant-input,.dataset-condition-empty { grid-column:2; } .dataset-condition>.ant-btn { grid-column:3; grid-row:1; } .dataset-preview-stats,.dataset-preview-metrics { grid-template-columns:1fr; } }
+
+body:has(.tech-white-shell) .analytics-dataset-dialog .ant-modal-body { overflow:hidden; }

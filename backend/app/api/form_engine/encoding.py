@@ -81,16 +81,20 @@ def _select_encoding_rule(rule: dict, data: dict) -> dict:
         return rule
     if not any(candidate.get("enabled") is not False for candidate in rule["rules"]):
         return {"enabled": False}
-    for candidate in rule["rules"]:
+    matching = [candidate for candidate in rule["rules"]
         if candidate.get("enabled") is not False and all(
             _matches_encoding_condition(condition, data) for condition in candidate.get("conditions", [])
-        ):
-            selected = dict(candidate)
-            if any(segment.get("resetCycle") == "dependency" for segment in selected.get("segments", [])):
-                sources = selected.get("dependencies") or [segment.get("sourceField") for segment in selected.get("segments", []) if segment.get("sourceField")]
-                selected["_dependencyScope"] = hashlib.sha256(json.dumps(
-                    [data.get(source) for source in sources], sort_keys=True, default=str).encode()).hexdigest()[:16]
-            return selected
+        )]
+    if len(matching) > 1:
+        names = "、".join(str(candidate.get("name") or candidate.get("id") or "未命名规则") for candidate in matching)
+        raise HTTPException(422, f"编码规则冲突：同时满足多条规则（{names}），请调整触发条件，确保每次仅命中一条规则")
+    if matching:
+        selected = dict(matching[0])
+        if any(segment.get("resetCycle") == "dependency" for segment in selected.get("segments", [])):
+            sources = selected.get("dependencies") or [segment.get("sourceField") for segment in selected.get("segments", []) if segment.get("sourceField")]
+            selected["_dependencyScope"] = hashlib.sha256(json.dumps(
+                [data.get(source) for source in sources], sort_keys=True, default=str).encode()).hexdigest()[:16]
+        return selected
     raise HTTPException(422, "没有满足条件的编码规则，请检查编码规则的触发条件")
 
 
@@ -117,6 +121,9 @@ def _render_code_template(rule: dict, sequence: int, data: dict | None = None) -
                 if raw is None or raw == "":
                     raise HTTPException(422, f"编码段 {segment.get('name', source)} 缺少来源值")
                 value = str(raw)
+            if len(value) > length and padding != "truncate":
+                label = segment.get("name") or {"fixed": "固定文本", "date": "日期时间", "sequence": "流水号"}.get(kind, segment.get("sourceField") or "字段取值")
+                raise HTTPException(422, f"编码段「{label}」内容 {len(value)} 个字符，超过配置的 {length} 位")
             if padding == "truncate":
                 value = value[:length]
             elif padding == "leftZero":

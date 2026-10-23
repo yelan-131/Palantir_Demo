@@ -284,8 +284,8 @@ const contextByRoute: Array<{
     test: (pathname) => navigationAreaForPath(pathname) === 'studio',
     context: {
       title: '应用工作室',
-      scope: '应用、表单、菜单、分析报表、业务规则与模板',
-      intro: '我会基于应用工作室提供帮助，可以解释应用配置、表单和报表，也可以生成业务规则草稿。',
+      scope: '应用、表单、菜单、看板与模板',
+      intro: '我会基于应用工作室提供帮助，可以解释应用配置、表单、看板，以及表单和流程里的规则。',
     },
   },
   {

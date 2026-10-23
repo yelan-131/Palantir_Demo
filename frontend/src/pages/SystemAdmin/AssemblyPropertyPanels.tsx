@@ -11,6 +11,7 @@ export type AssemblyField = { id: string; label: string; code: string; dataType:
 export type NewAssemblyField = { label: string; code: string; type: string; maxBytes?: number | null; options?: string };
 export const fieldTypeOptions = [
   { label: '文本', value: 'string' }, { label: '长文本', value: 'text' },
+  { label: '布尔', value: 'boolean' }, { label: '明细 / JSON', value: 'json' },
   { label: '整数', value: 'integer' }, { label: '小数', value: 'decimal' },
   { label: '日期', value: 'date' }, { label: '日期时间', value: 'datetime' },
   { label: '单选', value: 'enum' }, { label: '人员', value: 'person' }, { label: '附件', value: 'attachment' },

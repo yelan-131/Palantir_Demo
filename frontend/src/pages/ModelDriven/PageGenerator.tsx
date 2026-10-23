@@ -32,6 +32,7 @@ interface PageItem {
 }
 
 export default function PageGenerator() {
+  const [form] = Form.useForm();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [pages, setPages] = useState<PageItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,26 +50,23 @@ export default function PageGenerator() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleGenerate = () => {
+    form.resetFields();
     Modal.confirm({
       title: '自动生成页面',
       content: (
-        <Form layout="vertical" size="small" style={{ marginTop: 16 }}>
-          <Form.Item label="页面名称(英文)"><Input id="pg-name" placeholder="如 equipment-list" /></Form.Item>
-          <Form.Item label="页面标题"><Input id="pg-title" placeholder="如 设备管理" /></Form.Item>
-          <Form.Item label="选择模型">
+        <Form form={form} layout="vertical" size="small" initialValues={{ paradigm: 'master-detail' }} style={{ marginTop: 16 }}>
+          <Form.Item name="name" label="页面名称(英文)" rules={[{ required: true, message: '请填写此项' }]}><Input id="pg-name" placeholder="如 equipment-list" /></Form.Item>
+          <Form.Item name="title" label="页面标题"><Input id="pg-title" placeholder="如 设备管理" /></Form.Item>
+          <Form.Item name="model_name" label="选择模型" rules={[{ required: true, message: '请填写此项' }]}>
             <Select id="pg-model" placeholder="选择模型" options={models.map(m => ({ label: `${m.label} (${m.name})`, value: m.name }))} />
           </Form.Item>
-          <Form.Item label="页面范式">
-            <Select id="pg-paradigm" options={PARADIGMS} defaultValue="master-detail" />
+          <Form.Item name="paradigm" label="页面范式">
+            <Select id="pg-paradigm" options={PARADIGMS} />
           </Form.Item>
         </Form>
       ),
       onOk: async () => {
-        const name = (document.getElementById('pg-name') as HTMLInputElement)?.value?.trim();
-        const title = (document.getElementById('pg-title') as HTMLInputElement)?.value?.trim();
-        const model_name = (document.getElementById('pg-model') as any)?.value;
-        const paradigm = (document.getElementById('pg-paradigm') as any)?.value || 'master-detail';
-        if (!name || !model_name) { message.warning('名称和模型必填'); return; }
+        const { name, title, model_name, paradigm } = await form.validateFields();
         try {
           await generatePage({ name, title: title || name, paradigm, model_name, route_path: `/dynamic/${name}`, is_published: true });
           message.success('页面已生成并发布');

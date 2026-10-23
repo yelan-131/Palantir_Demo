@@ -158,6 +158,7 @@ class GraphService:
                        OR toString(root.pg_id) = $object_id
                        OR root.sku = $object_id
                     OPTIONAL MATCH p = (root)-[*1..{max_hops}]-(related)
+                    WHERE ALL(rel IN relationships(p) WHERE type(rel) <> 'VERSION_OF')
                     WITH root, collect(DISTINCT related)[0..$limit] AS relatedNodes, collect(relationships(p)) AS relGroups
                     WITH root, [root] + relatedNodes AS nodes, reduce(allRels = [], rels IN relGroups | allRels + rels) AS flattenedRels
                     UNWIND CASE WHEN size(flattenedRels) = 0 THEN [null] ELSE flattenedRels END AS r

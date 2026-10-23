@@ -1,3 +1,4 @@
+import './designer-dialog.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApartmentOutlined,
@@ -1486,6 +1487,7 @@ export default function ProfessionalFlowDesigner({
           </label>
         </section>
         <Modal
+          className="form-designer-dialog"
           title="设置条件规则"
           open={conditionModalOpen}
           onCancel={() => setConditionModalOpen(false)}

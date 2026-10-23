@@ -142,8 +142,8 @@ def test_business_module_tenant_isolation_for_data_pipeline_and_dashboards():
 
         seeded = asyncio.run(seed_business_data(tenant_a["id"], tenant_b["id"]))
 
-        ds_a = _ok(client.post("/api/v1/data-sources", headers=_headers(token_a), json={"name": f"same-ds-{suffix}", "source_type": "api", "connection_config": "{}"}), "tenant a data source")
-        ds_b = _ok(client.post("/api/v1/data-sources", headers=_headers(token_b), json={"name": f"same-ds-{suffix}", "source_type": "api", "connection_config": "{}"}), "tenant b data source")
+        ds_a = _ok(client.post("/api/v1/data-sources", headers=_headers(token_a), json={"name": f"same-ds-{suffix}", "source_type": "api", "connection_config": '{"url":"https://example.com/business-test"}' }), "tenant a data source")
+        ds_b = _ok(client.post("/api/v1/data-sources", headers=_headers(token_b), json={"name": f"same-ds-{suffix}", "source_type": "api", "connection_config": '{"url":"https://example.com/business-test"}' }), "tenant b data source")
         assert ds_a["tenant_id"] == tenant_a["id"]
         assert ds_b["tenant_id"] == tenant_b["id"]
         assert client.get(f"/api/v1/data-sources/{ds_a['id']}", headers=_headers(token_b)).status_code == 404

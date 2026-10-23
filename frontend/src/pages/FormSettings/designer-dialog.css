@@ -1,0 +1,241 @@
+/* Shared chrome for configuration dialogs owned by the form designer.
+   Keep this scoped class on portaled dialogs instead of changing app overlays. */
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-content {
+  padding: 20px 24px;
+  border: 1px solid #e4e9ed;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 48px rgb(28 43 56 / 14%);
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-header {
+  margin: 0 0 16px;
+  padding: 0 32px 0 0;
+  border: 0;
+  background: transparent;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-title {
+  color: #344957;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-close {
+  top: 16px;
+  inset-inline-end: 16px;
+  color: #8b969f;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-body { color: #526572; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-footer > .ant-btn + .ant-btn { margin-inline-start: 0; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog :is(.ant-modal-footer, .ant-modal-confirm-btns) .ant-btn {
+  height: 32px;
+  padding-inline: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: none;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog :is(.ant-modal-footer, .ant-modal-confirm-btns) .ant-btn-default:not(.ant-btn-dangerous) {
+  border-color: transparent;
+  background: transparent;
+  color: #72808b;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog :is(.ant-modal-footer, .ant-modal-confirm-btns) .ant-btn-default:not(.ant-btn-dangerous):hover:not(:disabled) { background: #f3f6f8; color: #344957; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog :is(.ant-modal-footer, .ant-modal-confirm-btns) .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled) {
+  min-width: 88px;
+  background: #36566c;
+  border-color: #36566c;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog :is(.ant-modal-footer, .ant-modal-confirm-btns) .ant-btn-primary:not(.ant-btn-dangerous):hover:not(:disabled) { background: #29475c; border-color: #29475c; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-footer .ant-btn-text.ant-btn-dangerous:not(:disabled) { color: #8b969f; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-footer .ant-btn-text.ant-btn-dangerous:hover:not(:disabled) { color: #bc4a45; background: #fcf2f1; }
+.form-designer-dialog .encoding-rule-footer { width: 100%; }
+.form-designer-dialog .encoding-rule-cancel { color: #72808b; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.default-rule-modal .encoding-rule-basics { border-bottom: 0; padding-bottom: 0; }
+
+/* The rule editor keeps its independently scrolling body and fixed actions. */
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-content { height: auto; padding: 0; max-height: calc(100dvh - 48px); }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-header { padding: 20px 56px 0 24px; margin: 0 0 16px; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-body { padding: 0 24px; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-footer { margin: 0; padding: 16px 24px 20px; }
+.form-designer-dialog :is(.designer-rule-form, .designer-rule-window-layout, .designer-rule-group-editor) { min-height: 0; }
+.form-designer-dialog .designer-rule-group-list { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.form-designer-dialog .designer-rule-condition-group { padding: 12px; border-color: #e4e9ed; border-radius: 6px; background: #fff; box-shadow: none; }
+.form-designer-dialog :is(.designer-rule-empty-add, .designer-rule-add-or, .designer-rule-add-condition).ant-btn { color: #607583; font-weight: 400; }
+.form-designer-dialog .designer-rule-empty-add.ant-btn::after { display: none; }
+
+.calculation-editor { display: flex; flex-direction: column; gap: 12px; }
+.calculation-editor > section + section { border-top: 1px solid #edf0f3; padding-top: 12px; }
+.calculation-editor .encoding-editor-field { display: flex; flex-direction: column; gap: 8px; color: #7c8994; font-size: 12px; }
+.calculation-readonly-note { align-self: end; padding-bottom: 8px; color: #87949f; font-size: 12px; }
+.calculation-editor textarea { font-family: ui-monospace, monospace; font-size: 13px; }
+.calculation-insert-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-height: 100px; overflow-y: auto; margin-top: 8px; }
+.calculation-insert-row > span { margin-right: 8px; color: #87949f; font-size: 12px; }
+.calculation-insert-row .ant-btn { font-size: 12px; color: #526c7e; }
+.calculation-function-note { color: #87949f; font-size: 12px; line-height: 1.9; margin-top: 8px; }
+.calculation-options, .calculation-samples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.calculation-options > label, .calculation-samples > label { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 8px; color: #718394; font-size: 12px; }
+.calculation-samples .ant-input-number { width: 100%; }
+.calculation-result { display: flex; gap: 16px; align-items: baseline; padding-top: 12px; font-size: 12px; }
+.calculation-result > span { color: #87949f; }
+.calculation-result code { color: #36566c; font-size: 14px; overflow-wrap: anywhere; }
+.formula-builder { display: flex; flex-direction: column; gap: 8px; }
+.formula-builder > .ant-segmented { align-self: stretch; padding: 3px; background: #f3f6f8; }
+.formula-builder .ant-segmented-item { font-size: 12px; }
+.formula-term { display: grid; grid-template-columns: 96px minmax(0, 1fr) 28px; gap: 10px; align-items: center; padding-bottom: 6px; border-bottom: 1px solid #edf0f3; }
+.formula-term > .ant-btn { width: 28px; min-width: 28px; height: 28px; padding: 0; }
+.formula-start-label, .formula-branch > span, .formula-condition-row > span { color: #7c8994; font-size: 12px; }
+.formula-operand { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; min-width: 0; }
+.formula-operand .ant-input-number { width: 100%; }
+.formula-builder > .ant-btn { align-self: flex-start; color: #526c7e; font-size: 12px; padding-left: 0; }
+.formula-help { display: block; color: #87949f; font-size: 12px; line-height: 1.7; }
+.formula-readable { display: flex; gap: 12px; padding: 10px 0 0; color: #718394; font-size: 12px; line-height: 1.8; }
+.formula-readable > strong { color: #36566c; font-weight: 500; overflow-wrap: anywhere; }
+.formula-condition { display: flex; flex-direction: column; gap: 12px; }
+.formula-condition-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 112px minmax(0, 1fr); gap: 8px; align-items: center; }
+.formula-condition-row .ant-input-number { width: 100%; }
+.formula-branch { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; }
+.formula-insert-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.formula-insert-tools > .ant-select { flex: 1; min-width: 160px; }
+.formula-insert-tools > .ant-btn { font-size: 14px; color: #526c7e; }
+@media (max-width: 600px) {
+  .calculation-options, .calculation-samples { grid-template-columns: minmax(0, 1fr); }
+  .formula-term { grid-template-columns: 76px minmax(0, 1fr) 24px; gap: 6px; }
+  .formula-operand { grid-template-columns: 68px minmax(0, 1fr); gap: 6px; }
+  .formula-condition-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .formula-condition-row > :nth-child(3) { grid-column: 2; }
+  .formula-condition-row > :last-child { grid-column: 2; }
+  .formula-branch { grid-template-columns: 40px minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-content { padding: 16px; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-close { top: 10px; inset-inline-end: 10px; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog .ant-modal-footer { flex-wrap: wrap; margin-top: 12px; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-content { padding: 0; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-header { padding: 16px 48px 0 16px; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-body { padding: 0 16px; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-rule-modal .ant-modal-footer { margin: 0; padding: 12px 16px 16px; }
+}
+
+/* Trial workspace: fixed controls and actions around a scrolling device canvas. */
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-content {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  box-shadow: 0 28px 90px rgb(24 43 63 / 22%);
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-header {
+  margin: 0;
+  padding: 24px 64px 22px 28px;
+  border-bottom: 1px solid #e9edf2;
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-close { top: 24px; inset-inline-end: 24px; }
+.trial-title { display: flex; align-items: center; gap: 14px; }
+.trial-title-icon { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #dfe8f2; border-radius: 12px; background: #f0f5fb; color: #456b94; font-size: 21px; flex-shrink: 0; }
+.trial-title-line { display: flex; align-items: center; gap: 12px; font-size: 19px; color: #263c50; }
+.trial-title-line .ant-tag { margin: 0; padding: 0 8px; background: #f2f5f8; border-color: #e4eaf0; color: #708397; font-size: 11px; font-weight: 400; line-height: 22px; }
+.trial-title p { margin: 5px 0 0; color: #81909e; font-size: 12px; font-weight: 400; line-height: 1.6; }
+.trial-controls { padding: 18px 28px 0; background: #fff; }
+.designer-preview-modal .designer-preview-toolbar { justify-content: space-between; gap: 16px; margin: 0; }
+.trial-control-group { display: flex; align-items: center; gap: 14px; }
+.trial-control-label { display: inline-flex; align-items: center; gap: 7px; color: #788998; font-size: 12px; white-space: nowrap; }
+.designer-preview-modal .ant-segmented { padding: 4px; border: 1px solid #e9eef3; border-radius: 8px; background: #f4f6f9; }
+.designer-preview-modal .ant-segmented-item-label { min-height: 30px; line-height: 30px; padding: 0 14px; font-size: 12px; }
+.designer-preview-modal .ant-segmented-item-selected { color: #355a7b; box-shadow: 0 1px 4px #263c5014; }
+.trial-scenario { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 15px 0; margin-top: 16px; border-top: 1px solid #edf0f4; }
+.designer-preview-modal .designer-preview-node-select { width: 228px; min-width: 0; }
+.trial-scenario-note { flex: 1; min-width: 180px; font-size: 12px; color: #8b98a5; line-height: 1.6; }
+.trial-stage { padding: 18px 28px 28px; background: #f3f6fa; border-top: 1px solid #e7ecf2; }
+.trial-stage-label { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; color: #7b8d9e; font-size: 11px; }
+.trial-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #6c9c8c; }
+.designer-preview-modal .designer-preview-shell { padding: 0; border: 0; border-radius: 0; background: transparent; max-height: min(58dvh, 650px); overflow: auto; scrollbar-gutter: stable; align-items: flex-start; }
+.designer-preview-modal .designer-preview-surface { min-width: 0; min-height: 360px; border-color: #e1e7ee; border-radius: 12px; box-shadow: 0 4px 18px #283e5210; overflow: hidden; }
+.designer-preview-modal .designer-preview-head { padding: 24px 28px 20px; align-items: flex-start; }
+.designer-preview-modal .designer-preview-head strong { display: block; margin-top: 7px; font-size: 18px; font-weight: 600; color: #2d4357; line-height: 1.6; overflow-wrap: anywhere; }
+.trial-form-eyebrow { font-size: 11px; color: #8b9cad; letter-spacing: 1px; }
+.designer-preview-modal .designer-preview-head p { margin: 6px 0 0; font-size: 12px; color: #91a0ad; }
+.designer-preview-modal .designer-preview-head > .ant-tag { margin: 3px 0 0 12px; white-space: nowrap; border: 0; padding: 3px 10px; border-radius: 6px; color: #597c9f; background: #eff5fb; font-size: 11px; }
+.trial-form-body { padding: 24px 28px 28px; }
+.designer-preview-modal .ant-form-item { margin-bottom: 8px; }
+.designer-preview-modal .ant-form-item-label > label { color: #465b6e; font-size: 13px; }
+.designer-preview-modal .ant-form-item-extra { padding-top: 5px; color: #96a1ad; font-size: 11px; }
+.designer-preview-modal .ant-form > small[role="alert"] { display: block; margin-bottom: 16px; color: #bd4c4c; }
+.designer-preview-modal .designer-preview-table { margin: 0; }
+.designer-preview-mobile .runtime-layout-item { grid-column: auto / span 12; }
+.designer-preview-mobile .runtime-layout-columns { grid-template-columns: 1fr; }
+.designer-preview-mobile .runtime-label-left > .ant-form-item > .ant-form-item-row { flex-direction: column; }
+.designer-preview-mobile .runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { width: 100%; max-width: 100%; flex-basis: auto; margin: 0; padding-bottom: 8px; }
+.designer-preview-mobile .runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-control { width: 100%; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-footer { margin: 0; padding: 18px 28px; border-top: 1px solid #e5ebf1; }
+.trial-footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; }
+.trial-footer > span { display: flex; align-items: center; gap: 7px; color: #8b99a6; font-size: 12px; }
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .trial-footer .ant-btn { height: 36px; padding-inline: 16px; border-radius: 7px; }
+@media (max-width: 760px) {
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-header { padding: 20px 48px 18px 20px; }
+  .trial-controls { padding: 16px 20px 0; }
+  .trial-control-group { flex-wrap: wrap; gap: 8px; }
+  .trial-stage { padding: 16px; }
+  .designer-preview-modal .designer-preview-head, .trial-form-body { padding: 20px; }
+  .trial-title-line { font-size: 17px; }
+  .trial-footer { flex-wrap: wrap; }
+  .trial-footer .ant-space { margin-left: auto; }
+  body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-footer { padding: 14px 20px; }
+}
+body:has(.tech-white-shell) .ant-modal.form-designer-dialog.designer-preview-modal .ant-modal-body { overflow: hidden; }
+.designer-preview-modal .designer-preview-shell { max-height: min(58dvh, 650px, calc(100dvh - 420px)); }
+@media (max-width: 760px) {
+  .designer-preview-modal .designer-preview-shell { max-height: max(100px, calc(100dvh - 500px)); }
+}
+
+/* Form contents reuse the design canvas renderer and its presentation classes. */
+.designer-preview-modal .trial-canvas { border-radius: 7px; box-shadow: none; }
+.designer-preview-modal .trial-form-body { padding: 0; }
+.designer-preview-modal .trial-canvas .designer-field-input { pointer-events: auto; }
+.designer-preview-modal .trial-canvas .designer-field-control { cursor: default; }
+.designer-preview-modal .trial-canvas .designer-field-control > label.designer-field-label { padding: 0; }
+.designer-preview-modal .trial-canvas .ant-form-item { margin: 0; }
+.designer-preview-modal .trial-canvas .designer-field-control:hover { border-color: transparent; background: transparent; box-shadow: none; }
+.designer-preview-mobile .trial-canvas .create-form-grid > [class*="control-width-"] { grid-column: 1 / -1; }
+.designer-preview-mobile .trial-canvas .designer-container-columns { grid-template-columns: 1fr !important; }
+.designer-preview-mobile .trial-canvas .designer-field-control > label.designer-field-label.is-label-left { grid-template-columns: minmax(0, 1fr); padding-top: 0; }
+.designer-preview-mobile .trial-canvas .designer-field-label.is-label-left > .designer-control-help { grid-column: 1; }
+
+.designer-preview-modal .trial-controls { padding: 18px 28px; }
+.designer-preview-modal .trial-scenario { margin: 0; padding: 0; border: 0; gap: 24px; }
+.trial-context-field { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.designer-preview-modal .designer-preview-role-select { width: 190px; }
+.designer-preview-modal .trial-flow-link { margin-left: auto; padding: 0; height: auto; color: #66829c; font-size: 12px; }
+.trial-context-note { display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 4px; margin-top: 12px; color: #8b98a5; font-size: 11px; line-height: 1.7; }
+@media(max-width:760px) {
+  .designer-preview-modal .trial-controls { padding: 16px 20px; }
+  .designer-preview-modal .trial-scenario { gap: 12px 20px; }
+  .trial-context-field { flex: 1 1 260px; }
+  .trial-context-field .ant-select { flex: 1; }
+}
+
+/* Calculation properties use the same text-first rows as encoding segments. */
+.rule-inline-cell { display: flex; align-items: center; min-width: 0; height: 28px; }
+.rule-inline-cell > .encoding-cell-display { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; }
+.rule-inline-cell > :is(.ant-select, .ant-input-number, .ant-input) { width: 100%; min-width: 0; font-size: 12px; }
+.rule-inline-cell :is(.ant-select-selector, .ant-input-number-input, .ant-input) { height: 28px !important; }
+.rule-inline-cell .ant-select-selection-item, .rule-inline-cell .ant-select-selection-placeholder { line-height: 26px !important; }
+.rule-inline-placeholder { color: #9aa6b0; font-weight: 400; }
+.formula-mode-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 36px; border-bottom: 1px solid #edf0f3; font-size: 12px; color: #7c8994; }
+.formula-term { padding: 4px 0; min-height: 36px; }
+.formula-operand { grid-template-columns: 82px minmax(0, 1fr); }
+.formula-condition { gap: 0; }
+.formula-condition-row, .formula-branch { min-height: 36px; padding: 4px 0; border-bottom: 1px solid #edf0f3; }
+.calculation-options { gap: 4px 20px; }
+.calculation-target-name { padding: 0 6px; line-height: 28px; color: #40576a; font-size: 12px; }
+.calculation-editor .encoding-editor-field { gap: 2px; }
+.calculation-readonly-note { padding-bottom: 6px; }

@@ -49,8 +49,11 @@ async def metadata(db, form, record, user):
     permission = await evaluate_form_permission(user, form.id, 'edit', db, record_data=record.get('data'))
     allowed = bool(permission.get('allowed'))
     editable = owns and allowed and status in {'draft', 'rejected'}
+    from app.services.designer_permissions import role_configs
+    configs=await role_configs(db,user,form)
+    can_submit=not any((value.get('actions') or {}).get('submit') is False for value in configs)
     submissions = [item for item in history if item.get('action') == 'submit']
-    return {'status': status, 'can_edit': editable, 'can_submit': editable and await enabled(db, form),
+    return {'status': status, 'can_edit': editable, 'can_submit': editable and can_submit and await enabled(db, form),
         'workflow_id': submissions[-1].get('workflow_id') if submissions else None, 'history': history}
 
 
@@ -90,6 +93,9 @@ async def sync_form_application_instance(db, inst, user, action, comment):
     if not form or form.tenant_id != inst.tenant_id:
         return
     history = [parsed(row.new_values) for row in await events(db, form, record_id)]
+    from app.services.designer_permissions import role_configs
+    configs=await role_configs(db,user,form)
+    can_submit=not any((value.get('actions') or {}).get('submit') is False for value in configs)
     submissions = [item for item in history if item.get('action') == 'submit']
     if not submissions:
         return

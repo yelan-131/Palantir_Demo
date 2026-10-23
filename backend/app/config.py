@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.13"
+    APP_VERSION: str = "0.3.14"
     APP_MODE: str = "demo"
     DEBUG: bool = True
 
@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     AI_EMBEDDING_MODEL: str = "embedding-3"
     AI_VISION_MODEL: str = "glm-4v-plus"
     AI_TIMEOUT_SECONDS: int = 30
+    FORM_FILE_STORAGE_DIR: str = "/data/form_files"
     KNOWLEDGE_STORAGE_DIR: str = "storage/knowledge_assets"
 
     # Identity access center

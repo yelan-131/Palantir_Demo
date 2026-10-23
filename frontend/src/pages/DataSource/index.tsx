@@ -16,6 +16,7 @@ import {
   message,
   Popconfirm,
   Tabs,
+  Switch,
 } from 'antd';
 import {
   PlusOutlined,
@@ -32,6 +33,8 @@ import {
 import {
   listDataSources,
   createDataSource,
+  updateDataSource,
+  getDataSource,
   deleteDataSource,
   testConnection,
   triggerSync,
@@ -92,12 +95,14 @@ export default function DataSourcePage() {
   const [testingIds, setTestingIds] = useState<Set<number>>(new Set());
   const [syncingIds, setSyncingIds] = useState<Set<number>>(new Set());
   const [form] = Form.useForm();
+  const sourceType=Form.useWatch('type',form);
+  const [editingSourceId,setEditingSourceId]=useState<number|null>(null);
 
   const fetchDataSources = useCallback(async () => {
     setLoading(true);
     try {
       const res = await listDataSources();
-      setDataSources(Array.isArray(res.data) ? res.data : res.data?.data ?? res.data?.items ?? []);
+      setDataSources((Array.isArray(res.data)?res.data:res.data?.data??res.data?.items??[]).map((item:any)=>({...item,type:['api','rest_api'].includes(item.source_type||item.type)?'api':item.source_type||item.type,host:item.connection_address||item.host||'—'})));
     } catch {
       message.error('加载数据源列表失败');
     } finally {
@@ -111,13 +116,18 @@ export default function DataSourcePage() {
 
   const handleCreate = async (values: Record<string, unknown>) => {
     try {
-      await createDataSource(values);
-      message.success('数据源创建成功');
+      let headers={};
+      try{headers=JSON.parse(String(values.headers||'{}'));}catch{message.error('认证请求头必须为 JSON 对象');return;}
+      const config=values.type==='api'?{url:values.url,method:'GET',headers,allow_private_network:values.allow_private_network===true}:{host:values.host,port:values.port?Number(values.port):undefined,database:values.database,username:values.username,password:values.password};
+      const payload={name:values.name,source_type:values.type,connection_config:JSON.stringify(config)};
+      const response=editingSourceId?await updateDataSource(editingSourceId,payload):await createDataSource(payload);
+      if(response.data?.source==='fallback')throw new Error('未保存到数据库');
+      message.success(editingSourceId?'数据源已保存':'数据源创建成功');
       setModalVisible(false);
       form.resetFields();
       fetchDataSources();
-    } catch {
-      message.error('创建数据源失败');
+    } catch(error:any) {
+      message.error(error?.response?.data?.detail||error?.message||'保存数据源失败');
     }
   };
 
@@ -137,6 +147,7 @@ export default function DataSourcePage() {
       const res = await testConnection(id);
       const success = res.data?.success ?? res.data?.connected;
       if (success) {
+        void fetchDataSources();
         message.success('连接测试成功');
       } else {
         message.error(`连接失败: ${res.data?.error ?? '未知错误'}`);
@@ -267,6 +278,7 @@ export default function DataSourcePage() {
       width: 280,
       render: (_: unknown, record: DataSource) => (
         <Space size="small">
+          {record.type==='api'&&<Button type="link" size="small" onClick={async()=>{try{const response=await getDataSource(record.id);const config=JSON.parse(response.data.connection_config||'{}');setEditingSourceId(record.id);form.setFieldsValue({name:record.name,type:'api',url:config.url||config.endpoint||config.base_url,headers:JSON.stringify(config.headers||{},null,2),allow_private_network:config.allow_private_network===true});setModalVisible(true);}catch{message.error('数据源配置加载失败');}}}>编辑</Button>}
           <Button
             type="link"
             size="small"
@@ -281,6 +293,8 @@ export default function DataSourcePage() {
             size="small"
             icon={<SyncOutlined />}
             loading={syncingIds.has(record.id)}
+            disabled={record.type==='api'}
+            title={record.type==='api'?'只读 API 按需读取，无需同步':undefined}
             onClick={() => handleSync(record.id)}
           >
             同步
@@ -355,7 +369,7 @@ export default function DataSourcePage() {
             <Button icon={<ReloadOutlined />} onClick={fetchDataSources}>
               刷新
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => (setEditingSourceId(null),form.resetFields(),setModalVisible(true))}>
               新建数据源
             </Button>
           </Space>
@@ -363,6 +377,7 @@ export default function DataSourcePage() {
       >
         <Table
           rowKey="id"
+          scroll={{ x: 1100 }}
           columns={columns}
           dataSource={dataSources}
           loading={loading}
@@ -371,7 +386,7 @@ export default function DataSourcePage() {
       </Card>
 
       <Modal
-        title="新建数据源"
+        title={editingSourceId?'编辑数据源':'新建数据源'}
         open={modalVisible}
         onCancel={() => {
           setModalVisible(false);
@@ -393,6 +408,7 @@ export default function DataSourcePage() {
               ))}
             </Select>
           </Form.Item>
+          {sourceType==='api'?<><Form.Item name="url" label="API URL" rules={[{required:true,message:'请输入只读 GET 接口 URL'}]}><Input placeholder="https://example.com/api/options"/></Form.Item><Form.Item name="headers" label="认证请求头（JSON）"><Input.TextArea rows={3} placeholder={'{"Authorization":"Bearer …"}'}/></Form.Item><Form.Item name="allow_private_network" label="允许已登记的内网接口" valuePropName="checked"><Switch/></Form.Item><Typography.Text type="secondary">只读 GET；默认阻止内网。即使允许内网，也禁止本机、云元数据地址与重定向。认证信息保存在数据源配置中。</Typography.Text></>:<>
           <Row gutter={16}>
             <Col span={16}>
               <Form.Item name="host" label="主机地址" rules={[{ required: true, message: '请输入主机地址' }]}>
@@ -420,6 +436,7 @@ export default function DataSourcePage() {
               </Form.Item>
             </Col>
           </Row>
+          </>}
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="数据源用途说明" />
           </Form.Item>
@@ -460,7 +477,7 @@ export default function DataSourcePage() {
               key: 'json',
               label: 'JSON 视图',
               children: (
-                <pre style={{ maxHeight: 500, overflow: 'auto', background: '#f5f5f5', padding: 12, borderRadius: 6 }}>
+                <pre style={{ maxHeight: 500, overflow: 'auto', background: 'var(--mf-panel-soft)', padding: 12, borderRadius: 6 }}>
                   {JSON.stringify(previewDataState.rows, null, 2)}
                 </pre>
               ),

@@ -281,8 +281,8 @@ export const getOverview = () => api.get('/dashboard/overview');
 export const getOEE = (lineId?: number) => api.get('/dashboard/oee', { params: { line_id: lineId } });
 export const getProductionStats = (days?: number) => api.get('/dashboard/production', { params: { days } });
 export const getAlerts = (limit?: number) => api.get('/dashboard/alerts', { params: { limit } });
-export const getAppProgramData = (programId: string, limit?: number) =>
-  api.get(`/dashboard/programs/${programId}`, { params: { limit } });
+export const getAppProgramData = (programId: string, limit?: number, query?: { filters?: string; widget_filters?: string }) =>
+  api.get(`/dashboard/programs/${programId}`, { params: { limit, ...query } });
 
 // Data Sources
 export const listDataSources = (params?: Record<string, string>) => api.get('/data-sources', { params });
@@ -699,8 +699,9 @@ export const getFieldOptions = (
 
 export const evaluateFormRules = (formId: number, data: Record<string, unknown>, recordId?: number) =>
   api.post(`/forms/${formId}/rules/evaluate`, { data, record_id: recordId });
-export const getFormReferenceOptions = (formId: number, field: string, data: Record<string, unknown>) =>
-  api.post(`/forms/${formId}/fields/${field}/options`, { data });
+export interface OptionSearchRequest { query?: string; page?: number; page_size?: number; selected?: string | number }
+export const getFormReferenceOptions = (formId: number, field: string, data: Record<string, unknown>, search?: OptionSearchRequest) =>
+  api.post(`/forms/${formId}/fields/${field}/options`, { data, ...search });
 
 export const getChildren = (modelName: string, recordId: number, childTable: string) =>
   api.get(`/model-driven/data/${modelName}/${recordId}/children/${childTable}`);
@@ -1232,3 +1233,26 @@ export const deleteWorkflowBinding = (formId: number | string, bindingId: number
   api.delete(`/forms/${formId}/workflow-bindings/${bindingId}`);
 
 export default api;
+
+export const uploadFormFile = (formId: number | string, fieldName: string, file: File, recordId?: number) => {
+  const data = new FormData(); data.append('file', file);
+  return api.post(`/forms/${formId}/fields/${encodeURIComponent(fieldName)}/files`, data, { timeout: 120000, params: {record_id: recordId} });
+};
+export const downloadFormFile = (formId: number | string, fieldName: string, fileId: string, recordId?: number) =>
+  api.get(`/forms/${formId}/fields/${encodeURIComponent(fieldName)}/files/${encodeURIComponent(fileId)}`, { params: recordId ? { record_id: recordId } : undefined, responseType: 'blob' });
+export const previewDesignerRules = (formId: number | string, controls: unknown[], data: Record<string, unknown>, maskRecord = false, validateOnly = false) =>
+  api.post(`/forms/${formId}/rules/preview`, { controls, data, mask_record: maskRecord, validate_only: validateOnly });
+
+export const restorePlatformFormDraft=(id:number|string)=>api.post(`/forms/${id}/draft/restore`);
+
+export const exportPlatformDynamicRecords=(formId:number|string,params:Record<string,unknown>)=>api.get(`/forms/${formId}/records-export`,{params,responseType:'blob'});
+
+export const previewFormReferenceOptions=(formId:number,field:string,controls:unknown[],data:Record<string,unknown>,search?:OptionSearchRequest)=>api.post(`/forms/${formId}/fields/${field}/options/preview`,{controls,data,...search});
+export const previewOptionSearchSchema=(formId:number,field:string,controls:unknown[])=>api.post(`/forms/${formId}/fields/${field}/options/schema/preview`,{controls});
+
+export const getFormOptionSources=()=>api.get('/forms/reference-sources');
+export const previewFormImport=(formId:number,file:File)=>{const data=new FormData();data.append('file',file);return api.post(`/forms/${formId}/imports/preview`,data);};
+export const executeFormImport=(formId:number,file:File,mapping:Record<string,string>,requestKey:string,schemaVersion:number)=>{const data=new FormData();data.append('file',file);data.append('mapping',JSON.stringify(mapping));data.append('request_key',requestKey);data.append('schema_version',String(schemaVersion));return api.post(`/forms/${formId}/imports`,data,{timeout:120000});};
+
+export const getEntityTimeline = (id: number, timestamp: string) => api.get(`/ontology/timeline/${id}`, { params: { timestamp } });
+export const getModuleReadiness = () => api.get('/productization/readiness');

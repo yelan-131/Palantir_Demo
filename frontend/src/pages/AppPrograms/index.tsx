@@ -1,3 +1,6 @@
+import ConfiguredAnalysisDashboard from './AnalyticsWorkspace';
+import type { RuntimeAnalyticsDesign, RuntimeAnalyticsData } from './analyticsTypes';
+import DynamicPage from '../DynamicPage';
 import React from 'react';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import dayjs from 'dayjs';
@@ -37,7 +40,7 @@ type ProgramRow = Record<string, unknown>;
 interface RuntimeFormLayoutField {
   fieldName: string;
   label?: string;
-  width?: 'quarter' | 'half' | 'threeQuarter' | 'full';
+  width?: 'quarter' | 'third' | 'half' | 'twoThird' | 'threeQuarter' | 'full';
   colSpan?: number;
   controlType?: string;
   required?: boolean;
@@ -74,10 +77,9 @@ interface ProgramDataPayload {
   rows?: ProgramRow[];
   viewConfig?: ViewConfig;
   analyticsDesign?: RuntimeAnalyticsDesign | null;
-  analyticsData?: {
-    metricValues?: Record<string, string | number>;
-    rows?: ProgramRow[];
-  };
+  analyticsData?: RuntimeAnalyticsData;
+  analyticsPublishedVersion?: number | null;
+  analyticsPublishedAt?: string | null;
   form?: {
     id: number;
     code: string;
@@ -85,31 +87,6 @@ interface ProgramDataPayload {
     kind?: string;
   } | null;
   source?: string;
-}
-
-type RuntimeAnalyticsWidgetType = 'metric-card' | 'line' | 'bar' | 'pie' | 'rank-table' | 'detail-table';
-
-interface RuntimeAnalyticsMetric {
-  id: string;
-  name: string;
-  format?: 'number' | 'percent' | 'currency' | string;
-}
-
-interface RuntimeAnalyticsWidget {
-  id: string;
-  title: string;
-  type: RuntimeAnalyticsWidgetType | string;
-  datasetId?: string;
-  metricIds?: string[];
-  dimension?: string;
-  width?: 'quarter' | 'half' | 'full' | string;
-  interaction?: string;
-}
-
-interface RuntimeAnalyticsDesign {
-  metrics?: RuntimeAnalyticsMetric[];
-  widgets?: RuntimeAnalyticsWidget[];
-  style?: Record<string, unknown>;
 }
 
 const programDefinitions: Record<string, ProgramDefinition> = {
@@ -216,7 +193,7 @@ const configuredFormProgramIds = new Set([
 ]);
 
 function hasRuntimeAnalyticsDesign(payload: ProgramDataPayload | null | undefined): payload is ProgramDataPayload & { analyticsDesign: RuntimeAnalyticsDesign } {
-  return Boolean(payload?.analyticsDesign?.widgets?.length);
+  return Boolean(payload?.analyticsDesign && typeof payload.analyticsDesign === 'object');
 }
 
 function hasConfiguredFormRuntime(payload: ProgramDataPayload | null | undefined): payload is ProgramDataPayload & { form: NonNullable<ProgramDataPayload['form']> } {
@@ -235,7 +212,7 @@ function buildConfiguredProgram(programId: string, payload: ProgramDataPayload, 
   return {
     id: form?.code || programId,
     title: form?.name || fallback?.title || programId,
-    subtitle: fallback?.subtitle || '后台配置驱动的业务交互表',
+    subtitle: fallback?.subtitle || (form?.kind === 'analysis' ? '按业务数据与当前权限展示' : '后台配置驱动的业务交互表'),
     kind: form?.kind === 'analysis' ? 'analysis' : 'business',
     owner: fallback?.owner || '业务配置',
     icon: fallback?.icon || <DatabaseOutlined />,
@@ -302,6 +279,16 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
     );
   }
 
+  // Configured business forms share the same published-schema renderer across
+  // workbench, menu, and direct links; never fall back to the old input widgets.
+  if(hasConfiguredFormRuntime(programData)&&program?.kind==='business'&&!hasRuntimeAnalyticsDesign(programData)){
+    return <DynamicPage formSlug={String(programData.form.id||programId)}/>;
+  }
+
+  if (hasConfiguredFormRuntime(programData) && program?.kind === 'analysis') {
+    return <ConfiguredAnalysisDashboard key={program.id} program={program} payload={{analyticsDesign: programData.analyticsDesign || {}, analyticsData: programData.analyticsData, analyticsPublishedVersion: programData.analyticsPublishedVersion, analyticsPublishedAt: programData.analyticsPublishedAt}} />;
+  }
+
   if (programId === 'production-overview') {
     if (programData === undefined || programLoading) {
       return (
@@ -313,6 +300,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
     if (hasRuntimeAnalyticsDesign(programData) && program) {
       return (
         <ConfiguredAnalysisDashboard
+          key={program.id}
           program={program}
           payload={programData}
           onSettings={() => navigate('/form-settings/production-overview?tab=dashboard')}
@@ -354,7 +342,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
   return (
     <div className={`app-program-page app-program-${program.kind}`}>
       {hasRuntimeAnalyticsDesign(programData) ? (
-        <ConfiguredAnalysisDashboard program={program} payload={programData} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
+        <ConfiguredAnalysisDashboard key={program.id} program={program} payload={programData} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
       ) : hasConfiguredFormRuntime(programData) || program.kind === 'business' ? (
         <BusinessProgram program={program} onSettings={openSettings} onReload={loadProgramData} loading={programLoading} />
       ) : (
@@ -385,130 +373,6 @@ function ProgramHeader({
         <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
         <Button icon={<SettingOutlined />} onClick={onSettings}>表单配置</Button>
       </Space>
-    </div>
-  );
-}
-
-function formatRuntimeMetricValue(value: string | number | undefined, metric?: RuntimeAnalyticsMetric) {
-  if (value === undefined || value === null || value === '') return metric?.format === 'percent' ? '0%' : '0';
-  if (metric?.format === 'percent') return `${value}%`;
-  if (metric?.format === 'currency') return `¥${Number(value || 0).toLocaleString('zh-CN')}`;
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : value;
-}
-
-function pickRuntimeRows(payload: ProgramDataPayload): ProgramRow[] {
-  const runtimeRows = payload.analyticsData?.rows;
-  if (Array.isArray(runtimeRows) && runtimeRows.length) return runtimeRows;
-  return Array.isArray(payload.rows) ? payload.rows : [];
-}
-
-function readRuntimeNumber(row: ProgramRow, keys: string[], fallback: number) {
-  for (const key of keys) {
-    const value = row[key];
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) return numeric;
-  }
-  return fallback;
-}
-
-function ConfiguredAnalysisDashboard({
-  program,
-  payload,
-  onSettings,
-  onReload,
-  loading,
-}: {
-  program: ProgramDefinition;
-  payload: ProgramDataPayload & { analyticsDesign: RuntimeAnalyticsDesign };
-  onSettings: () => void;
-  onReload: () => void;
-  loading?: boolean;
-}) {
-  const design = payload.analyticsDesign;
-  const widgets = design.widgets || [];
-  const metrics = design.metrics || [];
-  const metricMap = new Map(metrics.map((metric) => [metric.id, metric]));
-  const metricValues = payload.analyticsData?.metricValues || {};
-  const rows = pickRuntimeRows(payload);
-  const chartRows = rows.length ? rows.slice(-8) : Array.from({ length: 4 }).map((_, index) => ({ key: `sample-${index}`, actual: 24 + index * 12 }));
-
-  const renderMetricCards = (widget: RuntimeAnalyticsWidget) => {
-    const metricIds = widget.metricIds?.length ? widget.metricIds : metrics.slice(0, 3).map((metric) => metric.id);
-    return (
-      <div className="runtime-analytics-metrics">
-        {metricIds.map((metricId) => {
-          const metric = metricMap.get(metricId);
-          return (
-            <div key={metricId}>
-              <span>{metric?.name || metricId}</span>
-              <strong>{formatRuntimeMetricValue(metricValues[metricId], metric)}</strong>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const renderChart = (widget: RuntimeAnalyticsWidget) => {
-    const values = chartRows.map((row, index) => readRuntimeNumber(row, ['actual', 'planned', 'yieldRate', 'value'], 24 + index * 16));
-    const max = Math.max(...values, 1);
-    return (
-      <div className={`runtime-analytics-chart runtime-analytics-chart-${widget.type}`}>
-        {values.map((value, index) => (
-          <span key={`${widget.id}-${index}`} style={{ height: `${Math.max(18, Math.round((value / max) * 100))}%` }} />
-        ))}
-      </div>
-    );
-  };
-
-  const renderTable = (widget: RuntimeAnalyticsWidget) => {
-    const sample = rows[0] || {};
-    const keys = Object.keys(sample).filter((key) => !key.startsWith('_') && key !== 'key').slice(0, 4);
-    const dataKeys = keys.length ? keys : ['date', 'planned', 'actual', 'status'];
-    const columns = dataKeys.map((key) => ({
-      title: key === widget.dimension ? '对象' : fieldLabelMap[key] || key,
-      dataIndex: key,
-      key,
-      ellipsis: true,
-      render: (value: unknown) => formatDetailValue(value),
-    }));
-    return (
-      <Table
-        columns={columns}
-        dataSource={rows.slice(0, widget.type === 'rank-table' ? 6 : 8)}
-        pagination={false}
-        rowKey={(row, index) => String(row.key || row.date || row.id || `row-${index}`)}
-        size="small"
-      />
-    );
-  };
-
-  const renderWidgetBody = (widget: RuntimeAnalyticsWidget) => {
-    if (widget.type === 'metric-card') return renderMetricCards(widget);
-    if (widget.type === 'rank-table' || widget.type === 'detail-table') return renderTable(widget);
-    if (widget.type === 'pie') {
-      const percentValue = Number(metricValues[widget.metricIds?.[0] || ''] || 68);
-      return <Progress type="circle" percent={Math.max(0, Math.min(100, percentValue))} size={142} />;
-    }
-    return renderChart(widget);
-  };
-
-  return (
-    <div className="app-program-page app-program-analysis runtime-analytics-page">
-      <ProgramHeader program={program} onSettings={onSettings} onReload={onReload} loading={loading} />
-      <div className="runtime-analytics-canvas">
-        {widgets.map((widget) => (
-          <Card
-            className={`runtime-analytics-widget runtime-analytics-widget-${widget.width || 'half'}`}
-            key={widget.id}
-            size="small"
-            title={widget.title}
-            extra={<Tag>{widget.type}</Tag>}
-          >
-            {renderWidgetBody(widget)}
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }
@@ -954,12 +818,14 @@ function mergeCreateFieldsWithLayout(fields: BusinessCreateField[], layoutFields
 
 function getCreateFieldColSpan(field: BusinessCreateField) {
   const colSpan = Number(field.ui_config?.colSpan || 0);
-  if (colSpan >= 1.5 && colSpan < 2) return 18;
+  if (colSpan > 0 && colSpan < 2) return Math.max(1, Math.round(colSpan * 12));
   if (colSpan >= 2) return 24;
   if (colSpan === 1) return 12;
   if (colSpan > 0 && colSpan < 1) return 6;
   const width = String(field.ui_config?.width || '').toLowerCase();
   if (width === 'quarter') return 6;
+  if (width === 'third') return 8;
+  if (width === 'twothird') return 16;
   if (width === 'threequarter' || width === 'three-quarter') return 18;
   if (width === 'half') return 12;
   if (width === 'full') return 24;

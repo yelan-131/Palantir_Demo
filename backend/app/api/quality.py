@@ -737,19 +737,23 @@ class QualityEventAction(BaseModel):
 
 @router.get("/events")
 async def list_quality_events(user: dict = Depends(get_current_user)):
+    return await _database_quality_events(user)
+
+
+async def _database_quality_events(user: dict, defect_id: int | None = None):
     """List quality risk events derived from tenant database records."""
     async def _query(db):
         from app.models.relational import CAPA, Defect, Inspection
         from sqlalchemy import func, select
 
         tenant_id = current_tenant_id(user)
-        result = await db.execute(
-            select(Defect, Inspection)
+        query = (select(Defect, Inspection)
             .join(Inspection, Inspection.id == Defect.inspection_id)
             .where(Defect.tenant_id == tenant_id, Inspection.tenant_id == tenant_id)
-            .order_by(Defect.created_at.desc(), Defect.id.desc())
-            .limit(20)
-        )
+            .order_by(Defect.created_at.desc(), Defect.id.desc()))
+        if defect_id is not None:
+            query = query.where(Defect.id == defect_id)
+        result = await db.execute(query.limit(20))
         rows = result.all()
 
         defect_ids = [defect.id for defect, _inspection in rows]
@@ -789,12 +793,14 @@ async def list_quality_events(user: dict = Depends(get_current_user)):
                 "risk_score": risk_scores.get(defect.severity, 50),
                 "affected": {
                     "inspection_id": inspection.id,
+                    "defect_id": defect.id,
                     "target_id": inspection.target_id,
                     "capa_count": len(capas),
                 },
                 "recommended_actions": actions,
             })
 
+        events.sort(key=lambda event: (event["status"] == "closed", -event["risk_score"]))
         open_count = sum(1 for event in events if event["status"] != "closed")
         critical_count = sum(1 for event in events if event["severity"] == "critical")
         avg_risk = round(sum(event["risk_score"] for event in events) / len(events), 1) if events else 0
@@ -818,12 +824,22 @@ async def list_quality_events(user: dict = Depends(get_current_user)):
     }
 
 
+async def _resolve_quality_event(event_id: str, user: dict) -> dict:
+    if event_id.startswith("QD-") and event_id[3:].isdigit():
+        result = await _database_quality_events(user, int(event_id[3:]))
+        if result["data"]:
+            return result["data"][0]
+    elif not event_id.startswith("QD-"):
+        event = next((e for e in QUALITY_EVENT_DEMO["events"] if e["id"] == event_id), None)
+        if event:
+            return event
+    raise HTTPException(404, "Quality event not found")
+
+
 @router.get("/events/{event_id}/impact")
-async def get_quality_event_impact(event_id: str):
+async def get_quality_event_impact(event_id: str, user: dict = Depends(get_current_user)):
     """Return event-centered object graph used by the quality closure UI."""
-    event = next((e for e in QUALITY_EVENT_DEMO["events"] if e["id"] == event_id), None)
-    if not event:
-        raise HTTPException(404, "Quality event not found")
+    event = await _resolve_quality_event(event_id, user)
     try:
         from app.api.graph import (
             normalize_quality_event_graph_id,
@@ -841,12 +857,14 @@ async def get_quality_event_impact(event_id: str):
             timeout=5,
         )
         if graph_result:
-            return {"data": quality_graph_payload_from_result(event_id, graph_result)}
+            return {"data": {**quality_graph_payload_from_result(event_id, graph_result), "event": event}}
     except asyncio.TimeoutError:
         pass
     except Exception:
         pass
 
+    if event_id.startswith("QD-"):
+        raise HTTPException(404, "No impact graph has been linked to this quality event")
     return {
         "data": {
             "event": event,
@@ -864,11 +882,14 @@ async def get_quality_event_impact(event_id: str):
 
 
 @router.post("/events/{event_id}/ai-suggestion")
-async def get_quality_event_ai_suggestion(event_id: str):
+async def get_quality_event_ai_suggestion(event_id: str, user: dict = Depends(get_current_user)):
     """Draft AIP-style recommendation without executing any business action."""
-    event = next((e for e in QUALITY_EVENT_DEMO["events"] if e["id"] == event_id), None)
-    if not event:
-        raise HTTPException(404, "Quality event not found")
+    event = await _resolve_quality_event(event_id, user)
+    if event_id.startswith("QD-"):
+        return {"data": {"event_id": event_id, "mode": "draft_only",
+            "summary": f"{event['title']}：请结合检验、工单和图谱证据确认影响范围。",
+            "evidence": [event["description"], f"来源：{event['source']}", f"风险评分：{event['risk_score']}"],
+            "recommended_actions": [{"action": action, "priority": "P1", "owner": "质量工程师", "reason": "基于当前事件记录生成的处置建议，尚未执行。"} for action in event["recommended_actions"]]}}
     return {
         "data": {
             "event_id": event_id,
@@ -890,15 +911,17 @@ async def get_quality_event_ai_suggestion(event_id: str):
 
 
 @router.post("/events/{event_id}/actions")
-async def execute_quality_event_action(event_id: str, body: QualityEventAction):
+async def execute_quality_event_action(event_id: str, body: QualityEventAction, user: dict = Depends(get_current_user)):
     """Execute demo action for quality event closure.
 
     High-risk actions are represented as drafts/tasks; this endpoint does not
     mutate production data in fallback mode.
     """
-    event = next((e for e in QUALITY_EVENT_DEMO["events"] if e["id"] == event_id), None)
-    if not event:
-        raise HTTPException(404, "Quality event not found")
+    event = await _resolve_quality_event(event_id, user)
+
+    if event_id.startswith("QD-"):
+        return {"data": {"event_id": event_id, "action": body.action, "status": "preview_only",
+            "message": "此处为处置建议预览，未执行冻结、派单或通知。请在对应业务页面提交。"}}
 
     action_map = {
         "generate_capa": {"status": "draft_created", "target": "CAPA-072", "message": "CAPA 草稿已生成，等待质量主管审批。"},

@@ -61,6 +61,9 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
     validate_business_keys(body.data)
     from app.services.form_application_lifecycle import enabled, audit as lifecycle_audit, decorate
     managed_draft = await enabled(db, form)
+    if managed_draft or draft:
+        from app.services.designer_permissions import require_action
+        await require_action(db,user,form,'saveDraft')
     if managed_draft and body.status not in {None, 'active', 'draft'}:
         raise HTTPException(409, '新申请只能保存为草稿，请通过提交操作发起审批')
     record_status = 'draft' if managed_draft or draft else body.status
@@ -83,6 +86,8 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
     record_data = await _apply_record_encoding_rules(db, tenant_id, form, fields, input_data)
     generated_fields = rule_result['derived'] | {key for key, value in record_data.items() if input_data.get(key) != value}
     _validate_record_data(rule_result['fields'], record_data, partial=managed_draft or draft)
+    from app.services.field_uniqueness import enforce as enforce_uniqueness
+    await enforce_uniqueness(db,form,fields,record_data)
     await require_record_permission(db, user, form, "create", {"data": record_data, "created_by": current_user_id(user)})
     if _uses_physical_form_table(form):
         payload = _physical_write_payload(fields, record_data, editable_fields | generated_fields)
@@ -187,11 +192,11 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     from app.services.form_application_lifecycle import locked_record, guard_edit, decorate, metadata, audit as lifecycle_audit
     locked = await read_raw(db, form, record_id, lock=True)
     await require_record_permission(db, user, form, "edit", locked)
-    expected = getattr(body, 'expected_values', None)
-    if expected is not None and any(locked['data'].get(key) != value for key, value in expected.items()):
-        raise HTTPException(409, '记录已被其他人修改，请刷新后确认最新内容再保存')
     await guard_edit(db, form, locked, user, body.status)
     tracked = await metadata(db, form, locked, user)
+    if tracked:
+        from app.services.designer_permissions import require_action
+        await require_action(db,user,form,'saveDraft')
     await _protect_pending_form_record(db, tenant_id, form_id, record_id)
     _validate_record_status(body.status)
     validate_business_keys(body.data or {})
@@ -207,10 +212,20 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     if denied:
         raise HTTPException(403, f"Field permission denied: {', '.join(sorted(denied))}")
     from app.services.form_rules import evaluate
+    from app.services.field_policies import protect_update
+    await protect_update(db,user,fields,body.data or {},locked.get('data') or {})
+    expected=getattr(body,'expected_values',None)
+    if expected is not None:
+        from app.services.field_policies import presentation
+        _,policies=await presentation(db,user,fields,locked.get('data') or {})
+        if any(policies.get(key,{}).get('masked') for key in expected): raise HTTPException(403,'不能比较脱敏字段的原值')
+        if any(locked['data'].get(key)!=value for key,value in expected.items()): raise HTTPException(409,'记录已被其他人修改，请刷新后确认最新内容再保存')
     rule_result = await evaluate(db, user, fields, body.data or {}, existing=locked.get('data') or {},
                                  enforce=True, partial=bool(tracked and tracked['status'] in {'draft', 'rejected'}))
     rule_patch = {key: value for key, value in rule_result['data'].items()
                   if key in (body.data or {}) or value != (locked.get('data') or {}).get(key)}
+    from app.services.field_uniqueness import enforce as enforce_uniqueness
+    await enforce_uniqueness(db,form,fields,rule_result['data'],exclude_record_id=record_id)
     body = body.copy(update={'data': rule_patch})
     if _uses_physical_form_table(form):
         fields = await _runtime_form_fields(db, tenant_id, form_id)
@@ -384,6 +399,8 @@ async def record_allowed(db, user, form, action, record, *, cache=None):
         record_data=policy_data(record), cache=cache)
     if not decision["allowed"] or user.get("is_admin"):
         return bool(decision["allowed"])
+    from app.services.designer_permissions import row_allowed
+    if not await row_allowed(db,user,form,record,cache=cache):return False
     grants = [item for item in decision.get("matched", []) if item.get("effect") == "allow"]
     from app.core.permissions import get_user_org_ids
     for grant in grants:
@@ -416,8 +433,10 @@ async def project_record(db, user, form, record, fields=None, *, cache=None):
     visible = await allowed_form_fields(user, form.id, "view", fields, db, record_data=policy_data(record), cache=cache)
     from app.services.form_rules import states
     state = states([field for field in fields if not field.archived], record.get('data') or {})
-    return {**record, "data": {key: value for key, value in (record.get("data") or {}).items() if key in visible},
-            'field_states': {key: value for key, value in state.items() if key in visible}}
+    from app.services.field_policies import presentation
+    safe,policies=await presentation(db,user,fields,record.get('data') or {},cache=cache)
+    return {**record, "data": {key: value for key, value in safe.items() if key in visible},
+            'field_states': {key: {**value,**policies.get(key,{})} for key, value in state.items() if key in visible}}
 
 
 async def read_raw(db, form, record_id, *, lock=False, include_deleted=False):
@@ -481,12 +500,15 @@ async def iter_raw(db, form, *, include_deleted=False):
         cursor = batch[-1]["id"]
 
 
-async def authorized_records(db, user, form, *, include_deleted=False, decorate=True):
+async def authorized_records(db, user, form, *, include_deleted=False, decorate=True, statistics=False):
     if form.tenant_id != current_tenant_id(user):
         raise HTTPException(404, "Form not found")
     decision = await evaluate_form_permission(user, form.id, "view", db)
     if not decision["allowed"]:
         raise HTTPException(403, "Form permission denied")
+    if statistics:
+        from app.services.designer_permissions import allow_statistics
+        await allow_statistics(db,user,form)
     fields = await runtime_fields(db, form)
     cache = {}
     result = []
@@ -509,7 +531,9 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
     if cursor_after_id is not None and cursor_before_id is not None:
         raise HTTPException(400, "Use only one cursor direction")
     form = await resolve_form(db, user, form_id=form_id)
-    if user.get("is_admin") and not (_uses_physical_form_table(form) and (cursor_after_id is not None or cursor_before_id is not None)):
+    from app.services.field_policies import has_presentation_rules
+    has_policies=has_presentation_rules(await runtime_fields(db,form))
+    if user.get("is_admin") and not has_policies and not (_uses_physical_form_table(form) and (cursor_after_id is not None or cursor_before_id is not None)):
         return await _list_admin_records(form_id, db, user, include_deleted=include_deleted, search=search,
             filters_json=filters_json, sort_field=sort_field, sort_order=sort_order,
             cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id,
@@ -537,7 +561,7 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
     matches.sort(key=lambda row: row["id"], reverse=True)
     if sort_field:
         field = next(field for field in fields if field.field_name == sort_field)
-        numeric = str(field.field_type).lower() in {"number", "integer", "int", "decimal", "float"}
+        numeric = str(field.field_type).lower() in {"number", "integer", "int", "decimal", "float"} and not any((row.get('field_states') or {}).get(sort_field,{}).get('masked') for row in matches)
         def sort_value(row):
             value = row["data"].get(sort_field)
             return (value is None, float(value or 0) if numeric else str(value or ""))
@@ -603,6 +627,10 @@ async def write_fields(db, form, record, changes, *, user, system=False):
     from app.api.form_engine import _assert_unique_code_values
     await _assert_unique_code_values(db, form.tenant_id, form, fields, changes, exclude_record_id=record["id"])
     merged = {**record["data"], **changes}
+    from app.services.field_policies import protect_update
+    from app.services.field_uniqueness import enforce as enforce_uniqueness
+    if not system: await protect_update(db,user,fields,changes,record['data'])
+    await enforce_uniqueness(db,form,fields,merged,exclude_record_id=record['id'])
     if not system:
         await require_record_permission(db, user, form, "edit", record)
         await require_record_permission(db, user, form, "edit", {**record, "data": merged})

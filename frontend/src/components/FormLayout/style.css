@@ -1,0 +1,59 @@
+.runtime-layout-grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:12px; min-width:0; }
+.runtime-layout-item { grid-column:auto / span 12; min-width:0; }
+.runtime-layout-width-half { grid-column:auto / span 6; }
+.runtime-layout-width-third { grid-column:auto / span 4; }
+.runtime-layout-width-twoThird { grid-column:auto / span 8; }
+.runtime-layout-width-quarter { grid-column:auto / span 3; }
+.runtime-layout-width-threeQuarter { grid-column:auto / span 9; }
+/* The same explicit appearance overrides are used by the editor and runtime. */
+.form-control-presentation.has-borderRadius :is(.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-input-number-affix-wrapper, .ant-select-selector, .ant-picker) { border-radius:var(--field-borderRadius) !important; }
+.form-control-presentation.has-fontSize :is(input.ant-input, textarea.ant-input, .ant-input-number-input, .ant-select-selection-item, .ant-select-selection-placeholder, .ant-picker-input > input) { font-size:var(--field-fontSize) !important; }
+.form-control-presentation.has-labelFontSize :is(.designer-field-title, .ant-form-item-label > label) { font-size:var(--field-labelFontSize) !important; }
+.form-control-presentation.has-controlHeight :is(input.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-input-number-affix-wrapper, .ant-select-single, .ant-select-single .ant-select-selector, .ant-picker) { height:var(--field-controlHeight) !important; min-height:var(--field-controlHeight) !important; }
+.form-control-presentation.has-controlHeight :is(.ant-input-number-input, .ant-select-single .ant-select-selection-item, .ant-select-single .ant-select-selection-placeholder) { height:calc(var(--field-controlHeight) - 2px) !important; line-height:calc(var(--field-controlHeight) - 2px) !important; }
+.form-control-presentation.has-controlHeight textarea.ant-input { min-height:var(--field-controlHeight) !important; }
+.form-control-presentation.has-controlHeight .ant-input-affix-wrapper > input.ant-input { height:100% !important; min-height:0 !important; }
+.form-control-presentation.has-borderRadius .ant-input-affix-wrapper > input.ant-input { border-radius:0 !important; }
+.runtime-layout-item.is-start-new-row { grid-column:1 / span var(--layout-span,12); }
+.runtime-layout-group { border:1px solid var(--mf-border); border-radius:8px; padding:12px; min-width:0; }
+.runtime-layout-group > h4 { margin:0 0 12px; font-size:13px; }
+.runtime-layout-columns { display:grid; grid-template-columns:var(--layout-ratios); min-width:0; }
+.runtime-layout-columns > div { min-width:0; }
+.runtime-layout-divider { margin:4px 0; border-bottom:1px solid var(--mf-border); padding-bottom:8px; }
+.runtime-layout-tabs .ant-tabs-content-holder { min-width:0; }
+.runtime-layout-field > .ant-form-item > .ant-form-item-row { min-width:0; }
+.runtime-layout-field > .ant-form-item > .ant-form-item-row > .ant-form-item-label { min-width:0; }
+.runtime-layout-field > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.runtime-layout-field.runtime-label-align-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { text-align:left; }
+.runtime-layout-field.runtime-label-align-right > .ant-form-item > .ant-form-item-row > .ant-form-item-label { text-align:right; }
+.runtime-layout-field.runtime-label-top > .ant-form-item > .ant-form-item-row { flex-direction:column; }
+.runtime-layout-field.runtime-label-top > .ant-form-item > .ant-form-item-row > .ant-form-item-label { flex:0 0 auto; width:100%; max-width:100%; padding:0 0 8px; }
+.runtime-layout-field.runtime-label-top > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { height:auto; }
+.runtime-layout-field.runtime-label-top > .ant-form-item > .ant-form-item-row > .ant-form-item-control { flex:1 1 auto; width:100%; max-width:100%; min-width:0; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row { flex-direction:row; flex-wrap:nowrap; align-items:flex-start; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { flex:0 0 min(var(--runtime-label-width,96px),45%); width:min(var(--runtime-label-width,96px),45%); max-width:45%; padding:0; margin-right:12px; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { min-height:32px; height:auto; line-height:1.5; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-control { flex:1 1 0; width:auto; max-width:100%; min-width:0; }
+
+@media(max-width:700px) {
+  .runtime-layout-columns { grid-template-columns:1fr; }
+  .runtime-layout-item { grid-column:auto / span 12; }
+  .runtime-layout-item.is-start-new-row { grid-column:1 / span 12; }
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row { flex-direction:column; }
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { flex:0 0 auto; width:100%; max-width:100%; padding:0 0 8px; margin-right:0; }
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { min-height:0; }
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-control { flex:1 1 auto; width:100%; }
+}
+
+.form-control-presentation.has-controlWidth .designer-field-input,
+.form-control-presentation.has-controlWidth > .ant-form-item > .ant-form-item-row > .ant-form-item-control { width: min(100%, var(--field-controlWidth)); max-width: min(100%, var(--field-controlWidth)); }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row { align-items: flex-start; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { flex-basis: min(var(--runtime-label-width,96px),34%); width:min(var(--runtime-label-width,96px),34%); max-width:34%; margin-right:10px; }
+.runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { display:inline-flex; align-items:center; min-height:var(--field-controlHeight,32px); padding:0; }
+.form-control-presentation.has-controlWidth.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-control { flex:0 1 var(--field-controlWidth); }
+@media(max-width:700px) {
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label { flex-basis:auto; width:100%; max-width:100%; margin-right:0; }
+  .runtime-layout-field.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-label > label { min-height:0; }
+  .form-control-presentation.has-controlWidth.runtime-label-left > .ant-form-item > .ant-form-item-row > .ant-form-item-control { flex:1 1 auto; }
+}
+@media(min-width:701px) { .runtime-layout-grid:has(> .runtime-label-top) > .runtime-label-left { padding-top: 28px; } }

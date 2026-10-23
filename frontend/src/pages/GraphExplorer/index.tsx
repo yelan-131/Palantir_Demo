@@ -1,3 +1,5 @@
+import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
+import { CHART_SERIES_COLORS } from '../../theme/charts';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Card,
@@ -65,30 +67,30 @@ interface GraphStats {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  Factory: '#f5222d',
-  Workshop: '#fa8c16',
-  ProductionLine: '#faad14',
-  Equipment: '#52c41a',
-  Sensor: '#95de64',
-  Product: '#13c2c2',
-  Material: '#1677ff',
-  SalesOrder: '#722ed1',
-  WorkOrder: '#b37feb',
-  Worker: '#eb2f96',
-  Supplier: '#2f54eb',
-  Customer: '#ff85c0',
-  Inspection: '#ffc53d',
-  Defect: '#ff4d4f',
-  factory: '#f5222d',
-  workshop: '#fa8c16',
-  line: '#faad14',
-  equipment: '#52c41a',
-  product: '#13c2c2',
-  material: '#1677ff',
-  order: '#722ed1',
-  worker: '#eb2f96',
-  supplier: '#2f54eb',
-  default: '#8c8c8c',
+  Factory: CHART_SERIES_COLORS[0],
+  Workshop: CHART_SERIES_COLORS[2],
+  ProductionLine: colors.warning,
+  Equipment: CHART_SERIES_COLORS[1],
+  Sensor: colors.success,
+  Product: CHART_SERIES_COLORS[1],
+  Material: colors.primary,
+  SalesOrder: CHART_SERIES_COLORS[3],
+  WorkOrder: CHART_SERIES_COLORS[4],
+  Worker: CHART_SERIES_COLORS[5],
+  Supplier: CHART_SERIES_COLORS[4],
+  Customer: CHART_SERIES_COLORS[5],
+  Inspection: colors.warning,
+  Defect: colors.danger,
+  factory: CHART_SERIES_COLORS[0],
+  workshop: CHART_SERIES_COLORS[2],
+  line: colors.warning,
+  equipment: CHART_SERIES_COLORS[1],
+  product: CHART_SERIES_COLORS[1],
+  material: colors.primary,
+  order: CHART_SERIES_COLORS[3],
+  worker: CHART_SERIES_COLORS[5],
+  supplier: CHART_SERIES_COLORS[4],
+  default: colors.muted,
 };
 
 const LAYOUT_OPTIONS = [
@@ -230,20 +232,20 @@ export default function GraphExplorerPage() {
           selector: 'node:selected',
           style: {
             'border-width': 4,
-            'border-color': '#1890ff',
+            'border-color': colors.focus,
           },
         },
         {
           selector: 'edge',
           style: {
             width: 2,
-            'line-color': '#d9d9d9',
-            'target-arrow-color': '#d9d9d9',
+            'line-color': colors.borderStrong,
+            'target-arrow-color': colors.borderStrong,
             'target-arrow-shape': 'triangle',
             'curve-style': 'bezier',
             label: 'data(label)',
             'font-size': 9,
-            color: '#8c8c8c',
+            color: colors.muted,
             'text-rotation': 'autorotate',
             'text-outline-width': 2,
             'text-outline-color': '#fff',
@@ -253,8 +255,8 @@ export default function GraphExplorerPage() {
           selector: 'edge:selected',
           style: {
             width: 3,
-            'line-color': '#1890ff',
-            'target-arrow-color': '#1890ff',
+            'line-color': colors.focus,
+            'target-arrow-color': colors.focus,
           },
         },
       ],
@@ -468,18 +470,18 @@ export default function GraphExplorerPage() {
             </Space>
             <Spin spinning={loading}>
               {graphNodes.length === 0 ? (
-                <div style={{ height: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', borderRadius: 8 }}>
+                <div style={{ height: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--mf-panel-soft)', borderRadius: 8 }}>
                   <Empty description="搜索实体以可视化关系图谱" />
                 </div>
               ) : (
                 <div
                   ref={cyContainerRef}
-                  style={{ width: '100%', height: 500, border: '1px solid #f0f0f0', borderRadius: 8, background: '#fafafa' }}
+                  style={{ width: '100%', height: 500, border: '1px solid var(--mf-border)', borderRadius: 8, background: 'var(--mf-panel-soft)' }}
                 />
               )}
             </Spin>
             {selectedNode && (
-              <div style={{ marginTop: 8, padding: '8px 12px', background: '#f6f6f6', borderRadius: 4 }}>
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--mf-panel-soft)', borderRadius: 4 }}>
                 <Text strong>{selectedNode.label}</Text>
                 <Tag color={getColor(selectedNode.type)} style={{ marginLeft: 8 }}>{selectedNode.type}</Tag>
                 <Text type="secondary" style={{ marginLeft: 8 }}>ID: {selectedNode.id}</Text>
@@ -507,7 +509,7 @@ export default function GraphExplorerPage() {
             </div>
             <Button type="primary" onClick={handleCypher} loading={cypherLoading} style={{ marginTop: 4 }}>执行查询</Button>
             {cypherResult.length > 0 && (
-              <pre style={{ marginTop: 12, maxHeight: 300, overflow: 'auto', background: '#f5f5f5', padding: 12, borderRadius: 6, fontSize: 12 }}>
+              <pre style={{ marginTop: 12, maxHeight: 300, overflow: 'auto', background: 'var(--mf-panel-soft)', padding: 12, borderRadius: 6, fontSize: 12 }}>
                 {JSON.stringify(cypherResult, null, 2)}
               </pre>
             )}
