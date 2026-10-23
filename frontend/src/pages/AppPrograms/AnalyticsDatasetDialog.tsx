@@ -1,3 +1,4 @@
+import { createUuid } from '@/utils/uuid';
 import React, {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Checkbox, Collapse, ConfigProvider, Empty, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tabs, Tag} from 'antd';
 import {DatabaseOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
@@ -10,7 +11,7 @@ import {previewAnalyticsDesign} from './analyticsApi';
 import {formatAnalyticsValue} from './analyticsExploration';
 import './analytics-dataset-dialog.css';
 
-const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+const id = (prefix: string) => `${prefix}-${createUuid()}`;
 const numeric = (field: PlatformFormField) => /number|int|float|decimal|numeric|double|currency/.test(field.field_type);
 const operators = [
   {value:'eq',label:'等于'}, {value:'ne',label:'不等于'}, {value:'contains',label:'包含文字'},

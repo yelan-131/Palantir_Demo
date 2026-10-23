@@ -1,3 +1,4 @@
+import { createUuid } from '@/utils/uuid';
 import './designer-dialog.css';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useState } from 'react';
@@ -16,7 +17,7 @@ export default function ViewTabsEditor({ config, activeId, onSelect, onChange, r
   const [creating, setCreating] = useState(false);
   const open = (create: boolean) => {
     setCreating(create);
-    setEditing(create ? { ...structuredClone(active), id: crypto.randomUUID(), name: '',
+    setEditing(create ? { ...structuredClone(active), id: createUuid(), name: '',
       audience: { mode: 'restricted', roleIds: [], userIds: [], orgIds: [] } } : structuredClone(active));
   };
   const commit = () => {

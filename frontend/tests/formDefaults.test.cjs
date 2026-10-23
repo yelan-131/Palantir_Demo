@@ -1,5 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const ts=require('typescript');const vm=require('node:vm');
-const ctx={exports:{},crypto:require('node:crypto').webcrypto};vm.runInNewContext(ts.transpileModule(fs.readFileSync(require('node:path').join(__dirname,'../src/utils/formDefaults.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+const uuidContext={exports:{},crypto:require('node:crypto').webcrypto};vm.runInNewContext(ts.transpileModule(fs.readFileSync(require('node:path').join(__dirname,'../src/utils/uuid.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,uuidContext);
+const ctx={exports:{},require:name=>{if(name==='@/utils/uuid')return uuidContext.exports;throw new Error(name);}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(require('node:path').join(__dirname,'../src/utils/formDefaults.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
 const {newDefaultPart,defaultRuleSummary,defaultRuleErrors}=ctx.exports;
 const fields=[{key:'a',name:'名称',storageType:'string'},{key:'b',name:'规格',storageType:'string'},{key:'rows',name:'明细',storageType:'json'}];
 test('conditional fixed defaults validate references, values and dependency cycles',()=>{

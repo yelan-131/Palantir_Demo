@@ -1,3 +1,4 @@
+import { createUuid } from '@/utils/uuid';
 import { previewFieldPermission, previewFlowNodes as associatedPreviewNodes } from './previewPermissions';
 import { RuleInlineSelect } from './RuleInlineCell';
 import CalculationExpressionEditor from './CalculationExpressionEditor';
@@ -3442,7 +3443,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           <span>编码规则</span>
           <Button className="encoding-heading-add" aria-label="新增编码规则" title="新增编码规则"
             icon={<PlusOutlined />} onClick={() => { encodingRuleTargetRef.current = { controlId: selectedControlId, rule: selectedEncodingRule }; setEncodingSettingsDraft({ ...makeEncodingRule(selectedField),
-              id: `rule-${crypto.randomUUID()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] }); }} size="small" type="text" />
+              id: `rule-${createUuid()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] }); }} size="small" type="text" />
         </strong>
         {getEncodingRules(selectedEncodingRule).map((rule, index) => (
           <label key={rule.id || index}>
@@ -3578,7 +3579,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         {schema?.note&&<p className="encoding-editor-hint">{schema.note}</p>}
       </section>
       {schema&&schema.kind!=='static'&&<section className="encoding-editor-section search-range-section">
-        <div className="encoding-section-title"><strong>候选范围 <span className="encoding-section-count">全部条件满足</span></strong><Button type="text" size="small" icon={<PlusOutlined/>} disabled={filters.length>=20} onClick={()=>updateSearchSettings({filters:[...filters,{id:crypto.randomUUID(),field:schema.fields[0]?.value||'',operator:'eq',source:'fixed',value:''}]})}>添加范围条件</Button></div>
+        <div className="encoding-section-title"><strong>候选范围 <span className="encoding-section-count">全部条件满足</span></strong><Button type="text" size="small" icon={<PlusOutlined/>} disabled={filters.length>=20} onClick={()=>updateSearchSettings({filters:[...filters,{id:createUuid(),field:schema.fields[0]?.value||'',operator:'eq',source:'fixed',value:''}]})}>添加范围条件</Button></div>
         <p className="encoding-editor-hint">始终限定在当前用户有权查看的数据内；不添加条件时使用全部授权候选。引用字段未填写时，不返回候选。</p>
         {filters.map((filter,index)=><div key={filter.id} className="search-range-row">
           <Select aria-label={`范围字段 ${index+1}`} value={filter.field} options={schema.fields} onChange={field=>updateFilter(filter.id,{field})}/>
@@ -3665,7 +3666,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     return <div className="designer-default-mode-row">
       {renderRuleLabel('默认值', '开启后在新增时预填，允许使用者修改；关闭后保留规则但不生成默认值。齿轮用于配置规则。', true)}
       <div className="designer-rule-toggle">
-        {enabled && <Button className="designer-rule-config-button" size="small" type="text" icon={<SettingOutlined />} aria-label="设置默认值规则" disabled={Boolean(disabled)} onClick={event => { event.preventDefault(); event.stopPropagation(); setDefaultValueDraft({ controlId: selectedControl.id, rule: { ...structuredClone(rule), parts: (rule.parts || []).map(part => ({ ...part, id: part.id || crypto.randomUUID() })) }, fixed: String(getFieldDefaultValue(selectedField)) }); }} />}
+        {enabled && <Button className="designer-rule-config-button" size="small" type="text" icon={<SettingOutlined />} aria-label="设置默认值规则" disabled={Boolean(disabled)} onClick={event => { event.preventDefault(); event.stopPropagation(); setDefaultValueDraft({ controlId: selectedControl.id, rule: { ...structuredClone(rule), parts: (rule.parts || []).map(part => ({ ...part, id: part.id || createUuid() })) }, fixed: String(getFieldDefaultValue(selectedField)) }); }} />}
         <button type="button" role="switch" aria-label="启用默认值" aria-checked={enabled} disabled={Boolean(disabled)}
           className={`designer-rule-check ${enabled ? 'designer-rule-check-on' : ''}`}
           onClick={event => { event.preventDefault(); event.stopPropagation(); updateSelectedControl({ defaultRule: { ...rule, enabled: !enabled } }); }}>
@@ -4608,7 +4609,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     )));
   };
 
-  const addAssignmentRule = () => setAssignmentDraft(current => current && ({ ...current, rules: [...current.rules, { id: `assign-${crypto.randomUUID()}`, sourceAttribute: assignmentSourceAttributeOptions[0]?.value || 'self.value' }] }));
+  const addAssignmentRule = () => setAssignmentDraft(current => current && ({ ...current, rules: [...current.rules, { id: `assign-${createUuid()}`, sourceAttribute: assignmentSourceAttributeOptions[0]?.value || 'self.value' }] }));
   const updateAssignmentRule = (ruleId: string, patch: Partial<AssignmentRule>) => setAssignmentDraft(current => current && ({ ...current, rules: current.rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule) }));
   const removeAssignmentRule = (ruleId: string) => setAssignmentDraft(current => current && ({ ...current, rules: current.rules.filter(rule => rule.id !== ruleId) }));
 
@@ -4798,7 +4799,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const duplicateControl = (control?: LayoutControl | null) => {
     if (!control) return;
-    const tree = cloneLayoutSubtree(layoutControls, control.id, () => `control-${crypto.randomUUID()}`);
+    const tree = cloneLayoutSubtree(layoutControls, control.id, () => `control-${createUuid()}`);
     const copied = tree.find(item => item.parentId === control.parentId) || tree[0];
     setCopiedControl(control); setCopiedTree(layoutControls.filter(item => layoutDescendants(layoutControls, control.id).has(item.id)));
     commitLayoutChange((current) => [...current, ...tree]);
@@ -4816,7 +4817,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       message.warning('还没有复制控件');
       return;
     }
-    const tree = cloneLayoutSubtree(copiedTree.length ? copiedTree : [copiedControl], copiedControl.id, () => `control-${crypto.randomUUID()}`);
+    const tree = cloneLayoutSubtree(copiedTree.length ? copiedTree : [copiedControl], copiedControl.id, () => `control-${createUuid()}`);
     commitLayoutChange((current) => [...current, ...tree]);
     setSelectedControlId(tree.find(item => item.parentId === copiedControl.parentId)?.id || tree[0]?.id);
   };
@@ -4956,7 +4957,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         <label><span>内容间距</span><InputNumber aria-label="内容间距" min={0} max={40} value={control.layout?.gap ?? 12} onChange={gap => updateLayout({ gap: gap ?? 12 })} suffix="px" /></label>
         {control.controlType === 'container' && <><label><span>允许折叠</span><Switch size="small" checked={Boolean(control.layout?.collapsible)} onChange={collapsible => updateLayout({ collapsible })} /></label>{control.layout?.collapsible && <label><span>默认收起</span><Switch size="small" checked={Boolean(control.layout.defaultCollapsed)} onChange={defaultCollapsed => updateLayout({ defaultCollapsed })} /></label>}</>}
         {control.controlType === 'two-columns' && <><label><span>列数</span><Select aria-label="列数" value={control.layout?.columns || 2} options={[2,3,4].map(value => ({ value, label: `${value} 列` }))} onChange={columns => updateLayout({ columns, ratios: Array.from({ length: columns }, (_, i) => control.layout?.ratios?.[i] || 1) })} /></label><small>减少列数时，原列中的控件会移至第一列。</small>{layoutSlots(control).map((slot, index) => <label key={slot.id}><span>{slot.label}比例</span><InputNumber min={1} max={12} value={control.layout?.ratios?.[index] || 1} onChange={value => updateLayout({ ratios: layoutSlots(control).map((_, i) => i === index ? value || 1 : control.layout?.ratios?.[i] || 1) })} /></label>)}</>}
-        {control.controlType === 'tabs' && <><div className="designer-container-tab-settings">{layoutSlots(control).map(slot => <div key={slot.id}><Input aria-label={`页签名称：${slot.label}`} value={slot.label} onChange={event => updateLayout({ tabs: layoutSlots(control).map(tab => tab.id === slot.id ? { ...tab, label: event.target.value } : tab) })} /><Button danger size="small" disabled={layoutSlots(control).length < 2} onClick={() => { const remaining = layoutSlots(control).filter(tab => tab.id !== slot.id); updateLayout({ tabs: remaining }); setContainerTabs(current => ({ ...current, [control.id]: remaining[0].id })); }}>移除</Button></div>)}</div><Button size="small" icon={<PlusOutlined />} onClick={() => updateLayout({ tabs: [...layoutSlots(control), { id: `tab-${crypto.randomUUID()}`, label: `页签 ${layoutSlots(control).length + 1}` }] })}>新增页签</Button><small>移除页签后，其控件会保留在第一个页签。</small></>}
+        {control.controlType === 'tabs' && <><div className="designer-container-tab-settings">{layoutSlots(control).map(slot => <div key={slot.id}><Input aria-label={`页签名称：${slot.label}`} value={slot.label} onChange={event => updateLayout({ tabs: layoutSlots(control).map(tab => tab.id === slot.id ? { ...tab, label: event.target.value } : tab) })} /><Button danger size="small" disabled={layoutSlots(control).length < 2} onClick={() => { const remaining = layoutSlots(control).filter(tab => tab.id !== slot.id); updateLayout({ tabs: remaining }); setContainerTabs(current => ({ ...current, [control.id]: remaining[0].id })); }}>移除</Button></div>)}</div><Button size="small" icon={<PlusOutlined />} onClick={() => updateLayout({ tabs: [...layoutSlots(control), { id: `tab-${createUuid()}`, label: `页签 ${layoutSlots(control).length + 1}` }] })}>新增页签</Button><small>移除页签后，其控件会保留在第一个页签。</small></>}
       </>}
     </section>;
   };

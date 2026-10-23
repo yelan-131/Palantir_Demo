@@ -1,8 +1,9 @@
+import { createUuid } from '@/utils/uuid';
 export interface DefaultValuePart { id: string; kind: 'text' | 'field'; value: string }
 export interface DefaultValueCondition { sourceField: string; operator: 'eq' | 'ne' | 'contains' | 'gte' | 'lte' | 'isEmpty' | 'notEmpty'; value?: string }
 export interface DefaultValueRule { mode: 'fixed' | 'template'; enabled?: boolean; parts?: DefaultValuePart[]; conditions?: DefaultValueCondition[] }
 export function newDefaultPart(kind: DefaultValuePart['kind']): DefaultValuePart {
-  return { id: crypto.randomUUID(), kind, value: '' };
+  return { id: createUuid(), kind, value: '' };
 }
 export function defaultRuleSummary(rule: DefaultValueRule, fields: {key: string; name: string}[]) {
   return (rule.parts || []).map(part => part.kind === 'field' ? `「${fields.find(field => field.key === part.value)?.name || '选择字段'}」` : part.value ? JSON.stringify(part.value) : '固定文字').join(' + ');

@@ -1,3 +1,4 @@
+import { createUuid } from '@/utils/uuid';
 import { useState } from 'react';
 import { PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Collapse, Form, Input, InputNumber, Select, Space, Statistic, Switch, Tag } from 'antd';
@@ -16,7 +17,7 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
   const active = services.some((s: any) => s.id === selected) ? selected : services[0]?.id;
   const used = (sid: string, mid?: string) => Object.values(values.modelAssignments || {}).some((ref: any) => ref?.serviceId === sid && (!mid || ref.modelId === mid));
   const add = () => {
-    const id = `service-${crypto.randomUUID().slice(0, 8)}`;
+    const id = `service-${createUuid().slice(0, 8)}`;
     form.setFieldsValue({ modelServices: [...services, { id, name: '新模型服务', provider: 'openai-compatible', baseUrl: '', apiKey: '', timeoutSeconds: 30, retryCount: 2, models: [{ id: '', name: '', inputTypes: ['text'] }] }] });
     setSelected(id); onChange();
   };

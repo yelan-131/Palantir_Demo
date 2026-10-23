@@ -1,6 +1,6 @@
 # ManuFoundry / Palantir Demo
 
-Current version: 0.3.14
+Current version: 0.3.15
 
 ManuFoundry is a manufacturing low-code data workspace prototype. It combines configurable applications, forms, menus, identity access, knowledge assets, graph exploration, quality impact analysis, and an evolving AI Agent layer for assisted business configuration.
 
@@ -17,6 +17,12 @@ This repository is still in active development and is intended for demo and prod
 - Business workspaces for production, predictive maintenance, quality analytics, supply chain risk, reports, rules, workflows, notifications, and templates.
 - AI assistant APIs, provider abstraction, prompt/tool scaffolding, knowledge context, and low-code action guidance.
 - AI Agent work in progress, inspired by OpenClaw and Harness Agent style architecture: model invocation boundaries, task planning drafts, tool calls, knowledge context, action review, and safety policies.
+
+## 0.3.15 Fix
+
+- Fix business forms failing to render on HTTP origins when the import modal initializes.
+- Use cryptographically random UUIDs compatible with both HTTP and HTTPS for imports, attachments and designer identities.
+- See [release verification](docs/operations/release-0.3.15.md).
 
 ## 0.3.14 Focus
 
