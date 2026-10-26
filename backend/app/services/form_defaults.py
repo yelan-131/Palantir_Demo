@@ -1,5 +1,7 @@
 """Editable create-time defaults: literal parts and references, never executable code."""
 import math
+import json
+import copy
 from fastapi import HTTPException
 from app.services.field_limits import max_bytes, byte_size
 
@@ -104,6 +106,8 @@ def apply_defaults(fields, data, existing=None):
                     if str(value).lower() not in {'true', 'false', '1', '0'}:
                         raise ValueError()
                     value = str(value).lower() in {'true', '1'}
+                elif field.field_type == 'json' or (getattr(field, 'ui_config', None) or {}).get('typeSettings', {}).get('selectionMode') == 'multiple':
+                    value = json.loads(value) if isinstance(value, str) else copy.deepcopy(value)
             except (ValueError, TypeError, OverflowError):
                 raise HTTPException(422, f'字段「{field.label}」默认值与字段类型不符')
             data[name] = value

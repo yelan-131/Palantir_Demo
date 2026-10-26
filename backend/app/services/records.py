@@ -188,23 +188,23 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != tenant_id:
         raise HTTPException(404, "Form not found")
-    await require_form_permission(db, user, form_id, "edit")
+    cache = {('form', form_id): form}
+    await require_form_permission(db, user, form_id, "edit", cache=cache)
     from app.services.form_application_lifecycle import locked_record, guard_edit, decorate, metadata, audit as lifecycle_audit
-    locked = await read_raw(db, form, record_id, lock=True)
-    await require_record_permission(db, user, form, "edit", locked)
-    await guard_edit(db, form, locked, user, body.status)
-    tracked = await metadata(db, form, locked, user)
+    fields = await runtime_fields(db, form, cache=cache)
+    locked = await read_raw(db, form, record_id, lock=True, fields=fields)
+    await require_record_permission(db, user, form, "edit", locked, cache=cache)
+    tracked = await guard_edit(db, form, locked, user, body.status, cache=cache)
     if tracked:
         from app.services.designer_permissions import require_action
-        await require_action(db,user,form,'saveDraft')
+        await require_action(db,user,form,'saveDraft',cache=cache)
     await _protect_pending_form_record(db, tenant_id, form_id, record_id)
     _validate_record_status(body.status)
     validate_business_keys(body.data or {})
     validate_domain_update(form.code, body.data or {})
     if form.code == "material-application":
         raise HTTPException(409, "料号申请请通过专用入口修改")
-    fields = await _runtime_form_fields(db, tenant_id, form_id)
-    editable = await allowed_form_fields(user, form_id, 'edit', fields, db, record_data=policy_data(locked))
+    editable = await allowed_form_fields(user, form_id, 'edit', fields, db, record_data=policy_data(locked), cache=cache)
     unknown = set(body.data or {}) - {field.field_name for field in fields if not field.archived}
     if unknown:
         raise HTTPException(422, f"Unknown field(s): {', '.join(sorted(unknown))}")
@@ -213,32 +213,28 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
         raise HTTPException(403, f"Field permission denied: {', '.join(sorted(denied))}")
     from app.services.form_rules import evaluate
     from app.services.field_policies import protect_update
-    await protect_update(db,user,fields,body.data or {},locked.get('data') or {})
+    await protect_update(db,user,fields,body.data or {},locked.get('data') or {},cache=cache)
     expected=getattr(body,'expected_values',None)
     if expected is not None:
         from app.services.field_policies import presentation
-        _,policies=await presentation(db,user,fields,locked.get('data') or {})
+        _,policies=await presentation(db,user,fields,locked.get('data') or {},cache=cache)
         if any(policies.get(key,{}).get('masked') for key in expected): raise HTTPException(403,'不能比较脱敏字段的原值')
         if any(locked['data'].get(key)!=value for key,value in expected.items()): raise HTTPException(409,'记录已被其他人修改，请刷新后确认最新内容再保存')
     rule_result = await evaluate(db, user, fields, body.data or {}, existing=locked.get('data') or {},
-                                 enforce=True, partial=bool(tracked and tracked['status'] in {'draft', 'rejected'}))
+                                 enforce=True, partial=bool(tracked and tracked['status'] in {'draft', 'rejected'}), cache=cache)
     rule_patch = {key: value for key, value in rule_result['data'].items()
                   if key in (body.data or {}) or value != (locked.get('data') or {}).get(key)}
     from app.services.field_uniqueness import enforce as enforce_uniqueness
     await enforce_uniqueness(db,form,fields,rule_result['data'],exclude_record_id=record_id)
     body = body.copy(update={'data': rule_patch})
     if _uses_physical_form_table(form):
-        fields = await _runtime_form_fields(db, tenant_id, form_id)
-        await _ensure_physical_form_table(db, form, fields)
-        editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db, record_data=policy_data(locked))
+        editable_fields = editable
         updates = body.dict(exclude_unset=True, exclude={'expected_values'})
         if tracked or updates.get("status") is None:
             updates.pop("status", None)
         data_updates = updates.get("data") or {}
-        all_field_names = {field.field_name for field in fields if not field.archived}
-        existing = await _get_physical_record(db, form, fields, all_field_names, record_id, include_deleted=False)
-        merged = _merged_record_data(existing["data"]["data"], data_updates)
-        await require_record_permission(db, user, form, "edit", {**locked, "data": merged})
+        merged = _merged_record_data(locked['data'], data_updates)
+        await require_record_permission(db, user, form, "edit", {**locked, "data": merged}, cache=cache)
         _validate_record_data(rule_result['fields'], merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, data_updates, exclude_record_id=record_id)
         payload = _physical_write_payload(fields, data_updates, editable_fields | rule_result['derived'])
@@ -274,7 +270,7 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
         )
         if not defer_commit:
             await db.commit()
-        return {"data": await decorate(db, form, await project_record(db, user, form, result, fields), user)}
+        return {"data": await decorate(db, form, await project_record(db, user, form, result, fields, cache=cache), user, cache=cache)}
 
     record = await db.get(DynamicRecord, record_id)
     if not record or record.form_id != form_id or record.tenant_id != tenant_id or record.deleted_at is not None:
@@ -286,13 +282,12 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     if updates.get("data") is None:
         updates.pop("data", None)
     if "data" in updates:
-        fields = await _runtime_form_fields(db, tenant_id, form_id)
-        editable_fields = await allowed_form_fields(user, form_id, "edit", fields, db, record_data=policy_data(locked))
+        editable_fields = editable
         denied_fields = sorted(set(updates["data"].keys()) - editable_fields - rule_result['derived'])
         if denied_fields:
             raise HTTPException(403, f"Field permission denied: {', '.join(denied_fields)}")
         merged = _merged_record_data(record.data, updates["data"])
-        await require_record_permission(db, user, form, "edit", {**locked, "data": merged})
+        await require_record_permission(db, user, form, "edit", {**locked, "data": merged}, cache=cache)
         _validate_record_data(rule_result['fields'], merged, partial=bool(tracked and tracked["status"] in {"draft", "rejected"}))
         await _assert_unique_code_values(db, tenant_id, form, fields, updates["data"], exclude_record_id=record_id)
         updates["data"] = merged
@@ -313,8 +308,7 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     if not defer_commit:
         await db.commit()
     await db.refresh(record)
-    fields = await _runtime_form_fields(db, tenant_id, form_id)
-    return {"data": await decorate(db, form, await project_record(db, user, form, _record_payload(record), fields), user)}
+    return {"data": await decorate(db, form, await project_record(db, user, form, _record_payload(record), fields, cache=cache), user, cache=cache)}
 
 
 async def delete_record(form_id, record_id, db, user):
@@ -383,8 +377,13 @@ async def resolve_form(db, user, *, form_id=None, form_code=None):
     return form
 
 
-async def runtime_fields(db, form):
-    return await _runtime_form_fields(db, form.tenant_id, form.id)
+async def runtime_fields(db, form, *, cache=None):
+    key = ('runtime_fields', form.tenant_id, form.id)
+    if cache is not None and key in cache:
+        return cache[key]
+    fields = await _runtime_form_fields(db, form.tenant_id, form.id)
+    if cache is not None:cache[key] = fields
+    return fields
 
 
 def policy_data(record):
@@ -423,28 +422,31 @@ async def record_allowed(db, user, form, action, record, *, cache=None):
     return False
 
 
-async def require_record_permission(db, user, form, action, record):
-    if not await record_allowed(db, user, form, action, record):
+async def require_record_permission(db, user, form, action, record, *, cache=None):
+    if not await record_allowed(db, user, form, action, record, cache=cache):
         raise HTTPException(403, "Record permission denied")
 
 
 async def project_record(db, user, form, record, fields=None, *, cache=None):
-    fields = fields if fields is not None else await runtime_fields(db, form)
+    fields = fields if fields is not None else await runtime_fields(db, form, cache=cache)
     visible = await allowed_form_fields(user, form.id, "view", fields, db, record_data=policy_data(record), cache=cache)
     from app.services.form_rules import states
     state = states([field for field in fields if not field.archived], record.get('data') or {})
     from app.services.field_policies import presentation
     safe,policies=await presentation(db,user,fields,record.get('data') or {},cache=cache)
+    from app.services.workflow_field_policy import current_policy
+    node_policy = await current_policy(db, user, form, record.get('id'), cache=cache)
+    visible = set(visible) - {key for key, flags in node_policy.items() if isinstance(flags, dict) and flags.get('visible') is False}
     return {**record, "data": {key: value for key, value in safe.items() if key in visible},
             'field_states': {key: {**value,**policies.get(key,{})} for key, value in state.items() if key in visible}}
 
 
-async def read_raw(db, form, record_id, *, lock=False, include_deleted=False):
+async def read_raw(db, form, record_id, *, lock=False, include_deleted=False, fields=None):
     """Internal read for an already tenant-validated form; never return to clients directly."""
     if _uses_physical_form_table(form):
         table = str(form.table_name)
         assert_safe_identifier(table)
-        fields = await runtime_fields(db, form)
+        fields = fields if fields is not None else await runtime_fields(db, form)
         await _ensure_physical_form_table(db, form, fields)
         deleted = "" if include_deleted else " AND deleted_at IS NULL"
         suffix = " FOR UPDATE" if lock and db.bind.dialect.name != "sqlite" else ""
@@ -466,16 +468,18 @@ async def read_raw(db, form, record_id, *, lock=False, include_deleted=False):
 
 
 async def get_record(form_id, record_id, db, user, *, include_deleted=False):
+    cache = {}
     form = await resolve_form(db, user, form_id=form_id)
-    record = await read_raw(db, form, record_id, include_deleted=include_deleted)
-    await require_record_permission(db, user, form, "view", record)
+    fields = await runtime_fields(db, form, cache=cache)
+    record = await read_raw(db, form, record_id, include_deleted=include_deleted, fields=fields)
+    await require_record_permission(db, user, form, "view", record, cache=cache)
     from app.services.form_application_lifecycle import decorate
-    return {"data": await decorate(db, form, await project_record(db, user, form, record), user)}
+    return {"data": await decorate(db, form, await project_record(db, user, form, record, cache=cache), user, cache=cache)}
 
 
-async def iter_raw(db, form, *, include_deleted=False):
+async def iter_raw(db, form, *, include_deleted=False, fields=None):
     """Scan in bounded batches so permission filtering happens before pagination/counts."""
-    fields = await runtime_fields(db, form)
+    fields = fields if fields is not None else await runtime_fields(db, form)
     if _uses_physical_form_table(form):
         table = str(form.table_name)
         assert_safe_identifier(table)
@@ -498,28 +502,33 @@ async def iter_raw(db, form, *, include_deleted=False):
         for record in batch:
             yield record
         cursor = batch[-1]["id"]
+        if len(batch) < 200:
+            break
 
 
-async def authorized_records(db, user, form, *, include_deleted=False, decorate=True, statistics=False):
+async def authorized_records(db, user, form, *, include_deleted=False, decorate=True, statistics=False,
+                             cache=None, raw_records=None):
     if form.tenant_id != current_tenant_id(user):
         raise HTTPException(404, "Form not found")
-    decision = await evaluate_form_permission(user, form.id, "view", db)
+    cache = cache if cache is not None else {}
+    decision = await evaluate_form_permission(user, form.id, "view", db, cache=cache)
     if not decision["allowed"]:
         raise HTTPException(403, "Form permission denied")
     if statistics:
         from app.services.designer_permissions import allow_statistics
         await allow_statistics(db,user,form)
-    fields = await runtime_fields(db, form)
-    cache = {}
+    fields = await runtime_fields(db, form, cache=cache)
     result = []
-    async for record in iter_raw(db, form, include_deleted=include_deleted):
+    async for record in iter_raw(db, form, include_deleted=include_deleted, fields=fields):
+        if raw_records is not None:
+            raw_records[(form.id, record['id'])] = record
         if not await record_allowed(db, user, form, "view", record, cache=cache):
             continue
         record = await project_record(db, user, form, record, fields, cache=cache)
-        if decorate:
-            from app.services.form_application_lifecycle import decorate as decorate_record
-            record = await decorate_record(db, form, record, user)
         result.append(record)
+    if decorate:
+        from app.services.form_application_lifecycle import decorate_records
+        await decorate_records(db, form, result, user, cache=cache)
     return result
 
 
@@ -538,8 +547,9 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
             filters_json=filters_json, sort_field=sort_field, sort_order=sort_order,
             cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id,
             include_total=include_total, page=page, page_size=page_size)
-    fields = await runtime_fields(db, form)
-    visible = await allowed_form_fields(user, form.id, "view", fields, db)
+    cache = {}
+    fields = await runtime_fields(db, form, cache=cache)
+    visible = await allowed_form_fields(user, form.id, "view", fields, db, cache=cache)
     filters = _parse_record_filters(filters_json)
     _ensure_filter_fields_visible(filters, visible)
     _ensure_sort_field_allowed(sort_field, fields, visible)
@@ -551,7 +561,7 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
         from app.api.form_engine import _queryable_field_names
         if any(str(item.get("field") or "") not in _queryable_field_names(query_fields) for item in filters):
             raise HTTPException(400, "Field is not indexed for filtering")
-    records = await authorized_records(db, user, form, include_deleted=include_deleted)
+    records = await authorized_records(db, user, form, include_deleted=include_deleted, decorate=False, cache=cache)
     matches = []
     for record in records:
         # Filter only the projected row: hidden values cannot affect search/counts.
@@ -575,6 +585,8 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
     start = 0 if cursor_mode else (page - 1) * page_size
     rows = matches[start:start + page_size]
     has_more = len(matches) > start + page_size
+    from app.services.form_application_lifecycle import decorate_records
+    await decorate_records(db, form, rows, user, cache=cache)
     return {"data": rows, "total": total, "page": page, "page_size": page_size,
         "has_more": has_more, "next_cursor": rows[-1]["id"] if has_more and rows else None}
 
@@ -778,8 +790,8 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
     }
 
 
-async def require_form_permission(db, user, form_id, action):
-    if not (await evaluate_form_permission(user, form_id, action, db))["allowed"]:
+async def require_form_permission(db, user, form_id, action, *, cache=None):
+    if not (await evaluate_form_permission(user, form_id, action, db, cache=cache))["allowed"]:
         raise HTTPException(403, "Form permission denied")
 
 

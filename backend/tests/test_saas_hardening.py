@@ -13,11 +13,29 @@ def _headers(token: str) -> dict[str, str]:
 
 def _admin_token() -> str:
     from app.core.security import create_access_token
+    from app.core.db import db_session
+    from app.models.relational import Tenant, User
+    from sqlalchemy import select
+
+    async def seed_platform_admin():
+        async with db_session() as db:
+            if await db.get(Tenant, 1) is None:
+                db.add(Tenant(id=1, name='Test platform', slug='test-platform', status='active'))
+                await db.flush()
+            account = await db.scalar(select(User).where(User.tenant_id == 1, User.username == 'test-platform-admin'))
+            if account is None:
+                account = User(tenant_id=1, username='test-platform-admin', hashed_password='test', is_active=True, is_admin=True)
+                db.add(account)
+                await db.flush()
+            account_id = account.id
+            await db.commit()
+            return account_id
+    admin_id = asyncio.run(seed_platform_admin())
 
     return create_access_token(
-        "admin",
+        "test-platform-admin",
         extra={
-            "uid": 1,
+            "uid": admin_id,
             "tenant_id": 1,
             "is_admin": True,
             "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],

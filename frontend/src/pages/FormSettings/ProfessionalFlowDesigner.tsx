@@ -458,8 +458,7 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
     const outgoing = config.edges.filter((edge) => edge.source === node.id);
     return outgoing.length < 2 || outgoing.every((edge) => !edge.condition && !edge.isDefault);
   });
-  const parallelWithoutJoin = config.nodes.filter((node) => node.type === 'parallelGateway').length > 0
-    && config.nodes.filter((node) => node.type === 'joinGateway').length === 0;
+  const hasParallelGateway = config.nodes.some((node) => ['parallelGateway', 'joinGateway'].includes(node.type));
   const invalidEdges = config.edges.filter((edge) => !nodeIds.has(edge.source) || !nodeIds.has(edge.target));
   const enabledTriggers = config.triggerBindings.filter((binding) => binding.enabled);
   const issues: FlowDesignerValidationItem[] = [
@@ -489,9 +488,9 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
       detail: incompleteGateways.length ? `以下条件网关需要至少两条路径，并配置条件或默认路径：${incompleteGateways.map((node) => node.label).join('、')}` : '条件网关配置完整。',
     },
     {
-      level: parallelWithoutJoin ? 'warning' : 'suggestion',
+      level: hasParallelGateway ? 'error' : 'suggestion',
       title: '并行汇聚',
-      detail: parallelWithoutJoin ? '存在并行网关但缺少汇聚网关，建议补充汇聚节点。' : '并行与汇聚结构已匹配或未使用并行。',
+      detail: hasParallelGateway ? '暂不支持执行并行网关；请使用审批组配置会签或或签。' : '未使用并行网关。',
     },
     {
       level: invalidEdges.length ? 'error' : 'suggestion',

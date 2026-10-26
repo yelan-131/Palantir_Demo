@@ -5,9 +5,10 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.16"
+    APP_VERSION: str = "0.3.17"
     APP_MODE: str = "demo"
     DEBUG: bool = True
+    SQL_ECHO: bool = False  # opt-in SQL tracing, independent of web debug mode
 
     POSTGRES_HOST: str = "127.0.0.1"
     POSTGRES_PORT: int = 5432

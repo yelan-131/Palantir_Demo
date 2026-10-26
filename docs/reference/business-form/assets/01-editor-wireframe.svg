@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="890" viewBox="0 0 1400 890" role="img" aria-label="01-editor-wireframe.svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c8291"/></marker></defs><g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif"><rect x="0" y="0" width="1400" height="890" rx="0" fill="#f7f9fb" stroke="#f7f9fb"/>
+<text x="36" y="48" fill="#203344" font-size="27" font-weight="600">01 / 表单定义编辑器：区域与操作</text>
+<text x="36" y="80" fill="#647485" font-size="16" font-weight="400">依据当前 FormSettings 代码重绘的结构线框；示例内容用于说明，比例不代表固定像素。</text>
+<rect x="28" y="106" width="1344" height="735" rx="10" fill="#fff" stroke="#cdd6de"/>
+<rect x="28" y="106" width="174" height="735" rx="10" fill="#f1f4f7" stroke="#cdd6de"/>
+<text x="48" y="142" fill="#233344" font-size="19" font-weight="600">应用导航</text>
+<text x="48" y="194" fill="#233344" font-size="17" font-weight="400">生产态势</text>
+<text x="48" y="241" fill="#233344" font-size="17" font-weight="400">业务填报</text>
+<text x="48" y="288" fill="#233344" font-size="17" font-weight="400">告警中心</text>
+<text x="48" y="335" fill="#233344" font-size="17" font-weight="400">物料主数据</text>
+<rect x="220" y="124" width="1134" height="108" rx="10" fill="#f8fafc" stroke="#cdd6de"/>
+<text x="240" y="154" fill="#233344" font-size="19" font-weight="600">返回数据 / 表单编辑</text>
+<text x="240" y="183" fill="#62798a" font-size="15" font-weight="400">线上 v1 · 草稿有未保存修改</text>
+<rect x="866" y="140" width="108" height="34" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="878" y="162" fill="#304c60" font-size="15" font-weight="400">试填表单</text>
+<rect x="985" y="140" width="108" height="34" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="997" y="162" fill="#304c60" font-size="15" font-weight="400">版本管理</text>
+<rect x="1104" y="140" width="108" height="34" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="1116" y="162" fill="#304c60" font-size="15" font-weight="400">保存草稿</text>
+<rect x="1223" y="140" width="108" height="34" rx="10" fill="#304c60" stroke="#cdd6de"/>
+<text x="1235" y="162" fill="#fff" font-size="15" font-weight="400">发布更改</text>
+<text x="505" y="213" fill="#225b73" font-size="17" font-weight="600">填写表单     列表与筛选     流程与审批     权限管理</text>
+<rect x="220" y="250" width="220" height="470" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="238" y="280" fill="#233344" font-size="19" font-weight="600">① 字段与布局</text>
+<text x="238" y="310" fill="#536273" font-size="16" font-weight="400">搜索字段 / 控件</text>
+<text x="238" y="335" fill="#536273" font-size="16" font-weight="400">添加控件 / 表单字段</text>
+<text x="238" y="360" fill="#536273" font-size="16" font-weight="400">已使用字段标记</text>
+<text x="238" y="385" fill="#536273" font-size="16" font-weight="400">点击字段加入画布</text>
+<text x="238" y="410" fill="#536273" font-size="16" font-weight="400">点击已用字段定位</text>
+<text x="238" y="435" fill="#536273" font-size="16" font-weight="400">容器 / 多列 / Tab</text>
+<rect x="456" y="250" width="574" height="470" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="476" y="281" fill="#233344" font-size="19" font-weight="600">② 表单画布</text>
+<text x="476" y="314" fill="#233344" font-size="23" font-weight="600">设备告警处理单</text>
+<rect x="478" y="342" width="252" height="104" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="496" y="372" fill="#225b73" font-size="19" font-weight="600">告警标题 *</text>
+<text x="496" y="402" fill="#536273" font-size="16" font-weight="400">请输入告警标题</text>
+<rect x="746" y="342" width="260" height="104" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="764" y="372" fill="#233344" font-size="19" font-weight="600">告警等级 *</text>
+<text x="764" y="402" fill="#536273" font-size="16" font-weight="400">请选择告警等级</text>
+<rect x="478" y="463" width="528" height="112" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="496" y="493" fill="#233344" font-size="19" font-weight="600">描述</text>
+<text x="496" y="523" fill="#536273" font-size="16" font-weight="400">请输入告警描述</text>
+<text x="488" y="605" fill="#52697a" font-size="16" font-weight="400">选中高亮 · 拖拽排序 · 复制 · 移出画布</text>
+<text x="488" y="649" fill="#647485" font-size="16" font-weight="400">底部业务按钮仅为设计预览</text>
+<rect x="1046" y="250" width="308" height="470" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="1064" y="280" fill="#225b73" font-size="19" font-weight="600">③ 当前控件属性</text>
+<text x="1064" y="310" fill="#536273" font-size="16" font-weight="400">显示名称 / 填写方式</text>
+<text x="1064" y="335" fill="#536273" font-size="16" font-weight="400">绑定字段 / 存储信息</text>
+<text x="1064" y="360" fill="#536273" font-size="16" font-weight="400">宽度 / 换行 / 标题位置</text>
+<text x="1064" y="385" fill="#536273" font-size="16" font-weight="400">显示 / 只读 / 必填</text>
+<text x="1064" y="410" fill="#536273" font-size="16" font-weight="400">唯一 / 脱敏 / 允许复制</text>
+<text x="1064" y="435" fill="#536273" font-size="16" font-weight="400">默认值 / 条件规则</text>
+<text x="1064" y="460" fill="#536273" font-size="16" font-weight="400">提示与联动 / 类型设置</text>
+<text x="238" y="762" fill="#225b73" font-size="19" font-weight="600">操作反馈：属性变化同步画布，并将当前设计标记为未保存。</text>
+<text x="238" y="796" fill="#233344" font-size="17" font-weight="400">画布移除控件 ≠ 删除字段；草稿保存 ≠ 线上发布；试填 ≠ 写入业务数据。</text></g></svg>

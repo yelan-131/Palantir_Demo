@@ -255,12 +255,16 @@ async def evaluate_form_permission(
             )
         )).scalars().all()
     permission_rows = cache[form_permissions_key]
-    relevant = [
-        permission
-        for permission in permission_rows
-        if (permission.field_name is None or permission.field_name == field_name)
-        and _action_matches(permission.action, action)
-    ]
+    # These inputs do not depend on row values. Conditional RolePermission
+    # rules above are deliberately evaluated on every row before reaching here.
+    relevant_key = ('form_permission_rows', tenant_id, form_id, tuple(role_ids), action, field_name)
+    if relevant_key not in cache:
+        cache[relevant_key] = [
+            permission for permission in permission_rows
+            if (permission.field_name is None or permission.field_name == field_name)
+            and _action_matches(permission.action, action)
+        ]
+    relevant = cache[relevant_key]
     form_matched = [
         {"id": permission.id, "effect": permission.effect, "source": "form_permission", "field_name": permission.field_name}
         for permission in relevant
@@ -326,6 +330,7 @@ async def has_form_permission(
     db: AsyncSession,
     *,
     field_name: Optional[str] = None,
+    cache: Optional[dict] = None,
 ) -> bool:
     decision = await evaluate_form_permission(
         user,
@@ -333,8 +338,47 @@ async def has_form_permission(
         action,
         db,
         field_name=field_name,
+        cache=cache,
     )
     return bool(decision["allowed"])
+
+
+async def prefetch_form_permissions(user: dict, forms: list, db: AsyncSession, cache: dict) -> None:
+    """Load authorization inputs once for a read operation, never decisions.
+
+    The caller owns this per-principal, per-operation cache. Row conditions and
+    field denies are still evaluated by evaluate_form_permission on every row.
+    Nothing persists across HTTP requests or identity/permission changes.
+    """
+    if user.get('is_admin') or not forms:
+        return
+    from app.models.relational import FormPermission, ApplicationForm, ApplicationRole
+    tenant_id = current_tenant_id(user)
+    if 'role_ids' not in cache:
+        cache['role_ids'] = await get_user_role_ids(user, db)
+    role_ids = cache['role_ids']
+    form_ids = {form.id for form in forms if form.tenant_id == tenant_id}
+    for form in forms:
+        if form.id in form_ids:
+            cache[('form', form.id)] = form
+    if not role_ids or not form_ids:
+        return
+    permissions = (await db.scalars(select(FormPermission).where(
+        FormPermission.tenant_id == tenant_id, FormPermission.form_id.in_(form_ids),
+        FormPermission.role_id.in_(role_ids)))).all()
+    bindings = (await db.scalars(select(ApplicationForm).join(ApplicationRole,
+        ApplicationRole.application_id == ApplicationForm.application_id).where(
+        ApplicationForm.tenant_id == tenant_id, ApplicationRole.tenant_id == tenant_id,
+        ApplicationForm.form_id.in_(form_ids), ApplicationRole.role_id.in_(role_ids)))).all()
+    permissions_by_form = {form_id: [] for form_id in form_ids}
+    bindings_by_form = {form_id: [] for form_id in form_ids}
+    for permission in permissions:
+        permissions_by_form[permission.form_id].append(permission)
+    for binding in bindings:
+        bindings_by_form[binding.form_id].append(binding)
+    for form_id in form_ids:
+        cache[('form_permissions', tenant_id, form_id, tuple(role_ids))] = permissions_by_form[form_id]
+        cache[('application_form_bindings', tenant_id, form_id, tuple(role_ids))] = bindings_by_form[form_id]
 
 
 async def allowed_form_fields(user: dict, form_id: int, action: str, fields: list, db: AsyncSession, *, record_data: Optional[dict] = None, cache: Optional[dict] = None) -> set[str]:

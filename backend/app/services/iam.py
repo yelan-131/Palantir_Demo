@@ -197,18 +197,26 @@ async def revoke_session(db, session_id: str, revoked_by: Optional[int] = None) 
     return True
 
 
-async def is_session_active(session_id: Optional[str]) -> bool:
+async def is_session_active(session_id: Optional[str], *, user_id=None, tenant_id=None) -> bool:
     if not session_id:
         return True
     try:
         from app.core.db import db_session
-        from app.models.relational import UserSession
+        from app.models.relational import UserSession, User, Tenant
 
         async with db_session() as db:
-            row = await db.scalar(select(UserSession).where(UserSession.session_id == session_id))
+            query = (select(UserSession).join(User, User.id == UserSession.user_id)
+                     .join(Tenant, Tenant.id == UserSession.tenant_id)
+                     .where(UserSession.session_id == session_id, User.is_active.is_(True),
+                            User.tenant_id == UserSession.tenant_id, Tenant.status == 'active'))
+            if user_id is not None:
+                query = query.where(UserSession.user_id == user_id)
+            if tenant_id is not None:
+                query = query.where(UserSession.tenant_id == tenant_id)
+            row = await db.scalar(query)
             return bool(row and row.revoked_at is None and row.expires_at > datetime.utcnow())
     except Exception:
-        return not settings.IS_PRODUCTION
+        return False
 
 
 def get_oidc_config() -> dict[str, Any]:

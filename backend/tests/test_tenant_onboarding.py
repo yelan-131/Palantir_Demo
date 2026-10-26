@@ -10,18 +10,8 @@ def _headers(token: str) -> dict[str, str]:
 
 
 def _platform_headers() -> dict[str, str]:
-    from app.core.security import create_access_token
-
-    token = create_access_token(
-        "platform-admin",
-        extra={
-            "uid": 1,
-            "tenant_id": 1,
-            "is_admin": True,
-            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
-        },
-    )
-    return _headers(token)
+    from tests.test_saas_hardening import _admin_token
+    return _headers(_admin_token())
 
 
 def _ok(response, context: str) -> dict:

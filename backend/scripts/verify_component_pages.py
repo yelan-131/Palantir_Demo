@@ -30,6 +30,7 @@ def main():
         return subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_component_pages.py',
             'tests/test_record_service.py', 'tests/test_business_form_approvals.py', 'tests/test_analytics_runtime.py',
             'tests/test_form_shared_services.py', 'tests/test_static_options.py', 'tests/test_multiselect_limits.py',
+            'tests/test_publish_cache_recovery.py',
             '-q', '--tb=short', '--maxfail=1'], cwd=Path(__file__).resolve().parents[1], env=environment).returncode
     finally:
         with connection.cursor() as cursor:

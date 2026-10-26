@@ -35,7 +35,7 @@ if settings.DATABASE_BACKEND.lower() == "sqlite":
         raise RuntimeError("SQLite fallback is disabled when APP_MODE=production")
     logger.info("DATABASE_BACKEND=sqlite; using explicitly configured SQLite")
     try:
-        _engine = create_async_engine(_sqlite_url, echo=False, json_serializer=_json_serializer)
+        _engine = create_async_engine(_sqlite_url, echo=settings.SQL_ECHO, json_serializer=_json_serializer)
         DB_TYPE = "sqlite"
     except Exception as exc:
         raise RuntimeError(f"SQLite engine init failed: {exc}") from exc
@@ -44,7 +44,7 @@ else:
         import asyncpg  # noqa: F401
         _engine = create_async_engine(
             settings.DATABASE_URL,
-            echo=settings.DEBUG,
+            echo=settings.SQL_ECHO,
             json_serializer=_json_serializer,
             pool_size=5,
             max_overflow=5,

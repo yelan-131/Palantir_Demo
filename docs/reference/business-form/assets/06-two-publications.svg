@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="675" viewBox="0 0 1400 675" role="img" aria-label="06-two-publications.svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c8291"/></marker></defs><g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif"><rect x="0" y="0" width="1400" height="675" rx="0" fill="#f7f9fb" stroke="#f7f9fb"/>
+<text x="36" y="48" fill="#203344" font-size="27" font-weight="600">06 / 两种发布：业务定义与组件页面</text>
+<text x="36" y="80" fill="#647485" font-size="16" font-weight="400">当前项目的两条配置链路。复现时应分别管理草稿、发布动作和生效结果。</text>
+<rect x="36" y="140" width="395" height="155" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="54" y="170" fill="#225b73" font-size="19" font-weight="600">业务配置入口</text>
+<text x="54" y="200" fill="#536273" font-size="16" font-weight="400">字段与录入 / 列表与筛选</text>
+<text x="54" y="225" fill="#536273" font-size="16" font-weight="400">流程与审批 / 数据权限</text>
+<text x="54" y="250" fill="#536273" font-size="16" font-weight="400">独立或内嵌 FormSettings</text>
+<rect x="504" y="140" width="395" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="522" y="170" fill="#233344" font-size="19" font-weight="600">业务表单发布</text>
+<text x="522" y="200" fill="#536273" font-size="16" font-weight="400">FormVersion 快照</text>
+<text x="522" y="225" fill="#536273" font-size="16" font-weight="400">字段、填写规则、视图与业务权限</text>
+<text x="522" y="250" fill="#536273" font-size="16" font-weight="400">流程定义和触发绑定另有保存步骤</text>
+<rect x="972" y="140" width="390" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="990" y="170" fill="#233344" font-size="19" font-weight="600">运行态业务能力</text>
+<text x="990" y="200" fill="#536273" font-size="16" font-weight="400">按表单定义填写和查询</text>
+<text x="990" y="225" fill="#536273" font-size="16" font-weight="400">后端校验 / 记录读写 / 审批</text>
+<path d="M431 220 L504 220" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M899 220 L972 220" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="36" y="400" width="395" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="430" fill="#233344" font-size="19" font-weight="600">页面配置入口</text>
+<text x="54" y="460" fill="#536273" font-size="16" font-weight="400">页面与布局 / 添加组件</text>
+<text x="54" y="485" fill="#536273" font-size="16" font-weight="400">全局筛选 / 数据与指标</text>
+<text x="54" y="510" fill="#536273" font-size="16" font-weight="400">样式与组件交互</text>
+<rect x="504" y="400" width="395" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="522" y="430" fill="#233344" font-size="19" font-weight="600">组件页面发布</text>
+<text x="522" y="460" fill="#536273" font-size="16" font-weight="400">ComponentPageVersion</text>
+<text x="522" y="485" fill="#536273" font-size="16" font-weight="400">创建首个版本 / 发布新版本</text>
+<text x="522" y="510" fill="#536273" font-size="16" font-weight="400">不自动发布来源表单草稿</text>
+<rect x="972" y="400" width="390" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="990" y="430" fill="#233344" font-size="19" font-weight="600">运行态页面呈现</text>
+<text x="990" y="460" fill="#536273" font-size="16" font-weight="400">业务列表 / 筛选 / 指标 / 图表</text>
+<text x="990" y="485" fill="#536273" font-size="16" font-weight="400">依赖来源业务表单及其权限</text>
+<path d="M431 475 L504 475" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M899 475 L972 475" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1160 295 L1160 400" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="1168" y="337.5" fill="#52697a" font-size="14" font-weight="400">来源定义</text>
+<text x="36" y="628" fill="#225b73" font-size="21" font-weight="600">复现优先级：先完成上方表单定义链路，再扩展下方页面装配链路。</text></g></svg>

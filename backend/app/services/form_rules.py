@@ -199,7 +199,7 @@ async def archive_options(db, user, field, data, *, selected=None, search=None):
              'matchedFields': match_fields({name: getattr(row, name) for name in attributes}, spec.get('fields') or [label], keyword, spec.get('match', 'contains')) if keyword else []} for row in rows]
 
 
-async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, partial=False):
+async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, partial=False, cache=None):
     fields = [field for field in fields if not field.archived]
     by_name = {field.field_name: field for field in fields}
     data = {**(existing or {}), **incoming}
@@ -304,7 +304,7 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
         resolve(name)
     status = states(fields, data)
     from app.services.designer_permissions import field_settings
-    role_fields=await field_settings(db,user,fields)
+    role_fields=await field_settings(db,user,fields,cache=cache)
     for name,extra in role_fields.items():
         if extra.get('required') and status[name]['visible'] and not status[name].get('generated'):status[name]['required']=True
         if extra.get('hidden'):status[name]['required']=False

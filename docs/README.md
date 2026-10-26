@@ -53,6 +53,12 @@ Read these first when you want the current system truth:
 
 ## Developer Guides
 
+从空工程独立实现业务表单系统，请阅读
+[从零编写业务表单系统：开发规格与实现指南](development/business-form-from-scratch.md)。
+这是新系统开发规格，不要求取得现有项目代码；配置人员操作说明见业务表单使用指南。
+
+视觉与交互配套资料：[业务表单定义：现有 UI、架构与交互参考](reference/business-form/README.md)，以及[离线图文版](reference/business-form/index.html)。
+
 | Document | Purpose |
 | --- | --- |
 | [Frontend Development](development/frontend.md) | React/Vite shell, API client, routes, menus, UI conventions. |
@@ -72,6 +78,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.6](operations/release-0.3.6.md) | AI workspace history, runtime form permissions, knowledge ontology intake, admin governance, auth hardening, and production deployment. |
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
 | [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
+| [Release 0.3.17](operations/release-0.3.17.md) | Conditional approval routing, access checks, defaults, publish preview recovery, request-scoped read optimization, and local performance tools; updated through 2026-10-27. |
 | [Release 0.3.16](operations/release-0.3.16.md) | Unified component canvas, independent page publication, data workspaces, knowledge browsing, shared form services, and option validation. |
 | [Release 0.3.15](operations/release-0.3.15.md) | HTTP business form rendering and UUID compatibility fix. |
 | [Release 0.3.14](operations/release-0.3.14.md) | Analytics workspace, shared metrics, form imports and attachments, field protection, and designer version management. |
@@ -84,6 +91,9 @@ Read these first when you want the current system truth:
 | [Demo Knowledge Assets](operations/demo-knowledge-assets.md) | Local scripts for generating and seeding demo knowledge-base files. |
 
 ## Product And UX Design
+
+For the business form configuration-to-publication walkthrough, see
+[业务表单使用指南：从配置到发布](business/business-form-guide.md).
 
 | Document | Purpose |
 | --- | --- |

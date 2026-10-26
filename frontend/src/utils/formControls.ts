@@ -28,6 +28,12 @@ export function enumOptions(raw: unknown): { label: string; value: string | numb
   });
   return values && typeof values === 'object' ? Object.entries(values).filter(([key, value]) => !['source','custom'].includes(key) && ['string','number'].includes(typeof value)).map(([value,label]) => ({value,label:String(label)})) : [];
 }
+/** Render stored choice keys using their labels, preserving unknown values. */
+export function choiceLabel(value: unknown, raw: unknown): string {
+  const options = enumOptions(raw);
+  const one = (item: unknown) => options.find(option => String(option.value) === String(item))?.label ?? String(item ?? '');
+  return Array.isArray(value) ? value.map(one).join('、') : one(value);
+}
 export function normalizeText(value: string, settings: ControlSettings): string {
   const trimmed = settings.trimMode === 'trim' ? value.trim() : ['removeAll','trimAll'].includes(settings.trimMode || '') ? value.replace(/\s/g,'') : value;
   return settings.caseMode === 'upper' ? trimmed.toUpperCase() : settings.caseMode === 'lower' ? trimmed.toLowerCase() : trimmed;

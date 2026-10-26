@@ -42,7 +42,7 @@ def _uid() -> int:
     return 1_000_000 + (uuid.uuid4().int % 8_000_000)
 
 
-def _seed_users(uids: list[int]) -> None:
+def _seed_users(uids: list[int], *, admin_uid: int | None = None) -> None:
     from app.core.db import db_session
     from app.models.relational import User
 
@@ -57,6 +57,7 @@ def _seed_users(uids: list[int]) -> None:
                     email=f"wf-{uid}@test.local",
                     hashed_password="not-a-real-hash",
                     is_active=True,
+                    is_admin=uid == admin_uid,
                 ))
             await session.commit()
 
@@ -194,7 +195,7 @@ def test_create_definition_requires_admin(client):
 
 def test_definition_update_bumps_version_and_snapshots(client):
     admin = _uid()
-    _seed_users([admin])
+    _seed_users([admin], admin_uid=admin)
     payload = _definition_payload(f"wf-snap-{admin}", [[admin]])
     created = _ok(client.post("/api/v1/workflow/definitions", headers=_headers(admin, is_admin=True), json=payload), "create")
     assert created["version"] == 1
@@ -222,7 +223,7 @@ def test_definition_update_bumps_version_and_snapshots(client):
 
 def test_get_definition_not_found_is_404(client):
     admin = _uid()
-    _seed_users([admin])
+    _seed_users([admin], admin_uid=admin)
     response = client.get("/api/v1/workflow/definitions/99999999", headers=_headers(admin, is_admin=True))
     assert response.status_code == 404
 
@@ -230,7 +231,7 @@ def test_get_definition_not_found_is_404(client):
 def test_delete_definition_with_instances_is_409(client):
     admin = _uid()
     approver = _uid()
-    _seed_users([admin, approver])
+    _seed_users([admin, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -249,7 +250,7 @@ def test_delete_definition_with_instances_is_409(client):
 
 def test_start_requires_published_definition(client):
     admin = _uid()
-    _seed_users([admin])
+    _seed_users([admin], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -267,7 +268,7 @@ def test_start_pins_version_and_creates_first_approval(client):
     admin = _uid()
     initiator = _uid()
     approver = _uid()
-    _seed_users([admin, initiator, approver])
+    _seed_users([admin, initiator, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -292,7 +293,7 @@ def test_only_assigned_approver_can_act(client):
     initiator = _uid()
     approver = _uid()
     outsider = _uid()
-    _seed_users([admin, initiator, approver, outsider])
+    _seed_users([admin, initiator, approver, outsider], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -322,7 +323,7 @@ def test_only_assigned_approver_can_act(client):
 def test_act_on_finalized_instance_is_409(client):
     admin = _uid()
     approver = _uid()
-    _seed_users([admin, approver])
+    _seed_users([admin, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -350,7 +351,7 @@ def test_act_on_finalized_instance_is_409(client):
 def test_admin_override_records_own_approval_row(client):
     admin = _uid()
     approver = _uid()
-    _seed_users([admin, approver])
+    _seed_users([admin, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -377,7 +378,7 @@ def test_countersign_waits_for_all_approvers(client):
     admin = _uid()
     first = _uid()
     second = _uid()
-    _seed_users([admin, first, second])
+    _seed_users([admin, first, second], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -414,7 +415,7 @@ def test_countersign_waits_for_all_approvers(client):
 def test_reject_terminates_and_blocks_followups(client):
     admin = _uid()
     approver = _uid()
-    _seed_users([admin, approver])
+    _seed_users([admin, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -444,7 +445,7 @@ def test_cancel_limited_to_initiator_or_admin(client):
     initiator = _uid()
     approver = _uid()
     outsider = _uid()
-    _seed_users([admin, initiator, approver, outsider])
+    _seed_users([admin, initiator, approver, outsider], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -475,7 +476,7 @@ def test_definition_edit_does_not_reshape_inflight_instance(client):
     admin = _uid()
     first = _uid()
     second = _uid()
-    _seed_users([admin, first, second])
+    _seed_users([admin, first, second], admin_uid=admin)
     two_step = _definition_payload(f"wf-vpin-{admin}", [[first], [second]])
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
@@ -532,7 +533,7 @@ def test_workflow_notifications_are_owner_scoped(client):
     admin = _uid()
     approver = _uid()
     outsider = _uid()
-    _seed_users([admin, approver, outsider])
+    _seed_users([admin, approver, outsider], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),
@@ -575,7 +576,7 @@ def test_workflow_notifications_are_owner_scoped(client):
 def test_legacy_act_endpoint_uses_token_identity(client):
     admin = _uid()
     approver = _uid()
-    _seed_users([admin, approver])
+    _seed_users([admin, approver], admin_uid=admin)
     created = _ok(client.post(
         "/api/v1/workflow/definitions",
         headers=_headers(admin, is_admin=True),

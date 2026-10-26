@@ -11,9 +11,15 @@ async def role_configs(db,user,form,*,cache=None):
     cache=cache if cache is not None else {};key=('designer_roles',form.id)
     if key in cache:return cache[key]
     from app.core.permissions import get_user_role_ids
-    ids=await get_user_role_ids(user,db)
-    roles=(await db.scalars(select(Role).where(Role.tenant_id==form.tenant_id,Role.id.in_(ids)))).all() if ids else []
     design=(form.config or {}).get('permissionDesign') or {};configured=design.get('roles') or {}
+    if not configured:
+        cache[key]=[]
+        return []
+    if 'role_ids' not in cache:cache['role_ids']=await get_user_role_ids(user,db)
+    ids=cache['role_ids']
+    if 'designer_role_records' not in cache:
+        cache['designer_role_records']=(await db.scalars(select(Role).where(Role.tenant_id==form.tenant_id,Role.id.in_(ids)))).all() if ids else []
+    roles=cache['designer_role_records']
     values=[]
     for role in roles:
         value=configured.get(role.name) or configured.get(role.label)
@@ -84,8 +90,8 @@ async def field_settings(db,user,fields,*,cache=None):
             result[field.field_name].update(hidden=result[field.field_name]['hidden'] or 'hide' in modes,masked='mask' in modes)
     return result
 
-async def require_action(db,user,form,action):
-    configs=await role_configs(db,user,form)
+async def require_action(db,user,form,action,*,cache=None):
+    configs=await role_configs(db,user,form,cache=cache)
     if any((value.get('actions') or {}).get(action) is False for value in configs):raise HTTPException(403,'角色未获准执行此动作')
 
 async def allow_statistics(db,user,form):

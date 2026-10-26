@@ -45,11 +45,12 @@ test('deleted or disabled sort columns are discarded, including a removed view',
   }
 });
 
-test('workspace access requires backend administrator, runtime configure permission and enabled entry', () => {
-  assert.equal(canConfigureWorkspace(true, true, ['create', 'settings']), true);
-  assert.equal(canConfigureWorkspace(false, true, ['settings']), false);
-  assert.equal(canConfigureWorkspace(true, false, ['settings']), false);
-  assert.equal(canConfigureWorkspace(true, true, ['create']), false);
+test('administrator design access is independent of business toolbar visibility and respects read-only permission', () => {
+  assert.equal(canConfigureWorkspace(true, true), true);
+  assert.equal(canConfigureWorkspace(false, true), false);
+  assert.equal(canConfigureWorkspace(true, false), false);
+  const source = fs.readFileSync(path.join(__dirname, '../src/pages/DynamicPage/index.tsx'), 'utf8');
+  assert.match(source, /canConfigureWorkspace\(Boolean\(user\?\.is_admin\), canRunAction\('configure'\)\)/);
 });
 
 test('runtime normalization rejects published default sorting on unavailable columns', () => {

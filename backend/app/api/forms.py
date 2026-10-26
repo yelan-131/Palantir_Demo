@@ -526,7 +526,7 @@ async def _start_form_workflows(
         managed = str((config or {}).get("domainCode", "")).startswith("form-approval:") or (config or {}).get("domainCode") == "material-application-approval"
         if managed and not snapshot:
             raise HTTPException(409, "审批流程缺少已发布版本，请重新发布配置")
-        steps = _workflow_config_steps(config if isinstance(config, dict) else {})
+        steps = _workflow_config_steps(config if isinstance(config, dict) else {}, form_data)
         first_step_index = _find_first_approval_step(steps) if steps else 0
         current_step = steps[first_step_index] if steps and first_step_index < len(steps) else None
         variables = {
@@ -564,6 +564,8 @@ async def _start_form_workflows(
             "resource_id": record_payload.get("id"),
             "variables": variables,
         }
+        if config.get('nodes') and not config.get('steps'):
+            state['execution_node_ids'] = [step['node_id'] for step in steps]
         _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
         title = _workflow_instance_title(form, record_payload, binding.config)
         instance = WorkflowInstance(
@@ -945,8 +947,6 @@ async def list_forms(
         )).scalars().all()
         for field in field_rows:
             fields_by_form.setdefault(field.form_id, []).append(field)
-    if not forms:
-        raise seed_data_required("No forms found. Run the business form seed before opening forms.")
     return {"data": [_form_payload(form, fields=fields_by_form.get(form.id, [])) for form in forms]}
 
 

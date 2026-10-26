@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="920" viewBox="0 0 1400 920" role="img" aria-label="03-current-architecture.svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c8291"/></marker></defs><g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif"><rect x="0" y="0" width="1400" height="920" rx="0" fill="#f7f9fb" stroke="#f7f9fb"/>
+<text x="36" y="48" fill="#203344" font-size="27" font-weight="600">03 / 当前表单架构：界面、服务与存储</text>
+<text x="36" y="80" fill="#647485" font-size="16" font-weight="400">服务模块在同一个后端应用内；箭头代表调用或数据依赖，不代表独立微服务。</text>
+<rect x="36" y="120" width="408" height="145" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="150" fill="#233344" font-size="19" font-weight="600">配置入口</text>
+<text x="54" y="180" fill="#536273" font-size="16" font-weight="400">应用装配 → FormSettings</text>
+<text x="54" y="205" fill="#536273" font-size="16" font-weight="400">字段 / 布局 / 视图 / 流程 / 权限</text>
+<text x="54" y="230" fill="#536273" font-size="16" font-weight="400">ComponentPages 可内嵌打开设计器</text>
+<rect x="494" y="120" width="408" height="145" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="512" y="150" fill="#233344" font-size="19" font-weight="600">运行入口</text>
+<text x="512" y="180" fill="#536273" font-size="16" font-weight="400">FormPageEntry → 组件页或原业务页</text>
+<text x="512" y="205" fill="#536273" font-size="16" font-weight="400">DynamicPage / FormLayout / 控件</text>
+<text x="512" y="230" fill="#536273" font-size="16" font-weight="400">列表、填写、附件与业务提交</text>
+<rect x="952" y="120" width="410" height="145" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="970" y="150" fill="#233344" font-size="19" font-weight="600">AI 工具适配器</text>
+<text x="970" y="180" fill="#536273" font-size="16" font-weight="400">权限 / 工具白名单 / 确认</text>
+<text x="970" y="205" fill="#536273" font-size="16" font-weight="400">表单检查及写入工具</text>
+<text x="970" y="230" fill="#536273" font-size="16" font-weight="400">与 HTTP 复用相应业务服务</text>
+<rect x="36" y="320" width="866" height="110" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="350" fill="#233344" font-size="19" font-weight="600">HTTP API 与请求身份</text>
+<text x="54" y="380" fill="#536273" font-size="16" font-weight="400">forms.py / pages / workflow 等路由 → 租户、管理员、运行权限检查</text>
+<path d="M240 265 L240 320" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M698 265 L698 320" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="36" y="485" width="408" height="155" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="54" y="515" fill="#225b73" font-size="19" font-weight="600">表单定义与发布服务</text>
+<text x="54" y="545" fill="#536273" font-size="16" font-weight="400">form_fields / form_layouts</text>
+<text x="54" y="570" fill="#536273" font-size="16" font-weight="400">form_definition / form_versions</text>
+<text x="54" y="595" fill="#536273" font-size="16" font-weight="400">form_rule_preview / form_schemas</text>
+<rect x="494" y="485" width="408" height="155" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="512" y="515" fill="#225b73" font-size="19" font-weight="600">记录与运行服务</text>
+<text x="512" y="545" fill="#536273" font-size="16" font-weight="400">records / form_runtime / form_rules</text>
+<text x="512" y="570" fill="#536273" font-size="16" font-weight="400">defaults / calculations / option_sources</text>
+<text x="512" y="595" fill="#536273" font-size="16" font-weight="400">imports / files / approvals</text>
+<rect x="952" y="485" width="410" height="155" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="970" y="515" fill="#233344" font-size="19" font-weight="600">流程服务与绑定</text>
+<text x="970" y="545" fill="#536273" font-size="16" font-weight="400">流程定义及版本快照</text>
+<text x="970" y="570" fill="#536273" font-size="16" font-weight="400">实例 / 任务 / 审批 / 通知</text>
+<text x="970" y="595" fill="#536273" font-size="16" font-weight="400">业务动作与 workflow_bindings</text>
+<path d="M240 430 L240 485" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M698 430 L698 485" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1150,265 1150,455 240,455 240,485" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M902 375 L1150 485" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="36" y="715" width="408" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="745" fill="#233344" font-size="19" font-weight="600">配置与版本存储</text>
+<text x="54" y="775" fill="#536273" font-size="16" font-weight="400">forms / form_fields / form_layouts</text>
+<text x="54" y="800" fill="#536273" font-size="16" font-weight="400">form_versions / actions / permissions</text>
+<rect x="494" y="715" width="408" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="512" y="745" fill="#233344" font-size="19" font-weight="600">业务记录存储</text>
+<text x="512" y="775" fill="#536273" font-size="16" font-weight="400">动态 JSON：dynamic_records</text>
+<text x="512" y="800" fill="#536273" font-size="16" font-weight="400">物理表：共享 form_engine 适配</text>
+<rect x="952" y="715" width="410" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="970" y="745" fill="#233344" font-size="19" font-weight="600">页面与流程存储</text>
+<text x="970" y="775" fill="#536273" font-size="16" font-weight="400">ComponentPage / 页面版本</text>
+<text x="970" y="800" fill="#536273" font-size="16" font-weight="400">流程定义版本 / 实例 / 任务</text>
+<path d="M240 640 L240 715" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M698 640 L698 715" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1150 640 L1150 715" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="36" y="886" fill="#52697a" font-size="17" font-weight="400">存储提示：物理表单新增字段可能在发布前执行 DDL；组件页面版本和表单版本各自管理。</text></g></svg>

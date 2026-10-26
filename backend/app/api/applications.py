@@ -182,6 +182,13 @@ def _menu_rule_subject_matches(rule: dict, user: dict, role_ids: set[int], inher
 async def _user_can_access_menu_node(db: AsyncSession, user: dict, node, role_ids: list[int]) -> bool:
     if user.get("is_admin"):
         return True
+    if node.form_id is not None:
+        from app.core.permissions import has_form_permission
+        from app.models.relational import Form
+        form = await db.get(Form, node.form_id)
+        if (not form or form.tenant_id != current_tenant_id(user) or form.status != 'published'
+                or not await has_form_permission(user, form.id, 'view', db)):
+            return False
     config = node.config or {}
     inherited = await _user_can_access_application(db, user, node.application_id)
     role_id_set = set(role_ids)
@@ -448,8 +455,6 @@ async def list_applications(
     result = await safe_db_call(_query)
     if result is None:
         raise database_unavailable("Applications database unavailable")
-    if not result.get("data"):
-        raise seed_data_required("No published applications found. Run the application seed before opening the workspace.")
     return result
 
 
@@ -489,6 +494,7 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
             )
             .order_by(ApplicationForm.sort_order, Form.id)
         )
+        from app.core.permissions import has_form_permission
         form_items = [
             {
                 "id": 100000 + binding.id,
@@ -506,6 +512,7 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
                 "is_default": False,
             }
             for binding, form in form_rows.fetchall()
+            if user.get('is_admin') or await has_form_permission(user, form.id, 'view', session)
         ]
         if form_items:
             return {"data": form_items}

@@ -16,17 +16,8 @@ def _headers(token: str) -> dict[str, str]:
 
 
 def _admin_token() -> str:
-    from app.core.security import create_access_token
-
-    return create_access_token(
-        "admin",
-        extra={
-            "uid": 1,
-            "tenant_id": 1,
-            "is_admin": True,
-            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
-        },
-    )
+    from tests.test_saas_hardening import _admin_token as platform_admin_token
+    return platform_admin_token()
 
 
 def _admin_headers() -> dict[str, str]:

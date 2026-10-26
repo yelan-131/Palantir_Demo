@@ -18,6 +18,28 @@ def partial_mask(value,start=1,end=1):
     return text[:start]+'*'*max(4,len(text)-start-end)+(text[-end:] if end else '')
 
 
+def _dependencies(fields, cache):
+    key = ('presentation_dependencies', tuple(id(field) for field in fields))
+    if key not in cache:
+        dependencies = {field.field_name: set() for field in fields}
+        for field in fields:
+            expression = (config(field).get('computed') or {}).get('expression')
+            if expression:
+                try:dependencies[field.field_name].update(node.id for node in ast.walk(ast.parse(expression, mode='eval')) if isinstance(node, ast.Name))
+                except (SyntaxError, TypeError):pass
+            ref = config(field).get('relation_config') or {}
+            if isinstance(ref, str):
+                try:ref = json.loads(ref)
+                except (ValueError, TypeError):ref = {}
+            for target in ref.get('backfill') or {}:
+                if isinstance(target, str) and target in dependencies:dependencies[target].add(field.field_name)
+            for rule in config(field).get('assignmentRules') or []:
+                target = rule.get('targetField')
+                if isinstance(target, str) and target in dependencies:dependencies[target].add(field.field_name)
+        cache[key] = dependencies
+    return cache[key]
+
+
 async def presentation(db,user,fields,data,*,cache=None):
     """Return safe display values and executable copy policy, including for admins."""
     cache=cache if cache is not None else {};masked={};result={};out=dict(data)
@@ -44,32 +66,22 @@ async def presentation(db,user,fields,data,*,cache=None):
         if extra.get('hidden'):
             out.pop(name,None);masked[name]=True;result[name].update(masked=True,visible=False)
     # Calculated derivatives cannot serve as an alternate plaintext channel.
+    dependencies = _dependencies(fields, cache)
     changed=True
     while changed:
         changed=False
         for field in fields:
             if masked.get(field.field_name):continue
-            dependencies=set()
-            expression=(config(field).get('computed') or {}).get('expression')
-            if expression:
-                try: dependencies={node.id for node in ast.walk(ast.parse(expression,mode='eval')) if isinstance(node,ast.Name)}
-                except (SyntaxError,TypeError):pass
-            for source in fields:
-                ref=config(source).get('relation_config') or {}
-                if isinstance(ref,str):
-                    try:ref=json.loads(ref)
-                    except (ValueError,TypeError):ref={}
-                if field.field_name in (ref.get('backfill') or {}) or any(item.get('targetField')==field.field_name for item in config(source).get('assignmentRules') or []):dependencies.add(source.field_name)
-            if any(masked.get(key) for key in dependencies):
+            if any(masked.get(key) for key in dependencies[field.field_name]):
                 name=field.field_name;masked[name]=True;out[name]='••••••';result[name].update(masked=True,copyText='••••••');changed=True
     for name,policy in result.items():
         if policy.get('copyMode')=='maskedCopy':policy['copyText']=partial_mask(out.get(name)) if policy.get('visible') is not False else ''
     return out,result
 
 
-async def protect_update(db,user,fields,incoming,existing):
+async def protect_update(db,user,fields,incoming,existing,*,cache=None):
     if existing is None:return
-    _,policies=await presentation(db,user,fields,existing)
+    _,policies=await presentation(db,user,fields,existing,cache=cache)
     denied=[field.label for field in fields if policies[field.field_name]['masked'] and field.field_name in incoming and incoming[field.field_name]!=existing.get(field.field_name)]
     if denied:raise HTTPException(403,'脱敏字段不可直接修改：'+'、'.join(denied))
 

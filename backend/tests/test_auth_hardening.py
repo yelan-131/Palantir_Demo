@@ -8,16 +8,35 @@ from fastapi.testclient import TestClient
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_accepts_bearer_token():
+async def test_get_current_user_accepts_bearer_token(tmp_path, monkeypatch):
     from app.api import deps
     from app.core.security import create_access_token
+    from contextlib import asynccontextmanager
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.models.relational import Base, Tenant, User
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "auth.db"}')
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as db:
+        db.add(Tenant(id=1, name='Auth', slug='auth'))
+        db.add(User(id=321, tenant_id=1, username='auth-hardening-user', hashed_password='test', is_active=True))
+        await db.commit()
+    @asynccontextmanager
+    async def session():
+        async with factory() as db:
+            yield db
+    monkeypatch.setattr(deps, 'db_session', session)
 
     token = create_access_token(
         "auth-hardening-user",
         extra={"uid": 321, "tenant_id": 1, "is_admin": False},
     )
 
-    payload = await deps.get_current_user(authorization=f"Bearer {token}", access_token=None)
+    try:
+        payload = await deps.get_current_user(authorization=f"Bearer {token}", access_token=None)
+    finally:
+        await engine.dispose()
 
     assert payload["sub"] == "auth-hardening-user"
     assert payload["tenant_id"] == 1

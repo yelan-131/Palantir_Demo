@@ -47,11 +47,23 @@ async def get_current_user(
     if not payload:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
 
+    # Signed identity is not proof that the account is still enabled. Check
+    # legacy bearer tokens too, including tokens without a session id.
+    from app.models.relational import User, Tenant
+    async with db_session() as db:
+        account = await db.get(User, payload.get("uid")) if type(payload.get("uid")) is int else None
+        if not account or not account.is_active or account.tenant_id != payload.get("tenant_id"):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or unavailable")
+        tenant = await db.get(Tenant, account.tenant_id)
+        if not tenant or tenant.status != 'active':
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Tenant disabled or unavailable")
+        payload = {**payload, "is_admin": bool(account.is_admin), "sub": account.username}
+
     sid = payload.get("sid")
     if sid:
         from app.services.iam import is_session_active
 
-        if not await is_session_active(str(sid)):
+        if not await is_session_active(str(sid), user_id=payload.get("uid"), tenant_id=payload.get("tenant_id")):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired or revoked")
 
     return payload

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="770" viewBox="0 0 1400 770" role="img" aria-label="05-interaction-states.svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c8291"/></marker></defs><g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif"><rect x="0" y="0" width="1400" height="770" rx="0" fill="#f7f9fb" stroke="#f7f9fb"/>
+<text x="36" y="48" fill="#203344" font-size="27" font-weight="600">05 / 交互状态：从选中控件到线上版本</text>
+<text x="36" y="80" fill="#647485" font-size="16" font-weight="400">草稿脏状态和线上版本同时存在；不应把它们合并成一个“已发布 / 未发布”开关。</text>
+<rect x="36" y="144" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="174" fill="#233344" font-size="19" font-weight="600">已载入配置</text>
+<text x="54" y="204" fill="#536273" font-size="16" font-weight="400">读取服务器草稿 / 线上摘要</text>
+<text x="54" y="229" fill="#536273" font-size="16" font-weight="400">未选中或恢复选中控件</text>
+<rect x="384" y="144" width="280" height="125" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="402" y="174" fill="#225b73" font-size="19" font-weight="600">本地未保存</text>
+<text x="402" y="204" fill="#536273" font-size="16" font-weight="400">添加 / 改属性 / 排序</text>
+<text x="402" y="229" fill="#536273" font-size="16" font-weight="400">画布与右侧面板同步</text>
+<rect x="732" y="144" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="750" y="174" fill="#233344" font-size="19" font-weight="600">保存中</text>
+<text x="750" y="204" fill="#536273" font-size="16" font-weight="400">等待配置与布局请求</text>
+<text x="750" y="229" fill="#536273" font-size="16" font-weight="400">操作区显示加载反馈</text>
+<rect x="1080" y="144" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="1098" y="174" fill="#233344" font-size="19" font-weight="600">已保存待发布</text>
+<text x="1098" y="204" fill="#536273" font-size="16" font-weight="400">可以离开后继续配置</text>
+<text x="1098" y="229" fill="#536273" font-size="16" font-weight="400">线上仍使用既有版本</text>
+<path d="M316 205 L384 205" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M664 205 L732 205" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1012 205 L1080 205" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1080" y="375" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="1098" y="405" fill="#233344" font-size="19" font-weight="600">发布预检查</text>
+<text x="1098" y="435" fill="#536273" font-size="16" font-weight="400">先保存最新草稿</text>
+<text x="1098" y="460" fill="#536273" font-size="16" font-weight="400">读取服务器影响报告</text>
+<rect x="732" y="375" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="750" y="405" fill="#233344" font-size="19" font-weight="600">发布确认</text>
+<text x="750" y="435" fill="#536273" font-size="16" font-weight="400">无阻断才可确认</text>
+<text x="750" y="460" fill="#536273" font-size="16" font-weight="400">有提醒需理解影响</text>
+<rect x="384" y="375" width="280" height="125" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="402" y="405" fill="#233344" font-size="19" font-weight="600">正式发布</text>
+<text x="402" y="435" fill="#536273" font-size="16" font-weight="400">流程及绑定更新</text>
+<text x="402" y="460" fill="#536273" font-size="16" font-weight="400">服务端再次检查表单</text>
+<rect x="36" y="375" width="280" height="125" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="54" y="405" fill="#225b73" font-size="19" font-weight="600">线上新版本</text>
+<text x="54" y="435" fill="#536273" font-size="16" font-weight="400">生成版本快照</text>
+<text x="54" y="460" fill="#536273" font-size="16" font-weight="400">运行页重新读取</text>
+<path d="M1220 269 L1220 375" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1080 435 L1012 435" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M732 435 L664 435" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M384 435 L316 435" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="36" y="585" width="620" height="110" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="615" fill="#233344" font-size="19" font-weight="600">离开编辑器</text>
+<text x="54" y="645" fill="#536273" font-size="16" font-weight="400">存在未保存修改 → 确认保留编辑或放弃；内嵌返回可保存草稿后退出</text>
+<text x="54" y="670" fill="#536273" font-size="16" font-weight="400">放弃只影响当前未保存设计，不能删除已存在的业务记录</text>
+<rect x="704" y="585" width="656" height="110" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="722" y="615" fill="#233344" font-size="19" font-weight="600">恢复与异常</text>
+<text x="722" y="645" fill="#536273" font-size="16" font-weight="400">保存失败 → 不标记已保存；发布阻断 → 回到草稿修改</text>
+<text x="722" y="670" fill="#536273" font-size="16" font-weight="400">用线上配置重置草稿 → 覆盖设计配置；不回滚业务数据</text></g></svg>

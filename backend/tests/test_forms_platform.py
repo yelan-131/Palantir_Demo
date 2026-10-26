@@ -386,3 +386,13 @@ def test_utf8_byte_limits_measure_bytes_and_do_not_change_design_required_flags(
             _normalize_form_field_data({'validation':{'maxBytes':limit}}, current_field_type='string')
     with pytest.raises(HTTPException):
         _normalize_form_field_data({'validation':{'maxBytes':6}}, current_field_type='integer')
+
+
+def test_publish_creates_view_metadata_for_api_created_forms():
+    from app.services.form_definition import _promote_snapshot_config
+    snapshot = {'form': {'config': {'viewConfigDraft': {'table': {'columns': []}}}}}
+    promoted = _promote_snapshot_config(snapshot, '2026-10-26T12:00:00', 3)
+    meta = promoted['form']['config']['viewConfigMeta']
+    assert meta['status'] == 'published'
+    assert meta['publishedVersion'] == 3
+    assert meta['publishedAt'] == '2026-10-26T12:00:00'

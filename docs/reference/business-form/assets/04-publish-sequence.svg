@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="870" viewBox="0 0 1400 870" role="img" aria-label="04-publish-sequence.svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c8291"/></marker></defs><g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif"><rect x="0" y="0" width="1400" height="870" rx="0" fill="#f7f9fb" stroke="#f7f9fb"/>
+<text x="36" y="48" fill="#203344" font-size="27" font-weight="600">04 / 关键交互：编辑 → 保存 → 检查 → 发布</text>
+<text x="36" y="80" fill="#647485" font-size="16" font-weight="400">依据当前设计器调用链；前端分多次请求，不能把整个操作画成一笔跨模块事务。</text>
+<rect x="60" y="112" width="290" height="66" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="78" y="142" fill="#233344" font-size="19" font-weight="600">配置人员</text>
+<line x1="205" y1="190" x2="205" y2="720" stroke="#cdd6de" stroke-dasharray="6 6"/>
+<rect x="385" y="112" width="290" height="66" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="403" y="142" fill="#233344" font-size="19" font-weight="600">设计器 / 内存草稿</text>
+<line x1="530" y1="190" x2="530" y2="720" stroke="#cdd6de" stroke-dasharray="6 6"/>
+<rect x="720" y="112" width="290" height="66" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="738" y="142" fill="#233344" font-size="19" font-weight="600">配置与流程接口</text>
+<line x1="865" y1="190" x2="865" y2="720" stroke="#cdd6de" stroke-dasharray="6 6"/>
+<rect x="1055" y="112" width="290" height="66" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="1073" y="142" fill="#233344" font-size="19" font-weight="600">表单发布服务 / 数据库</text>
+<line x1="1200" y1="190" x2="1200" y2="720" stroke="#cdd6de" stroke-dasharray="6 6"/>
+<path d="M205 235 L530 235" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="217" y="222" fill="#334e62" font-size="15" font-weight="400">选中控件并改属性</text>
+<text x="430" y="267" fill="#647485" font-size="15" font-weight="400">画布刷新 / 标记 dirty</text>
+<path d="M205 305 L530 305" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="217" y="292" fill="#334e62" font-size="15" font-weight="400">点击保存草稿</text>
+<path d="M530 350 L865 350" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="337" fill="#334e62" font-size="15" font-weight="400">保存配置、布局、默认值及流程草稿</text>
+<path d="M865 395 L530 395" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="382" fill="#334e62" font-size="15" font-weight="400">成功反馈 / 更新保存状态</text>
+<path d="M205 450 L530 450" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="217" y="437" fill="#334e62" font-size="15" font-weight="400">点击发布更改</text>
+<path d="M530 495 L1200 495" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="482" fill="#334e62" font-size="15" font-weight="400">先保存草稿，再请求发布预检查</text>
+<path d="M1200 540 L530 540" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="527" fill="#334e62" font-size="15" font-weight="400">影响报告：阻断 / 提醒 / 信息</text>
+<path d="M205 585 L530 585" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="217" y="572" fill="#334e62" font-size="15" font-weight="400">阅读报告并确认发布</text>
+<path d="M530 630 L865 630" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="617" fill="#334e62" font-size="15" font-weight="400">发布流程定义、更新触发绑定</text>
+<path d="M530 680 L1200 680" fill="none" stroke="#6c8291" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="542" y="667" fill="#334e62" font-size="15" font-weight="400">请求表单发布 / 再次校验</text>
+<rect x="36" y="756" width="650" height="72" rx="10" fill="#fff" stroke="#cdd6de"/>
+<text x="54" y="786" fill="#233344" font-size="19" font-weight="600">失败分支</text>
+<text x="54" y="816" fill="#536273" font-size="16" font-weight="400">阻断 → 返回配置；请求失败 → 保留草稿并检查各模块状态</text>
+<rect x="714" y="756" width="648" height="72" rx="10" fill="#edf5f8" stroke="#6594a7"/>
+<text x="732" y="786" fill="#225b73" font-size="19" font-weight="600">成功分支</text>
+<text x="732" y="816" fill="#536273" font-size="16" font-weight="400">表单版本生成 → 刷新版本状态及运行页 → 验收</text></g></svg>

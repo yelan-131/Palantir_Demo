@@ -38,17 +38,20 @@ def _headers(token: str) -> dict[str, str]:
 
 
 def _admin_headers() -> dict[str, str]:
-    from app.core.security import create_access_token
+    from tests.test_saas_hardening import _admin_token
+    from app.core.db import db_session
+    from app.models.relational import AIAgentToolDefinition
+    from app.services.ai.agent_registry import seed_agent_registry_from_files
+    from sqlalchemy import func, select
 
-    token = create_access_token(
-        "admin",
-        extra={
-            "uid": 1,
-            "tenant_id": 1,
-            "is_admin": True,
-            "roles": [{"id": 1, "name": "admin", "label": "Administrator"}],
-        },
-    )
+    async def ensure_test_registry():
+        async with db_session() as db:
+            count = await db.scalar(select(func.count()).select_from(AIAgentToolDefinition))
+        if not count:
+            await seed_agent_registry_from_files(updated_by='legacy-proposal-tests')
+
+    token = _admin_token()
+    asyncio.run(ensure_test_registry())
     return _headers(token)
 
 

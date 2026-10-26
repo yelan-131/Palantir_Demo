@@ -3,7 +3,7 @@ import { selectionCountError } from '@/utils/selectOptions';
 import FormImport from '@/components/FormImport';
 import FieldProtection, {protectCopy, type FieldPolicy} from '@/components/FieldProtection';
 import FieldControl from '@/components/FormWidgets/FieldControl';
-import { enumOptions, type ControlSettings } from '@/utils/formControls';
+import { enumOptions, choiceLabel, type ControlSettings } from '@/utils/formControls';
 import FormLayout from '@/components/FormLayout';
 import type { FormLayoutNode } from '@/utils/formLayout';
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -382,6 +382,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState('');
+  const [configDenied, setConfigDenied] = useState(false);
   const [search, setSearch] = useState('');
   const [advancedFiltersOpen,setAdvancedFiltersOpen]=useState(false);
   const [exporting,setExporting]=useState(false);
@@ -389,15 +390,49 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
   const [sortState, setSortState] = useState<{ field?: string; order?: 'asc' | 'desc' }>({});
 
-  useEffect(()=>{
-    let active=true;
-    const sources=fields.filter(field=>{try{return ['dictionary','externalApi'].includes(JSON.parse(field.relation_config||'{}').source_kind);}catch{return false;}});
-    if(!platformForm||!data.length){setReferenceLabels({});return;}
-    Promise.allSettled(sources.map(async field=>{const dependencies=(field.typeSettings?.search?.filters||[]).filter(item=>item.source==='field'&&item.sourceField).map(item=>item.sourceField!);const contexts=[...new Map(data.map(row=>{const context=Object.fromEntries(dependencies.filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));return [JSON.stringify(context),context];})).values()];const responses=await Promise.all(contexts.map(context=>getFormReferenceOptions(platformForm.id,field.field_name,context)));return [field.field_name,Object.fromEntries(responses.flatMap(response=>(response.data.data||[]).map((option:any)=>[String(option.id),String(option.label)])))] as const;})).then(results=>{if(active)setReferenceLabels(Object.fromEntries(results.flatMap(result=>result.status==='fulfilled'?[result.value]:[])));});
-    return()=>{active=false;};
-  },[platformForm?.id,fields,data]);
-
   const [detailRecord, setDetailRecord] = useState<Record<string, any> | null>(null);
+  const [detailFields, setDetailFields] = useState<FieldDef[]>([]);
+  useEffect(() => {
+    let active = true;
+    setDetailFields([]);
+    if (!platformForm || !detailRecord) return;
+    // Detail uses the published form layout, not the smaller list schema.
+    // This read endpoint still enforces view permission for every field.
+    getPlatformForm(platformForm.id, { schema: 'published', scope: 'edit' }).then(response => {
+      const detail = unwrapApiData<PlatformForm>(response);
+      if (active) setDetailFields((detail?.fields || []).filter(field => !field.archived).map(mapPlatformField));
+    }).catch(() => { if (active) message.error('详情字段配置加载失败'); });
+    return () => { active = false; };
+  }, [platformForm?.id, detailRecord?.id, platformForm?.config?.publishedSchemaVersion]);
+  useEffect(() => {
+    let active = true;
+    setReferenceLabels({});
+    const rows = detailRecord ? [...data, detailRecord] : data;
+    if (!platformForm || !rows.length) return;
+    const labelFields = [...new Map([...fields, ...detailFields].map(field => [field.field_name, field])).values()];
+    const sources = labelFields.filter(field => {
+      try {
+        const ref = JSON.parse(field.relation_config || '{}');
+        return Boolean(ref.target_model || ref.target_form_code || ref.source_kind);
+      } catch { return false; }
+    });
+    Promise.allSettled(sources.map(async field => {
+      const dependencies = (field.typeSettings?.search?.filters || []).filter(item => item.source === 'field' && item.sourceField).map(item => item.sourceField!);
+      const requests = new Map<string, { selected: string | number; context: Record<string, unknown> }>();
+      for (const row of rows) {
+        const value = row[field.field_name];
+        if (row._fieldStates?.[field.field_name]?.masked || !['string', 'number'].includes(typeof value) || value === '') continue;
+        const context = Object.fromEntries(dependencies.filter(key => row[key] !== undefined).map(key => [key, row[key]]));
+        requests.set(JSON.stringify([value, context]), { selected: value, context });
+      }
+      // Resolve only displayed IDs, including ones beyond the first options page.
+      const responses = await Promise.all([...requests.values()].map(({ selected, context }) => getFormReferenceOptions(platformForm.id, field.field_name, context, { selected })));
+      return [field.field_name, Object.fromEntries(responses.flatMap(response => (response.data.data || []).map((option: any) => [String(option.id), String(option.label)])))] as const;
+    })).then(results => {
+      if (active) setReferenceLabels(Object.fromEntries(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])));
+    });
+    return () => { active = false; };
+  }, [platformForm?.id, fields, detailFields, data, detailRecord]);
   const [submittingApproval, setSubmittingApproval] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Record<string, any> | null>(null);
@@ -519,7 +554,13 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
       if (page > lastPage) { setPage(lastPage); return; }
       setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval, _fieldStates: record.field_states })));
       setTotal(nextTotal);setListError('');setSelectedRowKeys([]);
-    } catch { if (requestId === requestIdRef.current) {setListError('查询失败，以下保留上次成功加载的结果。');if(!embedded)message.error('加载数据失败');} }
+    } catch (error: any) { if (requestId === requestIdRef.current) {
+      if (error?.response?.status === 403) {
+        setConfigDenied(true); setConfigError('当前账号没有访问此表单的权限，请联系管理员。');
+        setPlatformForm(null); setPageConfig(null); setFields([]); setData([]); setTotal(0);
+        setDetailRecord(null); setModalOpen(false);
+      } else { setListError('查询失败，以下保留上次成功加载的结果。'); if(!embedded)message.error('加载数据失败'); }
+    } }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
   }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch]);
 
@@ -531,6 +572,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
     configPending.current = true;
     requestIdRef.current += 1;
     setConfigRefreshing(true);
+    setConfigDenied(false);
     if (schemaSlug.current !== slug) {
       schemaSlug.current = slug;
       setEditorTab(null);
@@ -556,8 +598,9 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         } else {
           try {
             dbForm = unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope: 'list' }));
-          } catch {
+          } catch (error: any) {
             if (!isCurrent()) return;
+            if ([401, 403].includes(error?.response?.status)) throw error;
             const matchedForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
             if (!isCurrent()) return;
             dbForm = matchedForm
@@ -617,11 +660,17 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         setPageConfig(pc);
         setConfigError('未找到平台表单配置，动态页面不再回退旧模型页面。');
         setLoading(false);
-      } catch {
+      } catch (error: any) {
         if (!isCurrent()) return;
-        setConfigError('页面配置加载失败，请检查表单是否存在并已发布。');
+        const denied = error?.response?.status === 403;
+        setConfigDenied(denied);
+        setConfigError(denied ? '当前账号没有访问此表单的权限，请联系管理员。' : '页面配置加载失败，请检查表单是否存在并已发布。');
+        if (denied) {
+          setPlatformForm(null); setPageConfig(null); setFields([]); setData([]); setTotal(0);
+          setDetailRecord(null); setModalOpen(false);
+        }
         setLoading(false);
-        message.error('页面配置不存在');
+        message.error(denied ? '无权访问该表单' : '页面配置加载失败');
       } finally {
         if (isCurrent()) {
           configPending.current = false;
@@ -665,11 +714,15 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         if(!record._fieldStates?.[field_name]?.masked&&referenceLabels[field_name]?.[String(val)])return referenceLabels[field_name][String(val)];
         if (typeof val === 'boolean') return val ? '是' : '否';
         if (val === undefined || val === null || val === '') return viewColumn?.emptyText || '-';
+        if (!record._fieldStates?.[field_name]?.masked && (f?.controlType === 'select' || f?.field_type === 'enum')) {
+          const label = choiceLabel(val, f?.enum_values);
+          return viewColumn?.renderType === 'tag' ? <Tag>{label}</Tag> : label;
+        }
         if (Array.isArray(val)) return f?.controlType==='upload'?val.map(item=>item?.name||'附件').join('、'):f?.controlType?.includes('table')?`${val.length} 条明细`:val.map(item=>typeof item==='object'?JSON.stringify(item):String(item)).join('、');
         if (typeof val==='object') return JSON.stringify(val);
         if (!record._fieldStates?.[field_name]?.masked) {
           if(viewColumn?.renderType==='number' && Number.isFinite(Number(val)))return Number(val).toLocaleString('zh-CN',{maximumFractionDigits:12});
-          if(viewColumn?.renderType==='date' && dayjs(val).isValid())return dayjs(val).format('YYYY-MM-DD HH:mm');
+          if(viewColumn?.renderType==='date' && dayjs(val).isValid())return dayjs(val).format(f?.typeSettings?.dateMode === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm');
           if(viewColumn?.renderType==='progress' && Number.isFinite(Number(val)))return <Progress size="small" percent={Math.max(0,Math.min(100,Number(val)))}/>;
         }
         if ((viewColumn?.renderType === 'tag' || f?.field_type === 'enum') && val) return <Tag>{String(val)}</Tag>;
@@ -733,7 +786,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   const rowActions=viewConfig?.table.rowActions||[];
   const configuredToolbarActions = activeViewTab?.table?.toolbarActions || pageConfig?.config.viewConfig?.table?.toolbarActions;
   const toolbarActions = viewConfig?.table.toolbarActions || configuredToolbarActions || ['settings'];
-  const canConfigureForm = Boolean(platformForm) && canConfigureWorkspace(Boolean(user?.is_admin), canRunAction('configure'), toolbarActions);
+  const canConfigureForm = Boolean(platformForm) && canConfigureWorkspace(Boolean(user?.is_admin), canRunAction('configure'));
   useEffect(() => { if (editorTab && !canConfigureForm) setEditorTab(null); }, [editorTab, canConfigureForm]);
   const openWorkspace = (tab: WorkspaceEditorTab) => {
     if (canConfigureForm && !modalOpen && !importOpen && !detailRecord && !schemaLoading) setEditorTab(tab);
@@ -894,6 +947,8 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
 
     const renderDetailValue=(field:FieldDef)=>{
     const value=detailRecord?.[field.field_name];const policy=detailRecord?._fieldStates?.[field.field_name]||{};
+    if (!policy.masked && value != null && (field.controlType === 'select' || field.field_type === 'enum')) return <FieldProtection {...policy}>{choiceLabel(value, field.enum_values)}</FieldProtection>;
+    if (!policy.masked && typeof value === 'boolean') return <FieldProtection {...policy}>{value ? field.typeSettings?.checkedText || '是' : field.typeSettings?.uncheckedText || '否'}</FieldProtection>;
     return <FieldProtection {...policy}>{!policy.masked&&referenceLabels[field.field_name]?.[String(value)]?referenceLabels[field.field_name][String(value)]:['upload','editable-table','readonly-table'].includes(field.controlType||'')&&!policy.masked?<FieldControl disabled type={field.controlType!} value={value} settings={field.typeSettings} formId={platformForm?.id} fieldName={field.field_name} recordId={detailRecord?.id} label={field.label}/>:value==null?'—':typeof value==='object'?JSON.stringify(value):String(value)}</FieldProtection>;
   };
   const renderDynamicFilterControl = (filter: ViewFilterConfig) => {
@@ -920,7 +975,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         <div className="app-business-content dynamic-business-content">
           <div className="app-business-title-row dynamic-business-title-row">
             <Space size={10} align="center" wrap>
-              <Tag color="warning">缺少视图配置</Tag>
+              <Tag color={configDenied ? 'error' : 'warning'}>{configDenied ? '无访问权限' : '缺少视图配置'}</Tag>
             </Space>
             {!embedded && workspaceEntry}
           </div>
@@ -1054,7 +1109,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         </Space>}>
         {detailRecord && <>
           {detailRecord._approval && <Typography.Paragraph>审批状态：<Tag>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</Tag></Typography.Paragraph>}
-          <Descriptions bordered column={1} size="small" items={fields.filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false).map(f => ({ key: f.field_name, label: f.label, children: renderDetailValue(f) }))} />
+          <Descriptions bordered column={1} size="small" items={(detailFields.length ? detailFields : fields).filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false && (!detailRecord._fieldStates || f.field_name in detailRecord._fieldStates)).map(f => ({ key: f.field_name, label: f.label, children: renderDetailValue(f) }))} />
           {detailRecord._approval && <>
             <Typography.Title level={5}>审批与修改记录</Typography.Title>
             <Timeline items={(detailRecord._approval.history || []).map((entry: Record<string, unknown>) => ({ children: <Space direction="vertical" size={0}>

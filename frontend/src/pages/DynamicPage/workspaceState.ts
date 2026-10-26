@@ -24,6 +24,7 @@ export function reconcilePublishedViewState(
   return { filterValues, sortState: sortable && sort.order ? { ...sort } : {} };
 }
 
-export function canConfigureWorkspace(isAdmin: boolean, configureAllowed: boolean, toolbarActions: readonly string[]): boolean {
-  return isAdmin && configureAllowed && toolbarActions.includes('settings');
+export function canConfigureWorkspace(isAdmin: boolean, configureAllowed: boolean): boolean {
+  // Business toolbar visibility cannot remove an administrator's design access.
+  return isAdmin && configureAllowed;
 }

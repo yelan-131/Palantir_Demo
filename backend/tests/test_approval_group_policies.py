@@ -58,7 +58,7 @@ def act(client, instance, uid, action='approve'):
 
 def test_mixed_group_modes_execute_and_overlap_is_retained(client):
     admin, a, b, c, d, e = [_uid() for _ in range(6)]
-    _seed_users([admin, a, b, c, d, e])
+    _seed_users([admin, a, b, c, d, e], admin_uid=admin)
     instance = start_grouped(client, admin, [('orSign', [a, b]), ('countersign', [b, c]), ('single', [d, e])])
     assert act(client, instance, e).status_code == 403
     assert _ok(act(client, instance, a), 'or-sign')['status'] == 'pending'
@@ -69,7 +69,7 @@ def test_mixed_group_modes_execute_and_overlap_is_retained(client):
 
 def test_satisfied_or_sign_closes_only_its_siblings_and_next_node_reassigns(client):
     admin, a, b, c = [_uid() for _ in range(4)]
-    _seed_users([admin, a, b, c])
+    _seed_users([admin, a, b, c], admin_uid=admin)
     instance = start_grouped(client, admin, [('orSign', [a, b]), ('single', [c])], next_groups=[('single', [b])])
     assert _ok(act(client, instance, a), 'first group')['status'] == 'pending'
     assert act(client, instance, b).status_code == 409
@@ -79,7 +79,7 @@ def test_satisfied_or_sign_closes_only_its_siblings_and_next_node_reassigns(clie
 
 def test_any_group_reject_ends_entire_node(client):
     admin, a, b = [_uid() for _ in range(3)]
-    _seed_users([admin, a, b])
+    _seed_users([admin, a, b], admin_uid=admin)
     instance = start_grouped(client, admin, [('single', [a]), ('single', [b])])
     assert _ok(act(client, instance, a, 'reject'), 'reject')['status'] == 'rejected'
     assert act(client, instance, b).status_code == 409
@@ -104,7 +104,7 @@ def test_form_trigger_pins_group_membership(client):
     from app.api.forms import _start_form_workflows
 
     admin, a, b = [_uid() for _ in range(3)]
-    _seed_users([admin, a, b])
+    _seed_users([admin, a, b], admin_uid=admin)
 
     async def check():
         async with db_session() as db:

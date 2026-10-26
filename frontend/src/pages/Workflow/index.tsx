@@ -13,7 +13,8 @@ import {
 import { Alert, Button, Drawer, Empty, Input, Modal, Select, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
 import { createRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { wfApproveOrReject, wfListBusinessItems } from '@/services/api';
+import { getFormReferenceOptions, wfApproveOrReject, wfListBusinessItems } from '@/services/api';
+import { displayWorkflowValue } from './fieldDisplay';
 import { APPROVAL_NOTIFICATIONS_CHANGED } from '@/components/NotificationCenter';
 import { WORKFLOW_VIEWS, normalizedWorkflowView as normalizedView } from '@/config/navigation';
 import { formatServerDateTime } from '@/utils/dateTime';
@@ -46,6 +47,7 @@ type WorkflowBusinessField = {
   required?: boolean;
   enum_values?: Record<string, unknown> | null;
   ui_config?: Record<string, unknown> | null;
+  value_labels?: Record<string, string>;
   changed?: boolean;
   old_value?: unknown;
   previous_value?: unknown;
@@ -70,6 +72,7 @@ type WorkflowBusinessItem = {
     id: number;
     workflow_id: number;
     initiator_id?: number | null;
+    current_node_id?: string;
     approvals?: Array<{ id: number; node_id?: string | null; approver_id?: number | null; approver_name?: string | null; action?: string | null; comment?: string | null; acted_at?: string | null }>;
     current_assignees?: Array<{ id: number; name: string; username?: string | null }>;
   } | null;
@@ -169,8 +172,8 @@ function splitChoiceValues(value: unknown) {
 function changeTooltipTitle(field: WorkflowBusinessField) {
   return (
     <div className="workflow-field-change-tooltip">
-      <div><span>变更前</span><strong>{formatValue(fieldOldValue(field))}</strong></div>
-      <div><span>变更后</span><strong>{formatValue(fieldNewValue(field))}</strong></div>
+      <div><span>变更前</span><strong>{displayWorkflowValue(field, fieldOldValue(field))}</strong></div>
+      <div><span>变更后</span><strong>{displayWorkflowValue(field, fieldNewValue(field))}</strong></div>
     </div>
   );
 }
@@ -181,11 +184,11 @@ function renderBusinessFieldValue(field: WorkflowBusinessField) {
   const content = isChoiceField(field) && formatValue(value) !== '-' ? (
     <span className="workflow-business-choice-values">
       {splitChoiceValues(value).map((item) => (
-        <Tag className="workflow-business-choice-tag" key={item}>{item}</Tag>
+        <Tag className="workflow-business-choice-tag" key={item}>{displayWorkflowValue(field, item)}</Tag>
       ))}
     </span>
   ) : (
-    <strong>{formatValue(value)}</strong>
+    <strong>{displayWorkflowValue(field, value)}</strong>
   );
 
   const valueNode = <div className={changed ? 'workflow-business-sheet-value is-changed' : 'workflow-business-sheet-value'}>{content}</div>;
@@ -211,7 +214,7 @@ function workflowCardPrimaryFields(item: WorkflowBusinessItem) {
     .map((field) => ({
       key: field.field_name,
       label: field.label || field.field_name,
-      value: formatValue(field.value),
+      value: displayWorkflowValue(field, field.value),
     }));
 }
 
@@ -241,8 +244,10 @@ export default function WorkflowPage() {
   const openedInstance = useRef<string | null>(null);
   const [instanceNotice, setInstanceNotice] = useState('');
   const [approvalLoading, setApprovalLoading] = useState<'approve' | 'reject' | null>(null);
+  const loadRequestId = useRef(0);
 
   const loadItems = async () => {
+    const request = ++loadRequestId.current;
     setLoading(true);
     setLoadError('');
     try {
@@ -251,17 +256,41 @@ export default function WorkflowPage() {
       const res = await wfListBusinessItems(sourceForm > 0 && sourceRecord > 0
         ? { source_form_id: sourceForm, source_record_id: sourceRecord }
         : undefined);
-      setDataset(unwrapDataset(res));
+      const next = unwrapDataset(res);
+      const requests = new Map<string, Promise<Record<string, string>>>();
+      await Promise.all(next.items.flatMap(item => (item.fields || []).map(async field => {
+        if (!item.form || field.value == null || field.value === '') return;
+        let relation = field.ui_config?.relation_config;
+        try { if (typeof relation === 'string') relation = JSON.parse(relation); } catch { return; }
+        if (!relation || typeof relation !== 'object') return;
+        const source = relation as Record<string, unknown>;
+        if (!source.target_model && !source.target_form_code && !source.source_kind) return;
+        const settings = field.ui_config?.typeSettings as { search?: { filters?: Array<{ source?: string; sourceField?: string }> } } | undefined;
+        const dependencies = (settings?.search?.filters || []).filter(filter => filter.source === 'field' && filter.sourceField).map(filter => filter.sourceField!);
+        const context = Object.fromEntries((item.fields || []).filter(candidate => dependencies.includes(candidate.field_name)).map(candidate => [candidate.field_name, candidate.value]));
+        const ids = Array.isArray(field.value) ? field.value : [field.value];
+        const labels = await Promise.all(ids.filter(value => ['string', 'number'].includes(typeof value) && !String(value).includes('*')).map(async selected => {
+          const key = JSON.stringify([item.form!.id, field.field_name, selected, context]);
+          if (!requests.has(key)) requests.set(key, getFormReferenceOptions(item.form!.id, field.field_name, context, { selected: selected as string | number })
+            .then(response => Object.fromEntries((response.data.data || []).map((option: { id: string | number; label: string }) => [String(option.id), option.label])))
+            .catch(() => ({})));
+          return requests.get(key)!;
+        }));
+        field.value_labels = Object.assign({}, ...labels);
+      })));
+      if (request === loadRequestId.current) setDataset(next);
     } catch (error) {
+      if (request !== loadRequestId.current) return;
       setLoadError(actionError(error).message);
       setDataset({ applications: [], forms: [], items: [], view_counts: {} });
     } finally {
-      setLoading(false);
+      if (request === loadRequestId.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadItems();
+    return () => { loadRequestId.current += 1; };
   }, [searchParams.get('source_form_id'), searchParams.get('source_record_id')]);
 
   useEffect(() => {
@@ -313,7 +342,7 @@ export default function WorkflowPage() {
     const text = query.trim().toLowerCase();
     if (!text) return true;
     return [item.title, item.summary, item.form?.name, item.form?.code, item.application?.name,
-      item.workflow?.id, item.record?.id, ...(item.fields || []).map(field => formatValue(field.value))]
+      item.workflow?.id, item.record?.id, ...(item.fields || []).map(field => displayWorkflowValue(field, field.value))]
       .some(value => String(value || '').toLowerCase().includes(text));
   }), [activeTab, sourceItems, sourceScoped, formFilter, query]);
   const selectedItem = dataset.items.find((item) => item.id === selectedId);
@@ -372,7 +401,7 @@ export default function WorkflowPage() {
         }
         setApprovalLoading(action);
         try {
-          await wfApproveOrReject(item.workflow!.id, { action, comment });
+          await wfApproveOrReject(item.workflow!.id, { action, comment, expected_node_id: item.workflow!.current_node_id });
           message.success(action === 'approve' ? '审批已通过' : '已驳回申请');
           await loadItems();
           closeWorkflowDetail();

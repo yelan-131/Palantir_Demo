@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DBAPIError
 from app.api._model_driven_shared import assert_safe_identifier
 from app.core.permissions import has_form_permission
 from app.api.form_engine import _field_allowed_values, _field_value_is_compatible, _is_anonymous_reader
@@ -437,7 +438,7 @@ def _promote_snapshot_config(snapshot: dict, published_at: str, version: int) ->
         analytics_meta.update(publishedVersion=version, publishedAt=published_at, status="published")
         config["analyticsDesignMeta"] = analytics_meta
     view_meta = {**(config.get("viewConfigMeta") or {})}
-    if view_meta:
+    if view_meta or isinstance(config.get('viewConfig'), dict):
         view_meta["publishedVersion"] = version
         view_meta["publishedAt"] = published_at
         view_meta["status"] = "published"
@@ -550,7 +551,21 @@ def _publish_impact_report(latest_version, next_version: int, draft_snapshot: di
 
 async def _build_publish_preview(db:AsyncSession,tenant_id:int,form)->tuple[dict,dict]:
     from app.services.form_option_sources import read_snapshot
-    async with read_snapshot():return await _build_publish_preview_inner(db,tenant_id,form)
+    # ALTER TABLE on another pooled connection invalidates asyncpg's cached
+    # SELECT * result shape. A savepoint lets us retry that read-only preview
+    # without losing the caller's pending draft or publication lock.
+    for attempt in range(2):
+        try:
+            async with db.begin_nested():
+                # begin_nested flushes pending metadata, which can expire
+                # server-generated timestamps. Reload them explicitly before
+                # snapshot serialization instead of triggering async lazy IO.
+                await db.refresh(form)
+                async with read_snapshot():
+                    return await _build_publish_preview_inner(db, tenant_id, form)
+        except DBAPIError as exc:
+            if attempt or getattr(exc.orig, 'sqlstate', None) != '0A000' or 'cached' not in str(exc.orig).lower():
+                raise
 
 
 async def _build_publish_preview_inner(db: AsyncSession, tenant_id: int, form) -> tuple[dict, dict]:

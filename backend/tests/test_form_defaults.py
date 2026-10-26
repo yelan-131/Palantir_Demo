@@ -16,6 +16,21 @@ def template(*parts):
     return {'mode': 'template', 'parts': [{'kind': kind, 'value': value} for kind, value in parts]}
 
 
+def test_json_and_multiselect_defaults_are_typed_and_invalid_json_is_rejected():
+    choices = field('choices', kind='json', default='["production", "quality"]')
+    enum = field('enum', kind='enum', default='["normal"]')
+    enum.ui_config = {'typeSettings': {'selectionMode': 'multiple'}}
+    data = {}
+    apply_defaults([choices, enum], data)
+    assert data == {'choices': ['production', 'quality'], 'enum': ['normal']}
+    explicit = {'choices': []}
+    apply_defaults([choices], explicit)
+    assert explicit['choices'] == []
+    with pytest.raises(HTTPException) as error:
+        apply_defaults([field('broken', kind='json', default='not JSON')], {})
+    assert error.value.status_code == 422
+
+
 def test_defaults_preserve_zero_false_manual_input_and_editing_and_wait_for_sources():
     fields = [field('name'), field('qty', kind='integer'), field('flag', kind='boolean'),
         field('label', template(('text', 'MAT-'), ('field', 'name'), ('text', '-'), ('field', 'qty'), ('field', 'flag')))]
