@@ -142,12 +142,21 @@ async def test_ai_creation_uses_shared_field_schema_and_storage(environment):
         'fields': [{'field_name': 'quantity', 'label': 'Quantity', 'field_type': 'int',
             'default_value': '2', 'validation': {'custom': True}}]})
     form_id = result['form']['id']
-    field = await db.scalar(select(FormField).where(FormField.form_id == form_id))
-    assert field.field_type == 'integer' and field.default_value == '2'
-    assert field.validation == {'custom': True}
     created = await db.get(Form, form_id)
-    columns = await column_names(db, created.table_name)
-    assert 'quantity' in columns
+    try:
+        field = await db.scalar(select(FormField).where(FormField.form_id == form_id))
+        assert field.field_type == 'integer' and field.default_value == '2'
+        assert field.validation == {'custom': True}
+        columns = await column_names(db, created.table_name)
+        assert 'quantity' in columns
+    finally:
+        # This test creates a physical table outside the shared fixture schema.
+        # Remove it before the next fixture rebuilds the referenced users table.
+        table_name = created.table_name
+        assert table_name == 't1_business_ai_shared_contract'
+        await db.rollback()
+        await db.execute(text('DROP TABLE IF EXISTS t1_business_ai_shared_contract'))
+        await db.commit()
 
 
 def test_new_tools_are_registered_and_allowed_by_inspection_skill():
