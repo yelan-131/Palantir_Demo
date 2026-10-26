@@ -1,6 +1,6 @@
 # ManuFoundry Architecture Overview
 
-Last updated: 2026-05-29
+Last updated: 2026-10-26
 
 This is the current high-level architecture document. It describes what the codebase implements now, and it separates that from Palantir-inspired reference direction.
 
@@ -14,6 +14,12 @@ ManuFoundry is a manufacturing low-code analytics workbench. It borrows three im
 
 This project is a prototype, not a full Palantir clone. The current system implements a usable workbench shell, manufacturing APIs, SaaS tenant foundations, low-code form metadata/version persistence, workflow/rules/reporting modules, AI-assisted low-code planning, and several Palantir-inspired design documents.
 
+The current implementation is a **modular monolith**: one React frontend and
+one FastAPI backend, with business modules sharing database infrastructure.
+Frontend pages and AI tools are separate entry points into shared business
+services. The recent form refactor strengthens this boundary; it does not
+introduce separately deployed microservices.
+
 ## 2. Current Technology Stack
 
 | Layer | Current stack |
@@ -23,23 +29,41 @@ This project is a prototype, not a full Palantir clone. The current system imple
 | Backend | FastAPI 0.115, Uvicorn 0.34, Python 3.11, Pydantic 2, SQLAlchemy 2, Alembic |
 | Relational database | PostgreSQL 16 in Docker; SQLite fallback for local/demo bootstrap |
 | Graph database | Neo4j 5 community |
-| Cache | Redis 7 |
+| Supporting infrastructure | Redis 7 is included in Compose; inclusion does not imply a separate worker service |
 | Analytics libraries | pandas, numpy, scipy, scikit-learn |
-| Optional/future AI orchestration | Prophet, Celery, LangChain are commented in `requirements.txt` and not active runtime dependencies |
+| AI execution | Official DeepSeek Harness SDK/runtime; platform-owned MCP bridge, tool registry, permissions, confirmations, and audit |
+| Optional libraries | Prophet, Celery, LangChain remain commented dependencies rather than the active Agent runtime |
 | Deployment | Docker Compose development stack plus production overlay |
 
 ## 3. System Context
 
 ```mermaid
-flowchart LR
-  User["User Browser"] --> Frontend["React Workbench<br/>Vite dev or nginx prod"]
-  Frontend --> API["FastAPI Backend<br/>/api/v1/*"]
-  API --> PG["PostgreSQL<br/>core data + platform metadata"]
-  API --> SQLite["SQLite fallback<br/>local/demo bootstrap"]
-  API --> Neo4j["Neo4j<br/>graph/ontology queries"]
-  API --> Redis["Redis<br/>cache/future async support"]
-  API --> Seeds["data/seed JSON<br/>demo data"]
+flowchart TB
+  User["User"] --> FE["React workbench<br/>Designer / business pages / dashboards"]
+  User --> Assistant["AI assistant"]
+  FE --> HTTP["FastAPI HTTP adapters"]
+  Assistant --> Agent["Harness Agent runtime<br/>Model calls / planning / context"]
+  Agent --> Boundary["Platform tool boundary<br/>Registry / permission / confirmation / audit"]
+  Boundary --> Tools["Whitelisted tool adapters"]
+  HTTP --> Services["Shared business services"]
+  Tools --> Services
+  Services --> Config["Form configuration<br/>Fields / layouts / rules / versions"]
+  Services --> Records["Record service<br/>Authorization / reads / writes"]
+  Services --> Business["Workflow / analytics / knowledge / graph modules"]
+  Records --> Engine["Shared form storage engine"]
+  Config --> DB["Relational database<br/>Metadata / versions / runtime state"]
+  Engine --> JSON["dynamic_records.data<br/>JSON / JSONB"]
+  Engine --> Physical["Form-managed business tables"]
+  Business --> DB
+  Business --> Graph["Neo4j"]
+  Business --> Files["Knowledge and attachment files"]
 ```
+
+The diagram describes the service direction for the refactored form paths.
+Some legacy route-owned helpers remain; see the current boundaries below.
+PostgreSQL is the Compose relational database; SQLite is an explicitly selected
+local/test alternative, not a second production database. Redis is supporting
+Compose infrastructure and is not the source of form definitions or records.
 
 ## 4. Frontend Architecture
 
@@ -129,7 +153,7 @@ Main API modules:
 
 ## 6. Data And Persistence
 
-The persistence layer has two major parts:
+The persistence layer has four main groups:
 
 1. **Core manufacturing data**
    - Factories, workshops, production lines, equipment, sensors, work orders, inspections, defects, suppliers, materials, customers, and related seed data.
@@ -138,7 +162,9 @@ The persistence layer has two major parts:
 2. **Low-code platform metadata**
    - Applications, application menus, roles.
    - Forms platform tables introduced by migration `0006_platform_forms.py`, versioned by `0021_form_versions.py`, seeded into production-like application assemblies by `0024_seed_application_assembly.py`, and extended with menu-node config by `0026_menu_node_config.py`.
-   - Dynamic form records stored as JSON/JSONB rather than creating a physical table for every user-defined form.
+   - Records support dynamic JSON/JSONB storage and form-managed physical tables.
+     Migration `0029_form_physical_tables.py` supports physical storage; both
+     adapters use the shared record boundary and published field resolution.
 
 3. **SaaS tenant and identity operations**
    - Tenants, tenant domains, invites, redacted exports, password reset tokens, sessions, password history, and OIDC state rows.
@@ -173,6 +199,7 @@ sequenceDiagram
   participant U as User
   participant FE as React Frontend
   participant API as FastAPI
+  participant S as Shared record service
   participant DB as PostgreSQL/SQLite
   participant G as Neo4j
 
@@ -184,13 +211,42 @@ sequenceDiagram
   API->>DB: Load application menu nodes
   API-->>FE: Menu tree
   FE->>API: GET /api/v1/forms/{form_id}/records
-  API->>DB: Load dynamic_records
+  API->>S: List records as authenticated user
+  S->>DB: Resolve published fields and read selected storage adapter
+  DB-->>S: Stored rows
+  S-->>API: Authorized records and visible fields
   API-->>FE: Record list
   FE->>API: POST /api/v1/graph/query
   API->>G: Read-only graph query
   G-->>API: Graph result
   API-->>FE: Graph result
 ```
+
+### Shared form services and AI tools
+
+Configuration and runtime have separate responsibilities:
+
+- Configuration services own fields, layouts, designer settings, impact checks,
+  publication snapshots, and version reads.
+- `services/records.py` owns business record access, tenant/row/field permissions,
+  validation, encoding, and the choice of storage adapter.
+- Workflow and lifecycle services govern submission, approval, and state changes;
+  analytics consumers use authorized record access.
+- `services/form_runtime.py` resolves the latest published field snapshot when
+  present, falling back to metadata only for unversioned forms. Saving a design
+  draft does not automatically publish its layout and interaction changes.
+
+HTTP routes keep dependency injection and response compatibility. AI handlers
+translate tool payloads into service calls. The Agent runtime can propose a
+write, but platform permissions and confirmation remain backend responsibilities.
+Tools are thin adapters, not a second implementation of business validation.
+
+The completed refactor shares field creation across UI and AI, routes AI
+business-form initial publication through the designer publication service, and
+extracts version, layout, and rule-preview operations. Five configuration read
+tools are registered under `low_code.inspect_form`. See
+[Form Management](form-management.md) for module ownership and
+[Low-Code Platform](low-code-platform.md) for call flows and enablement details.
 
 ## 8. Palantir Architecture Mapping
 
@@ -238,14 +294,26 @@ Implemented now:
 - Backend APIs for applications, forms platform, workflow, rules, reports, notifications, scheduler, search, templates, AI builder.
 - Local knowledge base APIs with persistent document/chunk/runtime rows, upload simulation, Markdown, cards, directories, binding candidates, OCR workflow metadata, TF-IDF retrieval, and persisted knowledge Agent conversations.
 - Productization readiness contract under `/api/v1/productization/readiness`.
-- Forms metadata persistence, published form versions, JSON dynamic records, and database-seeded application assembly menus.
+- Forms metadata, published versions, JSON and physical-table record storage, shared UI/AI field and publication services, and database-seeded application assembly menus.
 - Tenant operation APIs under `/api/v1/platform`, public tenant profile under `/api/v1/tenant/profile/public`, and system/release status endpoints.
 - Docker development and production-style compose files.
 - Backend test coverage across security, workflow, rules, notifications, forms, config import/export, templates, scheduler/search/AI builder, graph safety, and model-driven safety.
 
+Remaining consolidation work:
+
+- Application/menu, action/permission CRUD, and workflow-start compatibility
+  helpers still contain route-owned logic in `api/forms.py`.
+- Some services still use helpers under `api/form_engine` and lazy imports from
+  route modules. The backend is not yet a fully independent domain layer.
+- `FormSettings/index.tsx` remains a large frontend composition surface even
+  though controls, layout utilities, and several editors are reusable.
+- New AI tool definitions are present in seed/fallback files. Existing persisted
+  registries need the normal registry import/update flow before those tools are
+  available. A local code change is not a production deployment.
+
 Reference/planned:
 
-- Full external LLM orchestration through LangChain.
+- External orchestration alternatives such as LangChain; the current Agent already uses Harness.
 - Celery or another real async job worker.
 - TimescaleDB-specific time-series storage.
 - Prometheus/Grafana observability stack.

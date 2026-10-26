@@ -6,14 +6,14 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const source = fs.readFileSync(path.join(__dirname, '../src/pages/FormSettings/index.tsx'), 'utf8');
 const ast = ts.createSourceFile('index.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ['persistDesignerDraft', 'saveDraft', 'publishConfig'];
+const names = ['persistDesignerDraft', 'checkSelectionConfiguration', 'saveDraft', 'publishConfig'];
 const declarations = [];
 function visit(node) {
   if (ts.isVariableDeclaration(node) && names.includes(node.name.getText(ast))) declarations.push(`const ${node.getText(ast)};`);
   ts.forEachChild(node, visit);
 }
 visit(ast);
-const script = ts.transpileModule(declarations.join('\n') + '\nthis.actions = {saveDraft, publishConfig};', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const script = ts.transpileModule(declarations.join('\n') + '\nthis.actions = {saveDraft, publishConfig};', { fileName: 'actions.tsx', compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 function harness(analysis = false) {
   const calls = [];
   const form = { id: 1, config: { initial: true } };
@@ -21,7 +21,7 @@ function harness(analysis = false) {
   const savedWorkflow = { ...form, config: { workflow: true } };
   const ctx = {
     flowLoadError: '', isPersistingFlow: false, isAnalysisDesigner: analysis,
-    storedViewConfig: {}, analyticsDesign: {}, console: { error() {} },
+    storedViewConfig: {}, analyticsDesign: {}, layoutControls: [], baseConfig: { fields: [] }, console: { error() {} },
     message: { error: value => calls.push(['error', value]), success: () => calls.push(['success']) },
     ensurePlatformForm: async () => { calls.push(['ensure']); return form; },
     syncFieldDefaultValues: async () => { calls.push(['fields']); },
@@ -73,4 +73,20 @@ test('an ongoing save prevents a second prepare-release request', async () => {
   const { ctx, calls } = harness(); ctx.isPersistingFlow = true;
   assert.equal(await ctx.actions.publishConfig(), false);
   assert.equal(calls.length, 0);
+});
+
+test('invalid selection configuration blocks draft saving and publication before writes', async () => {
+  for (const action of ['saveDraft', 'publishConfig']) {
+    const { ctx, calls } = harness();
+    Object.assign(ctx, {
+      React: require('react'),
+      layoutControls: [{ fieldKey: 'status', name: '状态', dataSourceKind: 'static' }],
+      getEffectiveControlTypeForControl: () => 'select',
+      parseStaticOptions: () => [], staticOptionErrors: () => ['请配置选项'],
+      selectionConfigErrors: () => [], getFieldDefaultValue: () => '',
+      Modal: { error: () => calls.push(['validation']) },
+    });
+    assert.equal(await ctx.actions[action](), false);
+    assert.deepEqual(calls.map(call => call[0]), ['validation']);
+  }
 });

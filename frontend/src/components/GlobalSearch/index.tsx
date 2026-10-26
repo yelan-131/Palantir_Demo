@@ -74,7 +74,8 @@ export default function GlobalSearch() {
   const visibleAreas = NAVIGATION_AREAS.filter((area) => !area.adminOnly || user?.is_admin);
   const searchItems: SearchItem[] = visibleAreas.flatMap((area) => {
     const entries = NAVIGATION_ENTRIES
-      .filter((entry) => entry.area === area.key && (!entry.adminOnly || user?.is_admin))
+      .filter((entry) => entry.area === area.key && (!entry.adminOnly || user?.is_admin)
+        && !(entry.area === 'admin' && entry.group === '数据与集成'))
       .map((entry) => ({ key: entry.path, label: entry.label, icon: areaIcons[area.key], category: area.label }));
     const areaHome = entries.some((entry) => entry.key === area.home)
       ? []

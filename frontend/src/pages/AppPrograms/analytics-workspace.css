@@ -13,9 +13,38 @@
 .analytics-save-dirty { color:#9b6b11; }
 .analytics-save-pending { color:var(--mf-muted); }
 .analytics-context-hint { margin-left:8px;color:var(--mf-muted);font-size:12px; }
-.analytics-context-menu .ant-dropdown-menu { min-width:200px;padding:6px;border:1px solid var(--mf-border,#e0e6eb); }
-.analytics-context-menu .ant-dropdown-menu-item { padding:8px 12px; }
-.analytics-context-menu .ant-dropdown-menu-item-group-title { max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px; }
+.analytics-context-menu .ant-dropdown-menu,
+.analytics-context-submenu .ant-dropdown-menu {
+  padding:5px;
+  border:1px solid var(--mf-border);
+  border-radius:8px;
+  background:var(--mf-panel);
+  box-shadow:var(--mf-shadow);
+  color:var(--mf-text);
+}
+.analytics-context-menu > .ant-dropdown-menu { width:192px;max-width:calc(100vw - 24px); }
+.analytics-context-menu .ant-dropdown-menu-item-group-title { padding:5px 9px 7px;line-height:18px; }
+.analytics-context-heading { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mf-muted);font-size:11px;font-weight:400; }
+.analytics-context-menu .ant-dropdown-menu-item-group-list { margin:0; }
+.analytics-context-menu .ant-dropdown-menu-item,
+.analytics-context-menu .ant-dropdown-menu-submenu-title,
+.analytics-context-submenu .ant-dropdown-menu-item { display:flex;align-items:center;gap:9px;min-height:32px;padding:6px 9px;border-radius:4px;color:var(--mf-text);font-size:12px;line-height:20px; }
+.analytics-context-menu .ant-dropdown-menu-item-icon,
+.analytics-context-submenu .ant-dropdown-menu-item-icon { flex:none;margin-inline-end:0!important;font-size:13px!important;color:var(--mf-muted); }
+.analytics-context-menu .ant-dropdown-menu-title-content { min-width:0; }
+.analytics-context-menu .ant-dropdown-menu-item:hover,
+.analytics-context-menu .ant-dropdown-menu-item-active,
+.analytics-context-menu .ant-dropdown-menu-submenu-title:hover,
+.analytics-context-menu .ant-dropdown-menu-submenu-active > .ant-dropdown-menu-submenu-title,
+.analytics-context-submenu .ant-dropdown-menu-item:hover,
+.analytics-context-submenu .ant-dropdown-menu-item-active { background:var(--mf-panel-soft)!important; }
+.analytics-context-menu .ant-dropdown-menu-item:focus-visible,
+.analytics-context-menu .ant-dropdown-menu-submenu-title:focus-visible,
+.analytics-context-submenu .ant-dropdown-menu-item:focus-visible { outline:2px solid var(--mf-primary);outline-offset:-2px; }
+.analytics-context-menu .ant-dropdown-menu-item-divider { margin:4px 8px;border-block-start-color:var(--mf-border); }
+.analytics-context-menu .ant-dropdown-menu-submenu-expand-icon { inset-inline-end:9px;color:var(--mf-muted); }
+.analytics-context-menu .ant-dropdown-menu-submenu-title { padding-inline-end:24px; }
+.analytics-context-submenu .ant-dropdown-menu { min-width:158px; }
 .analytics-workspace-body { display:flex;align-items:flex-start;gap:16px;min-width:0; }
 .analytics-workspace-canvas { flex:1;min-width:0;min-height:240px;container-type:inline-size;container-name:analytics-canvas; }
 .analytics-workspace-canvas:focus-visible { outline:2px solid var(--mf-border-strong);outline-offset:4px;border-radius:8px; }

@@ -1,0 +1,9 @@
+.static-options-editor { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.static-options-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.static-options-editor small { color:#7b8799; font-size:11px; line-height:1.6; }
+.static-option-columns { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:0 52px 0 16px; color:#64748b; font-size:11px; }
+.static-option-row { display:flex; align-items:center; gap:4px; }
+.static-option-row .ant-input { width:0; flex:1; min-width:0; }
+.static-option-row .ant-btn { padding:0 2px; width:20px; min-width:20px; }
+.static-option-drag { cursor:grab; color:#94a3b8; }
+.static-options-preview { display:flex; flex-direction:column; gap:4px; }

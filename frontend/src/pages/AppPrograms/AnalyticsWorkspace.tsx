@@ -11,6 +11,7 @@ import { formatAnalyticsVersionTime } from './analyticsVersionUtils';
 import { getAnalyticsEditor, loadPublishedAnalytics, previewAnalyticsDesign, publishAnalyticsDesign, saveAnalyticsDraft } from './analyticsApi';
 import { analyticsErrorMessage, copyAnalyticsDesign, normalizeAnalyticsDesign, sameAnalyticsDesign, moveAnalyticsWidget } from './analyticsEditorState';
 import type { AnalyticsEditorPanelName, AnalyticsEditorState, AnalyticsVersionDetail, AnalyticsWidgetTabName, RuntimeAnalyticsData, RuntimeAnalyticsDesign } from './analyticsTypes';
+import { buildAnalyticsContextMenu } from './AnalyticsContextMenu';
 import './analytics-workspace.css';
 
 interface Props {
@@ -249,17 +250,9 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
     <div className="analytics-workspace-body">
       {admin ? <Dropdown trigger={['contextMenu']} disabled={locked} open={contextMenuOpen} onOpenChange={setContextMenuOpen} overlayClassName="analytics-context-menu" menu={{
         'aria-label': contextWidget ? `${contextWidget.title}配置菜单` : '看板配置菜单',
-        items: [
-          {key: 'context', type: 'group', label: contextWidget?.title || '看板', children: [
-            {key: 'edit', icon: <EditOutlined />, label: contextWidget ? '编辑此组件' : '编辑看板'},
-            ...(contextWidget ? [
-              {key: 'widget-style', icon: <SkinOutlined />, label: '调整外观'},
-              {key: 'widget-interaction', icon: <FilterOutlined />, label: '设置交互'},
-            ] : []),
-          ]},
-          {type: 'divider'},
-          ...(contextWidget ? [{key: 'page', label: '看板设置', children: pageSections.map(([key, label, icon]) => ({key, label, icon}))}] : pageSections.map(([key, label, icon]) => ({key, label, icon}))),
-        ],
+        items: buildAnalyticsContextMenu({ widgetTitle: contextWidget?.title, pageLabel: '看板',
+          sections: pageSections.map(([key, label, icon]) => ({key, label, icon})),
+        }),
         onClick: ({key}) => openConfiguration(key === 'edit' || key.startsWith('widget-') ? {panel: contextWidget ? 'widget' : null, widgetId: contextWidget?.id, widgetTab: key === 'widget-style' ? 'style' : key === 'widget-interaction' ? 'interaction' : 'data'} : {panel: key as AnalyticsEditorPanelName}),
       }}>{canvas}</Dropdown> : canvas}
       {configuring && <div className={`analytics-settings-page${panel === 'library' ? ' analytics-settings-page-library' : ''}`}>

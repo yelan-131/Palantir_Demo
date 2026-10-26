@@ -732,6 +732,31 @@ class ApplicationRole(TimestampMixin, Base):
     application: Mapped["Application"] = relationship(back_populates="roles")
 
 
+class ComponentPage(TimestampMixin, Base):
+    """Page presentation has its own lifecycle; business records keep their form IDs."""
+    __tablename__ = "component_pages"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_component_pages_tenant_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    code: Mapped[str] = mapped_column(String(100))
+    draft: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    published_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ComponentPageVersion(TimestampMixin, Base):
+    __tablename__ = "component_page_versions"
+    __table_args__ = (UniqueConstraint("page_id", "version", name="uq_component_page_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    page_id: Mapped[int] = mapped_column(ForeignKey("component_pages.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    definition: Mapped[dict] = mapped_column(JSON)
+    published_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class Form(TimestampMixin, Base):
     __tablename__ = "forms"
     __table_args__ = (

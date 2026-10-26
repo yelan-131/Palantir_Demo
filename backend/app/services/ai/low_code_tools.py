@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._model_driven_shared import assert_safe_identifier
 from app.api.deps import current_tenant_id, current_user_id
 from app.core.audit import write_audit_log
-from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Form, FormField, FormLayout, FormVersion
+from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Form, FormField, FormLayout
 
 
 FIELD_TYPE_ALIASES = {
@@ -49,74 +49,11 @@ def _physical_table_name(code: str, assembly_kind: str, tenant_id: int | None = 
     return table_name
 
 
-def _physical_column_type(field_type: str) -> str:
-    kind = (field_type or "string").lower()
-    if kind in {"integer", "int"}:
-        return "INTEGER"
-    if kind in {"number", "decimal", "float"}:
-        return "DOUBLE PRECISION"
-    if kind == "boolean":
-        return "BOOLEAN"
-    if kind == "date":
-        return "DATE"
-    if kind == "datetime":
-        return "TIMESTAMP"
-    return "TEXT"
-
-
 async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fields: list[FormField]) -> None:
-    assert_safe_identifier(table_name)
-    dialect_name = session.get_bind().dialect.name
-    if dialect_name == "sqlite":
-        await session.execute(text(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
-                record_status VARCHAR(50) NOT NULL DEFAULT 'active',
-                created_by INTEGER NULL REFERENCES users(id),
-                updated_by INTEGER NULL REFERENCES users(id),
-                source_dynamic_record_id INTEGER NULL UNIQUE,
-                deleted_at TIMESTAMP NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
-    else:
-        await session.execute(text(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                id SERIAL PRIMARY KEY,
-                tenant_id INTEGER NOT NULL DEFAULT 1 REFERENCES tenants(id),
-                record_status VARCHAR(50) NOT NULL DEFAULT 'active',
-                created_by INTEGER NULL REFERENCES users(id),
-                updated_by INTEGER NULL REFERENCES users(id),
-                source_dynamic_record_id INTEGER NULL UNIQUE,
-                deleted_at TIMESTAMP NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT now(),
-                updated_at TIMESTAMP NOT NULL DEFAULT now()
-            )
-        """))
-    await session.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_tenant_deleted_id ON {table_name} (tenant_id, deleted_at, id)"))
-    if dialect_name == "sqlite":
-        rows = await session.execute(text(f"PRAGMA table_info({table_name})"))
-        existing_columns = {str(row[1]) for row in rows.all()}
-    else:
-        rows = await session.execute(
-            text(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = :table_name
-                """
-            ),
-            {"table_name": table_name},
-        )
-        existing_columns = {str(row[0]) for row in rows.all()}
-    for field in fields:
-        field_name = _slugify(str(field.field_name), "field")
-        assert_safe_identifier(field_name)
-        if field_name not in existing_columns:
-            await session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {field_name} {_physical_column_type(field.field_type)} NULL"))
-            existing_columns.add(field_name)
+    """Compatibility adapter; all physical DDL belongs to the shared form engine."""
+    from types import SimpleNamespace
+    from app.api.form_engine import _ensure_physical_form_table as ensure_storage
+    await ensure_storage(session, SimpleNamespace(storage_mode="physical_table", table_name=table_name), fields)
 
 
 CREATE_FORM_DEFINITION_CONTRACT = {
@@ -662,44 +599,24 @@ async def execute_create_form_definition(
     session.add(form)
     await session.flush()
 
-    created_fields = []
-    seen_names: set[str] = set()
+    from app.services.form_fields import add_form_fields
+    normalized_fields = []
     for index, field_data in enumerate(fields):
         if not isinstance(field_data, dict):
-            continue
-        field_name = _slugify(str(field_data.get("field_name") or f"field_{index + 1}"), f"field_{index + 1}")
-        if field_name in seen_names:
-            continue
-        seen_names.add(field_name)
-        normalized_field_type = _normalize_field_type(field_data.get("field_type"))
-        field_visible_in_list = bool(field_data.get("visible_in_list", True))
-        field_searchable = (
-            bool(field_data.get("searchable"))
-            if "searchable" in field_data
-            else _default_searchable_for_field(
-                {"field_type": normalized_field_type, "visible_in_list": field_visible_in_list},
-                index,
-            )
-        )
-        field = FormField(
-            tenant_id=tenant_id,
-            form_id=form.id,
-            field_name=field_name,
-            label=str(field_data.get("label") or field_name),
-            field_type=normalized_field_type,
-            required=bool(field_data.get("required", False)),
-            visible_in_list=field_visible_in_list,
-            visible_in_form=bool(field_data.get("visible_in_form", True)),
-            searchable=field_searchable,
-            sortable=bool(field_data.get("sortable", False)),
-            enum_values=field_data.get("enum_values"),
-            ui_config=field_data.get("ui_config"),
-            sort_order=int(field_data.get("sort_order", index)),
-        )
-        session.add(field)
-        created_fields.append(field)
-
-    await _ensure_physical_form_table(session, table_name, created_fields)
+            raise HTTPException(422, "每个字段必须是一个对象")
+        raw = dict(field_data)
+        raw["field_name"] = _slugify(str(raw.get("field_name") or f"field_{index + 1}"))
+        raw.setdefault("sort_order", index)
+        raw.setdefault("searchable", _default_searchable_for_field(raw, index))
+        normalized_fields.append(raw)
+    if normalized_fields:
+        await add_form_fields(form.id, normalized_fields, session, user, defer_commit=True)
+    else:
+        from app.api.form_engine import _ensure_physical_form_table as ensure_storage
+        await ensure_storage(session, form, [])
+    created_fields = list((await session.scalars(select(FormField).where(
+        FormField.form_id == form.id, FormField.tenant_id == tenant_id)
+        .order_by(FormField.sort_order, FormField.id))).all())
 
     view_config = form_config.get("viewConfig") or _standard_view_config(field_configs)
     form_layout = form_config.get("formLayout") or _standard_form_layout(field_configs)
@@ -743,66 +660,11 @@ async def execute_create_form_definition(
             session.add(menu_node)
 
     if assembly_kind != "analysis":
+        # The same impact checks, rule validation, snapshot promotion and
+        # permission publication used by the designer apply to AI creation.
+        from app.services.form_versions import publish_form
         await session.flush()
-        published_at = datetime.now()
-        field_snapshots = [
-            {
-                "id": field.id,
-                "form_id": field.form_id,
-                "field_name": field.field_name,
-                "label": field.label,
-                "field_type": field.field_type,
-                "business_type": (field.ui_config or {}).get("businessType") or field.field_type,
-                "control_type": (field.ui_config or {}).get("controlType"),
-                "data_source": (field.ui_config or {}).get("dataSource") or (field.ui_config or {}).get("relation"),
-                "encoding_rule": (field.ui_config or {}).get("encodingRule"),
-                "required": field.required,
-                "visible_in_list": field.visible_in_list,
-                "visible_in_form": field.visible_in_form,
-                "searchable": field.searchable,
-                "sortable": field.sortable,
-                "archived": field.archived,
-                "default_value": field.default_value,
-                "enum_values": field.enum_values,
-                "validation": field.validation,
-                "ui_config": field.ui_config or {},
-                "sort_order": field.sort_order,
-            }
-            for field in created_fields
-        ]
-        session.add(FormVersion(
-            tenant_id=tenant_id,
-            form_id=form.id,
-            version=1,
-            status="published",
-            snapshot={
-                "form": {
-                    "id": form.id,
-                    "tenant_id": tenant_id,
-                    "name": form.name,
-                    "code": form.code,
-                    "description": form.description,
-                    "model_id": form.model_id,
-                    "table_name": form.table_name,
-                    "storage_mode": form.storage_mode,
-                    "status": "published",
-                    "owner_id": form.owner_id,
-                    "config": form_config,
-                },
-                "fields": field_snapshots,
-                "layouts": [
-                    {"layout_type": "list", "config": {"viewConfig": view_config, "columns": list_columns}},
-                    {"layout_type": "view", "config": {"draft": view_config, "published": view_config, "meta": form_config.get("viewConfigMeta")}},
-                    {"layout_type": "form", "config": form_layout},
-                ],
-                "actions": [],
-                "permissions": [],
-                "workflow_bindings": [],
-            },
-            impact_report={"latest_version": None, "next_version": 1, "record_count": 0, "blocking_count": 0, "warning_count": 0, "items": []},
-            published_by=current_user_id(user),
-            published_at=published_at,
-        ))
+        await publish_form(form.id, session, user, defer_commit=True)
 
     await session.commit()
     await session.refresh(form)
@@ -828,35 +690,7 @@ def _field_payload(field: FormField) -> dict[str, Any]:
     return {"id": field.id, "field_name": field.field_name, "label": field.label, "field_type": field.field_type}
 
 
-def _append_field_to_layouts(layouts: list[FormLayout], field: FormField) -> list[str]:
-    changed: list[str] = []
-    for layout in layouts:
-        config = dict(layout.config or {})
-        if layout.layout_type == "list":
-            columns = list(config.get("columns") or [])
-            if field.visible_in_list and not any(item.get("field_name") == field.field_name for item in columns if isinstance(item, dict)):
-                columns.append({"field_name": field.field_name, "label": field.label, "width": 160})
-                config["columns"] = columns
-                layout.config = config
-                changed.append("list")
-        elif layout.layout_type == "form":
-            sections = list(config.get("sections") or [])
-            if not sections:
-                sections = [{"title": "业务信息", "fields": []}]
-            first = dict(sections[0])
-            fields = list(first.get("fields") or [])
-            already_present = any(
-                (item.get("field_name") if isinstance(item, dict) else item) == field.field_name
-                for item in fields
-            )
-            if field.visible_in_form and not already_present:
-                fields.append({"field_name": field.field_name, "label": field.label, "col_span": 1})
-                first["fields"] = fields
-                sections[0] = first
-                config["sections"] = sections
-                layout.config = config
-                changed.append("form")
-    return changed
+from app.services.form_layouts import append_field_to_layouts as _append_field_to_layouts
 
 
 async def execute_add_form_field(
@@ -888,65 +722,22 @@ async def execute_add_form_field(
         raise HTTPException(status_code=422, detail="At least one field is required")
     validate_field_rule_definitions(fields)
 
-    existing_names = {
-        name
-        for name in (
-            await session.execute(select(FormField.field_name).where(FormField.form_id == form.id, FormField.tenant_id == tenant_id))
-        ).scalars().all()
-    }
-    max_sort_order = await session.scalar(
-        select(FormField.sort_order).where(FormField.form_id == form.id, FormField.tenant_id == tenant_id).order_by(FormField.sort_order.desc()).limit(1)
-    )
-    next_sort_order = int(max_sort_order or 0) + 1
-    created_fields: list[FormField] = []
-    for index, field_data in enumerate(fields):
+    from app.services.form_fields import add_form_fields
+    normalized = []
+    for field_data in fields:
         if not isinstance(field_data, dict):
-            continue
-        field_name = _slugify(str(field_data.get("field_name") or field_data.get("name") or f"field_{next_sort_order + index}"), f"field_{next_sort_order + index}")
-        assert_safe_identifier(field_name)
-        if field_name in existing_names:
-            raise HTTPException(status_code=409, detail=f"Field already exists on this form: {field_name}")
-        existing_names.add(field_name)
-        field = FormField(
-            tenant_id=tenant_id,
-            form_id=form.id,
-            field_name=field_name,
-            label=str(field_data.get("label") or field_name),
-            field_type=_normalize_field_type(field_data.get("field_type")),
-            required=bool(field_data.get("required", False)),
-            visible_in_list=bool(field_data.get("visible_in_list", True)),
-            visible_in_form=bool(field_data.get("visible_in_form", True)),
-            searchable=bool(field_data.get("searchable", False)),
-            sortable=bool(field_data.get("sortable", False)),
-            enum_values=field_data.get("enum_values"),
-            ui_config=field_data.get("ui_config"),
-            sort_order=int(field_data.get("sort_order", next_sort_order + index)),
-        )
-        session.add(field)
-        created_fields.append(field)
-
-    await session.flush()
-    layouts = (
-        await session.execute(select(FormLayout).where(FormLayout.form_id == form.id, FormLayout.tenant_id == tenant_id))
-    ).scalars().all()
-    changed_layouts: set[str] = set()
-    for field in created_fields:
-        changed_layouts.update(_append_field_to_layouts(list(layouts), field))
-
-    await session.commit()
-    for field in created_fields:
-        await session.refresh(field)
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="ai_add_form_field",
-        resource_type="form",
-        resource_id=form.id,
-        new_values=payload,
-    )
+            raise HTTPException(422, "每个字段必须是一个对象")
+        raw = dict(field_data)
+        if raw.get("field_name") or raw.get("name"):
+            raw["field_name"] = _slugify(str(raw.get("field_name") or raw.pop("name")))
+        normalized.append(raw)
+    result = await add_form_fields(form.id, normalized, session, user,
+        sync_layouts=True, audit_action="ai_add_form_field")
+    created_fields = result["fields"]
+    changed_layouts = result["changed_layouts"]
 
     return {
         "form": {"id": form.id, "name": form.name, "code": form.code, "status": form.status},
-        "fields": [_field_payload(field) for field in created_fields],
+        "fields": created_fields,
         "changed_layouts": sorted(changed_layouts),
     }

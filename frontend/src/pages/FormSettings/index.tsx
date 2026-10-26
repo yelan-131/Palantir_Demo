@@ -1,3 +1,5 @@
+import StaticOptionsEditor from './StaticOptionsEditor';
+import { parseStaticOptions, staticOptionErrors, normalizeSelection, selectionCountError, selectionConfigErrors } from '@/utils/selectOptions';
 import { createUuid } from '@/utils/uuid';
 import { previewFieldPermission, previewFlowNodes as associatedPreviewNodes } from './previewPermissions';
 import { RuleInlineSelect } from './RuleInlineCell';
@@ -10,7 +12,7 @@ import RelationPicker from '@/components/FormWidgets/RelationPicker';
 import { enumOptions, matchesOptionSearch, duplicateFieldBindings, type ControlSettings, type OptionSearchSettings } from '@/utils/formControls';
 import SettingsTabs from '@/components/SettingsTabs';
 import VersionManager from './VersionManager';
-import { isLayoutContainer, layoutSlots, normalizeLayout, placeLayoutControl, unwrapLayoutControl, cloneLayoutSubtree, layoutDescendants, buildRuntimeLayout, getControlAppearance, getControlPresentation, getControlColumnSpan, type LayoutPlacement, type ControlPresentation } from '@/utils/formLayout';
+import { isLayoutControl, isLayoutContainer, layoutSlots, normalizeLayout, placeLayoutControl, unwrapLayoutControl, cloneLayoutSubtree, layoutDescendants, buildRuntimeLayout, getControlAppearance, getControlPresentation, getControlColumnSpan, type LayoutPlacement, type ControlPresentation } from '@/utils/formLayout';
 import { DEFAULT_FIELD_BYTES, DEFAULT_FORM_LIMITS, fieldStorageSize } from '../SystemAdmin/assemblyPersistence';
 import { defaultRuleErrors, defaultRuleSummary, newDefaultPart, type DefaultValueRule } from '@/utils/formDefaults';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
@@ -683,8 +685,7 @@ const defaultControlTypeOptions = [
   { value: 'text', label: '文本输入' },
   { value: 'textarea', label: '多行文本' },
   { value: 'number', label: '数值输入' },
-  { value: 'select', label: '下拉选择' },
-  { value: 'relation', label: '对象/人员选择' },
+  { value: 'select', label: '选择控件' },
   { value: 'datetime', label: '日期时间' },
   { value: 'upload', label: '附件上传' },
   { value: 'switch', label: '开关切换' },
@@ -940,11 +941,10 @@ const ruleStrategyOptions: Partial<Record<ControlRuleKey, Array<{ value: string;
 const viewControlOptions: Array<{ value: ViewControlType; label: string }> = [
   { value: 'keyword', label: '关键词' },
   { value: 'text', label: '文本输入' },
-  { value: 'select', label: '下拉选择' },
+  { value: 'select', label: '选择控件' },
   { value: 'dateRange', label: '日期范围' },
   { value: 'date', label: '单日期' },
   { value: 'number', label: '数字' },
-  { value: 'relation', label: '关联对象' },
 ];
 
 const viewFilterOperatorOptions: Array<{ value: ViewFilterOperator; label: string }> = [
@@ -1454,8 +1454,7 @@ const defaultComponentGroups: Array<{ category: string; items: ComponentDefiniti
   {
     category: '选择控件',
     items: [
-      { key: 'select', category: '选择控件', name: '下拉选择', desc: '固定选项、枚举字典', icon: <SelectOutlined />, controlType: 'select' },
-      { key: 'relation', category: '选择控件', name: '关联对象', desc: '人员、设备、供应商、物料', icon: <LinkOutlined />, controlType: 'relation' },
+      { key: 'select', category: '选择控件', name: '选择控件', desc: '固定选项、字典、人员及关联记录', icon: <SelectOutlined />, controlType: 'select' },
       { key: 'datetime', category: '选择控件', name: '日期选择', desc: '日期、时间、时间范围', icon: <CalendarOutlined />, controlType: 'datetime' },
       { key: 'switch', category: '选择控件', name: '布尔选择', desc: '是/否、启用/停用', icon: <SwitcherOutlined />, controlType: 'switch' },
       { key: 'upload', category: '选择控件', name: '附件上传', desc: '图片、文件、凭证上传', icon: <PaperClipOutlined />, controlType: 'upload', defaultWidth: 'full' },
@@ -1482,7 +1481,7 @@ const defaultComponentGroups: Array<{ category: string; items: ComponentDefiniti
   },
 ];
 
-const defaultCommonControlKeys = ['text', 'number', 'code', 'select', 'relation', 'datetime'];
+const defaultCommonControlKeys = ['text', 'number', 'code', 'select', 'datetime'];
 
 const componentIconMap: Record<string, React.ReactNode> = {
   text: <FormOutlined />,
@@ -1588,8 +1587,18 @@ function getDesignerMeta(form: PlatformForm | null | undefined): DesignerMeta {
   const config = isRecord(form?.config) ? form?.config : {};
   const meta = isRecord(config?.designerMeta) ? config.designerMeta as DesignerMetaConfig : {};
   const typeSettingOptions = isRecord(meta.typeSettingOptions) ? meta.typeSettingOptions : {};
+  const selection = defaultComponentGroups.flatMap(group => group.items).find(item => item.key === 'select')!;
+  let selectionAdded = false;
+  const componentGroups = normalizeComponentGroups(meta.componentLibrary, defaultComponentGroups).map(group => ({ ...group, items: group.items.flatMap(item => {
+    if (!isDataSourceControlType(item.controlType)) return [item];
+    if (selectionAdded) return [];
+    selectionAdded = true;
+    return [{ ...selection, category: group.category }];
+  }) })).filter(group => group.items.length);
+  const options = normalizeDesignerOptions(meta.controlTypeOptions, defaultControlTypeOptions)
+    .map(option => isDataSourceControlType(option.value) ? { value: 'select', label: '选择控件' } : option);
   return {
-    controlTypeOptions: normalizeDesignerOptions(meta.controlTypeOptions, defaultControlTypeOptions),
+    controlTypeOptions: options.filter((option, index) => options.findIndex(item => item.value === option.value) === index),
     textFormatOptions: normalizeDesignerOptions(typeSettingOptions.textFormats, defaultTextFormatOptions),
     textTrimModeOptions: normalizeDesignerOptions(typeSettingOptions.textTrimModes, defaultTextTrimModeOptions),
     textCaseModeOptions: normalizeDesignerOptions(typeSettingOptions.textCaseModes, defaultTextCaseModeOptions),
@@ -1598,8 +1607,8 @@ function getDesignerMeta(form: PlatformForm | null | undefined): DesignerMeta {
     dateModeOptions: normalizeDesignerOptions(typeSettingOptions.dateModes, defaultDateModeOptions),
     defaultDateOptions: normalizeDesignerOptions(typeSettingOptions.defaultDates, defaultDateValueOptions),
     encodingResetCycleOptions: normalizeDesignerOptions(typeSettingOptions.encodingResetCycles, defaultEncodingResetCycleOptions),
-    componentGroups: normalizeComponentGroups(meta.componentLibrary, defaultComponentGroups),
-    commonControlKeys: normalizeStringList(meta.commonControlKeys, defaultCommonControlKeys),
+    componentGroups,
+    commonControlKeys: [...new Set(normalizeStringList(meta.commonControlKeys, defaultCommonControlKeys).map(key => key === 'relation' ? 'select' : key))],
     businessSections: Array.isArray(meta.businessSections) ? meta.businessSections : undefined,
   };
 }
@@ -1653,13 +1662,7 @@ function getPreviewNodeNote(node?: FlowDesignerNode) {
 }
 
 function optionSourceToOptions(source?: string, fallback?: string) {
-  const raw = source || fallback || '';
-  const values = raw
-    .split(/[、,/，|]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const normalized = values.length ? values : (fallback ? [fallback] : ['待配置选项']);
-  return normalized.map((item) => ({ value: item, label: item }));
+  return parseStaticOptions(source === undefined ? fallback : source);
 }
 
 function inferFieldControlType(field?: DesignerField) {
@@ -1703,7 +1706,7 @@ function getReferenceConfig(kind?: ReferenceSourceKind) {
 
 function fieldInput(field: DesignerField, placeholderOverride?: string, disabled = false, optionSourceOverride?: string, controlTypeOverride?: string, typeSettings?: ControlTypeSettings) {
   const type=controlTypeOverride && controlTypeOverride!=='field'?controlTypeOverride:inferFieldControlType(field);
-  return <FieldControl preview type={type} disabled={disabled} label={field.name} placeholder={placeholderOverride||field.placeholder} settings={typeSettings} options={field.enumValues&&optionSourceOverride===field.optionSource?field.enumValues:optionSourceOverride?optionSourceToOptions(optionSourceOverride):field.enumValues||optionSourceToOptions(field.optionSource)} />;
+  return <FieldControl preview type={type} disabled={disabled} label={field.name} placeholder={placeholderOverride||field.placeholder} settings={typeSettings} options={parseStaticOptions(optionSourceOverride ?? field.optionSource, field.enumValues)} />;
 }
 
 function designerFieldsToViewFields(fields: DesignerField[]) {
@@ -1782,14 +1785,15 @@ function mapPlatformFieldType(field: PlatformFormField): Pick<DesignerField, 'ty
   const rawBusinessType = getPlatformFieldString(field, 'business_type') || getPlatformUiString(field, 'businessType');
   const encodingRule = getPlatformEncodingRule(field);
   const businessType = encodingRule ? 'code' : mapPlatformBusinessType(rawBusinessType, rawType, controlType, dataSource, widget);
-  const enumSource = getPlatformEnumValues(field).join('、') || undefined;
+  const enumChoices = enumOptions(field.enum_values);
+  const enumSource = enumChoices.length ? JSON.stringify(enumChoices) : getPlatformEnumValues(field).join('、') || undefined;
   const label = field.label || field.field_name;
 
   if (businessType === 'code') {
     return { type: '文本 / 自动编号', businessType, placeholder: `自动生成${label}`, encodingRule };
   }
   if (businessType === 'enum') {
-    return { type: '下拉选择', businessType, optionSource: enumSource, placeholder: enumSource || `请选择${label}` };
+    return { type: '下拉选择', businessType, optionSource: enumSource, placeholder: `请选择${label}` };
   }
   if (businessType === 'datetime' || businessType === 'date') {
     return { type: '日期控件', businessType, placeholder: `选择${label}` };
@@ -2159,9 +2163,10 @@ function makeComponentControl(component: ComponentDefinition): LayoutControl {
     controlType: component.controlType,
     name: component.name,
     desc: component.desc,
-    placeholder: component.desc,
+    placeholder: component.controlType === 'select' ? '请选择' : component.desc,
     helpText: '',
-    optionSource: ['select', 'relation'].includes(component.controlType) ? component.desc : undefined,
+    optionSource: component.controlType === 'select' ? '' : component.controlType === 'relation' ? component.desc : undefined,
+    dataSourceKind: component.controlType === 'select' ? 'static' : undefined,
     typeSettings: getDefaultTypeSettings(component.controlType),
     width: component.defaultWidth || 'half',
     rules: makeControlRules(),
@@ -2459,6 +2464,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   useEffect(() => {
+    if (!embedded && platformForm?.config?.componentPageEnabled && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
+      navigate(`/program/${encodeURIComponent(platformForm.code)}`, {replace: true}); return;
+    }
     const liveAnalytics = platformForm?.config?.analyticsDesign;
     const hasRuntimeDashboard = Boolean(platformForm?.published_version || platformForm?.config?.publishedSchemaVersion || (liveAnalytics && typeof liveAnalytics === 'object' && !Array.isArray(liveAnalytics)));
     if (embedded || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
@@ -3006,7 +3014,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       ...enabledColumns.filter((column) => !baseConfig.fields.some((field) => field.key === column.fieldName)).map((column) => column.label),
     ];
     const duplicates=duplicateFieldBindings(layoutControls);
-    const unbound=layoutControls.filter(c=>!c.fieldKey&&!isLayoutContainer(c)&&c.controlType!=='divider');
+    const unbound=layoutControls.filter(c=>!c.fieldKey&&!isLayoutControl(c));
     const defaultErrors = defaultRuleErrors(layoutControls, baseConfig.fields);
     const checks: PublishCheckItem[] = [
       { level: baseConfig.fields.length > DEFAULT_FORM_LIMITS.fields ? 'error' : 'suggestion', title: '表单容量规则', detail: `当前 ${baseConfig.fields.length} 个字段，系统上限 ${DEFAULT_FORM_LIMITS.fields} 个；单条记录最多 2 MiB` },
@@ -3280,15 +3288,23 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     if (selectedEffectiveControlType === 'select' || selectedEffectiveControlType === 'relation') {
       return (
         <section className="designer-prop-section">
-          {renderPropertyHeading(selectedEffectiveControlType === 'relation' ? '关联设置' : '选择设置', '设置如何选择和展示选项；候选内容在数据来源中配置。问号可查看每项设置的效果与适用范围。')}
-          <div className="designer-property-rule-row">{renderRuleLabel('选择模式', '单选每次选择一项，多选可同时选择多项。关联对象、字典和 API 来源当前仅支持单选。', true)}<Select aria-label="选择模式" value={typeSettings.selectionMode || 'single'} options={(selectedEffectiveControlType==='relation'||['dictionary','externalApi'].includes(selectedReferenceSourceKind))?selectionModeOptions.filter(option=>option.value==='single'):selectionModeOptions} onChange={(selectionMode) => updateSelectedTypeSettings({ selectionMode })} /></div>
-          <div className="designer-property-rule-row">{renderRuleLabel('展示方式', '下拉适合普通选项；搜索可按选项文字查找；单复选会直接铺开选项；标签按多选方式填写。', true)}<Select aria-label="展示方式" value={typeSettings.displayMode || (selectedEffectiveControlType === 'relation' ? 'search' : 'dropdown')} options={(selectedEffectiveControlType==='relation'||['dictionary','externalApi'].includes(selectedReferenceSourceKind))?selectionDisplayOptions.filter(option=>['dropdown','search'].includes(String(option.value))):selectionDisplayOptions} onChange={(displayMode) => updateSelectedTypeSettings({ displayMode })} /></div>
-          {(typeSettings.displayMode || (selectedEffectiveControlType === 'relation' ? 'search' : 'dropdown')) === 'search' && <div className="designer-property-rule-row">
+          {renderPropertyHeading('选择设置', '设置如何选择和展示选项；候选内容在数据来源中配置。问号可查看每项设置的效果与适用范围。')}
+          <div className="designer-property-rule-row">{renderRuleLabel('选择模式', '单选每次选择一项，多选可同时选择多项。固定选项支持多选；字典和关联记录来源当前仅支持单选。', true)}<Select aria-label="选择模式" value={typeSettings.selectionMode || 'single'} options={(selectedReferenceSourceKind !== 'static')?selectionModeOptions.filter(option=>option.value==='single'):selectionModeOptions} onChange={(selectionMode) => updateSelectedTypeSettings({ selectionMode })} /></div>
+          <div className="designer-property-rule-row">{renderRuleLabel('展示方式', '下拉适合普通选项；搜索可按选项文字查找；单复选会直接铺开选项；标签按多选方式填写。', true)}<Select aria-label="展示方式" value={typeSettings.displayMode || (selectedReferenceSourceKind !== 'static' ? 'search' : 'dropdown')} options={(selectedReferenceSourceKind !== 'static')?selectionDisplayOptions.filter(option=>['dropdown','search'].includes(String(option.value))):selectionDisplayOptions.map(option => option.value === 'radio' ? { ...option, label: typeSettings.selectionMode === 'multiple' ? '平铺复选' : '平铺单选' } : option)} onChange={(displayMode) => updateSelectedTypeSettings({ displayMode })} /></div>
+          {(typeSettings.displayMode || (selectedReferenceSourceKind !== 'static' ? 'search' : 'dropdown')) === 'search' && <div className="designer-property-rule-row">
             {renderRuleLabel('搜索设置', '配置搜索字段、匹配方式和候选范围；齿轮中可输入关键词试搜。', true)}
             <div className="designer-rule-toggle"><Button className="designer-rule-config-button" aria-label="设置搜索规则" type="text" size="small" icon={<SettingOutlined />} disabled={!selectedControl?.fieldKey} onClick={openSearchSettings} /></div>
           </div>}
           <div className="designer-property-rule-row">{renderRuleLabel('允许清空', '下拉或搜索框中可一键移除已选内容。关闭后隐藏清空按钮；必填字段清空后仍需重新选择才能提交。', true)}<Switch aria-label="允许清空" size="small" checked={typeSettings.allowClear !== false} onChange={(allowClear) => updateSelectedTypeSettings({ allowClear })} /></div>
-          {selectedEffectiveControlType === 'select' && !['dictionary','externalApi'].includes(selectedReferenceSourceKind) && (
+          {selectedReferenceSourceKind === 'static' && typeSettings.selectionMode === 'multiple' && <>
+            <div className="designer-property-rule-row">{renderRuleLabel('最少选择', '提交时至少选择的数量；留空或 0 表示不限制，草稿可暂不满足。', true)}<InputNumber aria-label="最少选择数量" min={0} max={1000} precision={0} placeholder="不限" value={typeSettings.minSelections} onChange={value => updateSelectedTypeSettings({ minSelections: value ?? undefined })} /></div>
+            <div className="designer-property-rule-row">{renderRuleLabel('最多选择', '最多允许选择的数量，留空表示不限制。达到上限后仍可取消已选项。', true)}<InputNumber aria-label="最多选择数量" min={1} max={1000} precision={0} placeholder="不限" value={typeSettings.maxSelections} onChange={value => updateSelectedTypeSettings({ maxSelections: value ?? undefined })} /></div>
+            {typeSettings.displayMode !== 'radio' && <>
+              <div className="designer-property-rule-row">{renderRuleLabel('标签折叠', '只控制已选标签的显示，不改变选择结果；折叠后悬停可查看其余名称。', true)}<Select aria-label="标签折叠方式" value={typeSettings.tagCollapse || 'none'} options={[{ value: 'none', label: '不折叠' }, { value: 'responsive', label: '按宽度折叠' }, { value: 'fixed', label: '按数量折叠' }]} onChange={tagCollapse => updateSelectedTypeSettings({ tagCollapse })} /></div>
+              {typeSettings.tagCollapse === 'fixed' && <div className="designer-property-rule-row"><span>显示标签数</span><InputNumber aria-label="显示标签数量" min={1} max={1000} precision={0} value={typeSettings.maxVisibleTags ?? 3} onChange={value => updateSelectedTypeSettings({ maxVisibleTags: value ?? undefined })} /></div>}
+            </>}
+          </>}
+          {selectedReferenceSourceKind === 'static' && typeSettings.selectionMode === 'multiple' && typeSettings.displayMode !== 'radio' && (
             <div className="designer-property-rule-row">{renderRuleLabel('允许临时项', '多选或标签模式下，可输入候选项以外的新值；单选及单复选展示不支持。新值只保存到当前记录，不会自动新增来源数据。', true)}<Switch aria-label="允许临时项" size="small" checked={Boolean(typeSettings.allowCreateOption)} onChange={(allowCreateOption) => updateSelectedTypeSettings({ allowCreateOption })} /></div>
           )}
         </section>
@@ -3329,7 +3345,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const formatStorageBudget = (bytes: number) => bytes >= 1048576 && bytes % 1048576 === 0 ? `${bytes / 1048576} MiB` : bytes >= 1024 && bytes % 1024 === 0 ? `${bytes / 1024} KiB` : `${bytes} 字节`;
 
-  const renderFieldBindingProperties = () => selectedControl && !isLayoutContainer(selectedControl) ? <>
+  const renderFieldBindingProperties = () => selectedControl && !isLayoutControl(selectedControl) ? <>
     <label className="designer-prop-locked">
       <span>绑定字段</span>
       <Select aria-label="绑定字段" allowClear value={selectedControl.fieldKey} placeholder="请选择存储字段" options={baseConfig.fields.map(f => ({ value: f.key, label: `${f.name} (${f.key})` }))} onChange={fieldKey => updateSelectedControl({ fieldKey, source: 'field' })} />
@@ -3353,9 +3369,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           />
         </PropertyRow>
         <label>
-          <span>{embedded ? '填写方式' : '控件类型'}</span>
-          {isLayoutContainer(selectedControl) ? <Input readOnly value={selectedControl.controlType === 'container' ? '分组容器' : selectedControl.controlType === 'tabs' ? '页签容器' : '多列布局'} /> : <Select
-            value={selectedEffectiveControlType}
+          <span>{embedded && !isLayoutControl(selectedControl) ? '填写方式' : '控件类型'}</span>
+          {isLayoutControl(selectedControl) ? <Input readOnly value={selectedControl.controlType === 'divider' ? '分割符' : selectedControl.controlType === 'container' ? '分组容器' : selectedControl.controlType === 'tabs' ? '页签容器' : '多列布局'} /> : <Select
+            value={selectedEffectiveControlType === 'relation' ? 'select' : selectedEffectiveControlType}
             options={isEncodingField(selectedField) ? controlTypeOptions.filter((option) => ['code', 'text', 'textarea', 'readonly-text'].includes(String(option.value))) : controlTypeOptions}
             onChange={(controlType) => {
               const nextWidth = controlType === 'textarea' || controlType === 'upload' ? 'full' : selectedControl.width;
@@ -3368,7 +3384,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           />}
         </label>
         {renderFieldBindingProperties()}
-        {embedded && !isLayoutContainer(selectedControl) && !selectedControl.fieldKey && <Alert type="warning" showIcon message="请先绑定存储字段" description="在下方高级设置中选择字段后，填写内容才能保存。" />}
+        {embedded && !isLayoutControl(selectedControl) && !selectedControl.fieldKey && <Alert type="warning" showIcon message="请先绑定存储字段" description="在下方高级设置中选择字段后，填写内容才能保存。" />}
       </PropertyGroup>
     );
   };
@@ -3388,24 +3404,19 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
               const config = getReferenceConfig(dataSourceKind);
               updateSelectedControl({
                 dataSourceKind,
-                optionSource: dataSourceKind==='dictionary'?optionCatalog.dictionaries[0]?.code:dataSourceKind==='externalApi'?String(optionCatalog.externalApis[0]?.id||''):dataSourceKind==='businessForm'?referenceForms[0]?.code:config.objects[0]?.value,
+                optionSource: dataSourceKind==='static'?'[]':dataSourceKind==='dictionary'?optionCatalog.dictionaries[0]?.code:dataSourceKind==='externalApi'?String(optionCatalog.externalApis[0]?.id||''):dataSourceKind==='businessForm'?referenceForms[0]?.code:config.objects[0]?.value,
                 referenceValueField:undefined,referenceItemsPath:'data',
-                typeSettings:{...selectedControl.typeSettings,search:undefined,...(['dictionary','externalApi'].includes(dataSourceKind)?{selectionMode:'single',displayMode:'search',allowCreateOption:false}:{})},
+                typeSettings:{...selectedControl.typeSettings,search:undefined,...(dataSourceKind !== 'static'?{selectionMode:'single',displayMode:'search',allowCreateOption:false}:{displayMode:'dropdown'})},
                 referenceLabelField:undefined,
               });
             }}
           />
         </label>
         {selectedReferenceSourceKind === 'static' ? (
-          <label>
-            <span>选项值</span>
-            <Input
-              allowClear
-              placeholder={selectedReferenceConfig.placeholder}
-              value={selectedControl.optionSource || selectedField?.optionSource || ''}
-              onChange={(event) => updateSelectedControl({ optionSource: event.target.value })}
-            />
-          </label>
+          <StaticOptionsEditor
+            options={parseStaticOptions(selectedControl.optionSource, selectedField?.enumValues)}
+            onChange={options => updateSelectedControl({ optionSource: JSON.stringify(options) })}
+          />
         ) : (
           <label>
             <span>引用对象</span>
@@ -3426,7 +3437,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         </label>
         <label>
           <span>值字段</span>
-          {selectedReferenceSourceKind==='externalApi'?<Input aria-label="API 值字段" value={selectedControl.referenceValueField||'id'} onChange={event=>updateSelectedControl({referenceValueField:event.target.value})}/>:<Input readOnly value={selectedReferenceSourceKind==='dictionary'?'value（字典项编码）':'id（记录 ID）'}/>}
+          {selectedReferenceSourceKind==='externalApi'?<Input aria-label="API 值字段" value={selectedControl.referenceValueField||'id'} onChange={event=>updateSelectedControl({referenceValueField:event.target.value})}/>:<Input readOnly value={selectedReferenceSourceKind==='static'?'value（选项值）':selectedReferenceSourceKind==='dictionary'?'value（字典项编码）':'id（记录 ID）'}/>}
 
         </label>
         {selectedReferenceSourceKind==='externalApi'&&<><label><span>选项数组路径</span><Input aria-label="API 数组路径" placeholder="data.items；根数组留空" value={selectedControl.referenceItemsPath??'data'} onChange={event=>updateSelectedControl({referenceItemsPath:event.target.value})}/></label><small>只读 GET；接口 URL、认证头及内网访问许可在数据连接中维护，表单只保存数据源 ID 和映射。最多 1000 项。</small></>}
@@ -4257,7 +4268,35 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     return updatedForm;
   };
 
+  const checkSelectionConfiguration = () => {
+    const errors: string[] = [];
+    for (const control of layoutControls) {
+      const field = baseConfig.fields.find(item => item.key === control.fieldKey);
+      const kind = getEffectiveControlTypeForControl(control, field);
+      if (!['select', 'relation'].includes(kind)) continue;
+      const sourceKind = control.dataSourceKind || inferReferenceSourceKind(field, kind);
+      const settings = control.typeSettings || {};
+      if (sourceKind !== 'static') continue;
+      const options = control.optionSource === field?.optionSource && field?.enumValues ? enumOptions(field.enumValues) : parseStaticOptions(control.optionSource, field?.enumValues);
+      errors.push(...[...staticOptionErrors(options), ...selectionConfigErrors(settings, options.length)].map(error => `「${control.name}」${error}`));
+      if (settings.displayMode === 'tags' && settings.selectionMode !== 'multiple') errors.push(`「${control.name}」标签展示需要多选模式`);
+      if (settings.allowCreateOption && (settings.selectionMode !== 'multiple' || settings.displayMode === 'radio')) errors.push(`「${control.name}」当前模式不支持临时项`);
+      const rule = control.defaultRule || field?.defaultRule;
+      const fixed = getFieldDefaultValue(field);
+      if (rule?.enabled !== false && rule?.mode !== 'template' && fixed !== '') {
+        let values: unknown[] = [fixed];
+        if (settings.selectionMode === 'multiple') { try { const parsed = JSON.parse(fixed); values = Array.isArray(parsed) ? parsed : [parsed]; } catch { values = [fixed]; } }
+        const countError = selectionCountError(values, settings);
+        if (countError) errors.push(`「${control.name}」默认值${countError}`);
+        if (!settings.allowCreateOption && values.some(value => !options.some(option => String(option.value) === String(value)))) errors.push(`「${control.name}」默认值不在候选选项中`);
+      }
+    }
+    if (errors.length) { Modal.error({ title: '请完善选择控件配置', content: <div>{errors.map((error, index) => <div key={index}>{error}</div>)}</div> }); return false; }
+    return true;
+  };
+
   const saveDraft = async () => {
+    if (!checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
     if (isPersistingFlow) return false;
     setPersistingFlow(true);
@@ -4275,6 +4314,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const publishConfig = async () => {
+    if (!checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
     if (isPersistingFlow) return false;
     setPersistingFlow(true);
@@ -4294,6 +4334,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const confirmPublish = async () => {
+    if (!checkSelectionConfiguration()) return;
     if (flowLoadError) { message.error(flowLoadError); return; }
     if (publishErrorCount > 0) {
       message.error('请先处理发布确认中的阻断项');
@@ -4621,13 +4662,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const updateSelectedTypeSettings = (patch: Partial<ControlTypeSettings>) => {
     if (!selectedControl) return;
-    updateSelectedControl({
-      typeSettings: {
-        ...getDefaultTypeSettings(selectedEffectiveControlType, selectedField),
-        ...(selectedControl.typeSettings || {}),
-        ...patch,
-      },
-    });
+    const settings = { ...getDefaultTypeSettings(selectedEffectiveControlType, selectedField), ...(selectedControl.typeSettings || {}) };
+    updateSelectedControl({ typeSettings: ['select', 'relation'].includes(selectedEffectiveControlType)
+      ? normalizeSelection(settings, patch, selectedReferenceSourceKind === 'static') : { ...settings, ...patch } });
   };
 
   const syncEncodingSegments = (segments: EncodingSegment[]) => {
@@ -4981,10 +5018,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       const generatedCode = (isEncodingField(field) || control.controlType === 'code') && encoding?.enabled !== false && encoding?.generationMode !== 'manual' && !encoding?.allowManualOverride;
       const placeholder = control.placeholder || field?.placeholder;
       if (generatedCode) return <Input aria-label={control.name} disabled placeholder={placeholder} />;
-      return <Form.Item name={control.fieldKey || control.id} rules={[{ required: permission?.required || state?.required || control.rules.required.enabled, message: `请填写${control.name}` }]}>
+      return <Form.Item name={control.fieldKey || control.id} rules={[{ required: permission?.required || state?.required || control.rules.required.enabled, message: `请填写${control.name}` }, { validator: (_, value) => { const error = !readonly && effectiveControlType === 'select' ? selectionCountError(value, control.typeSettings) : undefined; return error ? Promise.reject(new Error(error)) : Promise.resolve(); } }]}>
         {platformForm && control.dataSourceKind && control.dataSourceKind !== 'static' && control.fieldKey && !state?.masked
           ? <RelationPicker formId={platformForm.id} fieldName={control.fieldKey} draftControls={layoutControls} contextData={previewValues} modelName={control.optionSource || ''} placeholder={placeholder || `请选择${control.name}`} disabled={readonly} allowClear={control.typeSettings?.allowClear !== false} showSearch={control.typeSettings?.displayMode !== 'dropdown'} copyMode={state?.copyMode} copyText={state?.copyText} />
-          : <FieldControl preview masked={state?.masked} copyMode={state?.copyMode} copyText={state?.copyText} type={effectiveControlType} label={control.name} settings={control.typeSettings} options={field?.enumValues && control.optionSource === field.optionSource ? field.enumValues : control.optionSource ? optionSourceToOptions(control.optionSource) : field?.enumValues} placeholder={placeholder} disabled={readonly} />}
+          : <FieldControl preview masked={state?.masked} copyMode={state?.copyMode} copyText={state?.copyText} type={effectiveControlType} label={control.name} settings={control.typeSettings} options={parseStaticOptions(control.optionSource, field?.enumValues)} placeholder={placeholder} disabled={readonly} />}
       </Form.Item>;
     };
     const dragClass = `${presentation.startNewRow ? 'is-start-new-row' : ''} ${!trial && draggedControlId === control.id ? 'canvas-control-dragging' : ''} ${!trial && dropHint?.controlId === control.id ? `canvas-drop-${dropHint.position}` : ''}`;
@@ -6547,7 +6584,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
             <div className="designer-props">
               {renderControlIdentityProperties()}
               {renderDisplayProperties()}
-              {embedded ? <>
+              {selectedControl.controlType === 'divider' ? <>
+                <section className="designer-prop-section"><strong className="designer-prop-section-title">显示设置</strong><label><span>显示分割符</span>{controlRuleToggle('visible')}</label></section>
+                {renderContainerProperties()}
+              </> : embedded ? <>
                 {isLayoutContainer(selectedControl) ? <>{renderContainerProperties()}<section className="designer-prop-section"><strong className="designer-prop-section-title">容器交互</strong><label><span>显示容器</span>{controlRuleToggle('visible')}</label><label><span>只读</span>{controlRuleToggle('readonly')}</label><small>同时作用于容器内的字段。</small></section></> : <>{renderCommonRuleProperties()}{renderTypeSpecificProperties()}{renderAutomationProperties()}{renderDataSourceProperties()}</>}
                 {!isLayoutContainer(selectedControl) && <>
                   {renderContainerProperties()}
@@ -6795,7 +6835,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           <span><LockOutlined /> {isAnalysisDesigner ? '示意数据 · 仅预览布局' : '试填内容不会保存为业务记录'}</span>
           <Space size={10}>
             <Button onClick={() => setPreviewOpen(false)}>返回设计</Button>
-            {!isAnalysisDesigner && <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => previewForm.validateFields().then(() => message.success('预览必填校验通过；数值、格式及字节限制以运行页保存校验为准')).catch(() => {})}>检查必填项</Button>}
+            {!isAnalysisDesigner && <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => previewForm.validateFields().then(() => message.success('预览必填及选择数量校验通过；数值、格式及字节限制以运行页保存校验为准')).catch(() => {})}>检查必填项</Button>}
           </Space>
         </div>}
         onCancel={() => setPreviewOpen(false)}

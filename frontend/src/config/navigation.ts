@@ -29,13 +29,10 @@ export const NAVIGATION_ENTRIES: NavigationEntry[] = [
   { path: '/studio/applications', label: '应用、表单与菜单', area: 'studio', adminOnly: true },
   { path: '/studio/templates', label: '模板中心', area: 'studio' },
   { path: '/plugins', label: '插件与扩展', area: 'plugins' },
-  { path: '/data-center/sources', label: '数据连接', area: 'data', group: '数据接入' },
-  { path: '/data-center/pipelines', label: '同步与管道', area: 'data', group: '数据接入' },
-  { path: '/data-center/reference', label: '字典与基础档案', area: 'data', group: '数据治理', adminOnly: true },
-  { path: '/data-center/assets', label: '数据资产与映射', area: 'data', group: '数据治理', adminOnly: true },
-  { path: '/data-center/objects', label: '对象与关系模型', area: 'data', group: '数据治理', adminOnly: true },
-  { path: '/data-center/entities', label: '实体与抽取浏览', area: 'data', group: '数据探索' },
-  { path: '/data-center/graph', label: '图谱探索', area: 'data', group: '数据探索' },
+  { path: '/data-center/sources', label: '数据接入', area: 'data', group: '数据接入' },
+  { path: '/data-center/assets', label: '数据资产', area: 'data', group: '数据治理' },
+  { path: '/data-center/reference', label: '基础数据', area: 'data', group: '数据治理', adminOnly: true },
+  { path: '/data-center/objects', label: '对象与关系', area: 'data', group: '数据探索' },
   { path: '/data-center/knowledge', label: '知识库', area: 'data', group: '数据探索', adminOnly: true },
   { path: '/admin/sources', label: '数据连接', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/pipelines', label: '同步与管道', area: 'admin', adminOnly: true, group: '数据与集成' },
@@ -120,10 +117,26 @@ export function settingsNavigationGroups(isAdmin: boolean) {
   ].filter(group => group.entries.length);
 }
 
-/** Old admin data URLs still highlight the single canonical data destination. */
+/** Old data URLs keep their filters and open the matching workspace tab. */
+export function dataCenterDestination(pathname: string, search = ''): string | undefined {
+  const path = pathname.replace(/^\/admin\//, '/data-center/');
+  const params = new URLSearchParams(search);
+  const aliases: Record<string, { path: string; parameter: string; value: string }> = {
+    '/data-center/pipelines': { path: '/data-center/sources', parameter: 'tab', value: 'pipelines' },
+    '/data-center/entities': { path: '/data-center/assets', parameter: 'view', value: 'entities' },
+    '/data-center/graph': { path: '/data-center/objects', parameter: 'view', value: 'graph' },
+  };
+  const alias = aliases[path];
+  if (alias) params.set(alias.parameter, alias.value);
+  const destination = alias?.path || path;
+  if (!NAVIGATION_ENTRIES.some(entry => entry.area === 'data' && entry.path === destination)) return undefined;
+  return destination + (params.size ? `?${params}` : '');
+}
+
+/** All tabs and legacy URLs highlight their parent workspace. */
 export function settingsDestinationKey(pathname: string, search = '') {
   if (pathname === '/account-center') return new URLSearchParams(search).get('tab') === 'preferences' ? '/account-center?tab=preferences' : '/account-center';
   if (pathname.startsWith('/form-settings/')) return '/studio/applications';
-  if (NAVIGATION_ENTRIES.some(entry => entry.area === 'data' && entry.path === pathname.replace(/^\/admin\//, '/data-center/'))) return pathname.replace(/^\/admin\//, '/data-center/');
-  return LEGACY_ROUTES[pathname] || pathname;
+  const canonical = LEGACY_ROUTES[pathname] || pathname;
+  return dataCenterDestination(canonical, search)?.split('?')[0] || canonical;
 }

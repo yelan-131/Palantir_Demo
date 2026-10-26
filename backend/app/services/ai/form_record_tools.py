@@ -88,7 +88,7 @@ async def prepare_record_update(session, *, user, payload):
 
 async def update_form_record(session, *, user, payload):
     from app.services import records
-    from app.api.forms import DynamicRecordUpdate
+    from app.services.form_schemas import DynamicRecordUpdate
     form = await records.resolve_form(session, user, form_id=payload.get('form_id'), form_code=payload.get('form_code'))
     receipt_run = None
     if payload.get('_execution_run_id'):

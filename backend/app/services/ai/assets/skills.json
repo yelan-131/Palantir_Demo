@@ -180,5 +180,29 @@
     "permission_capability": "workflow",
     "domain": "workflow",
     "output_schema": {"type": "workflow_result"}
+  },
+  "low_code.inspect_form": {
+    "name": "low_code.inspect_form",
+    "title": "Inspect form configuration",
+    "description": "Inspect form versions, layouts, rule results and publication impact using shared platform services.",
+    "capability_level": "qa",
+    "risk_level": "low",
+    "default_tool": "forms.preview_publish",
+    "allowed_tools": [
+      "forms.preview_publish",
+      "forms.list_versions",
+      "forms.get_version",
+      "forms.get_layouts",
+      "forms.evaluate_rules"
+    ],
+    "required_permissions": [
+      "config"
+    ],
+    "confirmation_policy": "none",
+    "permission_capability": "config",
+    "domain": "platform",
+    "output_schema": {
+      "type": "answer"
+    }
   }
 }

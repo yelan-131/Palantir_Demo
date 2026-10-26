@@ -1,7 +1,7 @@
 import { createUuid } from '@/utils/uuid';
 import FieldProtection, {type FieldPolicy} from '@/components/FieldProtection';
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Checkbox, DatePicker, Input, InputNumber, Radio, Select, Space, Switch, Table, Upload, message } from 'antd';
+import { Button, Checkbox, DatePicker, Input, InputNumber, Radio, Select, Space, Switch, Table, Tooltip, Upload, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { downloadFormFile, uploadFormFile, listPlatformDynamicRecords } from '@/services/api';
@@ -18,8 +18,16 @@ function FieldWidget({value,onChange,type,settings={},options,disabled,placehold
   if(type==='select') {
     const choices=enumOptions(options);const multiple=settings.selectionMode==='multiple'||settings.displayMode==='tags';
     if(settings.displayMode==='radio'&&!multiple)return <Radio.Group aria-label={label} disabled={disabled} value={value} options={choices} onChange={event=>onChange?.(event.target.value)} />;
-    if(multiple&&settings.displayMode==='radio')return <Checkbox.Group aria-label={label} disabled={disabled} value={value||[]} options={choices} onChange={onChange} />;
-    return <Select {...props} value={value} onChange={onChange} options={choices} mode={multiple?(settings.allowCreateOption?'tags':'multiple'):undefined} showSearch={settings.displayMode==='search'} filterOption={(input, option) => matchesOptionSearch(option?.label, input, settings.search?.match)} allowClear={settings.allowClear!==false} style={{width:'100%'}} />;
+    const selected = Array.isArray(value) ? value : [];
+    const atLimit = multiple && settings.maxSelections !== undefined && selected.length >= settings.maxSelections;
+    const limitedChoices = choices.map(option => ({ ...option, disabled: atLimit && !selected.includes(option.value) }));
+    const changeSelection = (next: any) => {
+      if (multiple && settings.maxSelections !== undefined && Array.isArray(next) && next.length > settings.maxSelections) { message.warning(`最多选择 ${settings.maxSelections} 项`); return; }
+      onChange?.(next);
+    };
+    if(multiple&&settings.displayMode==='radio')return <Checkbox.Group aria-label={label} disabled={disabled} value={selected} options={limitedChoices} onChange={changeSelection} />;
+    const maxTagCount = !multiple || settings.tagCollapse === 'none' ? undefined : settings.tagCollapse === 'responsive' ? 'responsive' as const : settings.tagCollapse === 'fixed' ? settings.maxVisibleTags ?? 3 : undefined;
+    return <Select {...props} value={value} onChange={changeSelection} options={limitedChoices} mode={multiple?(settings.allowCreateOption?'tags':'multiple'):undefined} maxTagCount={maxTagCount} maxTagPlaceholder={omitted => <Tooltip title={omitted.map(item => item.label).join('、')}><span aria-label={`另有 ${omitted.length} 项`}>+{omitted.length} 项</span></Tooltip>} showSearch={settings.displayMode==='search'||Boolean(multiple&&settings.allowCreateOption)} filterOption={(input, option) => matchesOptionSearch(option?.label, input, settings.search?.match)} allowClear={settings.allowClear!==false} style={{width:'100%'}} />;
   }
   if(type==='datetime') {
     const disabledDate=settings.disablePast?(date:dayjs.Dayjs)=>date.isBefore(dayjs().startOf('day')):undefined;

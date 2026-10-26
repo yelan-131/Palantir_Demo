@@ -1,3 +1,5 @@
+import {resolveListView, emptyFilterValue, clearedFilterValues, type FilterSettings, type ListSettings} from '../ComponentPages/businessComponents';
+import { selectionCountError } from '@/utils/selectOptions';
 import FormImport from '@/components/FormImport';
 import FieldProtection, {protectCopy, type FieldPolicy} from '@/components/FieldProtection';
 import FieldControl from '@/components/FormWidgets/FieldControl';
@@ -213,7 +215,7 @@ function renderFormFieldControl(field: FieldDef, runtime: FieldRuntime) {
   if (field.field_type !== 'relation') {
     const type = field.controlType || ({enum:'select',boolean:'switch',date:'datetime',datetime:'datetime',text:'textarea',int:'number',integer:'number',float:'number',decimal:'number',number:'number'} as Record<string,string>)[field.field_type] || 'text';
     return <Form.Item key={field.field_name} name={field.field_name} label={field.label} extra={field.helpText}
-      rules={[{required:field.required,message:`请填写${field.label}`}]}><FieldControl type={type} settings={{...(field.field_type==='date'?{dateMode:'date'}:{}),...field.typeSettings}} options={field.enum_values} placeholder={field.placeholder||`请填写${field.label}`} formId={runtime.formId} fieldName={field.field_name} recordId={runtime.recordId} label={field.label}/></Form.Item>;
+      rules={[{required:field.required,message:`请填写${field.label}`}, {validator: (_, value) => { const error = type === 'select' ? selectionCountError(value, field.typeSettings) : undefined; return error ? Promise.reject(new Error(error)) : Promise.resolve(); }}]}><FieldControl type={type} settings={{...(field.field_type==='date'?{dateMode:'date'}:{}),...field.typeSettings}} options={field.enum_values} placeholder={field.placeholder||`请填写${field.label}`} formId={runtime.formId} fieldName={field.field_name} recordId={runtime.recordId} label={field.label}/></Form.Item>;
   }
   switch (field.field_type) {
     case 'relation': {
@@ -337,13 +339,28 @@ function unwrapApiList<T>(payload: unknown): T[] {
   return Array.isArray(data) ? data as T[] : [];
 }
 
-export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
+export interface RecordListComponentProps {
+  formSlug?: string;
+  embedded?: boolean;
+  filterSettings?: FilterSettings;
+  listSettings?: ListSettings;
+  tableDensity?: 'compact' | 'standard' | 'comfortable' | null;
+  display?: 'all' | 'filters' | 'list';
+  filterFields?: string[] | null;
+  externalSearch?: string;
+  onFilterChange?: (value: {ready?: boolean; search: string; filters: Array<{field: string; op: string; value: unknown}>}) => void;
+  externalFilters?: Array<{field: string; op: string; value: unknown}>;
+  refreshKey?: number;
+  onMutated?: () => void;
+  readOnly?: boolean;
+}
+export default function DynamicPage({formSlug, embedded = false, externalFilters, refreshKey = 0, onMutated, readOnly = false, display = 'all', filterSettings, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
   const params = useParams<{ slug: string }>();
   const slug=formSlug||params.slug;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const linkedRecordId = searchParams.get('recordId');
-  const aliasProgramRoute = slug ? dynamicProgramRouteAliases[slug] : undefined;
+  const aliasProgramRoute = !embedded && slug ? dynamicProgramRouteAliases[slug] : undefined;
   const user = useAuthStore(state => state.user);
   const [editorTab, setEditorTab] = useState<WorkspaceEditorTab | null>(null);
   const [configRevision, setConfigRevision] = useState(0);
@@ -354,7 +371,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const workspaceTitle = pageConfig?.title || platformForm?.name;
-  useShellPageTitle(editorTab && workspaceTitle ? `${workspaceTitle} · 编辑表单` : workspaceTitle);
+  useShellPageTitle(editorTab && workspaceTitle ? `${workspaceTitle} · 编辑表单` : workspaceTitle, !embedded);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [referenceLabels,setReferenceLabels]=useState<Record<string,Record<string,string>>>({});
   const [mutationLayout, setMutationLayout] = useState<FormLayoutNode[] | null>(null);
@@ -384,8 +401,12 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   const [submittingApproval, setSubmittingApproval] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Record<string, any> | null>(null);
+  useEffect(() => {if(readOnly){setModalOpen(false);setImportOpen(false);}},[readOnly]);
   const [form] = Form.useForm();
   const [filterForm] = Form.useForm();
+  const [autoFilterRevision, setAutoFilterRevision] = useState(0);
+  const [selectedRowKeys,setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [listError,setListError] = useState('');
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [ruleStates, setRuleStates] = useState<FieldRuntime['states']>({});
@@ -428,10 +449,11 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   const [selectedViewTab, setSelectedViewTab] = useState('');
   const runtimeViewTabs = pageConfig?.config?.viewConfig?.tabs;
   const activeViewTab = runtimeViewTabs?.find((tab) => tab.id === selectedViewTab) || runtimeViewTabs?.[0];
-  const viewConfig = useMemo(
+  const baseViewConfig = useMemo(
     () => normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields),
     [fields, activeViewTab, pageConfig?.config?.viewConfig],
   );
+  const viewConfig = useMemo(()=>resolveListView(baseViewConfig,listSettings),[baseViewConfig,listSettings]);
   const runtimeViewState = useRef({ selectedViewTab: '', viewConfig, filterValues, sortState });
   runtimeViewState.current = { selectedViewTab: activeViewTab?.id || '', viewConfig, filterValues, sortState };
   const switchViewTab = (id: string) => {
@@ -446,25 +468,46 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
     filterForm.resetFields();
   };
 
-  const activeFilters = useMemo(() => viewConfig ? sortByOrder(viewConfig.filters).filter((filter) => filter.enabled) : [], [viewConfig]);
+  const activeFilters = useMemo(() => viewConfig ? sortByOrder(viewConfig.filters).filter((filter) => filter.enabled && (display !== 'filters' || selectedFilterFields == null || selectedFilterFields.includes(filter.fieldName))) : [], [viewConfig, display, selectedFilterFields]);
   const tableConfigColumns = useMemo(() => viewConfig ? sortByOrder(viewConfig.table.columns).filter((column) => column.enabled) : [], [viewConfig]);
-  const structuredFilters = useMemo(() => activeFilters
+  const structuredFilters = useMemo(() => [...(externalFilters || []), ...(display === 'list' ? [] : activeFilters)
     .map((filter) => filterValueToPayload(filter, Object.prototype.hasOwnProperty.call(filterValues,filter.id) ? filterValues[filter.id] : filter.defaultValue))
-    .filter(Boolean), [activeFilters, filterValues]);
+    .filter(Boolean)], [activeFilters, filterValues, externalFilters, display]);
+  useEffect(() => { setPage(1); }, [externalFilters, externalSearch]);
+  useEffect(()=>{setPage(1);setSortState({});setSelectedRowKeys([]);},[listSettings?.pageSize,listSettings?.defaultSort?.field,listSettings?.defaultSort?.order]);
+  const filterCallback = useRef(onFilterChange);
+  filterCallback.current = onFilterChange;
+  const requiredFilterFields = filterSettings?.requiredFields || [];
+  const ready = requiredFilterFields.every(name=>{
+    const filter = activeFilters.find(item=>item.fieldName===name);
+    return filter && !emptyFilterValue(Object.prototype.hasOwnProperty.call(filterValues,filter.id)?filterValues[filter.id]:filter.defaultValue);
+  });
+  const filterSignature = JSON.stringify({search:filterSettings?.showKeyword===false?'':search, filters: structuredFilters, ready});
+  useEffect(()=>{
+    if(display!=='filters'||filterSettings?.queryMode!=='change'||!autoFilterRevision)return;
+    const timer=window.setTimeout(()=>filterForm.submit(),350);
+    return ()=>window.clearTimeout(timer);
+  },[display,filterSettings?.queryMode,autoFilterRevision,filterForm]);
+  useEffect(()=>{setAdvancedFiltersOpen(Boolean(filterSettings?.expandAdvanced));},[filterSettings?.expandAdvanced]);
+  const selectionQueryKey = JSON.stringify([slug,page,search,externalSearch,structuredFilters,sortState,listSettings?.selection]);
+  useEffect(()=>{setSelectedRowKeys([]);},[selectionQueryKey]);
+  useEffect(() => {
+    if (display === 'filters' && !configRefreshing && !configError) filterCallback.current?.(JSON.parse(filterSignature));
+  }, [display, filterSignature, configRefreshing, configError]);
 
   useEffect(() => {
   if (aliasProgramRoute) navigate(aliasProgramRoute, { replace: true });
   }, [aliasProgramRoute, navigate]);
 
   const loadData = useCallback(async () => {
-    if (!slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig || configPending.current || configRefreshing || configError) return;
+    if (display === 'filters' || !slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig || configPending.current || configRefreshing || configError) return;
     const requestId = ++requestIdRef.current;
-    setLoading(true);
+    setLoading(true);setSelectedRowKeys([]);
     try {
       const res = await listPlatformDynamicRecords(platformForm.id, {
         page,
         page_size: viewConfig.table.pageSize,
-        search: search || undefined,
+        search: (externalSearch ?? search) || undefined,
         filters: structuredFilters.length ? JSON.stringify(structuredFilters) : undefined,
         sort_field: sortState.field || viewConfig.table.defaultSort?.fieldName,
         sort_order: sortState.order || (viewConfig.table.defaultSort ? (viewConfig.table.defaultSort.order === 'ascend' ? 'asc' : 'desc') : undefined),
@@ -475,10 +518,10 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
       const lastPage = Math.max(1, Math.ceil(nextTotal / viewConfig.table.pageSize));
       if (page > lastPage) { setPage(lastPage); return; }
       setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval, _fieldStates: record.field_states })));
-      setTotal(nextTotal);
-    } catch { if (requestId === requestIdRef.current) message.error('加载数据失败'); }
+      setTotal(nextTotal);setListError('');setSelectedRowKeys([]);
+    } catch { if (requestId === requestIdRef.current) {setListError('查询失败，以下保留上次成功加载的结果。');if(!embedded)message.error('加载数据失败');} }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
-  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError]);
+  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch]);
 
   useEffect(() => {
     if (!slug || aliasProgramRoute) return;
@@ -601,7 +644,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
       .map(fn => fields.find(f => f.field_name === fn))
       .filter((f): f is FieldDef => !!f);
   const runtimePermissions = platformForm?.runtime_permissions || {};
-  const canRunAction = (action: string) => Boolean(platformForm) && runtimePermissions[action] !== false;
+  const canRunAction = (action: string) => Boolean(platformForm) && (!readOnly || ['view', 'detail', 'refresh'].includes(action)) && runtimePermissions[action] !== false;
 
   const tableColumns = listFields.map(field_name => {
     const f = fields.find(x => x.field_name === field_name);
@@ -666,7 +709,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   }, [platformForm?.id, linkedRecordId]);
   const submitApproval = () => {
     const approval = detailRecord?._approval as RecordApproval | undefined;
-    if (!platformForm || !detailRecord || !approval?.can_submit) return;
+    if (readOnly || !platformForm || !detailRecord || !approval?.can_submit) return;
     Modal.confirm({ title: approval.status === 'rejected' ? '确认重新提交审批？' : '确认提交审批？',
       content: '提交后统一进入流程与待办，审批期间不能修改来源记录。',
       onOk: async () => {
@@ -675,6 +718,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
           await submitPlatformDynamicRecord(platformForm.id, detailRecord.id, approval.status);
           message.success('已提交审批，可在流程与待办 → 我发起的追踪');
           await openDetail(detailRecord); await loadData();
+          onMutated?.();
         } catch (error: any) { message.error(error?.response?.data?.detail || '提交失败，请补充必填字段'); throw error; }
         finally { setSubmittingApproval(false); }
       },
@@ -750,7 +794,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   };
 
   const openCreateModal = async () => {
-    if (!platformForm) return;
+    if (readOnly || !platformForm) return;
     setEditingRecord(null);
     try {
       const nextFields = await loadMutationSchema('create');
@@ -770,7 +814,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   };
 
   const openEditModal = async (record: Record<string, any>) => {
-    if (!platformForm) return;
+    if (readOnly || !platformForm) return;
     try {
       const item = unwrapApiData<any>(await getPlatformDynamicRecord(platformForm.id, record.id));
       record = { ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states };
@@ -797,6 +841,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   };
 
   const handleModalOk = async () => {
+    if(readOnly)return;
     try {
       if (rulesLoading || ruleError) return;
       const values = usesDraftLifecycle ? form.getFieldsValue() : await form.validateFields();
@@ -823,6 +868,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
       }
       setModalOpen(false);
       loadData();
+      onMutated?.();
     } catch (e: any) {
       if (e?.errorFields) return; // form validation error
       message.error(e?.response?.data?.detail || (editingRecord ? '更新失败' : '创建失败'));
@@ -832,6 +878,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
   };
 
   const handleDelete = async (id: number) => {
+    if(readOnly)return;
     try {
       if (platformForm) {
         await deletePlatformDynamicRecord(platformForm.id, id);
@@ -841,6 +888,7 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
       }
       message.success('已删除');
       loadData();
+      onMutated?.();
     } catch { message.error('删除失败'); }
   };
 
@@ -868,13 +916,13 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
 
   if (!pageConfig || !viewConfig) {
     return renderWorkspace(
-      <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className="app-business-page dynamic-business-page">
+      <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`app-business-page dynamic-business-page${display === 'list' ? ' component-page-list' : ''}`}>
         <div className="app-business-content dynamic-business-content">
           <div className="app-business-title-row dynamic-business-title-row">
             <Space size={10} align="center" wrap>
               <Tag color="warning">缺少视图配置</Tag>
             </Space>
-            {workspaceEntry}
+            {!embedded && workspaceEntry}
           </div>
           <Empty
             description={configError || '当前表单缺少已发布的数据视图配置'}
@@ -885,8 +933,48 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
     );
   }
 
+  const filterContent = (
+      <Form onValuesChange={()=>setAutoFilterRevision(value=>value+1)} key={activeViewTab?.id || 'default'}
+        className="app-business-search-grid app-business-configured-search dynamic-business-filter"
+        form={filterForm}
+        colon={false}
+        layout="horizontal"
+        onFinish={(values) => {
+          setPage(1);
+          setSearch(filterSettings?.showKeyword===false?'':String(values.keyword || ''));
+          setFilterValues(values);
+        }}
+      >
+        {filterSettings?.showKeyword!==false&&<Form.Item name="keyword" label="关键词">
+          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索业务记录" />
+        </Form.Item>}
+        {activeFilters.map((filter) => (
+          <Form.Item key={filter.id} name={filter.id} label={filter.label} rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]} style={filter.advanced&&!advancedFiltersOpen&&!requiredFilterFields.includes(filter.fieldName)?{display:'none'}:undefined} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
+            {renderDynamicFilterControl(filter)}
+          </Form.Item>
+        ))}
+        <Form.Item className="app-business-search-actions dynamic-view-filter-actions" label=" ">
+          <Space>
+            <Button onClick={() => {
+              setAutoFilterRevision(0);
+              if(filterSettings?.resetMode==='clear'){
+                const cleared=clearedFilterValues(activeFilters);
+                filterForm.setFields([{name:'keyword',value:'',errors:[]},...Object.entries(cleared).map(([name,value])=>({name,value,errors:[]}))]);
+                setFilterValues(cleared);
+              }else{filterForm.resetFields();setFilterValues({});}
+              setSearch('');setPage(1);
+            }}>{filterSettings?.resetLabel||'重置'}</Button>
+            {filterSettings?.queryMode!=='change'&&<Button type="primary" htmlType="submit" icon={<SearchOutlined />}>{filterSettings?.queryLabel||'查询'}</Button>}
+            {activeFilters.some(f=>f.advanced)&&<Button type="link" onClick={()=>setAdvancedFiltersOpen(v=>!v)}>{advancedFiltersOpen?'收起筛选':'更多筛选'}</Button>}
+          </Space>
+        </Form.Item>
+      </Form>
+  );
+  const missingFilterBinding = requiredFilterFields.some(name=>!activeFilters.some(filter=>filter.fieldName===name));
+  if (display === 'filters') return <div className="component-record-filter">{missingFilterBinding&&<Alert type="warning" showIcon message="必填筛选字段已失效，请重新配置筛选字段。" style={{marginBottom:12}} />}{filterSettings?.queryMode==='change'&&<p className="component-query-hint">条件变更后自动查询，必填条件校验通过后生效。</p>}{configError && <Alert type="warning" message={configError} />}{filterContent}</div>;
+
   return renderWorkspace(
-    <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className="app-business-page dynamic-business-page">
+    <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`app-business-page dynamic-business-page${display === 'list' ? ' component-page-list' : ''}`}>
       <div className="app-business-content dynamic-business-content">
       <div className="app-business-title-row dynamic-business-title-row">
         <Space size={8} wrap>
@@ -901,53 +989,24 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
           {toolbarActions.includes('import')&&canRunAction('import')&&canRunAction('create')&&<Button aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>批量导入</Button>}
       {toolbarActions.includes('export')&&canRunAction('export')&&<Button icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
         if(!platformForm)return;setExporting(true);
-        try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:search||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:sortState.field||viewConfig.table.defaultSort?.fieldName,sort_order:sortState.order||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
+        try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:(externalSearch??search)||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:sortState.field||viewConfig.table.defaultSort?.fieldName,sort_order:sortState.order||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
           const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
       }}>导出当前页</Button>}
         </Space>
-        {workspaceEntry}
+        {!embedded && workspaceEntry}
       </div>
 
+      {listError&&<Alert type="error" showIcon message={listError} action={<Button size="small" onClick={()=>void loadData()}>重试</Button>} />}
+      {listSettings?.columns?.some(name=>!baseViewConfig?.table.columns.some(column=>column.enabled&&column.fieldName===name))&&<Alert type="warning" showIcon message="部分配置列在当前发布视图中不可用，已自动隐藏。" />}
       {configError && <Alert type="warning" showIcon message={configError} action={<Button size="small" onClick={refreshPublishedConfig}>重新加载配置</Button>} />}
 
       {runtimeViewTabs && runtimeViewTabs.length > 0 && <Tabs activeKey={activeViewTab?.id} onChange={switchViewTab}
         items={runtimeViewTabs.map((tab) => ({ key: tab.id, label: tab.name }))} />}
-      <Form key={activeViewTab?.id || 'default'}
-        className="app-business-search-grid app-business-configured-search dynamic-business-filter"
-        form={filterForm}
-        colon={false}
-        layout="horizontal"
-        onFinish={(values) => {
-          setPage(1);
-          setSearch(String(values.keyword || ''));
-          setFilterValues(values);
-        }}
-      >
-        <Form.Item name="keyword" label="关键词">
-          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索业务记录" />
-        </Form.Item>
-        {activeFilters.map((filter) => (
-          <Form.Item key={filter.id} name={filter.id} label={filter.label} style={filter.advanced&&!advancedFiltersOpen?{display:'none'}:undefined} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
-            {renderDynamicFilterControl(filter)}
-          </Form.Item>
-        ))}
-        <Form.Item className="app-business-search-actions dynamic-view-filter-actions" label=" ">
-          <Space>
-            <Button onClick={() => {
-              filterForm.resetFields();
-              setSearch('');
-              setFilterValues({});
-              setPage(1);
-            }}>重置</Button>
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>查询</Button>
-            {activeFilters.some(f=>f.advanced)&&<Button type="link" onClick={()=>setAdvancedFiltersOpen(v=>!v)}>{advancedFiltersOpen?'收起筛选':'更多筛选'}</Button>}
-          </Space>
-        </Form.Item>
-      </Form>
+      {display !== 'list' && filterContent}
 
       <div className="app-business-list-toolbar dynamic-business-list-toolbar">
-        <Typography.Text type="secondary">共 {total} 条记录</Typography.Text>
+        <Typography.Text type="secondary">共 {total} 条记录{selectedRowKeys.length>0&&` · 已选 ${selectedRowKeys.length} 条`}</Typography.Text>
         <Typography.Text type="secondary">业务数据列表</Typography.Text>
       </div>
 
@@ -956,13 +1015,15 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
         dataSource={data}
         columns={tableColumns}
         rowKey="id"
+        rowSelection={listSettings?.selection&&listSettings.selection!=='none'?{type:listSettings.selection==='single'?'radio':'checkbox',selectedRowKeys,onChange:keys=>setSelectedRowKeys(keys)}:undefined}
+        locale={listSettings?.emptyText?{emptyText:<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listSettings.emptyText} />}:undefined}
         onRow={record=>({onClick:event=>{
           if((event.target as HTMLElement).closest('button,a,input,.ant-select,.ant-popover'))return;
           if(viewConfig.table.rowClickAction==='detail')void openDetail(record);
           if(viewConfig.table.rowClickAction==='edit'&&canRunAction('edit')&&(!record._approval||record._approval.can_edit))void openEditModal(record);
         }})}
         loading={loading || configRefreshing}
-        size={viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
+        size={tableDensity ? tableDensity === 'compact' ? 'small' : tableDensity === 'comfortable' ? 'large' : 'middle' : viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
         scroll={{ x: 'max-content', y: '100%' }}
         onChange={(_pagination, _filters, sorter: any) => {
           const activeSorter = Array.isArray(sorter) ? sorter.find((item) => item.order) : sorter;
@@ -985,11 +1046,11 @@ export default function DynamicPage({formSlug}:{formSlug?:string}={}) {
       />
       </div>
 
-      {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen && !editorTab} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();}}/>}
+      {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen && !editorTab} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();onMutated?.();}}/>}
       <Drawer title={`${pageConfig.title} · 记录详情`} open={Boolean(detailRecord) && !editorTab} onClose={() => setDetailRecord(null)} width={560}
         extra={<Space>
-          {(detailRecord?._approval ? detailRecord._approval.can_edit : canRunAction('edit')) && <Button onClick={() => detailRecord && openEditModal(detailRecord)}>编辑</Button>}
-          {detailRecord?._approval?.can_submit && <Button type="primary" loading={submittingApproval} onClick={submitApproval}>{detailRecord._approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
+          {!readOnly && (detailRecord?._approval ? detailRecord._approval.can_edit : canRunAction('edit')) && <Button onClick={() => detailRecord && openEditModal(detailRecord)}>编辑</Button>}
+          {!readOnly && detailRecord?._approval?.can_submit && <Button type="primary" loading={submittingApproval} onClick={submitApproval}>{detailRecord._approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
         </Space>}>
         {detailRecord && <>
           {detailRecord._approval && <Typography.Paragraph>审批状态：<Tag>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</Tag></Typography.Paragraph>}

@@ -168,6 +168,15 @@ async def _create_record_draft(payload: dict[str, Any], context: ToolHandlerCont
         return result
 
 
+def _shared_form_handler(operation: str) -> ToolHandler:
+    async def handler(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
+        from .form_configuration_tools import execute_form_configuration_tool
+        async with db_session() as session:
+            return await execute_form_configuration_tool(operation, session,
+                user=context.current_user or {}, payload=payload)
+    return handler
+
+
 TOOL_HANDLERS: dict[str, ToolHandler] = {
     "not_implemented": _not_implemented,
     "knowledge.search": _knowledge_search,
@@ -179,6 +188,12 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "forms.add_form_field": _forms_add_form_field,
     "ai.semantic_plan_low_code_form": _semantic_low_code_plan,
     "platform.query": _platform_query,
+    "forms.preview_publish": _shared_form_handler("forms.preview_publish"),
+    "forms.list_versions": _shared_form_handler("forms.list_versions"),
+    "forms.get_version": _shared_form_handler("forms.get_version"),
+    "forms.get_layouts": _shared_form_handler("forms.get_layouts"),
+    "forms.evaluate_rules": _shared_form_handler("forms.evaluate_rules"),
+
 }
 
 

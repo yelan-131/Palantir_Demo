@@ -1,0 +1,52 @@
+.knowledge-custom-explorer.knowledge-shelf { display: flex; flex-direction: column; flex: 1 1 0; gap: 12px; min-height: 0; min-width: 0; padding-top: 10px; }
+.knowledge-shelf > .ant-input-affix-wrapper { flex-shrink: 0; background: var(--mf-panel); border-color: var(--mf-border); font-size: 12px; border-radius: 7px; }
+.shelf-tabs { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--mf-border); padding-bottom: 8px; }
+.shelf-tabs > button:not(.ant-btn) { border: 0; background: transparent; color: var(--mf-muted); padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; }
+.shelf-tabs > button[aria-pressed=true] { background: var(--mf-selected); color: var(--mf-primary-strong); font-weight: 600; }
+.shelf-tabs small { font-size: 10px; margin-left: 5px; opacity: .7; }
+.shelf-tabs > .ant-btn { margin-left: auto; color: var(--mf-muted); }
+.shelf-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 2px 12px; scrollbar-width: thin; }
+.shelf-caption { display: flex; justify-content: space-between; align-items: center; margin: 0 4px 12px; color: var(--mf-muted); font-size: 11px; }
+.shelf-caption small { margin-left: 6px; font-size: 10px; }
+.shelf-collection { margin-bottom: 14px; border: 1px solid var(--mf-border); background: var(--mf-panel); border-radius: 9px; overflow: hidden; transition: border-color .15s, background .15s; }
+.shelf-collection.is-drop-target { border-color: var(--mf-focus); background: var(--mf-selected); }
+.shelf-collection-heading { display: flex; gap: 5px; align-items: center; padding: 9px 8px; background: color-mix(in srgb, var(--personal-folder-color) 5%, var(--mf-panel)); border-bottom: 1px solid var(--mf-border); }
+.shelf-folder-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 25px; height: 25px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--personal-folder-color) 10%, var(--mf-panel)); color: var(--personal-folder-color); font-size: 14px; }
+button.shelf-folder-icon { cursor: pointer; }
+.shelf-group-toggle { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--mf-text); text-align: left; cursor: pointer; }
+.shelf-group-toggle strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.shelf-group-toggle small { color: var(--mf-muted); font-size: 10px; }
+.shelf-group-toggle > .anticon { font-size: 9px; color: var(--mf-muted); transition: transform .15s; }
+.shelf-group-toggle .is-collapsed { transform: rotate(-90deg); }
+.shelf-collection-heading > .ant-btn { color: var(--mf-muted); width: 20px; height: 24px; }
+.shelf-collection-documents { padding: 4px; }
+.shelf-document { position: relative; display: flex; align-items: center; border-radius: 6px; margin-block: 2px; min-width: 0; }
+.shelf-document:hover { background: var(--mf-hover); }
+.shelf-document.is-selected { background: var(--mf-selected); box-shadow: inset 2px 0 var(--mf-primary); }
+.shelf-document-open { display: flex; gap: 9px; align-items: flex-start; flex: 1; min-width: 0; border: 0; background: transparent; padding: 11px 8px; text-align: left; cursor: pointer; color: var(--mf-text); }
+.shelf-document-open > .anticon { margin-top: 3px; color: var(--mf-icon); font-size: 13px; }
+.shelf-document-open > span:last-child { font-size: 12px; line-height: 1.65; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.shelf-document-open small { display: block; font-size: 10px; color: var(--mf-muted); font-weight: 400; margin-top: 2px; }
+.shelf-document-actions { align-self: flex-start; display: flex; padding-top: 9px; padding-right: 3px; }
+.shelf-document-actions .ant-btn { width: 19px; height: 23px; padding: 0; color: var(--mf-muted); opacity: 0; font-size: 11px; }
+.shelf-document:hover .shelf-document-actions .ant-btn, .shelf-document:focus-within .shelf-document-actions .ant-btn, .shelf-document-actions .ant-btn.is-favorite { opacity: 1; }
+.shelf-document-actions .ant-btn.is-favorite { color: var(--mf-warning); }
+.shelf-drop-hint { margin: 7px; padding: 19px 10px; text-align: center; border: 1px dashed var(--mf-border-strong); border-radius: 6px; color: var(--mf-muted); font-size: 11px; line-height: 1.7; }
+.shelf-add-collection { width: 100%; padding: 11px; background: transparent; border: 1px dashed var(--mf-border-strong); border-radius: 8px; color: var(--mf-muted); cursor: pointer; font-size: 12px; text-align: left; }
+.shelf-add-collection:hover { background: var(--mf-hover); color: var(--mf-primary); }
+.shelf-name-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 8px; }
+.shelf-name-editor > .ant-input { flex: 1; min-width: 70px; font-size: 12px; }
+.shelf-name-editor .ant-btn { font-size: 11px; padding-inline: 5px; }
+.shelf-name-editor > small { width: 100%; color: var(--mf-danger); padding-top: 3px; }
+.shelf-style-picker { display: flex; flex-direction: column; gap: 10px; padding: 4px; }
+.shelf-style-picker > span { color: var(--mf-muted); font-size: 11px; }
+.shelf-style-picker > div { display: flex; gap: 8px; }
+.shelf-color { display: flex; align-items: center; justify-content: center; width: 25px; height: 25px; border: 3px solid var(--mf-panel); border-radius: 50%; background: var(--personal-folder-color); color: white; cursor: pointer; font-size: 10px; }
+.shelf-color[aria-pressed=true] { outline: 1px solid var(--personal-folder-color); }
+.color-primary { --personal-folder-color: var(--mf-primary); }
+.color-success { --personal-folder-color: var(--mf-success); }
+.color-warning { --personal-folder-color: var(--mf-warning); }
+.color-focus { --personal-folder-color: var(--mf-focus); }
+.shelf-footer { flex-shrink: 0; font-size: 10px; color: var(--mf-muted); padding: 3px 4px; }
+.knowledge-shelf button:focus-visible { outline: 2px solid var(--mf-focus); outline-offset: 1px; }
+@media (pointer: coarse) { .shelf-document-actions .ant-btn { opacity: 1; } }

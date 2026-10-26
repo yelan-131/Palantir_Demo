@@ -78,6 +78,7 @@ import type { CSSProperties } from 'react';
 import GlobalSearch from '../../components/GlobalSearch';
 import NotificationCenter from '../../components/NotificationCenter';
 import KnowledgeReader from '../../components/KnowledgeReader';
+import KnowledgeExplorer from '../../components/KnowledgeExplorer';
 import { parseKnowledgeMarkdown, prepareKnowledgeMarkdown } from '../../utils/knowledgeMarkdown';
 import './knowledgeWorkspace.css';
 import {
@@ -746,7 +747,7 @@ const normalizeWizardSourceType = (value: unknown) => {
   return text;
 };
 
-export default function SemanticAssetCenter({ view, onViewChange }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void } = {}) {
+export default function SemanticAssetCenter({ view, onViewChange, embedded = false }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void; embedded?: boolean } = {}) {
   const [dataSourceForm] = Form.useForm();
   const [qualityRuleForm] = Form.useForm();
   const [qualityScoreForm] = Form.useForm();
@@ -3193,7 +3194,7 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
 
   return (
     <div className={view ? 'semantic-center semantic-asset-center semantic-asset-center-single' : 'semantic-center semantic-asset-center'}>
-      <section className="semantic-center-header">
+      {!embedded && <section className="semantic-center-header">
         <div>
           <Typography.Title level={4}>数据语义中心</Typography.Title>
           <Typography.Text type="secondary">从数据资产进入语义映射，再审核发布为对象与关系模型。</Typography.Text>
@@ -3202,8 +3203,8 @@ export default function SemanticAssetCenter({ view, onViewChange }: { view?: Sem
           <Tag icon={<FileSearchOutlined />}>Data Semantic Governance</Tag>
           <Button icon={<ReloadOutlined />} onClick={load}>重新读取</Button>
         </Space>
-      </section>
-      {view === 'ontology' ? ontologyView : <Tabs
+      </section>}
+      {embedded ? (view === 'ontology' ? ontologyView : view === 'mapping' ? semanticMappingView : dataAssetView) : view === 'ontology' ? ontologyView : <Tabs
         activeKey={semanticCenterTab}
         onChange={(key) => {
           setSemanticCenterTab(key as SemanticAssetCenterView);
@@ -3906,7 +3907,6 @@ export function KnowledgeCenter() {
   const [cards, setCards] = useState<KnowledgeCard[]>([]);
   const [chunks, setChunks] = useState<KnowledgeChunk[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>('');
-  const [knowledgeSearch, setKnowledgeSearch] = useState('');
   const [documentMarkdown, setDocumentMarkdown] = useState('');
   const [markdownLoading, setMarkdownLoading] = useState(false);
   const [draftQuery, setDraftQuery] = useState('从当前文档抽取系统、能力和上下游关系');
@@ -3926,7 +3926,6 @@ export function KnowledgeCenter() {
   const [inspectorVisible, setInspectorVisible] = useState(() => window.innerWidth >= 1200);
   const [inspectorTab, setInspectorTab] = useState<string | number>('outline');
   const [openDocumentIds, setOpenDocumentIds] = useState<string[]>([]);
-  const [expandedFolders, setExpandedFolders] = useState<string[] | null>(null);
   const readerRef = useRef<HTMLDivElement | null>(null);
   const openDocument = (id: string) => {
     if (id !== selectedDocumentId) setDocumentMarkdown('');
@@ -3942,101 +3941,16 @@ export function KnowledgeCenter() {
   const [ocrEnhanced, setOcrEnhanced] = useState(false);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
 
-  const visibleDocuments = useMemo(() => {
-    const keyword = knowledgeSearch.trim().toLowerCase();
-    const filtered = keyword
-      ? documents.filter((item: any) => [
-        item.title,
-        item.document_title,
-        item.source_file_name,
-        item.file_name,
-        item.summary,
-        item.source_type,
-        item.permission_scope,
-        item.owner_user_id,
-        ...(item.linked_objects ?? []).flatMap((link: any) => [link.type, link.id, link.name, link.object_type, link.object_id, link.object_name]),
-      ].filter(Boolean).join(' ').toLowerCase().includes(keyword))
-      : documents;
-    return [...filtered].sort((a: any, b: any) => {
-      const aId = a.id ?? a.document_id ?? '';
-      const bId = b.id ?? b.document_id ?? '';
-      const aIndex = KNOWLEDGE_ASSET_ORDER.indexOf(aId);
-      const bIndex = KNOWLEDGE_ASSET_ORDER.indexOf(bId);
-      if (aIndex !== bIndex) return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-      return String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? ''));
-    });
-  }, [documents, knowledgeSearch]);
-  const sourceLabelById = useMemo(() => {
-    const labels = new Map<string, string>();
-    sources.forEach((source) => labels.set(source.id, source.name));
-    labels.set('database', labels.get('database') ?? '数据库知识资产');
-    labels.set('uploaded', labels.get('uploaded') ?? '上传资料');
-    return labels;
-  }, [sources]);
-  const knowledgeTree = useMemo(() => {
-    const typeOrder = ['docx', 'xlsx', 'pdf', 'image', 'markdown'];
-    const expandedKeys: string[] = [];
-    const sourceBuckets = visibleDocuments.reduce<Record<string, KnowledgeDocument[]>>((acc, item) => {
-      const sourceId = item.source_id ?? 'database';
-      acc[sourceId] = [...(acc[sourceId] ?? []), item];
-      return acc;
-    }, {});
-    const sourceNodes = Object.entries(sourceBuckets).map(([sourceId, sourceDocuments]) => {
-      const sourceKey = `source:${sourceId}`;
-      expandedKeys.push(sourceKey);
-      const typeBuckets = sourceDocuments.reduce<Record<string, KnowledgeDocument[]>>((acc, item) => {
-        const type = normalizeKnowledgeTypeGroup(item);
-        acc[type] = [...(acc[type] ?? []), item];
-        return acc;
-      }, {});
-      const typeNodes = Object.entries(typeBuckets)
-        .sort(([a], [b]) => {
-          const aIndex = typeOrder.indexOf(a);
-          const bIndex = typeOrder.indexOf(b);
-          return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-        })
-        .map(([type, typeDocuments]) => {
-          const typeKey = `${sourceKey}:type:${type}`;
-          expandedKeys.push(typeKey);
-          return {
-            key: typeKey,
-            title: (
-              <div className="knowledge-tree-node folder">
-                <span className="knowledge-tree-node-title"><FileSearchOutlined /><strong>{KNOWLEDGE_TYPE_LABELS[type] ?? type.toUpperCase()}</strong></span>
-                <Tag>{typeDocuments.length}</Tag>
-              </div>
-            ),
-            children: typeDocuments.map((item) => {
-              const docId = getKnowledgeDocumentId(item);
-              const linkedObjects = item.linked_objects ?? [];
-              const statusMeta = getKnowledgeDocumentStatusMeta(item);
-              return {
-                key: `doc:${docId}`,
-                title: (
-                  <div className="knowledge-tree-node document">
-                    <span className="knowledge-tree-node-title"><strong title={getKnowledgeDocumentTitle(item)}>{getKnowledgeDocumentTitle(item)}</strong><Tag color={statusMeta.color}>{statusMeta.label}</Tag></span>
-                    <small>{getKnowledgeDocumentFileName(item)}{linkedObjects.length ? ` · ${linkedObjects.length} 个对象` : ''}</small>
-                  </div>
-                ),
-                isLeaf: true,
-              };
-            }),
-          };
-        });
-      return {
-        key: sourceKey,
-        title: (
-          <div className="knowledge-tree-node source">
-            <span className="knowledge-tree-node-title"><DatabaseOutlined /><strong>{sourceLabelById.get(sourceId) ?? sourceId}</strong></span>
-            <Tag>{sourceDocuments.length}</Tag>
-          </div>
-        ),
-        children: typeNodes,
-      };
-    });
-    const treeData: DataNode[] = visibleDocuments.length ? sourceNodes.length === 1 ? sourceNodes[0].children : sourceNodes : [];
-    return { data: treeData, expandedKeys };
-  }, [sourceLabelById, visibleDocuments]);
+  const explorerDocuments = useMemo(() => [...documents].sort((a, b) => {
+    const aRank = KNOWLEDGE_ASSET_ORDER.indexOf(getKnowledgeDocumentId(a));
+    const bRank = KNOWLEDGE_ASSET_ORDER.indexOf(getKnowledgeDocumentId(b));
+    return (aRank < 0 ? 999 : aRank) - (bRank < 0 ? 999 : bRank) || String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+  }).map(item => ({
+    id: getKnowledgeDocumentId(item), title: getKnowledgeDocumentTitle(item), filename: getKnowledgeDocumentFileName(item),
+    type: normalizeKnowledgeTypeGroup(item), typeLabel: KNOWLEDGE_TYPE_LABELS[normalizeKnowledgeTypeGroup(item)] || '其他文档',
+    updatedAt: String(item.updated_at || ''),
+    searchText: [item.summary, item.permission_scope, ...(item.linked_objects || []).flatMap(link => [link.type, link.id, link.name, link.object_type, link.object_id, link.object_name])].filter(Boolean).join(' '),
+  })), [documents]);
   const selectedDocument = documents.find((item: any) => (item.id ?? item.document_id) === selectedDocumentId) ?? documents[0];
   const selectedTitle = (selectedDocument as any)?.title ?? (selectedDocument as any)?.document_title ?? (selectedDocument as any)?.file_name ?? '暂无知识文档';
   const selectedSummary = (selectedDocument as any)?.summary ?? (selectedDocument ? `来源文件：${(selectedDocument as any)?.source_file_name ?? (selectedDocument as any)?.file_name ?? '数据库文档'}` : '上传或完成种子数据后，知识库目录会按数据库内容自动刷新。');
@@ -4552,42 +4466,7 @@ export function KnowledgeCenter() {
 
         <aside className="knowledge-left-panel" hidden={!libraryVisible} aria-label="文档目录">
           <Card className="knowledge-panel-card knowledge-library-card" title={<Space><FolderOutlined />知识库</Space>} extra={<Tooltip title="刷新文档"><Button type="text" size="small" icon={<ReloadOutlined />} aria-label="刷新文档" onClick={loadKnowledge} /></Tooltip>}>
-            <div className="knowledge-explorer-heading"><span>文件目录</span><span>{documents.length}</span></div>
-            <div className="knowledge-tree-tools">
-              <Input
-                aria-label="搜索知识文档"
-                placeholder="搜索文档、标签或对象"
-                prefix={<FileSearchOutlined />}
-                value={knowledgeSearch}
-                onChange={(event) => setKnowledgeSearch(event.target.value)}
-                allowClear
-              />
-
-            </div>
-            <div className="knowledge-directory-tree">
-              {knowledgeTree.data.length ? (
-                <div className="knowledge-tree-viewport">
-                  <Tree
-                    blockNode
-                    showLine
-                    treeData={knowledgeTree.data}
-                    selectedKeys={selectedDocumentId ? [`doc:${selectedDocumentId}`] : []}
-                    expandedKeys={knowledgeSearch.trim() ? knowledgeTree.expandedKeys : expandedFolders ?? knowledgeTree.expandedKeys}
-                    onExpand={keys => setExpandedFolders(keys.map(String))}
-                    onSelect={(keys) => {
-                      const key = String(keys[0] ?? '');
-                      if (key.startsWith('doc:')) {
-                        openDocument(key.slice(4));
-                        return;
-                      }
-                      if (key.startsWith('object:')) {
-                        openDocument(key.split(':')[1]);
-                      }
-                    }}
-                  />
-                </div>
-              ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无入库文档" />}
-            </div>
+            <KnowledgeExplorer documents={explorerDocuments} selectedId={selectedDocumentId} onOpen={openDocument} />
             <Upload.Dragger className="knowledge-upload-dragger" customRequest={handleUpload} showUploadList={false} disabled={uploading}>
               <p className="ant-upload-drag-icon"><InboxOutlined /></p>
               <p className="ant-upload-text">导入文档</p>

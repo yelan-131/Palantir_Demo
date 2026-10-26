@@ -249,6 +249,8 @@ app.include_router(platform.router, prefix="/api/v1/platform", tags=["platform"]
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["applications"])
 app.include_router(applications.admin_router, prefix="/api/v1/admin", tags=["applications-admin"])
 app.include_router(forms.router, prefix="/api/v1/forms", tags=["forms"])
+from app.api.component_pages import router as component_pages_router
+app.include_router(component_pages_router, prefix="/api/v1/pages", tags=["组件页面"])
 app.include_router(form_approvals.router, prefix="/api/v1/forms", tags=["表单审批设置"])
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["alerts"])
 app.include_router(material_applications.router, prefix="/api/v1/material-applications", tags=["料号申请"])

@@ -9,6 +9,7 @@ export interface ControlSettings {
   minLength?: number; maxLength?: number; textFormat?: string; trimMode?: string; caseMode?: string; rows?: number;
   min?: number; max?: number; precision?: number; unit?: string; thousandSeparator?: boolean;
   selectionMode?: string; displayMode?: string; allowClear?: boolean; allowCreateOption?: boolean;
+  minSelections?: number; maxSelections?: number; tagCollapse?: 'none' | 'responsive' | 'fixed'; maxVisibleTags?: number;
   dateMode?: string; defaultDate?: string; disablePast?: boolean;
   maxFiles?: number; maxFileSize?: number; fileTypes?: string; defaultChecked?: boolean; checkedText?: string; uncheckedText?: string;
   allowAdd?: boolean; allowDelete?: boolean; minRows?: number; maxRows?: number;

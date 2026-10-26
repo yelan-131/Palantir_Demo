@@ -30,7 +30,7 @@ async def environment(request, tmp_path):
         from app.models import relational
         model_names = ['SystemSetting','DataSource','Tenant', 'User', 'Role', 'UserRole', 'Material', 'Supplier', 'Form', 'FormField', 'FormLayout',
             'FormAction', 'FormPermission', 'FormVersion', 'AnalyticsSharedMetric', 'AnalyticsSharedMetricVersion', 'FormCodeSequence', 'DynamicRecord',
-            'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode',
+            'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode', 'ComponentPage', 'ComponentPageVersion',
             'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'WorkflowInstance',
             'WorkflowApproval', 'RolePermission', 'UserOrgMembership', 'OrgUnit', 'AuditLog', 'Notification', 'AIAgentRun']
         tables = {getattr(relational, name).__table__ for name in model_names}

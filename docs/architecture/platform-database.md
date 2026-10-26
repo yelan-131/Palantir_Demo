@@ -1,21 +1,25 @@
-# Platform Database Landing Plan
+# Platform Database Implementation
 
-Last updated: 2026-05-20
+Last updated: 2026-10-26
 
-This document records the first database-backed implementation for the
-application/form/menu platform layer. It intentionally separates low-code
-metadata changes from physical database DDL.
+This document describes current application/form/menu persistence and storage.
+For service ownership, see [Low-Code Platform](low-code-platform.md).
 
 ## Core Principle
 
-Creating an application, form, or field is a metadata operation by default.
-It writes platform configuration tables and does not run `CREATE TABLE`,
-`ALTER TABLE`, or `DROP COLUMN`.
+Configuration metadata and business records have distinct responsibilities.
+Metadata lives in the platform tables; business records may use dynamic
+JSON/JSONB storage or form-managed physical tables.
 
-Physical tables remain reserved for core manufacturing entities such as
-`equipment`, `work_orders`, `inspections`, and `suppliers`. User-defined
-forms store records in `dynamic_records.data` as JSON/JSONB until a future
-admin-controlled physicalization flow is added.
+The current create-form HTTP path converts a `dynamic` request without a table
+name into generated physical storage. AI form creation also uses physical
+storage. Existing dynamic forms remain supported by the shared record service.
+
+Creating a physical form and adding its fields can execute `CREATE TABLE` and
+`ALTER TABLE`. Field archival changes metadata and does not drop a column.
+Physical provisioning is centralized in `api/form_engine/physical.py` and reused
+by UI/AI field operations through `services/form_fields.py`. Configuration writes
+must not be described as universally metadata-only.
 
 ## Tables
 
@@ -27,7 +31,8 @@ admin-controlled physicalization flow is added.
 | `form_fields` | Form field metadata and UI configuration. |
 | `form_layouts` | List/detail/edit layout configuration. |
 | `form_actions` | Button/action configuration such as create, edit, delete, export, submit. |
-| `form_permissions` | Form, action, and future field-level permission rules. |
+| `form_permissions` | Form/action permissions and field permission configuration. |
+| `form_versions` | Published snapshots of definitions and configuration. |
 | `dynamic_records` | User-defined form records stored as JSON/JSONB. |
 | `workflow_bindings` | Connects a form action to a workflow definition. |
 
@@ -42,10 +47,12 @@ Create form under application
   -> application_forms
   -> default form_layouts
   -> default form_actions
+  -> shared engine provisions a table for physical storage
 
 Add field
+  -> shared field service validates batch, names, types, and active field limit
   -> form_fields
-  -> no physical ALTER TABLE
+  -> shared engine adds physical columns when applicable
 
 Configure page
   -> form_layouts
@@ -57,29 +64,27 @@ Assemble application
   -> application_forms
   -> application_menu_nodes
 
+Publish definition
+  -> shared version service validates and saves form_versions
+
 Enter business data
-  -> dynamic_records.data JSONB
+  -> shared record service checks actor, rules, and lifecycle
+  -> dynamic_records.data JSONB or form-managed physical table
 ```
 
 ## API Surface
 
-All endpoints are mounted under `/api/v1/forms`.
-
-| Capability | Endpoints |
-| --- | --- |
-| Forms | `GET /`, `POST /`, `GET /{form_id}`, `PUT /{form_id}` |
-| Application form bindings | `GET /applications/{application_id}/forms`, `PUT /applications/{application_id}/forms`, `DELETE /applications/{application_id}/forms/{form_id}` |
-| Fields | `POST /{form_id}/fields`, `PUT /{form_id}/fields/{field_id}`, `DELETE /{form_id}/fields/{field_id}` |
-| Layouts | `GET /{form_id}/layouts`, `PUT /{form_id}/layouts/{layout_type}` |
-| Actions | `GET /{form_id}/actions`, `POST /{form_id}/actions`, `PUT /{form_id}/actions/{action_id}`, `DELETE /{form_id}/actions/{action_id}` |
-| Permissions | `GET /{form_id}/permissions`, `POST /{form_id}/permissions`, `PUT /{form_id}/permissions/{permission_id}`, `DELETE /{form_id}/permissions/{permission_id}` |
-| Workflow bindings | `GET /{form_id}/workflow-bindings`, `POST /{form_id}/workflow-bindings`, `PUT /{form_id}/workflow-bindings/{binding_id}`, `DELETE /{form_id}/workflow-bindings/{binding_id}` |
-| Dynamic records | `GET /{form_id}/records`, `POST /{form_id}/records`, `PUT /{form_id}/records/{record_id}`, `DELETE /{form_id}/records/{record_id}` |
-| Application menu nodes | `GET /applications/{application_id}/menu-nodes`, `POST /applications/{application_id}/menu-nodes`, `PUT /applications/{application_id}/menu-nodes/{node_id}`, `DELETE /applications/{application_id}/menu-nodes/{node_id}` |
+The form routes are mounted under `/api/v1/forms`, with application runtime
+navigation under `/api/v1/applications`. For the endpoint contract reference,
+see [API Reference](../development/api-reference.md). Storage adapters retain the
+same record HTTP interface.
 
 ## Migration
 
-Schema migration: `backend/alembic/versions/0006_platform_forms.py`.
+Relevant migrations include `0006_platform_forms.py`, `0021_form_versions.py`,
+`0029_form_physical_tables.py`, and `0035_form_code_sequences.py`. Alembic owns
+platform schema evolution; the runtime engine provisions configured business
+tables. Registry seed files are a separate concern from schema migrations.
 
 Expected rollout sequence:
 
@@ -88,10 +93,10 @@ cd backend
 alembic upgrade head
 ```
 
-The seed script should remain responsible for data only. It should not create
-tables once the migration path is in use.
+Seed scripts remain responsible for initial data. Do not duplicate form DDL
+inside AI handlers; use the shared form engine.
 
-## Next Frontend Integration
+## Frontend and Runtime Integration
 
 The frontend service layer now exposes typed helpers in
 `frontend/src/services/api.ts` for forms, fields, layouts, actions,
@@ -105,15 +110,19 @@ fallback when the API cannot return data.
 Runtime application menus (`GET /api/v1/applications/{application_id}/menus`)
 also prefer `application_menu_nodes`; database-backed form menus route to
 `/dynamic/{form_id}`. The dynamic page first attempts to load a platform form
-by numeric id or form code, renders `form_fields`, and reads/writes records via
-`dynamic_records`. Record listing supports `page`, `page_size`, and `search`;
-record create/update validates known fields, required fields, primitive types,
-and enum values before storing JSON.
+by numeric id or form code and renders the runtime definition. Fields resolve
+from the latest published snapshot when available, with metadata fallback for
+unversioned forms. Record reads/writes go through `services/records.py` and the
+selected adapter. The common boundary applies tenant/row/field authorization,
+rules, encoding, and lifecycle protections for JSON and physical records.
 
-The next implementation slice should wire the existing UI workflows to those
-helpers:
+## Remaining Boundaries
 
-1. Application management creates an app through the existing application API.
-2. Form settings creates forms through `/api/v1/forms`.
-3. Field designer writes to `/api/v1/forms/{form_id}/fields`.
-4. Add advanced filter operators and database indexes for high-volume dynamic records.
+Application/menu and action/permission CRUD still include route-owned logic.
+Further extraction should preserve their tenant and visibility checks. The
+current field/version/layout/rule-preview refactor does not imply that every
+configuration capability is already exposed as an AI tool.
+
+New inspection tools are defined in both registry seeds and packaged fallback
+assets. Existing persisted AI registries require an explicit registry update;
+Alembic migration alone does not enable these tools.

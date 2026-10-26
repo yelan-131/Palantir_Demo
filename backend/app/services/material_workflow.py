@@ -68,7 +68,7 @@ async def sync_material_instance(db, inst, user=None, action=None, comment=None)
     if action == 'reject' and not str(comment or '').strip():
         raise HTTPException(422, '驳回时必须填写原因')
     from app.api.alerts import _records
-    from app.api.forms import _runtime_form_fields
+    from app.services.form_runtime import _runtime_form_fields
     fields = await _runtime_form_fields(db, inst.tenant_id, form.id)
     records = await _records(db, form, fields, None, variables.get('record_id'), lock=True)
     if not records or records[0]['data'].get('migration_marker'):

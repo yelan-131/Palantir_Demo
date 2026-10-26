@@ -1,0 +1,21 @@
+.data-center-workspace {
+  min-width: 0;
+}
+
+.data-center-workspace-heading h4.ant-typography {
+  margin: 0 0 6px;
+}
+
+.data-center-workspace-heading .ant-typography-secondary {
+  margin-bottom: 12px;
+}
+
+.data-center-workspace > .ant-tabs > .ant-tabs-nav {
+  margin-bottom: 18px;
+}
+
+.data-center-workspace-loading {
+  display: flex;
+  justify-content: center;
+  padding: 60px 0;
+}

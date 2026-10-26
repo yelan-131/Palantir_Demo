@@ -16,14 +16,20 @@ def normalize(value, rules):
 
 
 def validate(value, field, *, partial=False):
-    if value in (None,''): return
     ui=getattr(field,'ui_config',None) or {};rules=ui.get('typeSettings') or {};label=field.label or field.field_name
     def fail(detail): raise HTTPException(422,f'字段「{label}」{detail}')
     if ui.get('controlType')=='select':
         multiple=rules.get('selectionMode')=='multiple' or rules.get('displayMode')=='tags'
+        if multiple:
+            count = len(value) if isinstance(value, list) else 0
+            if not partial and count < int(rules.get('minSelections') or 0): fail(f'至少选择 {rules["minSelections"]} 项')
+            if rules.get('maxSelections') is not None and count > int(rules['maxSelections']): fail(f'最多选择 {rules["maxSelections"]} 项')
+        if value in (None, ''): return
         if multiple and not isinstance(value,list): fail('多选数据必须为数组')
         values=value if multiple else [value]
         if any(not isinstance(item,(str,int,float)) or isinstance(item,bool) for item in values): fail('选项值格式不正确')
+        if multiple and len({str(item) for item in values}) != len(values): fail('不能重复选择同一选项')
+    if value in (None, ''): return
     if isinstance(value,str):
         if len(value)<int(rules.get('minLength') or 0): fail('字符数不足')
         if rules.get('maxLength') is not None and len(value)>int(rules['maxLength']): fail('超过最大字符数')
@@ -117,6 +123,57 @@ def design_errors(config, fields):
         field=by_name[key];storage=field.get('field_type');rules=control.get('typeSettings') or {}
         if control.get('dataSourceKind') in {'externalApi','dictionary'} and not control.get('optionSource'):errors.append(f'「{label}」请选择有效数据来源')
         if control.get('dataSourceKind') in {'externalApi','dictionary'} and (rules.get('selectionMode')=='multiple' or rules.get('displayMode') in {'tags','radio','checkbox'}):errors.append(f'「{label}」引用数据源目前支持单选下拉或搜索；请调整选择模式')
+        effective_kind = kind
+        if kind == 'field':
+            effective_kind = 'select' if field.get('business_type') == 'enum' or storage == 'enum' else (field.get('ui_config') or {}).get('controlType')
+        if effective_kind in {'select', 'relation'}:
+            source_kind = control.get('dataSourceKind', 'static' if effective_kind == 'select' else 'masterData')
+            multiple = rules.get('selectionMode') == 'multiple'
+            display = rules.get('displayMode', 'dropdown')
+            if rules.get('selectionMode', 'single') not in {'single', 'multiple'} or display not in {'dropdown', 'search', 'radio', 'tags'}:
+                errors.append(f'「{label}」选择模式或展示方式无效')
+            if display == 'tags' and not multiple:
+                errors.append(f'「{label}」标签展示需要多选模式')
+            if source_kind != 'static' and (multiple or display not in {'dropdown', 'search'} or rules.get('allowCreateOption')):
+                errors.append(f'「{label}」引用数据源仅支持单选下拉或搜索')
+            if rules.get('allowCreateOption') and (not multiple or display == 'radio'):
+                errors.append(f'「{label}」当前模式不支持临时项')
+            if multiple or display == 'tags':
+                for setting, title, lower in [('minSelections', '最少选择', 0), ('maxSelections', '最多选择', 1), ('maxVisibleTags', '显示标签数', 1)]:
+                    number = rules.get(setting)
+                    if number is not None and (isinstance(number, bool) or not isinstance(number, int) or not lower <= number <= 1000):
+                        errors.append(f'「{label}」{title}需要是 {lower}～1000 的整数')
+                minimum, maximum = rules.get('minSelections'), rules.get('maxSelections')
+                if isinstance(minimum, int) and isinstance(maximum, int) and minimum > maximum:
+                    errors.append(f'「{label}」最少选择不能大于最多选择')
+                if rules.get('tagCollapse', 'none') not in {'none', 'responsive', 'fixed'}:
+                    errors.append(f'「{label}」标签折叠方式无效')
+            if source_kind == 'static':
+                from app.services.static_options import parse_options, option_errors
+                try:
+                    raw = field.get('enum_values') or {}
+                    choices = parse_options(control['optionSource']) if 'optionSource' in control else raw.get('values', raw) if isinstance(raw, dict) else raw
+                    if isinstance(choices, dict): choices = [{'value': key, 'label': str(value)} for key, value in choices.items()]
+                    errors.extend(f'「{label}」{error}' for error in option_errors(choices))
+                    if multiple and not rules.get('allowCreateOption') and isinstance(rules.get('minSelections'), int) and rules['minSelections'] > len(choices): errors.append(f'「{label}」最少选择不能超过候选选项数量')
+                    default = field.get('default_value')
+                    rule = control.get('defaultRule', (field.get('ui_config') or {}).get('defaultRule')) or {}
+                    if rule.get('enabled') is not False and rule.get('mode') != 'template' and default not in (None, ''):
+                        import json
+                        values = [default]
+                        if multiple and isinstance(default, str):
+                            try:
+                                parsed = json.loads(default)
+                                values = parsed if isinstance(parsed, list) else [parsed]
+                            except ValueError: pass
+                        allowed = {str(item['value'] if isinstance(item, dict) else item) for item in choices}
+                        if multiple:
+                            minimum, maximum = rules.get('minSelections'), rules.get('maxSelections')
+                            if isinstance(minimum, int) and len(values) < minimum: errors.append(f'「{label}」默认值至少选择 {minimum} 项')
+                            if isinstance(maximum, int) and len(values) > maximum: errors.append(f'「{label}」默认值最多选择 {maximum} 项')
+                        if not rules.get('allowCreateOption') and any(str(value) not in allowed for value in values): errors.append(f'「{label}」默认值不在候选选项中')
+                except (ValueError, TypeError, KeyError) as exc:
+                    errors.append(f'「{label}」静态选项配置无效：{exc}')
         if kind not in supported: errors.append(f'「{label}」控件尚不支持发布');continue
         if kind in {'upload','editable-table','readonly-table'} and storage!='json': errors.append(f'「{label}」需要绑定 JSON 字段')
         if storage=='date' and rules.get('dateMode') in {'datetime','range'}: errors.append(f'「{label}」日期字段仅支持日期模式，时间或范围需要新建对应类型字段')

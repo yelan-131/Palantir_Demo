@@ -52,8 +52,8 @@ const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => 
 const SchedulerPage = lazy(() => import('./pages/Scheduler'));
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
 const AlertCenterPage = lazy(() => import('./pages/AlertCenter'));
-const DynamicPage = lazy(() => import('./pages/DynamicPage'));
-const AppProgramPage = lazy(() => import('./pages/AppPrograms'));
+const ComponentPages = lazy(() => import('./pages/ComponentPages'));
+const FormPageEntry = lazy(() => import('./pages/ComponentPages/FormPageEntry'));
 const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const MaterialApplicationsPage = lazy(() => import('./pages/MaterialApplications'));
@@ -651,10 +651,13 @@ function AppContent() {
                   <Route path="/ai-assistant" element={<Navigate to="/" replace />} />
                   <Route path="/account-center" element={<AccountEntry currentApplication={currentApplication} />} />
 
-                  <Route path="/dynamic/:slug" element={<DynamicPage />} />
+                  <Route path="/dynamic/:slug" element={<FormPageEntry kind="business" />} />
+                  <Route path="/pages" element={<Navigate to="/studio/applications" replace />} />
+                  <Route path="/pages/new" element={<Navigate to="/studio/applications" replace />} />
+                  <Route path="/pages/:code" element={<ComponentPages />} />
                   <Route path="/program/alert-center" element={<AlertCenterPage />} />
                   <Route path="/program/material-application" element={<MaterialApplicationsPage />} />
-                  <Route path="/program/:programId" element={<AppProgramPage />} />
+                  <Route path="/program/:programId" element={<FormPageEntry kind="program" />} />
                   <Route path="/form-settings/:formId" element={<FormSettingsPage />} />
                   <Route path="/studio/*" element={<NavigationAreaPage />} />
                   <Route path="/data-center/*" element={<NavigationAreaPage />} />

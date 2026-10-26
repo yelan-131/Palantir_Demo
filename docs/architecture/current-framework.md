@@ -1,6 +1,6 @@
 # Current Code Framework
 
-Last updated: 2026-10-14
+Last updated: 2026-10-26
 
 This document describes the current code framework at a practical level. For the broader system architecture, read [overview.md](overview.md).
 
@@ -34,7 +34,10 @@ frontend/src/
     GlobalSearch/
     AccountMenu/
     ReportWidgets/
-    FormWidgets/
+    FormWidgets/                  # shared field controls, relation picker, subtable
+    FormLayout/                   # metadata-driven layout renderer
+    FormImport/                   # file import UI
+    FormApprovalSettings/         # approval configuration UI
   pages/
     Workspace/
     Dashboard/
@@ -68,7 +71,8 @@ backend/app/
     platform.py
     tenant.py
     applications.py
-    forms.py
+    forms.py                      # HTTP adapters plus remaining legacy configuration logic
+    form_engine/                  # shared storage/encoding/query helpers; legacy API namespace
     workflow.py
     data_sources.py
     ontology.py
@@ -96,6 +100,25 @@ backend/app/
     relational.py
     graph_models.py
   services/
+    form_schemas.py               # request contracts shared by HTTP and AI
+    form_definition.py            # normalization, serializers, design snapshots, impact checks
+    form_fields.py                # shared field/batch writes and physical schema extension
+    form_versions.py              # preview, publish, restore, version reads
+    form_layouts.py               # layout reads/writes and field insertion
+    form_rule_preview.py          # runtime/designer rule and option previews
+    form_runtime.py               # published fields and normalized record payloads
+    records.py                    # shared authorized business record boundary
+    form_application_lifecycle.py # application draft/submission lifecycle helpers
+    form_approval_config.py       # approval settings
+    form_imports.py               # import preview and execution
+    form_files.py                 # attachment storage and validation
+    ai/
+      harness_runtime.py          # Agent kernel and platform MCP bridge
+      tool_envelope.py            # permissions, confirmation, hooks, execution events
+      tool_handlers.py            # explicit executable handler allowlist
+      form_configuration_tools.py # shared-service adapters for five read tools
+      form_record_tools.py        # record tool adapters
+      low_code_tools.py           # AI creation/add-field composition
   core/
 ```
 
@@ -109,7 +132,8 @@ Already present:
 - `/api/v1/admin/applications`
 - `/api/v1/forms`
 - migration `backend/alembic/versions/0006_platform_forms.py`
-- migrations through `0026_menu_node_config.py`
+- form version/menu migrations plus `0029_form_physical_tables.py` and
+  `0035_form_code_sequences.py`
 - platform tables for forms, fields, layouts, actions, permissions, published versions, workflow bindings, dynamic records, application-form bindings, application menu nodes, menu-node config, and AI drafts
 
 Current important rule:
@@ -146,7 +170,7 @@ Recent code moves the project closer to a SaaS-shaped demo:
 | Dynamic form records | Stored in JSON/JSONB through `dynamic_records`. |
 | Graph data | Neo4j driver exists; graph features degrade when Neo4j is unavailable. |
 | Knowledge base | `/api/v1/knowledge` has persistent documents/chunks/ingestion/extraction/link rows plus demo spaces/directories/cards and TF-IDF retrieval. |
-| AI | Current assistant API is implemented directly with GLM-compatible defaults, skill/tool registry endpoints, conversation/memory/draft APIs, pending action state, confirmation-token scaffold, low-code planning tools, dynamic-record draft helpers, and persisted Agent runtime rows. |
+| AI | Harness SDK/runtime with a platform MCP bridge; backend-owned tool registry, permissions, confirmations, conversations, drafts, and runtime persistence. Legacy planning compatibility remains. |
 | Tenant platform | `/api/v1/platform` manages tenants, domains, invites, password resets, exports, and usage summaries for platform admins. |
 | Productization | `/api/v1/productization/readiness` exposes the current ready path and module maturity contract. |
 
@@ -207,3 +231,38 @@ pipelines or materialize ontology mappings into graph data.
 Cross-entry-point verification lives in `backend/tests/test_record_service.py`
 and uses isolated SQLite databases for dynamic and physical storage.
 PostgreSQL runtime verification remains a separate deployment check.
+
+
+## Shared Form Configuration Entry Points (2026-10-26)
+
+The backend is a modular monolith. Both HTTP routes and AI adapters call shared
+services; no additional deployment unit was introduced.
+
+- UI field creation and AI create/add-field operations call
+  `form_fields.add_form_fields`; the single-field route wraps the same operation.
+  It checks the complete batch, locks the form before counting active fields,
+  enforces the shared limit, and provisions physical columns through the engine.
+- AI business-form creation calls `form_versions.publish_form` with deferred
+  commit. Publication uses the same impact, rule, snapshot, and permission checks
+  as the designer, while the outer creation operation commits its composition.
+- Version, layout, and rule-preview routes delegate to the corresponding service
+  modules. `app.api.forms` re-exports old schema/helper names for compatibility.
+- Record drafts, imports, and AI record edits import request models from
+  `form_schemas.py`; analytics snapshot code imports shared serializers from
+  `form_definition.py`.
+- `low_code.inspect_form` exposes `forms.preview_publish`, `forms.list_versions`,
+  `forms.get_version`, `forms.get_layouts`, and `forms.evaluate_rules`. Seed
+  definitions live in `data/agent_registry/`; packaged fallback copies live in
+  `backend/app/services/ai/assets/`. Persisted registries need an explicit update.
+
+Keep adapter-specific behavior explicit: AI addition retains automatic list/form
+layout insertion; ordinary UI addition retains its prior layout behavior. Sharing
+a service does not mean all entry points have identical orchestration.
+
+Remaining work includes route-owned navigation/action/permission operations,
+workflow compatibility helpers, and further decomposition of the large frontend
+form settings page. New business validation belongs in services, not in another
+copy inside an AI handler or React component.
+
+See [Form Management](form-management.md) and [Low-Code Platform](low-code-platform.md).
+Cross-entry contracts are exercised in `backend/tests/test_form_shared_services.py`.

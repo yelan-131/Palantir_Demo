@@ -119,7 +119,7 @@ export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[];
 export function ExtensionLibrary({ isAdmin }: { isAdmin: boolean }) {
   const navigate = useNavigate();
   const entries = [
-    { name: '数据连接', description: '连接数据库和外部数据源，查看真实连接状态。', path: '/data-center/sources', icon: <ApiOutlined /> },
+    { name: '数据接入', description: '管理数据连接、同步任务与运行记录。', path: '/data-center/sources', icon: <ApiOutlined /> },
     ...(isAdmin ? [{ name: 'AI 技能与工具', description: '管理已注册的 Agent 技能、工具和平台模型设置。', path: '/admin/ai?tab=agent-registry', icon: <ToolOutlined /> }] : []),
   ];
   return <section><div className="shell-library-grid">{entries.map(entry => <Card key={entry.path}><span className="shell-library-icon">{entry.icon}</span><Typography.Title level={4}>{entry.name}</Typography.Title><Typography.Paragraph type="secondary">{entry.description}</Typography.Paragraph><Button onClick={() => navigate(entry.path)}>进入 →</Button></Card>)}</div></section>;

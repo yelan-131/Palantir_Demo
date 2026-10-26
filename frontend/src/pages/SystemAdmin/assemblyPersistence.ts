@@ -42,6 +42,7 @@ export async function persistForm(api: FormApi, current: { id: string; status: s
     assemblyKind: values.category === 'analytics' ? 'analysis' : 'interaction',
     analyticsMode: values.mode, entityLabel: values.entity,
     structureLocked: true,
+    ...(!latest ? {componentPageEnabled: true} : {}),
   };
   // Publication must use /publish so that the schema/layout version is saved.
   // Editing the metadata must never change a form's lifecycle state.

@@ -422,5 +422,152 @@
       "operation": "string",
       "record": "object"
     }
+  },
+  "forms.preview_publish": {
+    "name": "forms.preview_publish",
+    "title": "Preview form publication",
+    "description": "Check publication impact and blocking design errors without publishing.",
+    "handler_key": "forms.preview_publish",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.list_versions": {
+    "name": "forms.list_versions",
+    "title": "List form versions",
+    "description": "Read published versions through the shared form version service.",
+    "handler_key": "forms.list_versions",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.get_version": {
+    "name": "forms.get_version",
+    "title": "Get form version",
+    "description": "Read a published form snapshot through the shared form version service.",
+    "handler_key": "forms.get_version",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version_number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "form_id",
+        "version_number"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.get_layouts": {
+    "name": "forms.get_layouts",
+    "title": "Read form layouts",
+    "description": "Read form layouts through the shared layout service.",
+    "handler_key": "forms.get_layouts",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.evaluate_rules": {
+    "name": "forms.evaluate_rules",
+    "title": "Evaluate form rules",
+    "description": "Preview runtime defaults, calculations and field states without saving records.",
+    "handler_key": "forms.evaluate_rules",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "form_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data": {
+          "type": "object"
+        },
+        "record_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
   }
 }

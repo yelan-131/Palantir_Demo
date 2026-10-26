@@ -51,6 +51,8 @@ export interface LayoutPlacement {
   rules?: { visible?: { enabled?: boolean }; readonly?: { enabled?: boolean } };
 }
 export const isLayoutContainer = (control?: Pick<LayoutPlacement, 'controlType'>) => Boolean(control && ['container', 'two-columns', 'tabs'].includes(control.controlType));
+/** Layout-only controls never read or write a stored field. */
+export const isLayoutControl = (control?: Pick<LayoutPlacement, 'controlType'>) => isLayoutContainer(control) || control?.controlType === 'divider';
 export function layoutSlots(control: LayoutPlacement): { id: string; label: string }[] {
   if (control.controlType === 'tabs') return control.layout?.tabs?.length ? control.layout.tabs : [{ id: 'tab-1', label: '基础信息' }, { id: 'tab-2', label: '扩展信息' }];
   if (control.controlType === 'two-columns') return Array.from({ length: Math.min(4, Math.max(2, control.layout?.columns || 2)) }, (_, index) => ({ id: String(index), label: `第 ${index + 1} 列` }));
@@ -61,6 +63,7 @@ export function normalizeLayout<T extends LayoutPlacement>(controls: T[]): T[] {
   const clean = controls.filter(item => item?.id && !ids.has(item.id) && Boolean(ids.add(item.id))).map(item => ({ ...item, ...(item.presentation !== undefined ? { presentation: getControlPresentation(item.presentation) } : {}) }));
   const byId = new Map(clean.map(item => [item.id, item]));
   for (const item of clean) {
+    if (isLayoutControl(item)) delete item.fieldKey;
     const parent = item.parentId ? byId.get(item.parentId) : undefined;
     const seen = new Set([item.id]); let cursor = parent; let invalid = false;
     while (cursor) { if (seen.has(cursor.id)) { invalid = true; break; } seen.add(cursor.id); cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined; }

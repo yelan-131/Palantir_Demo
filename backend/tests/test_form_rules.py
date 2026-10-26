@@ -124,3 +124,24 @@ def test_disabled_assignment_mapping_survives_publishing_without_relation_backfi
     assert saved['ui_config']['assignmentRules'] == mapping
     assert saved['ui_config']['assignmentRulesEnabled'] is False
     assert saved['ui_config']['relation_config']['backfill'] == {}
+
+
+@pytest.mark.parametrize('legacy_type', ['select', 'relation'])
+def test_unified_selection_control_switches_between_inline_choices_and_records(legacy_type):
+    from app.api.forms import _apply_designer_field_settings
+    fields = [{'field_name': 'source', 'field_type': 'string', 'ui_config': {
+        'controlType': 'relation', 'relation_config': {'target_model': 'suppliers', 'label_field': 'name'}
+    }}]
+    inline = _apply_designer_field_settings({'formDesignerControls': [{
+        'fieldKey': 'source', 'controlType': legacy_type, 'dataSourceKind': 'static', 'optionSource': '启用、停用'
+    }]}, fields)[0]
+    assert inline['ui_config']['controlType'] == 'select'
+    assert 'relation_config' not in inline['ui_config']
+    assert inline['enum_values']['values'] == ['启用', '停用']
+    linked = _apply_designer_field_settings({'formDesignerControls': [{
+        'fieldKey': 'source', 'controlType': 'select', 'dataSourceKind': 'businessForm',
+        'optionSource': 'material_master', 'referenceLabelField': 'material_name'
+    }]}, [inline])[0]
+    assert linked['ui_config']['controlType'] == 'relation'
+    assert linked['ui_config']['relation_config']['target_model'] == 'materials'
+    assert linked['ui_config']['relation_config']['label_field'] == 'material_name'

@@ -1,6 +1,6 @@
 # ManuFoundry Documentation
 
-Last updated: 2026-06-15
+Last updated: 2026-10-26
 
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
@@ -8,7 +8,8 @@ are product design or Palantir-inspired reference material.
 
 ## Reading Rules
 
-- **Current implementation** means the document should match the running code.
+- **Current implementation** means the document describes the current source;
+  deployment/registry enablement status must be checked separately.
 - **Design** means the document defines product or engineering intent, but may
   include future behavior.
 - **Roadmap** means phased delivery direction, not a guarantee that every item
@@ -41,10 +42,11 @@ Read these first when you want the current system truth:
 | Document | Purpose |
 | --- | --- |
 | [Architecture Overview](architecture/overview.md) | Current full-system architecture, Palantir mapping, module layout, data flow, deployment shape. |
-| [Current Code Framework](architecture/current-framework.md) | Practical frontend/backend folder map and current module state. |
+| [Current Code Framework](architecture/current-framework.md) | Frontend/backend map, shared form services, AI adapters, and remaining extraction boundaries. |
+| [Low-Code Platform](architecture/low-code-platform.md) | Shared UI/AI service flow, configuration/runtime split, JSON/physical storage, and tool registry enablement. |
 | [API Reference](development/api-reference.md) | Current FastAPI route map and example requests. Keep full endpoint lists here. |
 | [Data Model](architecture/data-model.md) | Current relational model groups, platform forms storage, Neo4j notes, and ontology direction boundaries. |
-| [Platform Database Landing Plan](architecture/platform-database.md) | Current low-code forms/application/menu persistence design and rollout notes. |
+| [Platform Database Implementation](architecture/platform-database.md) | Platform metadata, published versions, physical provisioning, and shared record storage. |
 | [Permission System](architecture/permission-system.md) | Current authentication, RBAC, application visibility, admin guards, and platform form permission enforcement. |
 | [Knowledge Base](architecture/knowledge-base.md) | Current local knowledge/RAG MVP, persistent document/chunk/runtime rows, and future vector boundary. |
 | [Graph Database Integration](architecture/graph-database-integration.md) | Current graph sync and quality impact graph integration. |
@@ -70,6 +72,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.6](operations/release-0.3.6.md) | AI workspace history, runtime form permissions, knowledge ontology intake, admin governance, auth hardening, and production deployment. |
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
 | [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
+| [Release 0.3.16](operations/release-0.3.16.md) | Unified component canvas, independent page publication, data workspaces, knowledge browsing, shared form services, and option validation. |
 | [Release 0.3.15](operations/release-0.3.15.md) | HTTP business form rendering and UUID compatibility fix. |
 | [Release 0.3.14](operations/release-0.3.14.md) | Analytics workspace, shared metrics, form imports and attachments, field protection, and designer version management. |
 | [Release 0.3.13](operations/release-0.3.13.md) | Harness upgrade, execution progress and confirmation recovery, shared form rules, existing record updates, and assembly improvements. |
@@ -86,12 +89,11 @@ Read these first when you want the current system truth:
 | --- | --- |
 | [User Guide](business/user-guide.md) | Product walkthrough and demo-oriented usage notes. |
 | [Application Management](architecture/application-management.md) | Product boundary for application identity, visibility, and entry configuration. |
-| [Form Management](architecture/form-management.md) | Product boundary for configurable business forms and metadata-backed fields. |
+| [Form Management](architecture/form-management.md) | Current field/version/layout/rule service ownership, shared UI/AI paths, and explicitly labeled UX/lifecycle design guidance. |
 | [Configuration Lifecycle](architecture/configuration-lifecycle.md) | Draft/publish/disable/archive rules for configurable assets. |
 | [Business Interaction Form Logic](business/business-interaction-form-logic.md) | Business-facing explanation of dynamic interaction tables, runtime forms, permissions, workflow, and record storage. |
 | [Knowledge Base Workflow](business/knowledge-base-workflow.md) | User workflow for knowledge upload, review, binding, and workbench use. |
 | [Workbench Notification Center](architecture/workbench-notification-center.md) | Workbench and notification center UX boundary. |
-| [Low-Code Platform](architecture/low-code-platform.md) | Low-code platform shape and relation to application/form/runtime surfaces. |
 | [Recent Code Updates 2026-06-05](development/recent-code-updates-2026-06-05.md) | Current delivery note covering framework, backend, frontend, AI, permissions, tests, and deployment impact. |
 
 ## Roadmap And Productization
@@ -146,8 +148,11 @@ Archived documents are historical records and are not source of truth:
 | Production compose | `docker/docker-compose.prod-full.yml` | `docker/docker-compose.yml` plus `docker/docker-compose.prod.yml` |
 | Production nginx config | `frontend/nginx-prod.conf` | `frontend/nginx.conf` |
 | Production frontend port | inherited development port | host `80` to container `80` |
-| AI stack | Prophet/LangChain active | currently optional/future; active AI APIs are implemented directly |
-| Forms platform | "next phase persistence" | `/api/v1/forms` and migration `0006_platform_forms.py` exist |
+| AI stack | Prophet/LangChain active | Harness SDK/runtime is active; the platform owns tool permissions, confirmation, and audit |
+| Forms platform | "next phase persistence" | `/api/v1/forms`, published versions, and shared business services exist |
+| Form storage | all writes are metadata-only; physical tables are future work | JSON and physical storage are implemented; create/add-field paths can provision tables/columns |
+| UI/AI form logic | separate field/publication implementations | shared field and publication services, with adapter-specific orchestration |
+| New AI tools | seed file changes automatically enable persisted tools | existing database registries need an explicit registry update |
 | Permissions | frontend/menu-only visibility | backend admin guards, application access checks, and platform form runtime permission checks exist |
 | Knowledge base | frontend-only concept | `/api/v1/knowledge` exists with persistent document/chunk/runtime rows and local TF-IDF retrieval |
 | Knowledge Agent | stateless chat only | `/api/v1/knowledge/agent/conversations` persists conversations, messages, runs, tool calls, and memory rows |

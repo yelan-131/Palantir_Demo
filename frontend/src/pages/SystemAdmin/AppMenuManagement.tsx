@@ -667,7 +667,9 @@ export default function AppMenuManagement() {
   const saveForm = () => runPropertyOperation(async () => { await persistFormDraft(); message.success('表单/看板属性已保存'); });
   const enterFormDesigner = () => runPropertyOperation(async () => {
     const saved = await persistFormDraft();
-    navigate(`/form-settings/${encodeURIComponent(saved.code)}`);
+    navigate(saved.config?.componentPageEnabled || saved.config?.componentPageCode
+      ? `/program/${encodeURIComponent(saved.code)}`
+      : `/form-settings/${encodeURIComponent(saved.code)}`);
   });
 
   const createDraftApp = () => {

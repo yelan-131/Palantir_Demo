@@ -186,7 +186,7 @@ async def _legacy_runtime_snapshot(db, form):
     particular, _form_snapshot is unsuitable here: it applies designer controls
     and draft view columns to those raw fields as part of a full form publish.
     """
-    from app.api.forms import (_form_payload, _field_payload, _layout_payload,
+    from app.services.form_definition import (_form_payload, _field_payload, _layout_payload,
                                _action_payload, _permission_payload, _workflow_binding_payload)
     from app.models.relational import FormAction, FormLayout, FormPermission, WorkflowBinding
     from app.services.records import runtime_fields

@@ -137,3 +137,19 @@ test('explicit input width is bounded, published and removable without changing 
  assert.equal(saved.nodes[0].presentation.controlWidth,240);assert.equal(saved.nodes[0].width,'twoThird');
  assert.equal(ctx.exports.getControlAppearance({controlWidth:undefined}).style['--field-controlWidth'],undefined);
 });
+
+
+test('layout-only controls never bind fields or produce stored field payloads',()=>{
+ for(const controlType of ['container','two-columns','tabs','divider']){
+  const layout={...group,controlType,fieldKey:'accidental'};
+  assert.equal(ctx.exports.isLayoutControl(layout),true);
+  const clean=normalizeLayout([layout]);
+  assert.equal(clean[0].fieldKey,undefined);
+  assert.equal(layout.fieldKey,'accidental');
+  const runtime=buildRuntimeLayout(JSON.parse(JSON.stringify(clean)),()=>{throw new Error('Layout controls must not produce field values');});
+  assert.equal(runtime.nodes[0].kind,controlType);
+  assert.equal(runtime.sections[0].fields.length,0);
+ }
+ assert.equal(ctx.exports.isLayoutControl(field),false);
+ assert.equal(normalizeLayout([field])[0].fieldKey,'name');
+});

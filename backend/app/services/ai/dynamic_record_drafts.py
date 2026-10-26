@@ -158,7 +158,7 @@ async def create_dynamic_record_draft_from_agent(
                 raise HTTPException(409, '操作尚未确认或已结束')
 
     from app.services.records import runtime_fields, create_record
-    from app.api.forms import DynamicRecordCreate
+    from app.services.form_schemas import DynamicRecordCreate
     fields = await runtime_fields(session, form)
     data = {}
     for field in fields:
