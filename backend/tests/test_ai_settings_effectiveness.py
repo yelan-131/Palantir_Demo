@@ -93,7 +93,9 @@ async def test_harness_bounds_final_prompt_and_rejects_oversized_fixed_input(mon
     from app.services.ai.context_builder import estimate_tokens
     from app.services.ai.schemas import AgentRequest
     from app.services.ai.settings import merge_ai_settings
-    settings = merge_ai_settings({'apiKey': 'test-only-key', 'agentMode': 'confirm', 'chatModel': 'test', 'reasoningModel': 'test', 'contextPolicy': {'maxContextTokens': 12000}})
+    # Leave room for the complete registry; this test exercises trimming of
+    # large client context rather than rejection of the fixed tool schema.
+    settings = merge_ai_settings({'apiKey': 'test-only-key', 'agentMode': 'confirm', 'chatModel': 'test', 'reasoningModel': 'test', 'contextPolicy': {'maxContextTokens': 24000}})
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
     monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
     run = AsyncMock(return_value=SimpleNamespace(finish_reason='completed', final_response='OK', session_id='test'))
@@ -104,7 +106,7 @@ async def test_harness_bounds_final_prompt_and_rejects_oversized_fixed_input(mon
     prompt = run.call_args.args[2]
     options = mod.harness_options(settings, USER, token='test')
     fixed = options['env']['DSH_SYSTEM_PROMPT'] + json.dumps(mod.PlatformBridge(USER, settings, {}).available_tools(), ensure_ascii=False)
-    assert estimate_tokens(fixed + prompt) <= 12000
+    assert estimate_tokens(fixed + prompt) <= 24000
     run.reset_mock()
     response = await mod.HarnessRuntime().run(AgentRequest(message='中文' * 50000), user=USER)
     assert agent_response_status(response) == 'failed'

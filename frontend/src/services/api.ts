@@ -614,6 +614,10 @@ export const streamAgentChat = async (
   signal?: AbortSignal,
 ) => postAgentEventStream('/ai/agent/stream', data, onEvent, signal);
 
+export const acknowledgePageAction = (actionId: string, data: Record<string, unknown>) =>
+  api.post(`/ai/page-actions/${actionId}/result`, data);
+export const reviseAgentConfiguration = (runId: string, data: Record<string, unknown>) =>
+  api.post(`/ai/agent-runs/${runId}/configuration-review`, data);
 export const confirmAgentRun = (runId: string, data: Record<string, unknown>) =>
   api.post(`/ai/agent-runs/${runId}/confirm`, data);
 export const streamConfirmAgentRun = async (

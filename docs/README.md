@@ -78,6 +78,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.6](operations/release-0.3.6.md) | AI workspace history, runtime form permissions, knowledge ontology intake, admin governance, auth hardening, and production deployment. |
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
 | [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
+| [Release 0.3.18 — pending](operations/release-0.3.18.md) | AI configuration cards, editable proposals, native designer integration, and expanded form design tools. |
 | [Release 0.3.17](operations/release-0.3.17.md) | Conditional approval routing, access checks, defaults, publish preview recovery, request-scoped read optimization, and local performance tools; updated through 2026-10-27. |
 | [Release 0.3.16](operations/release-0.3.16.md) | Unified component canvas, independent page publication, data workspaces, knowledge browsing, shared form services, and option validation. |
 | [Release 0.3.15](operations/release-0.3.15.md) | HTTP business form rendering and UUID compatibility fix. |

@@ -170,9 +170,10 @@ async def _create_record_draft(payload: dict[str, Any], context: ToolHandlerCont
 
 def _shared_form_handler(operation: str) -> ToolHandler:
     async def handler(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
-        from .form_configuration_tools import execute_form_configuration_tool
+        from .form_configuration_tools import execute_form_configuration_tool, execute_form_design_tool, FORM_DESIGN_TOOLS
         async with db_session() as session:
-            return await execute_form_configuration_tool(operation, session,
+            executor = execute_form_design_tool if operation in FORM_DESIGN_TOOLS else execute_form_configuration_tool
+            return await executor(operation, session,
                 user=context.current_user or {}, payload=payload)
     return handler
 
@@ -195,6 +196,10 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "forms.evaluate_rules": _shared_form_handler("forms.evaluate_rules"),
 
 }
+
+
+from .form_configuration_tools import FORM_DESIGN_TOOLS
+TOOL_HANDLERS.update({name: _shared_form_handler(name) for name in FORM_DESIGN_TOOLS})
 
 
 def list_tool_handler_keys() -> list[str]:

@@ -384,7 +384,6 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   const [configError, setConfigError] = useState('');
   const [configDenied, setConfigDenied] = useState(false);
   const [search, setSearch] = useState('');
-  const [advancedFiltersOpen,setAdvancedFiltersOpen]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [importOpen,setImportOpen]=useState(false);
   const [filterValues, setFilterValues] = useState<Record<string, unknown>>({});
@@ -523,7 +522,6 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
     const timer=window.setTimeout(()=>filterForm.submit(),350);
     return ()=>window.clearTimeout(timer);
   },[display,filterSettings?.queryMode,autoFilterRevision,filterForm]);
-  useEffect(()=>{setAdvancedFiltersOpen(Boolean(filterSettings?.expandAdvanced));},[filterSettings?.expandAdvanced]);
   const selectionQueryKey = JSON.stringify([slug,page,search,externalSearch,structuredFilters,sortState,listSettings?.selection]);
   useEffect(()=>{setSelectedRowKeys([]);},[selectionQueryKey]);
   useEffect(() => {
@@ -1000,15 +998,17 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
           setFilterValues(values);
         }}
       >
+        <div className="dynamic-filter-fields">
         {filterSettings?.showKeyword!==false&&<Form.Item name="keyword" label="关键词">
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索业务记录" />
         </Form.Item>}
         {activeFilters.map((filter) => (
-          <Form.Item key={filter.id} name={filter.id} label={filter.label} rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]} style={filter.advanced&&!advancedFiltersOpen&&!requiredFilterFields.includes(filter.fieldName)?{display:'none'}:undefined} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
+          <Form.Item key={filter.id} name={filter.id} label={filter.label} rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
             {renderDynamicFilterControl(filter)}
           </Form.Item>
         ))}
-        <Form.Item className="app-business-search-actions dynamic-view-filter-actions" label=" ">
+        </div>
+        <Form.Item className="app-business-search-actions dynamic-view-filter-actions">
           <Space>
             <Button onClick={() => {
               setAutoFilterRevision(0);
@@ -1020,7 +1020,6 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
               setSearch('');setPage(1);
             }}>{filterSettings?.resetLabel||'重置'}</Button>
             {filterSettings?.queryMode!=='change'&&<Button type="primary" htmlType="submit" icon={<SearchOutlined />}>{filterSettings?.queryLabel||'查询'}</Button>}
-            {activeFilters.some(f=>f.advanced)&&<Button type="link" onClick={()=>setAdvancedFiltersOpen(v=>!v)}>{advancedFiltersOpen?'收起筛选':'更多筛选'}</Button>}
           </Space>
         </Form.Item>
       </Form>
@@ -1032,22 +1031,22 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
     <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`app-business-page dynamic-business-page${display === 'list' ? ' component-page-list' : ''}`}>
       <div className="app-business-content dynamic-business-content">
       <div className="app-business-title-row dynamic-business-title-row">
-        <Space size={8} wrap>
+        <Space className="dynamic-business-toolbar-actions" size={6} wrap>
           {toolbarActions.includes('create') && canRunAction('create') && (
             <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
-              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal}>{platformForm?.runtime_submission_available ? '填写申请' : '新增'}</Button>
+              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
             </Tooltip>
           )}
           {toolbarActions.includes('refresh')&&<Tooltip title="刷新">
             <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} onClick={loadData} />
           </Tooltip>}
-          {toolbarActions.includes('import')&&canRunAction('import')&&canRunAction('create')&&<Button aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>批量导入</Button>}
-      {toolbarActions.includes('export')&&canRunAction('export')&&<Button icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
+          {toolbarActions.includes('import')&&canRunAction('import')&&canRunAction('create')&&<Button aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)} />}
+      {toolbarActions.includes('export')&&canRunAction('export')&&<Button aria-label="导出当前页" title="导出当前页" icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
         if(!platformForm)return;setExporting(true);
         try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:(externalSearch??search)||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:sortState.field||viewConfig.table.defaultSort?.fieldName,sort_order:sortState.order||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
           const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
-      }}>导出当前页</Button>}
+      }} />}
         </Space>
         {!embedded && workspaceEntry}
       </div>
@@ -1062,7 +1061,6 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
 
       <div className="app-business-list-toolbar dynamic-business-list-toolbar">
         <Typography.Text type="secondary">共 {total} 条记录{selectedRowKeys.length>0&&` · 已选 ${selectedRowKeys.length} 条`}</Typography.Text>
-        <Typography.Text type="secondary">业务数据列表</Typography.Text>
       </div>
 
       <Table

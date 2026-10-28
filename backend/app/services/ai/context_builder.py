@@ -27,8 +27,19 @@ def estimate_tokens(value: Any) -> int:
 def fit_context_to_budget(payload: dict[str, Any], budget: int) -> dict[str, Any]:
     """Bound the whole serialized context, including semantic/client fields."""
     trimmed = deepcopy(payload)
+    # A partial draft can silently remove fields from the next proposal. Keep
+    # these objects whole, trimming replaceable history and evidence first.
+    protected = {"configurationDraft", "pendingActionState", "pending_action_state",
+                 "resumeDraft", "resume_draft", "form_id", "formId", "application_id",
+                 "designerContext", "pageControlsSupported"}
+    required = {key: value for key, value in trimmed.items() if key in protected}
+    if required and estimate_tokens(required) > budget:
+        raise ValueError("当前配置草稿超过上下文预算，请提高上下文预算或缩小配置范围；原草稿未修改")
     while trimmed and estimate_tokens(trimmed) > budget:
-        key = max(trimmed, key=lambda k: estimate_tokens({k: trimmed[k]}))
+        candidates = [key for key in trimmed if key not in protected]
+        if not candidates:
+            break
+        key = max(candidates, key=lambda k: estimate_tokens({k: trimmed[k]}))
         value = trimmed[key]
         if isinstance(value, list) and len(value) > 1:
             trimmed[key] = value[1:]

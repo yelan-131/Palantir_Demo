@@ -569,5 +569,1306 @@
     "permission_check": "config",
     "dry_run_supported": true,
     "audit_required": false
+  },
+  "forms.update_field": {
+    "name": "forms.update_field",
+    "title": "Update Field",
+    "description": "Update an existing field draft, including rules and UI properties. Publish separately to apply.",
+    "handler_key": "forms.update_field",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormFieldUpdate": {
+          "properties": {
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Label"
+            },
+            "field_type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Field Type"
+            },
+            "business_type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Business Type"
+            },
+            "control_type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Control Type"
+            },
+            "data_source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Data Source"
+            },
+            "encoding_rule": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Encoding Rule"
+            },
+            "required": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Required"
+            },
+            "visible_in_list": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible In List"
+            },
+            "visible_in_form": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible In Form"
+            },
+            "searchable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Searchable"
+            },
+            "sortable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Sortable"
+            },
+            "archived": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Archived"
+            },
+            "default_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Default Value"
+            },
+            "enum_values": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Enum Values"
+            },
+            "validation": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Validation"
+            },
+            "ui_config": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ui Config"
+            },
+            "sort_order": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Sort Order"
+            }
+          },
+          "title": "FormFieldUpdate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "field_id": {
+          "exclusiveMinimum": 0,
+          "title": "Field Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormFieldUpdate"
+        }
+      },
+      "required": [
+        "form_id",
+        "field_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.archive_field": {
+    "name": "forms.archive_field",
+    "title": "Archive Field",
+    "description": "Archive a field using designer checks. Publish separately.",
+    "handler_key": "forms.archive_field",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "field_id": {
+          "exclusiveMinimum": 0,
+          "title": "Field Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id",
+        "field_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.save_layout": {
+    "name": "forms.save_layout",
+    "title": "Save Layout",
+    "description": "Save a form layout using the designer service. Read layouts first; body.config replaces the layout config. Publish separately.",
+    "handler_key": "forms.save_layout",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormLayoutUpsert": {
+          "properties": {
+            "layout_type": {
+              "default": "list",
+              "title": "Layout Type",
+              "type": "string"
+            },
+            "config": {
+              "additionalProperties": true,
+              "title": "Config",
+              "type": "object"
+            }
+          },
+          "title": "FormLayoutUpsert",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "layout_type": {
+          "minLength": 1,
+          "title": "Layout Type",
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/$defs/FormLayoutUpsert"
+        }
+      },
+      "required": [
+        "form_id",
+        "layout_type",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.publish": {
+    "name": "forms.publish",
+    "title": "Publish",
+    "description": "Publish the current form draft with the designer impact checks. Preview publication first.",
+    "handler_key": "forms.publish",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.restore_draft": {
+    "name": "forms.restore_draft",
+    "title": "Restore Draft",
+    "description": "Replace draft with the latest published design; discards unpublished changes.",
+    "handler_key": "forms.restore_draft",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.update_definition": {
+    "name": "forms.update_definition",
+    "title": "Update Definition",
+    "description": "Update form metadata/config. Read current design first; config replaces the complete config. Publish separately.",
+    "handler_key": "forms.update_definition",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormUpdate": {
+          "properties": {
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Name"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "model_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Id"
+            },
+            "table_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Table Name"
+            },
+            "storage_mode": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Storage Mode"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status"
+            },
+            "config": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Config"
+            }
+          },
+          "title": "FormUpdate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormUpdate"
+        }
+      },
+      "required": [
+        "form_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.copy": {
+    "name": "forms.copy",
+    "title": "Copy",
+    "description": "Copy a form design without copying business records.",
+    "handler_key": "forms.copy",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormCopy": {
+          "properties": {
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "code": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "code"
+          ],
+          "title": "FormCopy",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormCopy"
+        }
+      },
+      "required": [
+        "form_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.delete": {
+    "name": "forms.delete",
+    "title": "Delete",
+    "description": "Delete a draft form only; existing designer dependency checks apply.",
+    "handler_key": "forms.delete",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.list_actions": {
+    "name": "forms.list_actions",
+    "title": "List Actions",
+    "description": "list actions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.list_actions",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.create_actions": {
+    "name": "forms.create_actions",
+    "title": "Create Actions",
+    "description": "create actions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.create_actions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormActionCreate": {
+          "properties": {
+            "action_key": {
+              "title": "Action Key",
+              "type": "string"
+            },
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
+            "action_type": {
+              "default": "builtin",
+              "title": "Action Type",
+              "type": "string"
+            },
+            "config": {
+              "additionalProperties": true,
+              "title": "Config",
+              "type": "object"
+            },
+            "enabled": {
+              "default": true,
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "sort_order": {
+              "default": 0,
+              "title": "Sort Order",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "action_key",
+            "label"
+          ],
+          "title": "FormActionCreate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormActionCreate"
+        }
+      },
+      "required": [
+        "form_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.update_actions": {
+    "name": "forms.update_actions",
+    "title": "Update Actions",
+    "description": "update actions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.update_actions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormActionUpdate": {
+          "properties": {
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Label"
+            },
+            "action_type": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Action Type"
+            },
+            "config": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Config"
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Enabled"
+            },
+            "sort_order": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Sort Order"
+            }
+          },
+          "title": "FormActionUpdate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "action_id": {
+          "exclusiveMinimum": 0,
+          "title": "Action Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormActionUpdate"
+        }
+      },
+      "required": [
+        "form_id",
+        "action_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.delete_actions": {
+    "name": "forms.delete_actions",
+    "title": "Delete Actions",
+    "description": "delete actions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.delete_actions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "action_id": {
+          "exclusiveMinimum": 0,
+          "title": "Action Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id",
+        "action_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.list_permissions": {
+    "name": "forms.list_permissions",
+    "title": "List Permissions",
+    "description": "list permissions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.list_permissions",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.create_permissions": {
+    "name": "forms.create_permissions",
+    "title": "Create Permissions",
+    "description": "create permissions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.create_permissions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormPermissionCreate": {
+          "properties": {
+            "role_id": {
+              "title": "Role Id",
+              "type": "integer"
+            },
+            "action": {
+              "title": "Action",
+              "type": "string"
+            },
+            "effect": {
+              "default": "allow",
+              "title": "Effect",
+              "type": "string"
+            },
+            "field_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Field Name"
+            }
+          },
+          "required": [
+            "role_id",
+            "action"
+          ],
+          "title": "FormPermissionCreate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormPermissionCreate"
+        }
+      },
+      "required": [
+        "form_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.update_permissions": {
+    "name": "forms.update_permissions",
+    "title": "Update Permissions",
+    "description": "update permissions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.update_permissions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "FormPermissionUpdate": {
+          "properties": {
+            "action": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Action"
+            },
+            "effect": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Effect"
+            },
+            "field_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Field Name"
+            }
+          },
+          "title": "FormPermissionUpdate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "permission_id": {
+          "exclusiveMinimum": 0,
+          "title": "Permission Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/FormPermissionUpdate"
+        }
+      },
+      "required": [
+        "form_id",
+        "permission_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.delete_permissions": {
+    "name": "forms.delete_permissions",
+    "title": "Delete Permissions",
+    "description": "delete permissions through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.delete_permissions",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "permission_id": {
+          "exclusiveMinimum": 0,
+          "title": "Permission Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id",
+        "permission_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.list_workflow_bindings": {
+    "name": "forms.list_workflow_bindings",
+    "title": "List Workflow Bindings",
+    "description": "list workflow bindings through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.list_workflow_bindings",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": true,
+    "audit_required": false
+  },
+  "forms.create_workflow_bindings": {
+    "name": "forms.create_workflow_bindings",
+    "title": "Create Workflow Bindings",
+    "description": "create workflow bindings through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.create_workflow_bindings",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "WorkflowBindingCreate": {
+          "properties": {
+            "workflow_id": {
+              "title": "Workflow Id",
+              "type": "integer"
+            },
+            "trigger_action": {
+              "default": "submit",
+              "title": "Trigger Action",
+              "type": "string"
+            },
+            "enabled": {
+              "default": true,
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "config": {
+              "additionalProperties": true,
+              "title": "Config",
+              "type": "object"
+            }
+          },
+          "required": [
+            "workflow_id"
+          ],
+          "title": "WorkflowBindingCreate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/WorkflowBindingCreate"
+        }
+      },
+      "required": [
+        "form_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.update_workflow_bindings": {
+    "name": "forms.update_workflow_bindings",
+    "title": "Update Workflow Bindings",
+    "description": "update workflow bindings through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.update_workflow_bindings",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "$defs": {
+        "WorkflowBindingUpdate": {
+          "properties": {
+            "workflow_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Workflow Id"
+            },
+            "trigger_action": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Trigger Action"
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Enabled"
+            },
+            "config": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Config"
+            }
+          },
+          "title": "WorkflowBindingUpdate",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "binding_id": {
+          "exclusiveMinimum": 0,
+          "title": "Binding Id",
+          "type": "integer"
+        },
+        "body": {
+          "$ref": "#/$defs/WorkflowBindingUpdate"
+        }
+      },
+      "required": [
+        "form_id",
+        "binding_id",
+        "body"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.delete_workflow_bindings": {
+    "name": "forms.delete_workflow_bindings",
+    "title": "Delete Workflow Bindings",
+    "description": "delete workflow bindings through the existing form designer with tenant and admin checks.",
+    "handler_key": "forms.delete_workflow_bindings",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "form_id": {
+          "exclusiveMinimum": 0,
+          "title": "Form Id",
+          "type": "integer"
+        },
+        "binding_id": {
+          "exclusiveMinimum": 0,
+          "title": "Binding Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "form_id",
+        "binding_id"
+      ],
+      "title": "FormDesignRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object|array"
+    },
+    "permission_check": "config",
+    "dry_run_supported": false,
+    "audit_required": true
   }
 }

@@ -831,3 +831,22 @@ body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
 .tech-white-shell .analytics-library-list > button { border-color: var(--mf-border); background: var(--mf-panel); }
 .tech-white-shell .analytics-library-list > button:hover:not(:disabled) { border-color: var(--mf-border-strong); background: var(--mf-hover); }
 .tech-white-shell .analytics-library-list > button:focus-visible { outline-color: var(--mf-focus); }
+
+/* Metric summaries use dividers in place of decorative cards. */
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics {
+  gap: 0;
+  background: var(--mf-panel);
+  border-block: 1px solid var(--mf-border);
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div {
+  border: 0;
+  border-radius: 0 !important;
+  background: transparent;
+  padding: 16px 20px;
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div + div {
+  border-left: 1px solid var(--mf-border);
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .ant-table-thead > tr > th {
+  background: var(--mf-sidebar);
+}

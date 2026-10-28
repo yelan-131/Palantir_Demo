@@ -29,6 +29,8 @@ from app.services.ai.agent_items import (
 )
 from app.services.ai.audit import list_ai_audit_logs, record_ai_event
 from app.services.ai.client import get_provider
+from app.services.ai.page_controls import PageControlResult
+from app.services.ai.configuration_review import ConfigurationReviewEdit, revise_configuration
 from app.services.ai.confirmations import consume_confirmation_token
 from app.services.ai.agent_context_router import agent_context_router
 from app.services.ai.context_builder import context_builder
@@ -1347,6 +1349,29 @@ async def _confirm_agent_run_for_user(
         await event_sink("post.confirmation", {"run_id": run_id, "status": run.get("status") or "completed"})
     _audit_ai_event(current_user, "agent_run_confirmed", {"run_id": run_id})
     return _public_agent_run(run)
+
+
+@router.post('/page-actions/{action_id}/result')
+async def receive_page_action_result(action_id: str, body: PageControlResult, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    from app.services.ai.harness_runtime import BRIDGES
+    for bridge in tuple(BRIDGES.values()):
+        if bridge.user.get('tenant_id') != current_user.get('tenant_id') or _user_key(bridge.user) != _user_key(current_user):
+            continue
+        future = bridge.page_actions.get(action_id)
+        if future is not None and not future.done():
+            future.set_result(body.model_dump())
+            return {'ok': True}
+    raise HTTPException(404, '页面操作不存在或已结束')
+
+
+@router.post("/agent-runs/{run_id}/configuration-review")
+async def edit_ai_configuration_review(run_id: str, body: ConfigurationReviewEdit, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    await _load_effective_ai_settings()
+    result = await revise_configuration(run_id, body, current_user, AI_SYSTEM_SETTINGS)
+    _audit_ai_event(current_user, "agent_configuration_revised", {"run_id": run_id, "action_index": body.action_index})
+    return result
 
 
 @router.post("/agent-runs/{run_id}/confirm")

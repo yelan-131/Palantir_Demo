@@ -1,15 +1,15 @@
 /** Shared colors for the shell, Ant Design controls and the visible palette card. */
 export const TECH_WHITE_PALETTE = {
-  canvas: '#F7F9FD',
+  canvas: '#F5F6F7',
   surface: '#FFFFFF',
-  rail: '#F0F4FB',
-  menu: '#F5F8FD',
-  hover: '#F0F5FF',
-  selected: '#E8EFFC',
-  border: '#DFE7F3',
-  borderStrong: '#BCCDE5',
-  text: '#2B4367',
-  muted: '#637D9C',
+  rail: '#F1F2F3',
+  menu: '#FAFAFA',
+  hover: '#F1F4F6',
+  selected: '#E8EEF3',
+  border: '#DFE2E5',
+  borderStrong: '#BBC3CB',
+  text: '#252B32',
+  muted: '#626C77',
   faint: '#7E91AA',
   icon: '#7F96B4',
   primary: '#476791',
@@ -32,8 +32,8 @@ export const TECH_WHITE_PALETTE = {
 
 /** Shared geometry; table size variants and user density remain independent. */
 export const TECH_WHITE_GEOMETRY = {
-  panelRadius: 12,
-  controlRadius: 8,
+  panelRadius: 4,
+  controlRadius: 4,
   controlHeight: 34,
   panelPadding: 20,
 } as const;
@@ -77,7 +77,7 @@ export const SHELL_COLOR_VARIABLES: Record<string, string> = {
   '--mf-accent': TECH_WHITE_PALETTE.primary,
   '--mf-text-secondary': TECH_WHITE_PALETTE.muted,
   '--mf-primary-strong': TECH_WHITE_PALETTE.primaryStrong,
-  '--mf-feature-bg': `linear-gradient(115deg, ${TECH_WHITE_PALETTE.hover} 0%, ${TECH_WHITE_PALETTE.featureEnd} 75%)`,
+  '--mf-feature-bg': TECH_WHITE_PALETTE.surface,
   '--mf-focus': TECH_WHITE_PALETTE.focus,
   '--mf-icon-bg': TECH_WHITE_PALETTE.iconBg,
   '--mf-success': TECH_WHITE_PALETTE.success,

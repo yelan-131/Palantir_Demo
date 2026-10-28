@@ -29,8 +29,11 @@ import {
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
 import { LEGACY_ACCOUNT_SECTIONS, navigationAreaForPath } from '@/config/navigation';
 import { useAiWorkbench } from './context';
+import type { PageAction } from './pageControls';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
+import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
+import { NativeDesignerReview } from './NativeDesignerReview';
 
 type ChatRole = 'assistant' | 'user';
 type MockSkillStatus = 'draft_created' | 'ready_for_review' | 'completed' | 'failed';
@@ -731,25 +734,12 @@ function getGenericActionReview(action: MockSkillAction) {
 
 function getPendingStateFromAction(action: MockSkillAction): AgentActionState {
   const payload = asRecord(action.payload);
-  let collectedSlots: Record<string, unknown> = payload;
-  if (getLowCodeReview(action)) {
-    const form = asRecord(payload.form);
-    const menu = asRecord(payload.menu);
-    collectedSlots = {
-      formName: form.name,
-      formCode: form.code,
-      form_name: form.name,
-      form_code: form.code,
-      description: form.description,
-      fields: Array.isArray(payload.fields) ? payload.fields : [],
-      createMenu: Boolean(menu.create),
-      menuTitle: menu.title,
-    };
-  }
+  // Preserve the complete proposal, including application IDs, menu options
+  // and field rules, when asking the model for a delta.
   return {
     skill: action.skill,
     status: 'collecting',
-    collected_slots: collectedSlots,
+    collected_slots: payload,
     missing_slots: [],
   };
 }
@@ -865,7 +855,7 @@ function generateUnavailableReply(): AssistantReply {
 
 export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
-  const { knowledgeContext } = useAiWorkbench();
+  const { knowledgeContext, enqueuePageAction, designerContext } = useAiWorkbench();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [sessions, setSessions] = useState<AgentSession[]>([]);
@@ -875,6 +865,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [historyScope, setHistoryScope] = useState<'recent' | 'archived'>('recent');
   const [archivedSessions, setArchivedSessions] = useState<AgentSession[]>([]);
   const [sending, setSending] = useState(false);
+  const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string }>();
   const streamController = useRef<AbortController | null>(null);
   useEffect(() => () => streamController.current?.abort(), []);
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
@@ -963,7 +954,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages.length, open]);
+  }, [messages.length, open, sending, nativeDraftReview?.draftId, designerContext?.review_ready]);
 
   useEffect(() => {
     document.body.classList.toggle('ai-workbench-open', open && enabled);
@@ -1220,12 +1211,17 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         applicationName,
         knowledgeContext,
       });
-      Object.assign(runtimeContext, extraContext || {});
+      Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {});
       await streamAgentChat({
         message: trimmed,
         page: AI_WORKBENCH_PAGE,
         context: runtimeContext,
       }, ({ event, data }) => {
+        if (event === 'ui.action') {
+          if (typeof data.draft_id === 'string') setNativeDraftReview({ sessionId, draftId: data.draft_id });
+          enqueuePageAction(data as unknown as PageAction);
+          return;
+        }
         const traceItem = createTraceItem(event, data);
         if (traceItem) {
           updateSessionMessage(sessionId, assistantMessageId, (message) => ({
@@ -1523,8 +1519,11 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const canShowAssistantMeta = message.role === 'assistant' && !isTypingAssistant;
               const actionStateReview = message.role === 'assistant' ? getActionStateReview(message.actionState) : undefined;
               const traceItems = message.trace || [];
-              const completedToolCount = traceItems.filter((item) => item.kind === 'result').length;
-              const runningToolCount = traceItems.filter((item) => item.kind === 'tool').length;
+              const toolCalls = traceItems.filter((item) => item.kind === 'tool').length;
+              const toolResults = traceItems.filter((item) => item.kind === 'result').length;
+              const activeRun = sending && message.id === messages[messages.length - 1]?.id;
+              const completedToolCount = activeRun ? toolResults : Math.max(toolCalls, toolResults);
+              const runningToolCount = activeRun ? Math.max(0, toolCalls - toolResults) : 0;
               const toolTraceCount = completedToolCount + runningToolCount;
               const traceSummary = runningToolCount
                 ? `正在运行 ${runningToolCount} 个工具`
@@ -1605,7 +1604,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                   ) : null}
                   {canShowAssistantMeta && message.actions?.length ? (
                     <div className="ai-skill-action-list">
-                      {message.actions.map((action) => {
+                      {message.actions.map((action, actionIndex) => {
                         const review = getLowCodeReview(action);
                         const genericReview = getGenericActionReview(action);
                         const note = messageScopedNote(action.id);
@@ -1637,6 +1636,23 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                   {review.menuEnabled ? `菜单：${review.menuTitle}` : '不创建菜单入口'}
                                 </Tag>
                               </div>
+                              {message.requiresConfirmation && message.runId && action.payload?._harness_tool === 'forms.create_form_definition' ? (
+                                <ConfigurationReviewEditor
+                                  runId={message.runId}
+                                  token={getConfirmationToken(message.confirmationPayload) || ''}
+                                  actionIndex={actionIndex}
+                                  payload={action.payload}
+                                  disabled={sending || Boolean(confirmingRunId)}
+                                  onSaved={(items) => {
+                                    if (!activeSessionId) return;
+                                    updateSessionMessage(activeSessionId, message.id, current => ({
+                                      ...current, items,
+                                      actions: mapAgentActions(getConfirmationActions(items)),
+                                      confirmationPayload: getConfirmationItemPayload(items),
+                                    }));
+                                  }}
+                                />
+                              ) : null}
                               <div className="ai-confirm-review-meta">
                                 <span>字段 {review.fieldCount}</span>
                                 <span>{review.description}</span>
@@ -1795,6 +1811,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               </div>
               );
             })}
+            {nativeDraftReview && nativeDraftReview.sessionId === activeSession?.id && !sending && !messages[messages.length - 1]?.content.startsWith('执行失败') && <NativeDesignerReview key={nativeDraftReview.draftId} draftId={nativeDraftReview.draftId} disabled={sending || Boolean(confirmingRunId)} />}
           </div>
 
           <div className="ai-chat-input">

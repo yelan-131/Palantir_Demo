@@ -123,3 +123,90 @@
   border-start-end-radius: 5px;
   border-end-end-radius: 5px;
 }
+
+/* Compact actions stay alongside the workspace entry on the right. */
+.tech-white-shell .app-content .dynamic-business-title-row {
+  justify-content: flex-end;
+  gap: 8px;
+}
+.tech-white-shell .app-content .dynamic-business-title-row > .dynamic-business-toolbar-actions {
+  margin-left: auto;
+}
+.tech-white-shell .app-content .dynamic-business-title-row .form-workspace-entry {
+  margin-left: 0;
+}
+.tech-white-shell .app-content .dynamic-business-toolbar-actions .ant-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 5px;
+}
+.tech-white-shell .app-content .dynamic-business-toolbar-actions .anticon {
+  font-size: 13px;
+}
+
+/* Keep the actions visible while additional filter rows scroll independently. */
+.tech-white-shell .app-content .dynamic-business-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+.tech-white-shell .app-content .dynamic-business-filter .dynamic-filter-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+  gap: 12px 16px;
+  max-height: 140px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.tech-white-shell .app-content .dynamic-filter-fields > .ant-form-item {
+  min-width: 0;
+  margin: 0;
+}
+.tech-white-shell .app-content .dynamic-filter-fields .ant-form-item-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.tech-white-shell .app-content .dynamic-filter-fields .ant-form-item-label {
+  flex: none;
+  padding: 0;
+  text-align: left;
+}
+.tech-white-shell .app-content .dynamic-filter-fields .ant-form-item-label > label {
+  height: 20px;
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+}
+.tech-white-shell .app-content .dynamic-filter-fields .ant-form-item-control {
+  width: 100%;
+  min-width: 0;
+  flex: auto;
+}
+.tech-white-shell .app-content .dynamic-business-filter .dynamic-view-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid #e7edf4;
+}
+@media (max-width: 900px) {
+  .tech-white-shell .app-content .dynamic-business-filter .dynamic-filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .tech-white-shell .app-content .dynamic-business-filter .dynamic-filter-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

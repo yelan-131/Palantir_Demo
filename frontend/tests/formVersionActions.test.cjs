@@ -20,6 +20,7 @@ function harness(analysis = false) {
   const savedView = { ...form, config: { view: true } };
   const savedWorkflow = { ...form, config: { workflow: true } };
   const ctx = {
+    lastSavedForm: { current: null },
     flowLoadError: '', isPersistingFlow: false, isAnalysisDesigner: analysis,
     storedViewConfig: {}, analyticsDesign: {}, layoutControls: [], baseConfig: { fields: [] }, console: { error() {} },
     message: { error: value => calls.push(['error', value]), success: () => calls.push(['success']) },
@@ -48,6 +49,7 @@ test('prepare release saves the full draft before checking, and never publishes 
   assert.equal(workflow[2], savedView);
   assert.equal(workflow[3], undefined, 'editing a published workflow must create a separate draft');
   assert.equal(ctx.isPersistingFlow, false);
+  assert.equal(ctx.lastSavedForm.current.config.workflow, true);
 });
 test('analytics save uses the updated form so saving charts cannot overwrite saved form layout', async () => {
   const { ctx, calls, savedView } = harness(true);

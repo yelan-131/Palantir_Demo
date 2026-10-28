@@ -1,3 +1,5 @@
+import { useAiWorkbench } from '@/components/AiChatWidget/context';
+import type { PageAction, NewFormDraft } from '@/components/AiChatWidget/pageControls';
 import StaticOptionsEditor from './StaticOptionsEditor';
 import { parseStaticOptions, staticOptionErrors, normalizeSelection, selectionCountError, selectionConfigErrors } from '@/utils/selectOptions';
 import { createUuid } from '@/utils/uuid';
@@ -57,7 +59,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { Alert, Dropdown, Button, Checkbox, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Form, Tag, Table, Tooltip, Typography, message } from 'antd';
-import { useNavigate, useParams, useSearchParams, useBlocker } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams, useBlocker, useLocation } from 'react-router-dom';
 import {
   previewDesignerRules,
   getFormOptionSources,
@@ -2347,13 +2349,83 @@ export interface FormSettingsPageProps {
   onPublished?: () => void;
 }
 
+function nativeDraftEncoding(settings: NonNullable<PageAction['properties']>['encoding']): EncodingRule | undefined {
+  if (!settings) return undefined;
+  const rule = makeEncodingRule();
+  const dateLength = settings.date_pattern.length;
+  return { ...rule, prefix: settings.prefix, datePattern: settings.date_pattern,
+    template: `{PREFIX}-{${settings.date_pattern}}-{SEQ${settings.sequence_length}}`,
+    sequenceLength: settings.sequence_length, resetCycle: settings.reset_cycle,
+    fixedLength: settings.prefix.length + dateLength + settings.sequence_length + 2,
+    segments: [
+      { id: 'prefix', name: '业务前缀', type: 'fixed', value: settings.prefix, length: settings.prefix.length, padding: 'none', lockAfterGenerated: true },
+      { id: 'date', name: '日期', type: 'date', datePattern: settings.date_pattern, length: dateLength, padding: 'none', lockAfterGenerated: true },
+      { id: 'sequence', name: '流水号', type: 'sequence', length: settings.sequence_length, resetCycle: settings.reset_cycle,
+        padding: 'leftZero', sequenceStart: 1, sequenceStep: 1, lockAfterGenerated: true },
+    ] };
+}
+
+function draftFieldToDesignerField(field: NewFormDraft['fields'][number]): DesignerField {
+  const numeric = ['integer', 'decimal'].includes(field.field_type);
+  const date = ['date', 'datetime'].includes(field.field_type);
+  const types: Record<string, [string, FieldBusinessType]> = {
+    text: ['多行文本', 'longText'], code: ['文本 / 自动编号', 'code'],
+    enum: ['下拉选择', 'enum'], attachment: ['附件控件', 'attachment'],
+  };
+  const [type, businessType] = types[field.field_type] || (numeric ? ['数值控件', 'number'] : date ? ['日期控件', field.field_type] : ['文本输入', 'text']);
+  return { key: field.field_name, name: field.label,
+    storageType: field.field_type === 'code' ? 'string' : field.field_type === 'attachment' ? 'json' : field.field_type,
+    type, businessType: businessType as FieldBusinessType, locked: field.field_type === 'code',
+    encodingRule: nativeDraftEncoding(field.encoding),
+    enumValues: field.options ? { values: field.options } : undefined,
+    optionSource: field.options ? JSON.stringify(field.options) : undefined,
+    required: field.required, placeholder: field.placeholder || (field.field_type === 'code' ? '保存时自动生成' : `请输入${field.label}`), listVisible: true };
+}
+
+function applyNativeFieldProperties(control: LayoutControl, field: DesignerField | undefined, properties: NonNullable<PageAction['properties']>): LayoutControl {
+  const kind = properties.control_type || getEffectiveControlTypeForControl(control, field);
+  if (properties.label !== undefined && !properties.label.trim()) throw new Error('字段名称不能为空');
+  if (properties.readonly === false && (control.encodingRule || isEncodingField(field) || control.computed)) throw new Error('自动生成字段的只读状态不能直接取消');
+  if (properties.encoding && !isEncodingField(field)) throw new Error('编号规则只能用于编码字段');
+  if (properties.options && kind !== 'select') throw new Error('候选项只能用于选择控件');
+  const settings = { ...(properties.control_type ? getDefaultTypeSettings(kind, field) : control.typeSettings),
+    ...properties.settings, ...(properties.min !== undefined ? { min: properties.min } : {}), ...(properties.max !== undefined ? { max: properties.max } : {}) };
+  if (settings.min !== undefined && settings.max !== undefined && settings.min > settings.max) throw new Error('最小值不能大于最大值');
+  if ((properties.min !== undefined || properties.max !== undefined || properties.settings?.precision !== undefined) && kind !== 'number') throw new Error('只有数字控件支持数值范围和精度');
+  if (properties.settings?.rows !== undefined && kind !== 'textarea') throw new Error('只有多行文本支持行数');
+  if (settings.displayMode === 'tags' && settings.selectionMode !== 'multiple') throw new Error('标签样式需要多选模式');
+  return { ...control, controlType: kind,
+    ...(properties.label !== undefined ? { name: properties.label.trim() } : {}),
+    ...(properties.width ? { width: properties.width } : {}),
+    ...(properties.help_text !== undefined ? { helpText: properties.help_text } : {}),
+    ...(properties.options ? { optionSource: JSON.stringify(properties.options), dataSourceKind: 'static' as const } : {}),
+    ...(properties.presentation ? { presentation: { ...control.presentation, ...properties.presentation } } : {}),
+    ...(properties.encoding ? { encodingRule: nativeDraftEncoding(properties.encoding) } : {}),
+    ...(properties.placeholder !== undefined ? { placeholder: properties.placeholder }
+      : properties.required === true && /^选填/.test(control.placeholder || '')
+        ? { placeholder: control.placeholder!.replace(/^选填[，,、：:\s]*/, '') || `请输入${control.name}` } : {}),
+    typeSettings: settings,
+    rules: { ...control.rules,
+      ...(properties.required !== undefined ? { required: { ...control.rules.required, enabled: properties.required } } : {}),
+      ...(properties.readonly !== undefined || isEncodingField(field) ? { readonly: { ...control.rules.readonly, enabled: isEncodingField(field) || Boolean(properties.readonly) } } : {}) },
+  };
+}
+
 export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, onExit, onPublished }: FormSettingsPageProps = {}) {
   const { formId: routeFormId } = useParams();
   const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const aiFormDraft = formId === 'new' ? location.state?.aiFormDraft as (NewFormDraft & { id: string }) | undefined : undefined;
   const staticBaseConfig = useMemo(
     () => {
+      if (aiFormDraft) return {
+        ...defaultConfig, id: aiFormDraft.code, name: aiFormDraft.name,
+        createTitle: `新增${aiFormDraft.name}`, description: aiFormDraft.description,
+        dataSource: aiFormDraft.code, filters: [], flowSteps: [],
+        fields: aiFormDraft.fields.map(draftFieldToDesignerField),
+      } satisfies DesignerConfig;
       if (formId && configs[formId]) return configs[formId];
       const fallbackId = formId || defaultConfig.id;
       const requestedTab = searchParams.get('tab');
@@ -2363,8 +2435,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         kind: inferDesignerKindFromMeta(defaultConfig.kind, fallbackId, requestedTab),
       };
     },
-    [formId, searchParams],
+    [formId, searchParams, aiFormDraft],
   );
+  const initializedAiDraft = useRef<string>();
+  const lastSavedForm = useRef<PlatformForm | null>(null);
+  const [draftReviewReady, setDraftReviewReady] = useState(false);
   const isPlatformFormRoute = Boolean(formId && isNumericFormRouteId(formId));
   const [databaseFieldsByForm, setDatabaseFieldsByForm] = useState<Record<string, DesignerField[]>>({});
   const [databaseMetaByForm, setDatabaseMetaByForm] = useState<Record<string, {
@@ -2433,7 +2508,12 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [previewStates,setPreviewStates]=useState<Record<string,{visible:boolean;required:boolean;readonly:boolean;masked?:boolean;copyMode?:'normal'|'maskedCopy'|'disabled';copyText?:string}>>({});
   const [previewRuleError,setPreviewRuleError]=useState('');
   const previewEpoch=useRef(0);
-  const blocker=useBlocker(hasUnsavedChanges);
+  const blocker=useBlocker(({currentLocation,nextLocation}) => hasUnsavedChanges
+    // A pending designer can mount before React Router commits navigation.
+    // Its new draft must not block the navigation that is opening it.
+    && currentLocation.pathname === location.pathname
+    && currentLocation.search === location.search
+    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search));
   useEffect(()=>{if(!hasUnsavedChanges)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[hasUnsavedChanges]);
   useEffect(()=>{if(blocker.state!=='blocked')return;const modal=Modal.confirm({className:'form-designer-dialog',title:'当前有未保存修改',content:'离开后本次修改不会保留。请先保存草稿，或确认放弃修改。',okText:'放弃并离开',cancelText:'继续编辑',onOk:()=>blocker.proceed(),onCancel:()=>blocker.reset()});return()=>modal.destroy();},[blocker]);
   const [flowLoadError, setFlowLoadError] = useState('');
@@ -2658,6 +2738,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   }, [activePermissionRole, permissionRoles]);
 
   useEffect(() => {
+    if (aiFormDraft && initializedAiDraft.current === aiFormDraft.id) return;
+    initializedAiDraft.current = aiFormDraft?.id;
+    setDraftReviewReady(false);
     const nextControls = baseConfig.fields.map(makeFieldControl);
     const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
     const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : tabs;
@@ -2680,7 +2763,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setHistory([]);
     setFuture([]);
     setLibrarySearch('');
-    setHasUnsavedChanges(false);
+    setHasUnsavedChanges(Boolean(aiFormDraft));
     setPreviewOpen(false);
     setPublishCheckOpen(false);
     setVersionPanelOpen(false);
@@ -2721,6 +2804,8 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   useEffect(() => {
     let cancelled = false;
     const loadPersistedFlow = async () => {
+      // A new form stays entirely in this existing editor until the user saves.
+      if (aiFormDraft) { setResolvingPlatformConfig(false); return; }
       setResolvingPlatformConfig(true);
       setFlowLoadError('');
       try {
@@ -4021,6 +4106,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     if (platformForm) return platformForm;
     const matchedForm = await resolvePlatformFormForConfig(staticBaseConfig.id);
     if (matchedForm) {
+      if (aiFormDraft) throw new Error('表单编码已被使用，请修改编码后重试，不能覆盖已有表单');
       setPlatformForm(matchedForm);
       setPermissionDrafts(permissionDraftsFromConfig(matchedForm.config));
       setWorkflowMeta(getWorkflowDesignerMeta(matchedForm));
@@ -4031,9 +4117,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       name: baseConfig.name,
       code: baseConfig.id,
       description: baseConfig.description,
-      table_name: baseConfig.dataSource,
+      table_name: aiFormDraft ? undefined : baseConfig.dataSource,
       storage_mode: 'dynamic',
-      status: 'active',
+      status: aiFormDraft ? 'draft' : 'active',
       config: {
         workflowDesigner: {},
         source: 'form-settings',
@@ -4041,39 +4127,43 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         viewConfigDraft: storedViewConfig,
         viewConfigMeta: {
           draftVersion: 1,
-          publishedVersion: 1,
+          publishedVersion: aiFormDraft ? 0 : 1,
           draftSavedAt: new Date().toISOString(),
-          publishedAt: new Date().toISOString(),
-          status: 'published',
+          publishedAt: aiFormDraft ? undefined : new Date().toISOString(),
+          status: aiFormDraft ? 'draft' : 'published',
         },
       },
     });
     const createdForm = createResponse.data?.data as PlatformForm;
-    await Promise.all(baseConfig.fields.map((field, index) => createPlatformFormField(createdForm.id, {
-      field_name: field.key,
-      label: field.name,
-      field_type: mapDesignerFieldType(field),
-      business_type: getFieldBusinessType(field),
-      control_type: inferFieldControlType(field),
-      data_source: field.optionSource,
-      encoding_rule: isEncodingField(field) ? makeEncodingRule(field) : undefined,
-      required: Boolean(field.required),
-      visible_in_list: field.listVisible !== false,
-      visible_in_form: true,
-      searchable: Boolean(field.searchable),
-      sortable: Boolean(field.sortable),
-      default_value: getDesignerFieldDefaultValue(field),
-      enum_values: field.optionSource ? { source: field.optionSource } : undefined,
-      validation: field.validation ? { message: field.validation } : undefined,
-      ui_config: {
-        placeholder: field.placeholder,
-        locked: Boolean(field.locked),
-        designerType: field.type,
-        businessType: getFieldBusinessType(field),
-        controlType: inferFieldControlType(field),
-      },
-      sort_order: index,
-    })));
+    await Promise.all(baseConfig.fields.map((baseField, index) => {
+      const control = layoutControls.find(item => item.fieldKey === baseField.key);
+      const field = control ? { ...baseField, name: control.name, required: control.rules.required.enabled, placeholder: control.placeholder ?? baseField.placeholder } : baseField;
+      return createPlatformFormField(createdForm.id, {
+        field_name: field.key,
+        label: field.name,
+        field_type: mapDesignerFieldType(field),
+        business_type: getFieldBusinessType(field),
+        control_type: inferFieldControlType(field),
+        data_source: field.optionSource,
+        encoding_rule: control?.encodingRule || (isEncodingField(field) ? field.encodingRule || makeEncodingRule(field) : undefined),
+        required: Boolean(field.required),
+        visible_in_list: field.listVisible !== false,
+        visible_in_form: true,
+        searchable: Boolean(field.searchable),
+        sortable: Boolean(field.sortable),
+        default_value: getDesignerFieldDefaultValue(field),
+        enum_values: control?.optionSource && enumOptions(control.optionSource).length ? { values: enumOptions(control.optionSource) } : field.enumValues as Record<string, unknown> | undefined || (field.optionSource ? { source: field.optionSource } : undefined),
+        validation: field.validation ? { message: field.validation } : undefined,
+        ui_config: {
+          placeholder: field.placeholder,
+          locked: Boolean(field.locked),
+          designerType: field.type,
+          businessType: getFieldBusinessType(field),
+          controlType: inferFieldControlType(field),
+        },
+        sort_order: index,
+      });
+    }));
     setPlatformForm(createdForm);
     setWorkflowMeta({});
     return createdForm;
@@ -4264,6 +4354,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       const saved = await saveWorkflowDefinition('draft', formWithView, meta.draftWorkflowId === meta.publishedWorkflowId ? undefined : meta.draftWorkflowId);
       updatedForm = await updateFormWorkflowMeta(formWithView, { ...meta, draftWorkflowId: saved.id });
     }
+    lastSavedForm.current = updatedForm;
     setHasUnsavedChanges(false);
     return updatedForm;
   };
@@ -4607,6 +4698,95 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       return next;
     });
   };
+
+  const { registerPageController, setDesignerContext } = useAiWorkbench();
+  const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, fields: baseConfig.fields });
+  aiNativeState.current = { layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, fields: baseConfig.fields };
+  const [pageCallCompletion, setPageCallCompletion] = useState<{ resolve: (state: Record<string, unknown>) => void } | null>(null);
+  useEffect(() => {
+    if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig || isAnalysisDesigner) return;
+    return registerPageController(platformForm?.id || 0, async (action: PageAction) => {
+      const current = aiNativeState.current;
+      if (action.draft_id ? (current.platformForm || action.draft_id !== aiFormDraft?.id) : current.platformForm?.id !== action.form_id) throw new Error('当前设计器与目标表单不一致');
+      if (action.action === 'confirm_draft') {
+        if (!aiFormDraft || !await current.saveDraft()) throw new Error('草稿未保存，请检查页面提示后重试');
+        return { form_id: lastSavedForm.current?.id, saved: true, published: false };
+      }
+      if (action.action === 'draft_new') {
+        setDatabaseFieldsByForm(fields => ({ ...fields, [staticBaseConfig.id]: [] }));
+        current.commitLayoutChange(() => []);
+        setDraftReviewReady(false);
+      }
+      if (action.action === 'add_field' || action.action === 'set_field_properties') setDraftReviewReady(false);
+      if (action.action === 'add_field') {
+        if (!aiFormDraft || !action.field) throw new Error('只能向未创建的本地草稿逐步添加字段');
+        if (current.fields.length >= 60) throw new Error('草稿已达到字段数量上限');
+        if (current.fields.some(field => field.key === action.field!.field_name)) throw new Error('该字段已在草稿中');
+        const field = draftFieldToDesignerField(action.field);
+        const fields = [...current.fields, field];
+        setDatabaseFieldsByForm(value => ({ ...value, [staticBaseConfig.id]: fields }));
+        const addedControl = applyNativeFieldProperties(makeFieldControl(field), field, action.field);
+        current.commitLayoutChange(controls => {
+          const next = [...controls];
+          next.splice(Math.min(action.field!.position ?? next.length, next.length), 0, addedControl);
+          return next;
+        });
+        setViewConfig(makeDesignerViewConfig({ ...baseConfig, fields }));
+        setSelectedControlId(addedControl.id);
+      }
+      if (action.action === 'review') setDraftReviewReady(true);
+      const control = action.field_name ? current.layoutControls.find(item => item.fieldKey === action.field_name) : undefined;
+      if (action.field_name && !control) throw new Error('该字段不在当前画布中，请先在原设计器加入已有字段');
+      if (action.action === 'set_field_properties' && control) {
+        const properties = action.properties || {};
+        const field = current.fields.find(field => field.key === control.fieldKey);
+        const updated = applyNativeFieldProperties(control, field, properties);
+        current.commitLayoutChange(controls => {
+          const next = controls.map(item => item.id === control.id ? updated : item);
+          if (properties.position !== undefined) {
+            const index = next.findIndex(item => item.id === control.id);
+            const [moved] = next.splice(index, 1);
+            next.splice(Math.min(properties.position, next.length), 0, moved);
+          }
+          return next;
+        });
+      }
+      setActiveTab('form');
+      if (control) setSelectedControlId(control.id);
+      if (action.action === 'preview') setPreviewOpen(true);
+      // Resolve only after React commits the native designer's changed state.
+      return new Promise<Record<string, unknown>>(resolve => setPageCallCompletion({ resolve }));
+    });
+  }, [platformForm?.id, aiFormDraft, isResolvingPlatformConfig, isAnalysisDesigner, registerPageController, baseConfig.fields]);
+  useEffect(() => {
+    if (!pageCallCompletion) return;
+    const selected = layoutControls.find(control => control.id === selectedControlId);
+    pageCallCompletion.resolve({ form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id,
+      fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey, label: control.name,
+        control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
+        required: control.rules.required.enabled, readonly: control.rules.readonly.enabled })), selected_field: selected?.fieldKey,
+      label: selected?.name, required: selected?.rules.required.enabled,
+      readonly: selected?.rules.readonly.enabled, unsaved_changes: hasUnsavedChanges,
+      saved: false, published: false });
+    setPageCallCompletion(null);
+  }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft]);
+  useEffect(() => {
+    if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig) return;
+    setDesignerContext({ form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, unsaved_changes: hasUnsavedChanges,
+      selected_field: layoutControls.find(control => control.id === selectedControlId)?.fieldKey,
+      fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey,
+        label: control.name, required: control.rules.required.enabled, readonly: control.rules.readonly.enabled,
+        min: control.typeSettings?.min, max: control.typeSettings?.max,
+        control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
+        width: control.width, settings: control.typeSettings, presentation: control.presentation,
+        options: enumOptions(control.optionSource), encoding: control.encodingRule ? { prefix: control.encodingRule.prefix, date_pattern: control.encodingRule.datePattern, sequence_length: control.encodingRule.sequenceLength, reset_cycle: control.encodingRule.resetCycle } : undefined })) });
+  }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, selectedControlId, hasUnsavedChanges, setDesignerContext]);
+  useEffect(() => {
+    if (aiFormDraft && platformForm?.id && !hasUnsavedChanges && !isPersistingFlow) {
+      navigate(`/form-settings/${platformForm.id}?tab=form&legacy=1`, { replace: true });
+    }
+  }, [aiFormDraft, platformForm?.id, hasUnsavedChanges, isPersistingFlow, navigate]);
+  useEffect(() => () => setDesignerContext(undefined), [setDesignerContext]);
 
   const undoLayoutChange = () => {
     setHistory((current) => {
@@ -6016,8 +6196,8 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           >
             版本管理
           </Button>
-          {<Button size="small" title="保存草稿" aria-label="保存草稿" icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft}>保存草稿</Button>}
-          {<Button className="designer-publish-button" size="small" type="primary" icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>{embedded ? '发布更改' : '发布配置'}</Button>}
+          {<Button size="small" title={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} aria-label={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft}>{aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'}</Button>}
+          {<Button className="designer-publish-button" size="small" type="primary" disabled={Boolean(aiFormDraft && !platformForm)} icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>{embedded ? '发布更改' : '发布配置'}</Button>}
         </Space>
       </header>
 

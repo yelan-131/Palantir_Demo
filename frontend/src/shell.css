@@ -116,3 +116,8 @@ body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 .shell-settings-popup .user-menu-header strong { font-size: 13px; font-weight: 500; }
 .shell-settings-popup .user-menu-header > div > span { margin: 2px 0 0; font-size: 12px; }
 .shell-settings-popup .ant-dropdown-menu-item-disabled:has(.user-menu-header) { cursor: default; }
+
+/* Compact, neutral navigation chrome. */
+.tech-white-shell .shell-search-input { border-radius: 4px; background: var(--mf-sidebar); }
+.tech-white-shell .shell-rail-button { border-radius: 5px; }
+.tech-white-shell .app-menu :is(.ant-menu-item, .ant-menu-submenu-title) { border-radius: 4px; }

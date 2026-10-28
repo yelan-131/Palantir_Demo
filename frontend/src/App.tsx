@@ -34,6 +34,7 @@ import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, useApplicationLi
 import { normalizeShellMenu, shellMenuAncestors, applicationNavigation } from './utils/shellMenu';
 import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
+import { AiPageActionRouter } from './components/AiChatWidget/pageControls';
 import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
 import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
@@ -612,6 +613,7 @@ function AppContent() {
   return (
     <ShellPageTitleProvider fallback={runtimeTitle}>
     <AiWorkbenchProvider>
+    <AiPageActionRouter />
     <Layout className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <ApplicationRail library={library} onOpen={openLibraryApp} onHome={() => { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); }} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
       {showContextMenu && smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
