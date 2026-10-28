@@ -2,6 +2,8 @@
 
 Current version: 0.3.18
 
+Version numbering and release lifecycle: [project version policy](docs/operations/version-policy.md).
+
 ManuFoundry is a manufacturing low-code data workspace prototype. It combines configurable applications, forms, menus, identity access, knowledge assets, graph exploration, quality impact analysis, and an evolving AI Agent layer for assisted business configuration.
 
 This repository is still in active development and is intended for demo and product exploration work, not direct commercial production use.
@@ -21,7 +23,7 @@ This repository is still in active development and is intended for demo and prod
 ## 0.3.18 Focus
 
 - AI configuration cards, editable proposals, bounded recovery, native designer controls, and expanded form design tools.
-- Recorded on 2026-10-28; acceptance and deployment remain pending.
+- Released on 2026-10-28; see the release notes for validation results and remaining limitations.
 
 See [0.3.18 release notes](docs/operations/release-0.3.18.md).
 
