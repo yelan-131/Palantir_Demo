@@ -1,3 +1,4 @@
+import {widgetInfoText} from './analyticsWidgetDescription';
 import type { RuntimeAnalyticsDesign, RuntimeAnalyticsDataset, RuntimeAnalyticsMetric } from './analyticsTypes';
 
 export function copyAnalyticsDesign(design: RuntimeAnalyticsDesign): RuntimeAnalyticsDesign {
@@ -6,7 +7,7 @@ export function copyAnalyticsDesign(design: RuntimeAnalyticsDesign): RuntimeAnal
 
 export function normalizeAnalyticsDesign(design: RuntimeAnalyticsDesign): RuntimeAnalyticsDesign {
   const value = copyAnalyticsDesign(design);
-  return { ...value, datasets: value.datasets || [], metrics: value.metrics || [], widgets: value.widgets || [], globalFilters: value.globalFilters || [], interactions: value.interactions || [], style: value.style || {} };
+  return { ...value, datasets: value.datasets || [], metrics: value.metrics || [], widgets: (value.widgets || []).map(widget=>({...widget,appearance:{...widget.appearance,infoText:widgetInfoText(widget,value)}})), globalFilters: value.globalFilters || [], interactions: value.interactions || [], style: value.style || {} };
 }
 
 function canonical(value: unknown): unknown {

@@ -202,6 +202,18 @@ from .form_configuration_tools import FORM_DESIGN_TOOLS
 TOOL_HANDLERS.update({name: _shared_form_handler(name) for name in FORM_DESIGN_TOOLS})
 
 
+def _dashboard_handler(operation):
+    async def handler(payload, context):
+        from .dashboard_tools import execute_dashboard_tool
+        async with db_session() as session:
+            return await execute_dashboard_tool(operation, session, user=context.current_user or {}, payload=payload)
+    return handler
+
+
+from .dashboard_tools import REQUESTS as DASHBOARD_REQUESTS
+TOOL_HANDLERS.update({name: _dashboard_handler(name) for name in DASHBOARD_REQUESTS})
+
+
 def list_tool_handler_keys() -> list[str]:
     return sorted(TOOL_HANDLERS)
 

@@ -1,0 +1,90 @@
+/* Dashboard material tokens; only dashboard content opts into the paper surface. */
+.app-content:has(:is(.runtime-analytics-page,.component-page)) {
+  background-color: #f6f8fa;
+  background-image: linear-gradient(rgba(99, 126, 145, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 126, 145, .10) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+.app-content:has(:is(.runtime-analytics-page,.component-page)) > .content-surface {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+:is(.runtime-analytics-page,.component-page) {
+  background-color: var(--analytics-paper, #f6f8fa);
+  background-image: linear-gradient(rgba(99, 126, 145, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 126, 145, .10) 1px, transparent 1px);
+  background-size: var(--analytics-grid-size, 44px) var(--analytics-grid-size, 44px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.runtime-analytics-page .runtime-analytics-canvas { background: transparent; padding: 0; }
+.runtime-analytics-page .runtime-analytics-widget,
+.runtime-analytics-page .runtime-analytics-metrics > div,
+.analytics-workspace-canvas .runtime-analytics-page .runtime-analytics-filters {
+  background: rgb(255 255 255 / var(--analytics-card-opacity, .78));
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: 0 4px 20px rgba(37, 62, 80, .055), inset 0 1px 0 rgba(255, 255, 255, .9);
+  -webkit-backdrop-filter: blur(var(--analytics-card-blur, 12px));
+  backdrop-filter: blur(var(--analytics-card-blur, 12px));
+}
+.runtime-analytics-page .runtime-analytics-widget > .ant-card-head { background: transparent; border-bottom-color: rgba(116, 139, 155, .12); }
+.runtime-analytics-page .ant-table,
+.runtime-analytics-page .ant-table-tbody > tr > td { background: transparent; }
+.runtime-analytics-page .ant-table-thead > tr > th { background: rgba(239, 244, 247, .65); }
+.analytics-workspace-canvas .runtime-analytics-page .runtime-analytics-metrics { gap: 16px; }
+.analytics-workspace-canvas .runtime-analytics-page .runtime-analytics-metrics > div { border-radius: inherit; }
+.runtime-analytics-page .runtime-analytics-filters { border-radius: 12px; padding: 14px 16px; }
+.runtime-analytics-dark { --analytics-paper: #101c26; }
+.runtime-analytics-dark .runtime-analytics-widget,
+.runtime-analytics-dark .runtime-analytics-metrics > div,
+.analytics-workspace-canvas .runtime-analytics-dark .runtime-analytics-filters { background: rgb(22 38 50 / var(--analytics-card-opacity, .78)); border-color: #29434f; }
+/* Keep the shared shell's opaque panel rules from flattening dashboard materials. */
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics {
+  gap: 16px; background: transparent; border: 0;
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) :is(.runtime-analytics-widget:not(.analytics-metric-group), .runtime-analytics-metrics > div, .runtime-analytics-filters) {
+  background: rgb(255 255 255 / var(--analytics-card-opacity, .78));
+  border: 1px solid rgba(255,255,255,.9);
+  box-shadow: 0 4px 20px rgba(37,62,80,.055), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div { border-radius: var(--analytics-card-radius, 12px) !important; }
+.tech-white-shell .app-content .runtime-analytics-page .ant-card-head { background: transparent; }
+.app-content:has(:is(.runtime-analytics-page,.component-page)), .runtime-analytics-page { background-attachment: fixed; }
+.runtime-analytics-page .analytics-metric-group { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* KPI title and content areas inherit bounded widget appearance parameters. */
+.tech-white-shell .app-content .analytics-metric-group .analytics-widget-heading,
+.tech-white-shell .app-content .analytics-metric-group .analytics-kpi-label > span { font-size: var(--analytics-metric-title-size, 12px); }
+.tech-white-shell .app-content .analytics-metric-group .runtime-analytics-metrics { grid-template-columns: var(--analytics-metric-columns, repeat(auto-fit, minmax(120px, 1fr))); }
+.tech-white-shell .app-content .analytics-metric-group .runtime-analytics-metrics > div { padding: var(--analytics-metric-padding, 18px); text-align: var(--analytics-metric-align, left); }
+.tech-white-shell .app-content .analytics-metric-group .runtime-analytics-metrics strong { font-size: var(--analytics-metric-value-size, 30px); }
+.tech-white-shell .app-content .analytics-metric-group .analytics-kpi-label { position: relative; display: block; text-align: var(--analytics-metric-align, left); padding-right: 24px; }
+.tech-white-shell .app-content .analytics-metric-group .analytics-kpi-label > .ant-btn { position: absolute; right: 0; top: 0; }
+@container analytics-canvas (max-width: 480px) { .tech-white-shell .app-content .analytics-metric-group .runtime-analytics-metrics { grid-template-columns: 1fr; } }
+.tech-white-shell .app-content .analytics-metric-group.analytics-metric-group-filled {
+  background: rgb(255 255 255 / var(--analytics-card-opacity, .78)) !important;
+  border: 1px solid rgba(255,255,255,.9) !important;
+  box-shadow: 0 4px 20px rgba(37,62,80,.055);
+  backdrop-filter: blur(var(--analytics-card-blur, 12px));
+}
+.tech-white-shell .app-content .runtime-analytics-page .analytics-widget-heading { font-size: var(--analytics-metric-title-size, 12px); }
+.tech-white-shell .app-content .runtime-analytics-page .analytics-table-striped-row > td { background: rgba(121,145,165,.07); }
+.analytics-filter-heading > small { margin-left: auto; }
+.analytics-filter-heading > .ant-btn { flex: none; font-size: 11px; color: var(--mf-muted); }
+
+/* Business components share the dashboard paper and glass material tokens. */
+.tech-white-shell .app-content .component-page .component-page-widget,
+.tech-white-shell .app-content .component-page .component-page-filters {
+  background:rgb(255 255 255 / var(--analytics-card-opacity,.78));
+  border:1px solid rgba(255,255,255,.9);
+  box-shadow:0 4px 20px rgba(37,62,80,.055),inset 0 1px 0 rgba(255,255,255,.9);
+  -webkit-backdrop-filter:blur(var(--analytics-card-blur,12px));
+  backdrop-filter:blur(var(--analytics-card-blur,12px));
+}
+.tech-white-shell .app-content .component-page .component-page-widget>.ant-card-head {background:transparent;border-bottom-color:rgba(116,139,155,.12);}
+.tech-white-shell .app-content .component-page :is(.ant-table,.ant-table-container,.ant-table-tbody>tr>td,.ant-table-placeholder) {background:transparent;}
+.tech-white-shell .app-content .component-page .ant-table-thead>tr>th {background:rgba(239,244,247,.65);}
+
+.runtime-analytics-page .analytics-table-style .ant-table { font-family:inherit; }
+.runtime-analytics-page .analytics-table-style .ant-table-cell { font-size:var(--analytics-table-font-size,12px);color:var(--analytics-table-text-color,inherit);vertical-align:middle; }
+.tech-white-shell .app-content .runtime-analytics-page .analytics-table-style .ant-table-thead > tr > th { background:var(--analytics-table-header-color,rgba(239,244,247,.65)); }

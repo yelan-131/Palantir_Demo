@@ -1,3 +1,4 @@
+import DispatchLog from './DispatchLog';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Table, Button, Space, Modal, Form, Input, Select, Tag, Popconfirm,
@@ -18,6 +19,7 @@ interface WfDef {
 
 export default function WorkflowList() {
   const [defs, setDefs] = useState<WfDef[]>([]);
+  const [dispatchWorkflow,setDispatchWorkflow]=useState<WfDef>();
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -127,6 +129,7 @@ export default function WorkflowList() {
         <Space size={4}>
           <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewFlow(r)}>查看流程</Button>
           <Button size="small" type="primary" icon={<ThunderboltOutlined />} onClick={() => handleStart(r)}>发起</Button>
+          <Button size="small" onClick={()=>setDispatchWorkflow(r)}>下发记录</Button>
           <Popconfirm title="确定删除？" onConfirm={async () => { await wfDeleteDefinition(r.id); fetchData(); }}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -140,6 +143,7 @@ export default function WorkflowList() {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Typography.Title level={5} style={{ margin: 0 }}>工作流管理</Typography.Title>
       </div>
+      <DispatchLog workflow={dispatchWorkflow} onClose={()=>setDispatchWorkflow(undefined)}/>
       <Table dataSource={defs} columns={columns} rowKey="id" loading={loading} size="small" />
     </div>
   );

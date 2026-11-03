@@ -1,5 +1,5 @@
 export type ViewControlType = 'keyword' | 'text' | 'select' | 'dateRange' | 'date' | 'number' | 'relation';
-export type ViewFilterOperator = 'contains' | 'equals' | 'between' | 'gte' | 'lte';
+export type ViewFilterOperator = 'contains' | 'equals' | 'between' | 'gte' | 'lte' | 'in';
 export type ViewTableDensity = 'compact' | 'middle' | 'large';
 export type ViewColumnRenderType = 'text' | 'tag' | 'date' | 'number' | 'progress';
 

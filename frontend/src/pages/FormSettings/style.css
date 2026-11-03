@@ -1498,7 +1498,7 @@
   font-size: 11px;
 }
 
-.create-form-grid label {
+.create-form-grid > label {
   grid-column: span 2;
   display: flex;
   flex-direction: column;
@@ -1508,7 +1508,7 @@
   border-radius: 6px;
 }
 
-.create-form-grid label > span {
+.create-form-grid > label > span {
   color: #34444e;
   font-size: 12px;
   font-weight: 600;
@@ -1523,13 +1523,13 @@
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
 }
 
-.designer-field-control label {
+.designer-field-control > label {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.designer-field-control label > span {
+.designer-field-control > label > span {
   color: #34444e;
   font-size: 12px;
   font-weight: 600;

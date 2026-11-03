@@ -84,7 +84,7 @@ export interface AnalyticsVersion {
 }
 export interface AnalyticsVersionDetail extends AnalyticsVersion { design: RuntimeAnalyticsDesign }
 export type AnalyticsEditorPanelName = 'widget' | 'data' | 'filters' | 'style' | 'add' | 'permissions' | 'versions' | 'library';
-export type AnalyticsWidgetTabName = 'data' | 'style' | 'interaction';
+export type AnalyticsWidgetTabName = 'basic' | 'data' | 'style' | 'interaction';
 
 export interface SharedMetricDefinition {
   name: string;

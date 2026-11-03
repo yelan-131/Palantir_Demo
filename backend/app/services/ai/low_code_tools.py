@@ -379,8 +379,11 @@ def _standard_analytics_design(form_code: str, form_name: str, fields: list[dict
         "style": {
             "preset": "factory",
             "background": "#f4f5f6",
-            "componentGap": 12,
-            "cardRadius": 4,
+            "componentGap": 16,
+            "cardRadius": 12,
+            "gridSize": 44,
+            "cardOpacity": 0.78,
+            "cardBlur": 12,
             "cardBorder": "light",
             "chartPalette": "manufacturing",
             "tableDensity": "standard",
@@ -577,6 +580,10 @@ async def execute_create_form_definition(
     initial_status = "draft" if assembly_kind == "analysis" else "published"
     if requested_status and requested_status != "draft":
         initial_status = requested_status
+    if assembly_kind == 'analysis' and initial_status == 'draft':
+        form_config.pop('analyticsDesign', None)
+        form_config['analyticsDesignMeta'] = {**(form_config.get('analyticsDesignMeta') or {}),
+            'status': 'draft', 'publishedVersion': 0, 'publishedAt': None}
     # Derived server-side from the final (possibly deduped) code and the
     # caller's tenant. Payload-supplied names are ignored so an AI plan can
     # neither point a form at another tenant's namespace nor at a core table.
@@ -620,7 +627,7 @@ async def execute_create_form_definition(
 
     view_config = form_config.get("viewConfig") or _standard_view_config(field_configs)
     form_layout = form_config.get("formLayout") or _standard_form_layout(field_configs)
-    analytics_design = form_config.get("analyticsDesign")
+    analytics_design = form_config.get("analyticsDesignDraft") or form_config.get("analyticsDesign")
     list_columns = [
         {"field_name": field.field_name, "label": field.label, "width": 160}
         for field in created_fields
@@ -637,7 +644,7 @@ async def execute_create_form_definition(
         session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form", config=form_layout or {"sections": [{"title": "业务信息", "fields": form_items}]}))
 
     if assembly_kind == "analysis":
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="analytics", config={"draft": analytics_design, "published": analytics_design, "meta": form_config.get("analyticsDesignMeta")}))
+        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="analytics", config={"draft": analytics_design, "published": form_config.get('analyticsDesign'), "meta": form_config.get("analyticsDesignMeta")}))
 
     binding = None
     menu_node = None

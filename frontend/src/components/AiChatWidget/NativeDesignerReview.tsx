@@ -13,7 +13,18 @@ export function NativeDesignerReview({ draftId, disabled }: { draftId: string; d
   const [error, setError] = useState('');
   if (saved) return <article className="ai-skill-action-card ai-confirm-review"><Tag color="green">表单草稿已确认创建</Tag><p>已保存工作区中的最新配置，可在原设计器继续发布。</p></article>;
   if (designerContext?.draft_id !== draftId || !designerContext.review_ready) return null;
-  const fields = (designerContext.fields || []) as Array<{ field_name: string; label: string; required: boolean; min?: number; max?: number }>;
+  const fields = (designerContext.fields || []) as Array<{ field_name: string; label: string; required: boolean; readonly?: boolean; min?: number; max?: number;
+    control_type?: string; options?: Array<{ label: string }>; settings?: { precision?: number; rows?: number; maxFiles?: number; maxFileSize?: number } }>;
+  const kindNames: Record<string, string> = { text: '短文本', textarea: '多行说明', code: '自动编号', select: '选择', number: '数值', datetime: '日期', upload: '附件', switch: '是 / 否' };
+  const describe = (field: typeof fields[number]) => [
+    kindNames[field.control_type || ''] || '', field.required ? '必填' : '选填',
+    field.readonly ? '只读' : '',
+    field.settings?.precision !== undefined ? `保留 ${field.settings.precision} 位小数` : '',
+    field.settings?.rows ? `${field.settings.rows} 行` : '',
+    field.settings?.maxFiles ? `最多 ${field.settings.maxFiles} 个文件` : '',
+    field.options?.length ? field.options.map(option => option.label).join(' / ') : '',
+    field.min !== undefined || field.max !== undefined ? `范围 ${field.min ?? '不限'}～${field.max ?? '不限'}` : '',
+  ].filter(Boolean).join(' · ');
   const confirm = async () => {
     if (locked.current || disabled) return;
     const controller = getPageController(0);
@@ -37,7 +48,7 @@ export function NativeDesignerReview({ draftId, disabled }: { draftId: string; d
     <Space><strong>{String(designerContext.form_name || '新表单')}</strong><Tag color="orange">待最终确认</Tag></Space>
     <p>请复核工作区。确认后创建并保存当前草稿。</p>
     <div className="ai-confirm-field-list">{fields.map(field => <div className="ai-confirm-field-item" key={field.field_name}>
-      <span>{field.label}</span><small>{field.required ? '必填' : '选填'}{field.min !== undefined || field.max !== undefined ? ` · 范围 ${field.min ?? '不限'}～${field.max ?? '不限'}` : ''}</small>
+      <span>{field.label}</span><small>{describe(field)}</small>
     </div>)}</div>
     {error && <Alert type="error" message={error} />}
     <div className="ai-confirm-actions"><Button type="primary" icon={<CheckCircleOutlined />} disabled={disabled || !fields.length} loading={saving} onClick={() => void confirm()}>确认创建草稿</Button></div>

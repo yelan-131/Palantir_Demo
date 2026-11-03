@@ -69,15 +69,9 @@
 .tech-white-shell .app-content .component-page .component-record-filter .dynamic-view-filter-actions {grid-column:auto;align-self:end;display:flex;justify-content:flex-end;}
 .tech-white-shell .app-content .component-page .component-record-filter .dynamic-view-filter-actions .ant-form-item-label {display:none;}
 .tech-white-shell .app-content .component-page .component-record-filter :is(.ant-input-affix-wrapper,.ant-select-selector,.ant-picker,.ant-input-number) {background:var(--mf-surface,#fff);border-radius:6px;}
-.tech-white-shell .app-content .component-page .component-page-list .dynamic-business-content {display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;}
-.tech-white-shell .app-content .component-page .component-page-list .dynamic-business-content>* {grid-column:1/-1;min-width:0;}
-.tech-white-shell .app-content .component-page .component-page-list .dynamic-business-title-row {grid-column:2;grid-row:1;margin:0 0 10px;align-self:center;}
-.tech-white-shell .app-content .component-page .component-page-list .dynamic-business-list-toolbar {grid-column:1;grid-row:1;min-height:32px;padding:0 0 10px;align-self:center;}
-.tech-white-shell .app-content .component-page .component-page-list .dynamic-business-list-toolbar>.ant-typography:last-child {display:none;}
 .tech-white-shell .app-content .component-page .component-page-list .ant-table-wrapper {border-radius:6px;overflow:hidden;}
 .tech-white-shell .app-content .component-page .component-page-list .ant-table-thead>tr>th {background:var(--mf-panel-soft,#f5f7fa);font-weight:500;}
 .tech-white-shell .app-content .component-page .component-page-list .ant-pagination {margin-bottom:0;}
-.tech-white-shell .app-content .component-page .property-inspector-group-title {background:var(--mf-panel-soft,#f5f7fa);}
 @container analytics-canvas (max-width:540px) {
   .tech-white-shell .app-content .component-page .component-record-filter .dynamic-business-filter {grid-template-columns:repeat(2,minmax(0,1fr));}
   .tech-white-shell .app-content .component-page .component-page-filters>.ant-space {width:100%;}
@@ -123,4 +117,211 @@
 .component-column-order>div>span {min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--mf-muted);font-size:12px;}
 .component-query-hint {margin:0 0 12px;font-size:12px;color:var(--mf-muted);}
 .component-page .component-record-filter .ant-form-item-explain-error {font-size:11px;line-height:1.5;}
-.component-page-list .dynamic-business-content>.ant-alert {margin-bottom:12px;}
+
+.component-page-empty {padding:72px 24px;text-align:center;color:var(--mf-muted);}
+
+.component-list-header-actions {display:inline-flex;align-items:center;}
+.component-list-header-actions:empty {display:none;}
+.component-list-header-actions .ant-btn {height:26px;min-width:26px;padding-inline:6px;}
+
+/* The shared dashboard inspector owns sizing and row hierarchy. */
+.component-page .analytics-settings-page:has(>.analytics-editor-form-inspector) {flex-basis:320px;width:320px;}
+@media(max-width:800px){.component-page .analytics-settings-page:has(>.analytics-editor-form-inspector){flex-basis:auto;width:100%;}}
+
+.component-business-tabs {display:flex;flex-direction:column;gap:6px;margin:12px 0;}
+.component-business-tabs>[role="tab"] {width:100%;text-align:left;border:1px solid var(--mf-border);border-radius:6px;background:var(--mf-surface,#fff);color:var(--mf-muted);font:inherit;padding:10px 12px;cursor:pointer;}
+.component-business-tabs>[role="tab"][aria-selected="true"] {border-color:var(--mf-primary);background:var(--mf-info-bg);color:var(--mf-text);font-weight:600;}
+.component-business-tabs>[role="tab"]:focus-visible {outline:2px solid var(--mf-primary);outline-offset:2px;}
+.component-business-tabs>[role="tab"]:disabled {opacity:.5;cursor:not-allowed;}
+.component-business-panel>.ant-alert {margin-top:12px;}
+
+/* Allocate the available viewport to the embedded editor instead of a fixed canvas. */
+.component-page.component-page-source-open .analytics-workspace-body {height:var(--component-editor-height,calc(100dvh - 112px));min-height:0;align-items:stretch;}
+.component-page-source-open .component-page-preview {display:flex;flex-direction:column;height:100%;min-height:0;}
+.component-page-source-open .component-page-source-editor {display:flex;flex-direction:column;flex:1;min-height:0;height:100%;overflow:auto;}
+.component-page-source-open .component-page-source-editor>.form-designer-page {flex:1;min-height:0;height:100%;}
+.component-page-source-open .component-page-source-editor .form-designer-shell {flex:1;min-height:0;}
+.component-page-source-open .component-page-source-editor .form-designer-canvas {min-height:0;}
+.component-page-source-open .component-page-source-editor .professional-flow-designer {flex:1;height:100%;min-height:0;}
+.component-page-source-open .analytics-settings-page {height:100%;min-height:0;position:relative;top:auto;}
+@media(max-width:800px){
+ .component-page.component-page-source-open .analytics-workspace-body {height:auto;}
+ .component-page-source-open .component-page-source-editor {height:var(--component-editor-height,70dvh);flex:auto;}
+ .component-page-source-open .analytics-settings-page {height:auto;min-height:300px;max-height:65dvh;}
+}
+
+/* The source editor renders its controls into the one workspace inspector. */
+.tech-white-shell .app-content .component-page .form-designer-unified .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) {grid-template-columns:208px minmax(0,1fr);}
+.tech-white-shell .app-content .component-page .professional-flow-external-inspector {grid-template-columns:208px minmax(0,1fr);}
+.component-source-properties {min-width:0;}
+.tech-white-shell .app-content .component-source-properties>.form-designer-right {width:100%;min-width:0;max-width:none;height:auto;padding:0;border:0;border-radius:0;background:transparent;overflow:visible;}
+.component-source-properties>.form-designer-right>.property-inspector-header {padding:0 0 10px;margin-bottom:10px;background:transparent;}
+.component-source-properties>.professional-flow-properties {height:auto;padding:0;border:0;border-radius:0;background:transparent;overflow:visible;}
+.component-source-actions {display:inline-flex;align-items:center;}
+.component-source-actions .ant-btn {width:24px;height:26px;padding:0;}
+.component-source-properties .designer-props {padding:0;}
+@media(max-width:800px) {
+ .tech-white-shell .app-content .component-page .form-designer-unified .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow),
+ .tech-white-shell .app-content .component-page .professional-flow-external-inspector {grid-template-columns:150px minmax(0,1fr);}
+}
+
+/* Embedded properties share the workspace frame and heading. */
+.tech-white-shell .app-content .component-page .component-source-properties.form-designer-embedded>.form-designer-right.property-inspector {padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;}
+.component-source-properties>.form-designer-right.property-inspector>.property-inspector-header {display:none;}
+.component-page .component-source-properties>.professional-flow-properties {padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;}
+.component-source-properties .professional-flow-panel-head {margin:0 0 10px;padding:10px;background:var(--mf-surface,#fff);border:1px solid var(--property-border);border-radius:6px;}
+.component-source-properties .professional-flow-panel-head strong {font-size:12px;font-weight:600;}
+.component-source-properties .professional-flow-panel-head span {font-size:11px;color:var(--mf-muted);}
+.component-source-properties .professional-flow-props {gap:10px;}
+.component-source-properties .professional-flow-props section {gap:8px;padding:10px;border:1px solid var(--property-border);border-radius:6px;background:var(--mf-surface,#fff);min-width:0;}
+.component-source-properties .professional-flow-section-title {margin:-10px -10px 0;padding:8px 10px;border-bottom:1px solid var(--property-border);border-radius:6px 6px 0 0;background:var(--property-soft);font-size:12px;font-weight:600;color:var(--mf-text);}
+.component-source-properties .professional-flow-trigger {gap:6px;min-height:30px;}
+.component-source-properties .professional-flow-trigger .ant-tag {margin:0;font-size:10px;color:var(--mf-muted);}
+.component-source-properties .professional-flow-props label {font-size:12px;color:var(--mf-muted);}
+
+/* Flow settings share the same collapsible property groups as other components. */
+.component-source-properties .professional-flow-props>.property-inspector-group {margin:0;border:1px solid var(--mf-border);background:var(--mf-surface,#fff);}
+.component-source-properties .professional-flow-props>.property-inspector-group>label {min-height:34px;margin:0;padding:4px 10px;box-sizing:border-box;border-bottom:1px solid var(--mf-border);}
+.component-source-properties .professional-flow-props>.property-inspector-group>label:last-child {border-bottom:0;}
+.component-source-properties .professional-flow-props>.property-inspector-group>div {margin:8px 10px;}
+.component-source-properties .professional-flow-props>.property-inspector-group .ant-select-single {height:26px;}
+.component-source-properties .professional-flow-props>.property-inspector-group .ant-input {min-height:26px;font-size:12px;}
+
+/* Entry fields and containers use the same disclosure and spacing as the other tabs. */
+.component-source-properties .form-designer-right .designer-props .property-inspector-group {
+ display:block;margin:0;padding:0;border:1px solid var(--property-border);border-radius:6px;background:var(--mf-surface,#fff);
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-title {
+ min-height:32px;margin:0;padding:7px 10px;gap:7px;border:0;background:var(--property-soft);font-size:12px;line-height:1.4;
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group[open]>.property-inspector-group-title {
+ border-bottom:1px solid var(--property-border);
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-title::before {
+ content:'';width:5px;height:5px;margin-right:3px;border:solid var(--mf-muted);border-width:0 1px 1px 0;border-radius:0;background:none;transform:rotate(-45deg);flex-shrink:0;
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group[open]>.property-inspector-group-title::before {transform:rotate(45deg);}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group>label {
+ min-height:34px;margin:0;padding:4px 10px;grid-template-columns:var(--property-label-width) minmax(0,1fr);box-sizing:border-box;
+}
+.component-source-properties .form-designer-right .designer-props label>span {color:var(--mf-muted);font-weight:500;line-height:1.5;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group:not([open])>:not(summary) {display:none;}
+
+/* Keep the inspector stationary while the canvas scrolls independently. */
+@media(min-width:801px) {
+ .component-page.analytics-workspace-configuring .analytics-workspace-body {height:var(--component-editor-height,calc(100dvh - 112px));min-height:0;align-items:stretch;overflow:hidden;}
+ .component-page.analytics-workspace-configuring .component-page-preview {height:100%;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;}
+ .component-page.analytics-workspace-configuring .analytics-settings-page {position:relative;top:auto;height:100%;min-height:0;align-self:stretch;}
+ .component-page.analytics-workspace-configuring .analytics-editor-panel-body {overscroll-behavior:contain;}
+}
+
+@media(min-width:801px) {
+ .tech-white-shell .app-content>.content-surface:has(.component-page.analytics-workspace-configuring) {overflow:hidden;scrollbar-gutter:auto;min-height:0;}
+ .tech-white-shell .app-content .component-page.analytics-workspace-configuring {height:100%;min-height:0;box-sizing:border-box;overflow:hidden;}
+ .component-page.analytics-workspace-configuring .analytics-workspace-body {height:100%;}
+}
+
+.component-page-widget {position:relative;}
+.component-page-widget[style*="height"] {display:flex;flex-direction:column;}
+.component-page-widget[style*="height"]>.ant-card-body {flex:1;min-height:0;overflow:auto;}
+.component-resize-handle {position:absolute;right:2px;bottom:2px;width:16px;height:16px;border:0;background:linear-gradient(135deg,transparent 50%,var(--mf-muted) 50%,var(--mf-muted) 57%,transparent 57%,transparent 70%,var(--mf-muted) 70%,var(--mf-muted) 77%,transparent 77%);cursor:nwse-resize;touch-action:none;opacity:.5;z-index:3;}
+.component-resize-handle:hover,.component-resize-handle:focus-visible {opacity:1;}
+
+.component-page-version-row {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px solid var(--mf-border);}
+.component-page-version-row time {font-size:12px;color:var(--mf-muted);}
+
+/* Canvas, field and container properties share one inspector hierarchy. */
+.component-source-properties .form-designer-right .designer-props {gap:10px;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-title::after {display:none;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-actions {margin-left:auto;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-actions .ant-btn {height:22px;padding:0 4px;font-size:11px;color:var(--mf-muted);}
+.component-source-properties .form-designer-right .designer-props .property-inspector-row {grid-template-columns:72px minmax(0,1fr);gap:8px;min-height:34px;padding:4px 10px;margin:0;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-label>label {display:block;min-height:0;padding:0;margin:0;border:0;background:transparent;font-size:12px;color:var(--mf-muted);}
+.component-source-properties .form-designer-right .designer-props .designer-description-row {align-items:start;}
+
+/* Use the surrounding tab's tokens for every entry-property state. */
+.component-source-properties>.form-designer-right.property-inspector {
+ --property-label-width:inherit;--property-control-height:inherit;--property-row-height:inherit;--property-group-gap:inherit;
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group-title {
+ min-height:34px;padding:8px 10px;font-size:12px;font-weight:600;line-height:1.4;letter-spacing:.01em;
+ color:var(--mf-text);background:color-mix(in srgb,var(--mf-primary,#47627b) 7%,white);
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group.designer-prop-section-primary {
+ border-color:var(--property-border);background:var(--mf-surface,#fff);
+}
+.component-source-properties .form-designer-right .designer-props :is(.property-inspector-row,.designer-property-rule-row),
+.component-source-properties .form-designer-right .designer-props .property-inspector-group>label {
+ display:grid;grid-template-columns:var(--property-label-width) minmax(0,1fr);align-items:center;
+ gap:8px;min-height:34px;margin:0;padding:4px 10px;border-bottom:1px solid #f0f3f6;
+}
+.component-source-properties .form-designer-right .designer-props :is(label>span,.designer-rule-label,.designer-property-rule-row>.designer-rule-label) {
+ color:var(--mf-muted);font-size:12px;font-weight:500;line-height:1.5;
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-label {
+ display:flex;align-items:center;justify-content:flex-start;align-self:stretch;min-height:26px;gap:4px;padding:0;text-align:left;
+}
+.component-source-properties .form-designer-right .designer-props .property-inspector-label>label {display:block;min-height:0;padding:0;margin:0;border:0;font-weight:500;color:var(--mf-muted);}
+.component-source-properties .form-designer-right .designer-props label>:is(.ant-input,.ant-input-affix-wrapper,.ant-input-number,.ant-input-number-affix-wrapper,.ant-select) {
+ width:100%;min-width:0;max-width:100%;box-sizing:border-box;font-size:12px;border-radius:5px;
+}
+.component-source-properties .form-designer-right .designer-props :is(.ant-input:not(textarea),.ant-input-affix-wrapper,.ant-input-number,.ant-input-number-affix-wrapper,.ant-select-single) {height:26px;}
+.component-source-properties .form-designer-right .designer-props .ant-input-number-input {height:24px;font-size:12px;}
+.component-source-properties .form-designer-right .designer-props .ant-select-single .ant-select-selector {height:26px!important;border-radius:5px;align-items:center;}
+.component-source-properties .form-designer-right .designer-props .ant-select-single :is(.ant-select-selection-item,.ant-select-selection-placeholder) {line-height:24px!important;font-size:12px;}
+.component-source-properties .form-designer-right .designer-props .property-inspector-group>:is(label,.property-inspector-row,.designer-property-rule-row):last-child {border-bottom:0;}
+.component-source-properties .form-designer-right .designer-props :is(.property-inspector-row,.property-inspector-group>label):has(textarea) {align-items:start;padding-top:7px;padding-bottom:7px;}
+
+/* Workflow canvas, nodes and edges use the same tab inspector typography. */
+.component-source-properties .professional-flow-properties .property-inspector-group-title {
+ min-height:34px;padding:8px 10px;font-size:12px;font-weight:600;line-height:1.4;letter-spacing:.01em;
+ color:var(--mf-text);background:color-mix(in srgb,var(--mf-primary,#47627b) 7%,white);
+}
+.component-source-properties .professional-flow-properties .professional-flow-props>.property-inspector-group>label {
+ display:grid;grid-template-columns:var(--property-label-width) minmax(0,1fr);gap:8px;align-items:center;
+ min-height:34px;padding:4px 10px;margin:0;border-bottom:1px solid #f0f3f6;
+}
+.component-source-properties .professional-flow-properties .professional-flow-props label>span {
+ color:var(--mf-muted);font-size:12px;font-weight:500;line-height:1.5;
+}
+.component-source-properties .professional-flow-properties .professional-flow-props :is(.ant-input:not(textarea),.ant-input-affix-wrapper,.ant-input-number,.ant-input-number-affix-wrapper,.ant-select-single) {height:26px;font-size:12px;border-radius:5px;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-input-number {width:100%;min-width:0;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-input-number-input {height:24px;font-size:12px;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-select-single .ant-select-selector {height:26px!important;border-radius:5px;align-items:center;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-select-single :is(.ant-select-selection-item,.ant-select-selection-placeholder) {line-height:24px!important;font-size:12px;}
+.component-source-properties .professional-flow-properties .professional-flow-props label>.ant-switch {justify-self:end;width:34px;min-width:34px;max-width:34px;height:18px;margin-right:2px;padding:0;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-switch .ant-switch-handle {width:14px;height:14px;top:2px;}
+.component-source-properties .professional-flow-properties .professional-flow-props .ant-switch.ant-switch-checked .ant-switch-handle {inset-inline-start:calc(100% - 16px);}
+.component-source-properties .professional-flow-properties .professional-flow-panel-head {padding:10px;border:1px solid var(--property-border);border-radius:6px;background:var(--mf-surface,#fff);}
+.component-source-properties .professional-flow-properties .professional-flow-panel-head strong {color:var(--mf-text);font-size:12px;font-weight:600;}
+.component-source-properties .professional-flow-properties .professional-flow-panel-head span {color:var(--mf-muted);font-size:11px;font-weight:400;}
+.component-source-properties .professional-flow-properties :is(.professional-flow-assignee-head,.professional-flow-field-head) {color:var(--mf-muted);background:var(--property-soft);font-size:11px;font-weight:500;}
+.component-source-properties .professional-flow-properties .professional-flow-field-row {font-size:12px;color:var(--mf-muted);border-color:#f0f3f6;min-height:34px;}
+.component-source-properties .professional-flow-properties .professional-flow-node-kind strong {font-size:12px;font-weight:500;color:var(--mf-text);}
+.component-source-properties .professional-flow-properties .property-inspector-group-actions .ant-btn {height:22px;padding:0 4px;color:var(--mf-muted);}
+
+.component-source-properties .professional-flow-properties .professional-flow-props .property-inspector-row {grid-template-columns:var(--property-label-width) minmax(0,1fr);min-height:34px;gap:8px;padding:4px 10px;border-bottom-color:#f0f3f6;}
+.component-source-properties .professional-flow-properties .property-inspector-label>label {display:block;min-height:0;margin:0;padding:0;border:0;background:transparent;font-size:12px;font-weight:500;color:var(--mf-muted);}
+.component-source-properties .professional-flow-properties .property-inspector-row:has(textarea) {align-items:start;padding-top:7px;padding-bottom:7px;}
+.component-source-properties .professional-flow-properties textarea.ant-input {height:auto;min-height:48px;font-size:12px;line-height:1.6;border-radius:5px;}
+
+/* Each filter owns a full-width field grid; the keyword occupies one of four cells. */
+.tech-white-shell .app-content .component-page .component-record-filter .dynamic-business-filter {display:block;width:100%;}
+.tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;max-height:none;overflow:visible;gap:12px 16px;}
+.component-filter-scheme-tabs {padding:8px 10px 0;}
+.component-filter-scheme-tabs .ant-tabs-nav {margin-bottom:8px;}
+.component-filter-scheme-tabs .ant-tabs-tab {padding:4px 8px!important;font-size:12px;}
+.component-filter-schemes-runtime>.ant-tabs>.ant-tabs-nav {margin-bottom:12px;}
+@container business-filter (max-width:560px) {
+ .tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+
+.component-filter-scheme-group>.property-inspector-group-title {gap:4px;padding:2px 8px;}
+.component-filter-scheme-group>.property-inspector-group-title>.property-inspector-group-actions {flex:1;min-width:0;margin:0;}
+.component-filter-scheme-group .component-filter-scheme-tabs {padding:0;flex:1;min-width:0;}
+.component-filter-scheme-group .component-filter-scheme-tabs>.ant-tabs-nav {margin:0;}
+.component-filter-scheme-group .component-filter-scheme-tabs .ant-tabs-tab {padding:4px!important;margin-right:2px!important;}
+.component-filter-scheme-group .component-filter-scheme-tabs .ant-tabs-nav-add {padding:0 3px;min-width:22px;}
+
+.component-filter-scheme-heading {flex:1;min-width:0;}
+.component-filter-scheme-heading .ant-tabs {width:100%;}

@@ -65,7 +65,7 @@
 .analytics-add-widget { margin-top:12px;min-height:42px; }
 .analytics-publish-summary { margin-top:16px; }
 .analytics-workspace-canvas .runtime-analytics-metrics { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }
-.analytics-settings-page { flex:0 0 410px;width:410px;min-width:0;display:flex;position:sticky;top:0;height:max(480px,calc(100vh / var(--app-ui-scale,1) - 192px));border:1px solid var(--mf-border);border-radius:10px;overflow:hidden; }
+.analytics-settings-page { flex:0 0 320px;width:320px;min-width:0;display:flex;position:sticky;top:0;height:max(480px,calc(100vh / var(--app-ui-scale,1) - 192px));border:1px solid var(--mf-border);border-radius:10px;overflow:hidden; }
 .analytics-settings-page .analytics-editor-panel-navigation { padding:0;border:0; }
 .analytics-settings-page .analytics-editor-panel-status { padding:0; }
 .analytics-object-navigation { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--mf-border,#e3e9ee); }
@@ -125,7 +125,7 @@
 .analytics-drilldown-context p { margin:8px 0;color:var(--mf-muted); }
 .analytics-drilldown-context small { color:var(--mf-muted); }
 @container analytics-canvas (max-width:760px) { .runtime-analytics-widget-half,.runtime-analytics-widget-quarter,.runtime-analytics-widget-wide { grid-column:1/-1; } }
-@media(max-width:1150px) { .analytics-settings-page { flex-basis:360px;width:360px; } }
+
 @media(max-width:800px) { .analytics-workspace-body { flex-direction:column; }.analytics-workspace-canvas { width:100%; }.analytics-settings-page { width:100%;flex-basis:auto;position:static;height:720px; }.analytics-workspace-toolbar { padding:10px; } }
 
 .analytics-settings-page-library { flex-basis:460px;width:460px; }
@@ -144,3 +144,21 @@
 
 .analytics-widget-drop-target { outline:2px dashed var(--mf-primary, #2c6e84); outline-offset:3px; }
 .analytics-widget-select:focus-visible { outline:2px solid var(--mf-primary, #2c6e84); outline-offset:3px; border-radius:3px; }
+.analytics-widget-info-text { max-width:320px;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--mf-border);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--mf-muted);font-size:12px;line-height:1.7; }
+/* Twelve columns allow edge resizing without disturbing component order. */
+.analytics-workspace-canvas .runtime-analytics-canvas { grid-template-columns:repeat(12,minmax(0,1fr));align-items:start; }
+.analytics-workspace-canvas .runtime-analytics-canvas > .runtime-analytics-widget { position:relative;grid-column:span var(--analytics-widget-columns,6);min-width:0; }
+.analytics-workspace-canvas .runtime-analytics-canvas > .analytics-widget-sized { min-height:0;align-self:start; }
+.analytics-widget-sized > .ant-card-body { box-sizing:border-box;height:calc(100% - 46px);overflow:auto; }
+.analytics-widget-sized:not(:has(> .ant-card-head)) > .ant-card-body { height:100%; }
+.analytics-resize-handles { position:absolute;inset:0;pointer-events:none;z-index:4; }
+.analytics-resize-handle { position:absolute;pointer-events:auto;touch-action:none;border:0;padding:0;background:transparent;opacity:0; }
+.analytics-editable-widget:hover .analytics-resize-handle,.analytics-selected-widget .analytics-resize-handle,.analytics-resize-handle:focus-visible { opacity:1; }
+.analytics-resize-width { right:-4px;top:10px;bottom:10px;width:9px;cursor:ew-resize; }
+.analytics-resize-height { bottom:-4px;left:10px;right:10px;height:9px;cursor:ns-resize; }
+.analytics-resize-both { bottom:-4px;right:-4px;width:16px;height:16px;cursor:nwse-resize; }
+.analytics-resize-both::after { content:'';position:absolute;right:4px;bottom:4px;width:7px;height:7px;border-right:2px solid var(--mf-primary);border-bottom:2px solid var(--mf-primary);border-radius:0 0 2px 0; }
+.analytics-resize-width:hover { background:linear-gradient(90deg,transparent,rgba(71,98,123,.12),transparent); }
+.analytics-resize-height:hover { background:linear-gradient(transparent,rgba(71,98,123,.12),transparent); }
+.analytics-resize-handle:focus-visible { outline:2px solid var(--mf-primary);outline-offset:2px; }
+@container analytics-canvas (max-width:480px) { .analytics-workspace-canvas .runtime-analytics-canvas > .runtime-analytics-widget { grid-column:1/-1; } .analytics-resize-width,.analytics-resize-both { display:none; } }

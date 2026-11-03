@@ -24,7 +24,7 @@ export default function FormPageEntry({kind}: {kind: 'business' | 'program'}) {
         const response = await api.get(`/pages/forms/${encodeURIComponent(slug || '')}/binding`);
         let value = response.data;
         if (value.enabled && !value.code && admin) {
-          const created = await api.post(`/pages/forms/${value.form.id}/binding`);
+          const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: true});
           value = {...value, code: created.data.code};
         }
         if (current) setBinding(value);

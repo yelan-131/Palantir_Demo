@@ -15,4 +15,5 @@ venv
 .vscode
 .idea
 *.md
+!app/services/ai/form_design_skill.md
 manufoundry.db

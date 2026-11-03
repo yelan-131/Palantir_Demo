@@ -58,3 +58,108 @@ test('linked lists wait for required filters and can proceed after valid submiss
  assert.equal(linkedListQuery(widgets,{f:{ready:false,search:'',filters:[]}},'list').ready,false);
  assert.equal(linkedListQuery(widgets,{f:{ready:true,search:'',filters:[{field:'name',op:'equals',value:'A'}]}},'list').ready,true);
 });
+
+test('component bindings override legacy defaults and reload their query',()=>{
+ const {widgetSourceId,pageDataSignature}=context.exports;
+ const page={sourceFormId:1,filterFields:[],widgets:[{id:'list',type:'record-list'}]};
+ assert.equal(widgetSourceId(page,page.widgets[0]),1);
+ const changed=plain(page);changed.widgets[0].dataBinding={formId:20};
+ assert.equal(widgetSourceId(changed,changed.widgets[0]),20);
+ assert.notEqual(pageDataSignature(page),pageDataSignature(changed));
+ assert.equal(widgetSourceId({widgets:[]}),undefined);
+});
+test('switching one component source clears its stale fields and incompatible links only',()=>{
+ const {bindWidgetSource}=context.exports;
+ const page={sourceFormId:1,filterFields:['title'],widgets:[
+  {id:'one',type:'record-list',listSettings:{columns:['title'],pageSize:25},dimension:'title'},
+  {id:'two',type:'record-list',listSettings:{columns:['qty']}},
+  {id:'filter',type:'record-filter',targetWidgetIds:['one','two']}
+ ]};
+ const next=bindWidgetSource(page,'one',20);
+ assert.deepEqual(plain(next.widgets[0].dataBinding),{formId:20});
+ assert.equal(next.widgets[0].listSettings.columns,null);
+ assert.equal(next.widgets[0].listSettings.pageSize,25);
+ assert.equal(next.widgets[0].dimension,undefined);
+ assert.deepEqual(plain(next.widgets[1].listSettings.columns),['qty']);
+ assert.deepEqual(plain(next.widgets[2].targetWidgetIds),['one']);
+ assert.equal(next.widgets[2].dataBinding.formId,20);
+ assert.deepEqual(page.widgets[2].targetWidgetIds,['one','two']);
+ assert.deepEqual(plain(next.filterFields),['title']);
+});
+
+test('list filter creation binds the selected source and scopes queries to that list',()=>{
+ const {ensureListFilter}=context.exports;
+ const page={sourceFormId:1,filterFields:[],widgets:[{id:'other',type:'record-list'},{id:'list',type:'record-list',title:'申请',dataBinding:{formId:20},showFilters:true}]};
+ const result=ensureListFilter(page,'list','filter');
+ assert.equal(result.created,true);
+ assert.deepEqual(plain(result.definition.widgets.map(item=>item.id)),['other','filter','list']);
+ assert.deepEqual(plain(result.definition.widgets[1].dataBinding),{formId:20});
+ assert.deepEqual(plain(result.definition.widgets[1].targetWidgetIds),['list']);
+ assert.equal(result.definition.widgets[2].showFilters,false);
+ assert.equal(page.widgets.length,2);
+ const reused=ensureListFilter(result.definition,'list','another');
+ assert.equal(reused.created,false);
+ assert.equal(reused.filterId,'filter');
+ assert.equal(reused.definition,result.definition);
+});
+test('unbound, unrelated and full pages cannot gain an invalid automatic filter',()=>{
+ const {ensureListFilter}=context.exports;
+ assert.equal(ensureListFilter({widgets:[{id:'list',type:'record-list'}]},'list','f'),undefined);
+ assert.equal(ensureListFilter({sourceFormId:1,widgets:[{id:'metric',type:'metric'}]},'metric','f'),undefined);
+ const widgets=Array.from({length:30},(_,i)=>({id:String(i),type:'record-list',title:String(i)}));
+ assert.equal(ensureListFilter({sourceFormId:1,widgets},'1','f'),undefined);
+});
+
+test('filter and chart contributions intersect without losing another source on clear',()=>{
+ const {componentQuery}=context.exports;
+ const page={sourceFormId:1,widgets:[
+  {id:'filter',type:'record-filter',targetWidgetIds:['total','list']},
+  {id:'a',type:'chart',dimension:'status',targetWidgetIds:['total','list']},
+  {id:'b',type:'chart',dimension:'status',targetWidgetIds:['total']},
+  {id:'foreign',type:'record-filter',dataBinding:{formId:2},targetWidgetIds:['total']},
+  {id:'total',type:'metric'},{id:'list',type:'record-list'},
+ ]};
+ const values={filter:{search:'A',filters:[{field:'qty',op:'gte',value:0}]},foreign:{search:'secret',filters:[]}};
+ const combined=componentQuery(page,values,{a:'open',b:'closed'},'total');
+ assert.equal(combined.search,'A');
+ assert.equal(combined.filters.length,3);
+ assert.deepEqual(plain(combined.filters.slice(1).map(c=>c.value)),['open','closed']);
+ const afterClear=componentQuery(page,values,{b:'closed'},'total');
+ assert.equal(afterClear.filters.length,2);
+ assert.equal(afterClear.filters[1].value,'closed');
+ assert.equal(componentQuery(page,values,{b:'closed'},'list').filters.length,1);
+});
+test('required filters block metrics and binding/configuration changes reload aggregate data',()=>{
+ const {componentQuery,pageDataSignature}=context.exports;
+ const page={sourceFormId:1,filterFields:[],widgets:[{id:'f',type:'record-filter',targetWidgetIds:['m'],filterSettings:{requiredFields:['title']}},{id:'m',type:'metric'}]};
+ assert.equal(componentQuery(page,{}, {},'m').ready,false);
+ const next=plain(page);next.widgets[0].targetWidgetIds=[];
+ assert.equal(componentQuery(next,{}, {},'m').ready,true);
+ assert.notEqual(pageDataSignature(page),pageDataSignature(next));
+});
+
+test('changing list source synchronizes linked filters and clears old field references',()=>{
+ const page={sourceFormId:1,widgets:[{id:'list',type:'record-list',dataBinding:{formId:1}},{id:'filter',type:'record-filter',dataBinding:{formId:1},targetWidgetIds:['list'],filterFields:['old'],filterSettings:{requiredFields:['old']}}]};
+ const next=context.exports.bindWidgetSource(page,'list',2);
+ assert.equal(next.widgets[1].dataBinding.formId,2);
+ assert.deepEqual(plain(next.widgets[1].targetWidgetIds),['list']);
+ assert.equal(next.widgets[1].filterFields,null);
+ assert.deepEqual(plain(next.widgets[1].filterSettings.requiredFields),[]);
+ assert.equal(page.widgets[1].dataBinding.formId,1);
+});
+test('configure linked filter repairs a stale source rather than creating a duplicate',()=>{
+ const page={widgets:[{id:'list',type:'record-list',dataBinding:{formId:2}},{id:'filter',type:'record-filter',dataBinding:{formId:1},targetWidgetIds:['list']}]};
+ const result=context.exports.ensureListFilter(page,'list','new');
+ assert.equal(result.filterId,'filter');
+ assert.equal(result.definition.widgets.length,2);
+ assert.equal(result.definition.widgets[1].dataBinding.formId,2);
+ assert.deepEqual(plain(result.definition.widgets[1].targetWidgetIds),['list']);
+});
+
+test('switching a source clears filter schemes with references to its old fields',()=>{
+ const value={title:'page',sourceFormId:1,filterFields:[],roleIds:[],widgets:[{id:'filter',type:'record-filter',title:'F',width:24,aggregate:'count',filterFields:['old'],filterSettings:{schemes:[{id:'scheme',name:'old',groups:[{columns:['old']}]}],requiredFields:['old']}}]};
+ const next=context.exports.bindWidgetSource(value,'filter',2);
+ assert.equal(next.widgets[0].filterSettings.schemes,null);
+ assert.equal(next.widgets[0].filterFields,null);
+ assert.equal(value.widgets[0].filterSettings.schemes.length,1);
+});

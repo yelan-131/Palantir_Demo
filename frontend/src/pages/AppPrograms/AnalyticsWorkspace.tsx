@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert, Button, Dropdown, Empty, Input, Modal, Select, Space, Spin, Tooltip, Typography, message } from 'antd';
-import { CheckCircleOutlined, ClockCircleOutlined, DatabaseOutlined, EditOutlined, FilterOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, RedoOutlined, SafetyCertificateOutlined, SaveOutlined, SkinOutlined, UndoOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, FilterOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SafetyCertificateOutlined, SaveOutlined, SkinOutlined, UndoOutlined } from '@ant-design/icons';
 import { Link, useBlocker, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import AnalyticsDashboard, { type AnalyticsDataQuery } from './AnalyticsDashboard';
@@ -39,7 +39,8 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
   const [published, setPublished] = React.useState(payload);
   const [panel, setPanel] = React.useState<AnalyticsEditorPanelName | null>('widget');
   const [selectedWidgetId, setSelectedWidgetId] = React.useState<string>();
-  const [widgetTab, setWidgetTab] = React.useState<AnalyticsWidgetTabName>('data');
+  const [widgetTab, setWidgetTab] = React.useState<AnalyticsWidgetTabName>('basic');
+  const [contextFilters, setContextFilters] = React.useState(false);
   const [contextWidgetId, setContextWidgetId] = React.useState<string>();
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const [past, setPast] = React.useState<RuntimeAnalyticsDesign[]>([]);
@@ -100,7 +101,7 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
       const initialPanel = target?.panel === null ? 'style' : ['widget', 'data', 'library', 'filters', 'style', 'add', 'permissions', 'versions'].includes(requestedPanel || '') ? requestedPanel as AnalyticsEditorPanelName : 'widget';
       const selected = target?.widgetId ? next.widgets?.find(widget => widget.id === target.widgetId)?.id : next.widgets?.[0]?.id;
       if (target?.widgetId && !selected) message.info('该组件已在草稿中移除，请选择其他组件。');
-      setSelectedWidgetId(selected); setWidgetTab(target?.widgetTab || 'data'); setPanel(initialPanel); setPast([]); setFuture([]); setHistoricalPreview(undefined); setReleaseNote(''); setConfigurationOpen(true);
+      setSelectedWidgetId(selected); setWidgetTab(target?.widgetTab || 'basic'); setPanel(initialPanel); setPast([]); setFuture([]); setHistoricalPreview(undefined); setReleaseNote(''); setConfigurationOpen(true);
     } catch (cause) { showError(cause, '无法读取看板草稿，请重试。'); }
     finally { operationRef.current = false; if (alive.current) setOperation(null); }
   }, [admin, program.id, payload.analyticsDesign, searchParams]);
@@ -146,6 +147,27 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
   };
   const cancelLeave = () => { setExitPrompt(false); if (blocker.state === 'blocked') blocker.reset(); };
   const requestExit = () => { if (locked) return; if (dirty || libraryDirty) setExitPrompt(true); else leave(); };
+  const exitRequestRef=React.useRef(requestExit);
+  exitRequestRef.current=requestExit;
+  React.useEffect(()=>{
+    if(!configuring || locked)return;
+    const escape=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape' || event.defaultPrevented)return;
+      if(contextMenuOpen){setContextMenuOpen(false);return;}
+      const overlays=document.querySelectorAll('.ant-modal-wrap,.ant-select-dropdown,.ant-dropdown,.ant-popover,.ant-picker-dropdown');
+      if(Array.from(overlays).some(node=>node.getClientRects().length>0 && getComputedStyle(node).visibility!=='hidden'))return;
+      event.preventDefault();exitRequestRef.current();
+    };
+    window.addEventListener('keydown',escape);
+    return ()=>window.removeEventListener('keydown',escape);
+  },[configuring,locked,contextMenuOpen]);
+  const exitOnBlank=(event:React.MouseEvent)=>{
+    if(!configuring || locked || exitPrompt)return;
+    const element=event.target instanceof Element?event.target:null;
+    if(!element || element.closest('.analytics-settings-page,[data-analytics-widget-id],.runtime-analytics-filters,.ant-modal-root,.ant-dropdown,.ant-select-dropdown,.ant-popover,.ant-picker-dropdown,.ant-message,button,a,input,textarea,select,[role="combobox"]'))return;
+    requestExit();
+  };
+
 
   const checkPublish = async () => {
     if (!editor || operationRef.current || libraryBusyRef.current || libraryDirty) return;
@@ -235,40 +257,39 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
       if (element?.closest('input, textarea, [contenteditable="true"], [role="combobox"]')) {
         event.stopPropagation(); setContextMenuOpen(false); return;
       }
+      setContextFilters(!!element?.closest('.runtime-analytics-filters'));
       setContextWidgetId(element?.closest<HTMLElement>('[data-analytics-widget-id]')?.dataset.analyticsWidgetId);
     } : undefined}>
     <Spin spinning={operation === 'load'}>
       {!activePayload.analyticsDesign.widgets?.length ? <Empty description="尚未添加看板组件" /> :
-        <AnalyticsDashboard key={program.id} program={program} payload={activePayload} hideHeader editing={configuring && !locked && !historicalPreview} onSelectWidget={selectWidget} onReorder={(source, target) => { if (configuring && !locked && !historicalPreview && !libraryDirty) changeDesign(moveAnalyticsWidget(draft, source, target)); }} selectedWidgetId={configuring && panel === 'widget' ? selectedWidgetId : undefined} requestData={configuring ? previewData : reloadPublished} refreshKey={refreshKey} />}
+        <AnalyticsDashboard key={program.id} program={program} payload={activePayload} hideHeader editing={configuring && !locked && !historicalPreview} onSelectWidget={selectWidget} onResize={configuring && !locked && !historicalPreview && !libraryDirty ? (id, patch)=>{changeDesign({...draft,widgets:(draft.widgets || []).map(widget=>widget.id===id?{...widget,appearance:{...widget.appearance,...patch}}:widget)});} : undefined} onReorder={(source, target) => { if (configuring && !locked && !historicalPreview && !libraryDirty) changeDesign(moveAnalyticsWidget(draft, source, target)); }} selectedWidgetId={configuring && panel === 'widget' ? selectedWidgetId : undefined} requestData={configuring ? previewData : reloadPublished} refreshKey={refreshKey} />}
     </Spin>
   </main>;
 
   const errorNotice = error && <Alert type="error" showIcon message={error} action={conflict && <Button size="small" onClick={() => { confirmation.current = modal.confirm({title:'重新加载服务器草稿？',content:'当前本地修改将被服务器草稿替换。取消可继续保留本地修改。',okText:'重新加载',cancelText:'保留修改',onOk:() => enterEditor({panel, widgetId: selectedWidgetId})}); }}>重新加载草稿</Button>} />;
-  return <div className={`analytics-workspace${configuring ? ' analytics-workspace-configuring' : ''}`}>
+  return <div className={`analytics-workspace${configuring ? ' analytics-workspace-configuring' : ''}`} onClick={exitOnBlank}>
     {modalContext}
     {!configuring && errorNotice}
     <div className="analytics-workspace-body">
       {admin ? <Dropdown trigger={['contextMenu']} disabled={locked} open={contextMenuOpen} onOpenChange={setContextMenuOpen} overlayClassName="analytics-context-menu" menu={{
         'aria-label': contextWidget ? `${contextWidget.title}配置菜单` : '看板配置菜单',
-        items: buildAnalyticsContextMenu({ widgetTitle: contextWidget?.title, pageLabel: '看板',
+        items: contextFilters ? [{key:'filters',label:'编辑全局筛选',icon:<FilterOutlined />},{key:'style',label:'页面与主题',icon:<SkinOutlined />}] : buildAnalyticsContextMenu({ widgetTitle: contextWidget?.title, pageLabel: '看板',
           sections: pageSections.map(([key, label, icon]) => ({key, label, icon})),
         }),
-        onClick: ({key}) => openConfiguration(key === 'edit' || key.startsWith('widget-') ? {panel: contextWidget ? 'widget' : null, widgetId: contextWidget?.id, widgetTab: key === 'widget-style' ? 'style' : key === 'widget-interaction' ? 'interaction' : 'data'} : {panel: key as AnalyticsEditorPanelName}),
+        onClick: ({key}) => openConfiguration(key === 'edit' || key.startsWith('widget-') ? {panel: contextWidget ? 'widget' : null, widgetId: contextWidget?.id, widgetTab: key === 'widget-style' ? 'style' : key === 'widget-interaction' ? 'interaction' : 'basic'} : {panel: key as AnalyticsEditorPanelName}),
       }}>{canvas}</Dropdown> : canvas}
       {configuring && <div className={`analytics-settings-page${panel === 'library' ? ' analytics-settings-page-library' : ''}`}>
         <AnalyticsEditorPanel embedded panel={panel || 'widget'} design={draft} programId={program.id} selectedWidgetId={selectedWidgetId} onSelectWidget={selectWidget} onChange={changeDesign} onClose={requestExit} disabled={locked} widgetTab={widgetTab} onWidgetTabChange={setWidgetTab} onOpenMetricLibrary={openMetricLibrary}
-          navigation={panel==='widget' ? <Dropdown trigger={['click']} disabled={locked} menu={{items:[
-            {key:'widgets',label:'切换组件',children:(draft.widgets || []).map(widget=>({key:`select-widget:${widget.id}`,label:widget.title}))},
-            {key:'settings',label:'看板设置',children:pageSections.map(([key,label,icon])=>({key,label,icon}))},
-          ],onClick:({key})=>key.startsWith('select-widget:')?selectWidget(key.slice('select-widget:'.length)):switchPanel(key as AnalyticsEditorPanelName)}}><Button type="text" size="small" aria-label="组件配置操作" title="切换组件或打开看板设置" icon={<MoreOutlined />} /></Dropdown> : <div className="analytics-object-navigation"><Select aria-label="看板设置分类" size="small" value={panel || 'style'} options={pageSections.map(([value,label])=>({value,label}))} disabled={locked} onChange={switchPanel} /><Button type="text" size="small" disabled={locked} onClick={()=>switchPanel('widget')}>组件属性</Button></div>}
-          status={<div className="analytics-settings-status">
-            <div className="analytics-settings-history"><Tooltip title={editor?.draftSavedAt ? `最近保存 ${formatAnalyticsVersionTime(editor.draftSavedAt)}` : '修改在左侧即时预览'}><span className={`analytics-save-status ${dirty ? 'analytics-save-dirty' : hasUnpublishedDraft ? 'analytics-save-pending' : ''}`} role="status">{dirty ? <><EditOutlined /> 未保存修改</> : hasUnpublishedDraft ? <><ClockCircleOutlined /> 草稿待发布</> : <><CheckCircleOutlined /> 与线上版本一致</>}</span></Tooltip><Space size={0}>
+          navigation={panel==='widget' ? undefined : <div className="analytics-object-navigation"><Select aria-label="看板设置分类" size="small" value={panel || 'style'} options={pageSections.map(([value,label])=>({value,label}))} disabled={locked} onChange={switchPanel} /><Button type="text" size="small" disabled={locked} onClick={()=>switchPanel('widget')}>组件属性</Button></div>}
+          headerStatus={<Tooltip title={<>{dirty?'未保存修改':hasUnpublishedDraft?'草稿待发布':'与线上版本一致'}{editor?.draftSavedAt && <><br />最近保存 {formatAnalyticsVersionTime(editor.draftSavedAt)}</>}</>}><span className={`analytics-save-indicator ${dirty?'is-dirty':hasUnpublishedDraft?'is-pending':''}`} role="status" aria-label={dirty?'未保存修改':hasUnpublishedDraft?'草稿待发布':'与线上版本一致'} tabIndex={0} /></Tooltip>}
+          headerActions={<div className="analytics-settings-history analytics-settings-history-inline"><Space size={0}>
               <Tooltip title="撤销"><Button aria-label="撤销" type="text" icon={<UndoOutlined />} disabled={!past.length || locked} onClick={undo} /></Tooltip>
               <Tooltip title="重做"><Button aria-label="重做" type="text" icon={<RedoOutlined />} disabled={!future.length || locked} onClick={redo} /></Tooltip>
-            </Space></div>
+            </Space></div>}
+          status={errorNotice || (editor && !editor.publishedVersion && !editor.publishedDesign) ? <div className="analytics-settings-status">
             {errorNotice}
             {editor && !editor.publishedVersion && !editor.publishedDesign && <Alert type="info" showIcon message="请先完成新表单的首次发布" description={<Link to={`/form-settings/${encodeURIComponent(program.id)}?legacy=1&tab=dashboard`}>前往表单设置</Link>} />}
-          </div>}
+          </div> : undefined}
           content={panel === 'library' ? <AnalyticsMetricLibrary design={draft} focusId={libraryFocusId} refreshKey={editor?.revision} disabled={!!operation} hasUnsavedBoardChanges={dirty} onChange={changeDesign} onPublished={async () => { await enterEditor({panel:'library'}); setRefreshKey(key => key + 1); }} onDirtyChange={setLibraryDirty} onBusyChange={setLibraryBusy} /> : panel === 'versions' ? <AnalyticsVersionHistory programId={program.id} draft={draft} refreshKey={editor?.revision} previewVersion={historicalPreview?.version} disabled={locked} onPreview={setHistoricalPreview} onStopPreview={() => setHistoricalPreview(undefined)} onRestore={restoreVersion} /> : undefined}
           actions={<div className="analytics-settings-actions">{(panel==='library' || historicalPreview) && <span>{panel==='library'?'以下操作仅保存或发布当前看板配置。':`正在预览 v${historicalPreview?.version}，返回草稿后可保存或发布。`}</span>}<div>
             <Button icon={<SaveOutlined />} loading={operation === 'save'} disabled={!dirty || libraryDirty || libraryBusy || !!historicalPreview || (!!operation && operation !== 'save')} onClick={() => { void save(); }}>{panel === 'library' ? '保存看板草稿' : '保存草稿'}</Button>

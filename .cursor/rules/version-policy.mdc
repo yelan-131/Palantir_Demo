@@ -1,0 +1,10 @@
+---
+description: Project version numbering and release lifecycle
+alwaysApply: true
+---
+
+- Follow `docs/operations/version-policy.md` for all release work.
+- Daily independent releases increment patch; milestone/major transitions require explicit confirmation of scope.
+- Extend an existing draft; preserve published history. Legacy missing status means frozen history.
+- Use `scripts/bump_release.py` to synchronize metadata. Document-only changes do not bump versions.
+- Distinguish draft preparation, release, and deployment verification; report only checks actually performed.

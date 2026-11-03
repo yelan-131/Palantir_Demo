@@ -1,0 +1,26 @@
+.component-inline-columns {padding:0 8px 8px;font-family:inherit;}
+.component-inline-columns-tools {display:flex;align-items:center;gap:2px;padding:2px 0 5px;}
+.component-inline-columns-tools>.ant-input-affix-wrapper {min-width:0;flex:1;font-size:11px;}
+.component-inline-columns-tools>.ant-btn {flex-shrink:0;width:24px;padding:0;}
+.component-inline-columns-status {display:flex;justify-content:space-between;gap:8px;padding:3px 2px 6px;font-size:11px;color:var(--mf-muted);}
+.component-inline-columns-list {max-height:321px;overflow:auto;overscroll-behavior:contain;border-top:1px solid var(--property-border);}
+.component-inline-column {display:flex;align-items:center;gap:4px;height:32px;min-height:32px;box-sizing:border-box;padding:3px 2px;border-bottom:1px solid color-mix(in srgb,var(--property-border),transparent 55%);font-size:12px;}
+.component-inline-column:hover {background:var(--property-soft);}
+.component-inline-column-handle {color:var(--mf-faint);font-size:11px;cursor:grab;flex-shrink:0;}
+.component-inline-column-handle.is-hidden {visibility:hidden;}
+.component-inline-column-rank {width:22px;flex-shrink:0;padding:0;border:0;background:transparent;color:var(--mf-muted);font:inherit;font-size:11px;text-align:center;cursor:pointer;}
+.component-inline-column-rank:not(:disabled):hover {color:var(--mf-primary);text-decoration:underline;}
+.component-inline-column-rank.is-empty {cursor:default;color:var(--mf-faint);}
+.component-inline-column-label {min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--mf-text);cursor:default;}
+.component-inline-column>.ant-checkbox-wrapper {flex-shrink:0;margin:0;}
+.component-inline-columns-pagination {display:flex;justify-content:center;padding-top:8px;}
+.component-inline-columns-pagination .ant-pagination {font-size:11px;}
+.component-inline-columns-heading>span:first-child {white-space:nowrap;}
+.component-inline-columns-heading .component-inline-columns-tools {min-width:0;flex:1;padding:0;gap:0;}
+.component-inline-columns-heading .ant-input-affix-wrapper {min-width:42px;height:24px;padding-inline:4px;}
+.component-inline-columns-heading .ant-btn {width:20px;height:24px;}
+.component-inline-columns-table-heading {display:grid;grid-template-columns:minmax(0,1fr) 30px 30px;gap:4px;padding:5px 2px;font-size:11px;color:var(--mf-muted);}
+.component-inline-columns-table-heading>span:not(:first-child) {text-align:center;}
+.component-inline-column>.component-inline-column-check {display:flex;justify-content:center;width:30px;flex:0 0 30px;}
+
+.component-filter-field-picker .component-inline-columns-table-heading {grid-template-columns:minmax(0,1fr) 30px;}

@@ -150,9 +150,6 @@
 .analytics-widget-context strong { display:block;font-size:12px; }
 .analytics-widget-context small { display:block;margin-top:5px;color:var(--mf-muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .analytics-widget-position { font-size:11px;color:var(--mf-faint);font-variant-numeric:tabular-nums; }
-.analytics-widget-tabs>.ant-tabs-nav .ant-tabs-tab { border-radius:6px;background:var(--mf-panel-soft);padding:9px 6px; }
-.analytics-widget-tabs>.ant-tabs-nav .ant-tabs-tab-active { background:var(--mf-info-bg); }
-.analytics-widget-tabs>.ant-tabs-nav::before,.analytics-widget-tabs>.ant-tabs-nav .ant-tabs-ink-bar { display:none; }
 .analytics-widget-section { padding:0 0 20px;margin-bottom:20px;border-bottom:1px solid var(--mf-border); }
 .analytics-widget-section:last-child { border-bottom:0;margin-bottom:0;padding-bottom:0; }
 .analytics-widget-section>.analytics-editor-field:last-child { margin-bottom:0; }
@@ -230,3 +227,131 @@
 .analytics-dataset-cards article { border:1px solid var(--mf-border,#e1e9ee); padding:14px; border-radius:6px; }
 .analytics-dataset-cards article>div:first-child { display:flex; flex-direction:column; gap:6px; }
 .analytics-dataset-cards small,.analytics-dataset-cards p { font-size:12px; color:var(--mf-muted,#718592); line-height:1.7; }
+.analytics-widget-type-field { padding: 8px 10px; }
+.analytics-property-section-label { margin-bottom: 8px; font-size: 11px; font-weight: 500; color: var(--mf-muted); }
+.analytics-property-metric-definitions dl { margin: 6px 0 0; }
+.analytics-property-metric-definitions dl > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-top: 1px solid var(--mf-border); font-size: 11px; line-height: 1.6; }
+.analytics-property-metric-definitions dt { color: var(--mf-muted); }
+.analytics-property-metric-definitions dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--mf-text); }
+.analytics-property-metric-definitions dd code { margin: 0; }
+.analytics-property-metric-rows { padding: 0 10px 8px; }
+.analytics-property-metric-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 9px 0; border: 0; border-bottom: 1px solid var(--mf-border); background: transparent; text-align: left; cursor: pointer; color: var(--mf-text); }
+.analytics-property-metric-row:hover { background: var(--mf-panel-soft); }
+.analytics-property-metric-row:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
+.analytics-property-metric-row strong { flex: 0 1 30%; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analytics-property-metric-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mf-muted); font-size: 10px; }
+.analytics-property-metric-row small { flex: none; color: var(--mf-faint); font-size: 10px; }
+.analytics-appearance-switches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 0 8px 6px; }
+.analytics-appearance-switches .property-inspector-row { display: flex; justify-content: space-between; gap: 6px; padding: 5px 2px; border: 0; min-width: 0; }
+.analytics-appearance-switches .property-inspector-label { min-width: 0; }
+.analytics-appearance-switches .ant-switch { flex: none; }
+
+/* Match the business form's inspector: 72px labels, 26px inputs and 34px rows. */
+.analytics-editor-form-inspector { --property-label-width: 72px; --property-control-height: 26px; --property-row-height: 34px; --property-group-gap: 10px; }
+.analytics-editor-form-inspector .property-inspector-header { min-height: 46px; padding: 10px 12px; }
+.analytics-editor-form-inspector .property-inspector-header strong { font-size: 12px; font-weight: 600; }
+.analytics-editor-form-inspector .property-inspector-header-actions { gap: 2px; }
+.analytics-editor-form-inspector .analytics-widget-properties { display: flex; flex-direction: column; gap: 10px; }
+.analytics-editor-form-inspector .analytics-widget-properties > .property-inspector-group { margin: 0; border-radius: 6px; border-color: #e1e9ee; box-shadow: none; background: #fff; }
+.analytics-editor-form-inspector .property-inspector-group-title { min-height: 32px; padding: 8px 10px; background: var(--mf-panel-soft); font-size: 12px; font-weight: 600; }
+.analytics-editor-form-inspector .property-inspector-row { grid-template-columns: 72px minmax(0,1fr); min-height: 34px; gap: 8px; padding: 4px 10px; border-bottom-color: #f0f3f6; }
+.analytics-editor-form-inspector .property-inspector-label > label { font-size: 12px; line-height: 1.5; font-weight: 500; }
+.analytics-editor-form-inspector .property-inspector-row > :is(.ant-select,.ant-input-number,.ant-input-number-affix-wrapper,.ant-input-affix-wrapper) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.analytics-editor-form-inspector .property-inspector-row .ant-select-single { height: 26px; }
+.analytics-editor-form-inspector .property-inspector-row .ant-select-single .ant-select-selector { height: 26px !important; align-items: center; border-radius: 5px; }
+.analytics-editor-form-inspector .property-inspector-row .ant-select-single :is(.ant-select-selection-item,.ant-select-selection-placeholder) { line-height: 24px !important; font-size: 12px; }
+.analytics-editor-form-inspector .property-inspector-row .ant-input-number-affix-wrapper { height: 26px; padding: 0 7px; border-radius: 5px; }
+.analytics-editor-form-inspector .property-inspector-row .ant-input-number-affix-wrapper > .ant-input-number { flex: 1; min-width: 0; width: 0; }
+.analytics-editor-form-inspector .property-inspector-row .ant-input-number-input { height: 24px; font-size: 12px; }
+.analytics-editor-form-inspector .ant-input-number-suffix { color: var(--mf-faint); font-size: 11px; }
+.analytics-editor-form-inspector .property-inspector-row > .ant-switch { justify-self: end; width: 34px; min-width: 34px; max-width: 34px; height: 18px; margin-right: 2px; padding: 0; }
+.analytics-editor-form-inspector .ant-switch .ant-switch-handle { width: 14px; height: 14px; top: 2px; }
+.analytics-editor-form-inspector .ant-switch.ant-switch-checked .ant-switch-handle { inset-inline-start: calc(100% - 16px); }
+.analytics-editor-form-inspector .property-inspector-advanced > summary { display: flex; align-items: center; justify-content: flex-start; gap: 7px; padding: 8px 10px; color: var(--mf-muted); font-size: 11px; }
+.analytics-editor-form-inspector .property-inspector-advanced > summary::after { display: none; }
+.analytics-editor-form-inspector .analytics-appearance-switches { display: block; padding: 0; }
+.analytics-editor-form-inspector .analytics-appearance-switches .property-inspector-row { display: grid; }
+.analytics-editor-form-inspector .analytics-editor-panel-footer { padding: 10px 12px; }
+.analytics-inspector-option { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; }
+.analytics-inspector-option .anticon { color: var(--mf-muted); font-size: 13px; }
+.analytics-inspector-palette { display: inline-flex; gap: 2px; }
+.analytics-inspector-palette i { width: 8px; height: 10px; border-radius: 2px; }
+.analytics-editor-form-inspector .analytics-dependent-options { margin:0;padding:0;border:0;border-radius:0;background:transparent; }
+.analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { grid-template-columns:72px minmax(0,1fr);padding-inline:10px;background:transparent; }
+@keyframes analytics-option-reveal { from { opacity:0;transform:translateY(-3px); } to { opacity:1;transform:none; } }
+@media(prefers-reduced-motion:reduce) { .analytics-dependent-options { animation:none!important; } }
+
+/* Secondary controls use the same hue with a translucent surface. */
+.analytics-editor-form-inspector .analytics-switch-heading { background:color-mix(in srgb,var(--mf-primary,#47627b) 3%,transparent); }
+.analytics-editor-form-inspector .analytics-switch-heading .property-inspector-label > label { color:color-mix(in srgb,var(--mf-muted,#718394) 88%,transparent); }
+.analytics-editor-form-inspector .analytics-dependent-options > summary { display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:26px;padding:5px 10px;list-style:none;color:var(--mf-muted);font-size:10px;cursor:pointer; }
+.analytics-dependent-options > summary::-webkit-details-marker { display:none; }
+.analytics-dependent-options > summary::before { content:'';width:4px;height:4px;border:solid currentColor;border-width:0 1px 1px 0;transform:rotate(-45deg); }
+.analytics-dependent-options[open] > summary::before { transform:rotate(45deg); }
+.analytics-dependent-options > summary > span { margin-left:auto;color:var(--mf-faint); }
+.analytics-dependent-options > summary:hover { background:color-mix(in srgb,var(--mf-primary,#47627b) 4%,transparent); }
+.analytics-dependent-options > summary:focus-visible { outline:2px solid var(--mf-primary);outline-offset:-2px; }
+.analytics-dependent-options:not([open]) > :not(summary) { display:none!important; }
+/* Reserve enough room for parameter names and their help affordance. */
+.analytics-editor-form-inspector { --property-label-width:92px; }
+.analytics-editor-form-inspector .property-inspector-row,
+.analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { grid-template-columns:var(--property-label-width) minmax(0,1fr); }
+/* One alignment and heading hierarchy for every standard settings panel. */
+.analytics-editor-form-inspector .property-inspector-row,
+.analytics-editor-form-inspector .property-inspector-row:has(.option-picker-inline) { align-items:center; }
+.analytics-editor-form-inspector .option-picker-inline-rail { margin-inline:3px; }
+.analytics-editor-form-inspector .option-picker-inline-rail > input { left:-3px;width:calc(100% + 6px); }
+.analytics-editor-form-inspector .option-picker-inline-stops { margin-inline:-12px; }
+.analytics-editor-form-inspector .property-inspector-label,
+.analytics-editor-form-inspector .property-inspector-row:has(textarea) > .property-inspector-label { display:flex;align-items:center;justify-content:flex-start;align-self:stretch;min-height:26px;gap:4px;padding:0;text-align:left; }
+.analytics-editor-form-inspector .property-inspector-label > label { text-align:left; }
+/* Level 1: collapsible primary groups. */
+.analytics-editor-form-inspector .property-inspector-group-title { min-height:34px;padding:8px 10px;font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--mf-text);background:color-mix(in srgb,var(--mf-primary,#47627b) 7%,white); }
+/* Level 2: configuration areas inside advanced appearance. */
+/* Level 3: optional details below a specific toggle. */
+.analytics-editor-form-inspector .analytics-dependent-options > summary { min-height:27px;box-sizing:border-box;padding:6px 12px 6px 18px;font-size:10px;font-weight:400;line-height:1.5;color:var(--mf-muted);background:transparent; }
+.analytics-editor-form-inspector .analytics-dependent-options > summary > span { font-size:10px;font-weight:400; }
+.analytics-editor-form-inspector .analytics-editor-panel-body > .analytics-editor-help { margin:0 0 10px;font-size:11px;line-height:1.7; }
+.analytics-editor-heading { flex:none; background:var(--mf-surface,#fff);border-bottom:1px solid var(--mf-border); }
+.analytics-editor-heading .property-inspector-header { border-bottom:0; }
+.analytics-editor-heading-status .analytics-settings-status { padding:0 12px 7px;border:0;background:transparent; }
+.analytics-editor-heading-status .analytics-settings-history { min-height:24px; }
+.analytics-editor-heading-status .analytics-settings-history .ant-btn { height:24px;width:25px;padding:0; }
+.analytics-editor-heading-status .analytics-save-status { font-size:10px; }
+/* Compact browser-style tabs: rounded tabs, neutral active fill, no underline. */
+.analytics-editor-panel .analytics-widget-tabs { flex:none;padding:0 12px;background:var(--mf-surface,#fff); }
+.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-nav { margin:0;padding:4px 0 0;border-bottom:0; }
+.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-nav::before { display:none; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-nav-list { width:100%;gap:3px; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab { flex:1;justify-content:center;min-height:0;height:28px;box-sizing:border-box;margin:0!important;padding:4px 0;border-radius:8px 8px 0 0;background:transparent;font-size:12px;line-height:20px;transition:background 160ms ease; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:hover { background:#f2f3f5; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active,
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active:hover { background:#e9ebee; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-btn { color:var(--mf-muted);font-weight:500;text-shadow:none;line-height:20px; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { color:var(--mf-text);font-weight:600;text-shadow:none; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-ink-bar { display:none; }
+/* The active tab flows into the panel with outward bottom corners. */
+.analytics-editor-panel .analytics-widget-tabs .ant-tabs-nav-wrap { overflow:visible; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active { z-index:1; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before,
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { content:'';position:absolute;bottom:0;width:8px;height:8px;pointer-events:none; }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before { left:-8px;background:radial-gradient(circle at 0 0,transparent 8px,#e9ebee 8.5px); }
+.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { right:-8px;background:radial-gradient(circle at 100% 0,transparent 8px,#e9ebee 8.5px); }
+.analytics-editor-panel:has(> .analytics-widget-tabs) > .analytics-editor-panel-body { background:#e9ebee; }
+.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-content-holder { display:none; }
+.analytics-editor-heading .property-inspector-header > div:first-child { gap:7px; }
+.analytics-editor-heading .property-inspector-header .analytics-save-indicator { flex:none;overflow:visible;margin-inline:0 3px; }
+.analytics-editor-form-inspector .analytics-appearance-group { margin-bottom:10px; }
+.analytics-widget-properties[data-widget-tab=basic] > [data-property-section]:not([data-property-section=basic]),
+.analytics-widget-properties[data-widget-tab=style] > [data-property-section]:not([data-property-section=style]),
+.analytics-widget-properties[data-widget-tab=data] > [data-property-section]:not([data-property-section=data]),
+.analytics-widget-properties[data-widget-tab=interaction] > [data-property-section]:not([data-property-section=interaction]) { display:none; }
+.analytics-editor-panel-footer .analytics-settings-actions > div { justify-content:flex-end;gap:6px; }
+.analytics-editor-panel-footer .analytics-settings-actions .ant-btn { flex:none;height:30px;padding-inline:10px;font-size:11px; }
+.analytics-settings-history-inline { display:inline-flex;align-items:center;gap:3px;flex:none; }
+.analytics-save-indicator { display:inline-block;width:8px;height:8px;border-radius:50%;margin-inline:5px;background:var(--mf-success,#24986b);box-shadow:0 0 0 3px color-mix(in srgb,var(--mf-success,#24986b) 10%,transparent); }
+.analytics-save-indicator.is-dirty { background:#b88336;box-shadow:0 0 0 3px rgba(184,131,54,.10); }
+.analytics-save-indicator.is-pending { background:var(--mf-primary,#47627b);box-shadow:0 0 0 3px rgba(71,98,123,.10); }
+.analytics-save-indicator:focus-visible { outline:2px solid var(--mf-primary);outline-offset:4px; }
+.analytics-editor-heading .property-inspector-header-actions { gap:0; }
+.analytics-settings-history-inline .ant-btn { width:23px;height:24px;padding:0; }

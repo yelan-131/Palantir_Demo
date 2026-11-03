@@ -4,7 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
-const context = {exports: {}};
+const descriptions = {exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/pages/AppPrograms/analyticsWidgetDescription.ts'), 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText, descriptions);
+const context = {exports: {}, require:name=>{
+  if(name==='./analyticsWidgetDescription')return descriptions.exports;
+  throw new Error(`Unexpected dependency: ${name}`);
+}};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/pages/AppPrograms/analyticsEditorState.ts'), 'utf8'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText, context);
 const {normalizeAnalyticsDesign, sameAnalyticsDesign, moveAnalyticsWidget} = context.exports;
 

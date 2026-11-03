@@ -85,6 +85,7 @@ interface ApplicationInfo {
 interface ReleaseInfo {
   version: string;
   released_at?: string | null;
+  updated_at?: string | null;
   title?: string;
   summary?: string;
   highlights?: string[];
@@ -99,6 +100,7 @@ type ReleaseCategoryKey = 'added' | 'improved' | 'removed';
 interface ReleaseRecord {
   version: string;
   released_at?: string | null;
+  updated_at?: string | null;
   date?: string | null;
   title?: string;
   summary?: string;
@@ -123,6 +125,7 @@ function normalizeReleaseRecords(release?: ReleaseInfo | null): ReleaseRecord[] 
   return [{
     version: release.version,
     released_at: release.released_at,
+    updated_at: release.updated_at,
     title: release.title,
     summary: release.summary,
     categories: {
@@ -697,9 +700,9 @@ function AppContent() {
               <div className="release-carousel-header">
                 <div className="release-carousel-version-meta">
                   <span className="release-record-version">v{releaseRecords[activeReleaseIndex]?.version}</span>
-                  {(releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date) && (
+                  {(releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date || releaseRecords[activeReleaseIndex]?.updated_at) && (
                     <span className="release-record-date">
-                      {releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date}
+                      {releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date || `更新于 ${releaseRecords[activeReleaseIndex]?.updated_at}`}
                     </span>
                   )}
                 </div>
@@ -753,18 +756,6 @@ function AppContent() {
                     })}
                   </div>
                 </div>
-              </div>
-              <div className="release-carousel-dots">
-                {releaseRecords.map((record, index) => (
-                  <button
-                    className={index === activeReleaseIndex ? 'release-carousel-dot is-active' : 'release-carousel-dot'}
-                    key={`${record.version}-${index}`}
-                    type="button"
-                    onClick={() => setReleaseRecordIndex(index)}
-                  >
-                    <span>{record.version}</span>
-                  </button>
-                ))}
               </div>
             </div>
           )}

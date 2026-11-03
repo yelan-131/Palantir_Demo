@@ -1870,5 +1870,312 @@
     "permission_check": "config",
     "dry_run_supported": false,
     "audit_required": true
+  },
+  "dashboards.preview_source": {
+    "name": "dashboards.preview_source",
+    "title": "预览业务数据看板",
+    "description": "先用 platform.form_settings.query 定位真实来源表单，再传 source_form_code；未提供 design 时生成指标卡、趋势和排行默认方案。返回可复用的 design 和真实预览数据。自定义 design 使用现有 analyticsDesign 格式：datasets(id,sourceType=businessForm,source,refreshMode,dimensions,measures)，metrics(id,datasetId,expression)，widgets(id,type,datasetId,metricIds,dimension)，globalFilters，interactions。只读，不保存。",
+    "handler_key": "dashboards.preview_source",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "source_form_code": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Source Form Code",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Design"
+        }
+      },
+      "required": [
+        "source_form_code"
+      ],
+      "title": "SourceRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "config",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": false
+  },
+  "dashboards.create": {
+    "name": "dashboards.create",
+    "title": "创建看板草稿",
+    "description": "使用已存在的 source_form_code 创建分析看板，name/code 为新看板名称编码。可复用 preview_source 返回的 design；不提供时生成默认方案。必须先预览核对来源。调用只生成确认操作，用户确认后创建草稿；不自动发布。首次发布使用 forms.preview_publish / forms.publish。",
+    "handler_key": "dashboards.create",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "source_form_code": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Source Form Code",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Design"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "code": {
+          "pattern": "^[a-z][a-z0-9_]{0,55}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "application_id": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Application Id"
+        }
+      },
+      "required": [
+        "source_form_code",
+        "name",
+        "code"
+      ],
+      "title": "CreateRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "config",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "dashboards.get": {
+    "name": "dashboards.get",
+    "title": "读取看板配置",
+    "description": "读取看板草稿、已发布配置和 revision；修改前必须读取，不得猜 expectedRevision。",
+    "handler_key": "dashboards.get",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "program_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Program Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "program_id"
+      ],
+      "title": "BoardRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "config",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": false
+  },
+  "dashboards.query": {
+    "name": "dashboards.query",
+    "title": "查询已发布看板数据",
+    "description": "按已发布看板的指标、数据范围、权限和筛选口径返回真实计算结果。program_id 是看板编码；filters 为全局筛选，widget_filters 为组件筛选。数据错误或不可用时如实说明，不编造数值。",
+    "handler_key": "dashboards.query",
+    "side_effect": "read",
+    "risk_level": "low",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "program_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Program Id",
+          "type": "string"
+        },
+        "filters": {
+          "additionalProperties": true,
+          "title": "Filters",
+          "type": "object"
+        },
+        "widget_filters": {
+          "additionalProperties": true,
+          "title": "Widget Filters",
+          "type": "object"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "program_id"
+      ],
+      "title": "QueryRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "qa",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": false
+  },
+  "dashboards.save_draft": {
+    "name": "dashboards.save_draft",
+    "title": "保存看板草稿",
+    "description": "修改已有看板组件、数据源、指标、布局或筛选。先 dashboards.get，传完整 design 和返回的 revision 作为 expectedRevision。只准备确认操作；确认后保存草稿，不发布。",
+    "handler_key": "dashboards.save_draft",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "design": {
+          "additionalProperties": true,
+          "title": "Design",
+          "type": "object"
+        },
+        "expectedRevision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Expectedrevision",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "program_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Program Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "design",
+        "expectedRevision",
+        "program_id"
+      ],
+      "title": "WriteRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "config",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": true
+  },
+  "dashboards.publish": {
+    "name": "dashboards.publish",
+    "title": "发布看板配置",
+    "description": "先读取 revision 并核对草稿，传完整 design 和 expectedRevision。确认后仅发布看板，复用平台校验及并发保护；首次发布尚未完成时应使用 forms.publish。",
+    "handler_key": "dashboards.publish",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "design": {
+          "additionalProperties": true,
+          "title": "Design",
+          "type": "object"
+        },
+        "expectedRevision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Expectedrevision",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "program_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Program Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "design",
+        "expectedRevision",
+        "program_id"
+      ],
+      "title": "WriteRequest",
+      "type": "object"
+    },
+    "output_schema": {
+      "data": "object"
+    },
+    "permission_check": "config",
+    "domain": "analysis",
+    "dry_run_supported": false,
+    "audit_required": true
   }
 }

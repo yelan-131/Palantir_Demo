@@ -179,6 +179,8 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
             step["field_permissions"] = node["fieldPermissions"]
         if node.get("approvalMode"):
             step["approval_mode"] = node["approvalMode"]
+        if node.get("externalAction"):
+            step["external_action"] = node["externalAction"]
         ordered.append(step)
         for edge in edge_map.get(current, []):
             target = _edge_target(edge)
@@ -1453,6 +1455,10 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
             state['execution_node_ids'] = [step['node_id'] for step in steps]
         _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
 
+        from app.services.workflow_dispatch import enqueue
+        enqueue(state, steps, 0, first_step_index if any(step.get('type')=='approval' for step in steps) else len(steps))
+        if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps):
+            state.update(current_node='end',current_step=max(0,len(steps)-1))
         inst = WorkflowInstance(
             tenant_id=tenant_id,
             workflow_id=def_id, title=body.title,
@@ -1460,7 +1466,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
             initiator_id=initiator_id,
             form_data=json.dumps(form_data, ensure_ascii=False),
             workflow_state=json.dumps(state, ensure_ascii=False),
-            status="pending",
+            status="approved" if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps) else "pending",
         )
         db.add(inst)
         await db.flush()
@@ -1690,6 +1696,8 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
 
         # Approve: move to next step
         next_step_idx = _find_next_actionable_step(steps, current_step_idx)
+        from app.services.workflow_dispatch import enqueue
+        enqueue(state, steps, current_step_idx + 1, next_step_idx if next_step_idx is not None else len(steps))
         if next_step_idx is not None:
             next_step = steps[next_step_idx]
             state["current_step"] = next_step_idx
@@ -1920,3 +1928,49 @@ async def workflow_stats(user: dict = Depends(get_current_user)):
         }
 
     return await _try_db(_query)
+
+
+@router.get("/instances/{inst_id}/dispatches")
+async def list_dispatches(inst_id: int, user: dict = Depends(require_admin)):
+    async def query(db):
+        from app.models.relational import WorkflowInstance
+        instance=await db.get(WorkflowInstance,inst_id)
+        if not instance or instance.tenant_id != current_tenant_id(user):
+            raise HTTPException(404,'Workflow not found')
+        jobs=json.loads(instance.workflow_state or '{}').get('dispatch_jobs') or []
+        return {'items':[{key:value for key,value in job.items() if key!='action'} for job in jobs]}
+    return await _try_db(query)
+
+
+@router.post("/instances/{inst_id}/dispatches/{node_id}/retry")
+async def retry_dispatch(inst_id: int, node_id: str, user: dict = Depends(require_admin)):
+    async def query(db):
+        from app.models.relational import WorkflowInstance
+        instance=await db.scalar(select(WorkflowInstance).where(WorkflowInstance.id==inst_id,WorkflowInstance.tenant_id==current_tenant_id(user)).with_for_update())
+        if not instance:
+            raise HTTPException(404,'Workflow not found')
+        state=json.loads(instance.workflow_state or '{}')
+        job=next((job for job in state.get('dispatch_jobs',[]) if job['node_id']==node_id),None)
+        if instance.status in {'cancelled','canceled','rejected'}:
+            raise HTTPException(409,'已撤销或驳回的流程不能重试下发')
+        if not job or job['status']!='failed':
+            raise HTTPException(409,'只能重试失败的下发任务')
+        job['status']='pending';state['dispatch_pending']=True
+        instance.workflow_state=json.dumps(state,ensure_ascii=False)
+        from app.services.records import change_audit
+        await change_audit(db,tenant_id=instance.tenant_id,user_id=current_user_id(user),action='retry_workflow_dispatch',resource_type='workflow_instance',resource_id=instance.id,new_values={'node_id':node_id})
+        await db.commit()
+        return {'status':'pending'}
+    return await _try_db(query)
+
+
+@router.get('/definitions/{def_id}/dispatches')
+async def definition_dispatches(def_id: int, user: dict = Depends(require_admin)):
+    async def query(db):
+        from app.models.relational import WorkflowDef, WorkflowInstance
+        definition=await db.get(WorkflowDef,def_id)
+        if not definition or definition.tenant_id!=current_tenant_id(user):
+            raise HTTPException(404,'Workflow not found')
+        instances=(await db.scalars(select(WorkflowInstance).where(WorkflowInstance.workflow_id==def_id,WorkflowInstance.tenant_id==current_tenant_id(user)).order_by(WorkflowInstance.id.desc()).limit(100))).all()
+        return {'items':[{'instance_id':instance.id,'instance_title':instance.title,**{key:value for key,value in job.items() if key!='action'}} for instance in instances for job in json.loads(instance.workflow_state or '{}').get('dispatch_jobs',[])]}
+    return await _try_db(query)

@@ -1114,9 +1114,9 @@ export const listPlatformForms = (params?: { application_id?: number }) =>
   api.get('/forms', { params });
 export const createPlatformForm = (data: Record<string, unknown>) =>
   api.post('/forms', data);
-export const getPlatformForm = (id: number | string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'create' | 'edit' | 'designer' }) =>
+export const getPlatformForm = (id: number | string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'filters' | 'create' | 'edit' | 'designer' }) =>
   api.get(`/forms/${id}`, { params });
-export const getPlatformFormByCode = (code: string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'create' | 'edit' | 'designer' }) =>
+export const getPlatformFormByCode = (code: string, params?: { schema?: 'draft' | 'published'; scope?: 'list' | 'filters' | 'create' | 'edit' | 'designer' }) =>
   api.get(`/forms/code/${code}`, { params });
 export const updatePlatformForm = (id: number | string, data: Record<string, unknown>) =>
   api.put(`/forms/${id}`, data);

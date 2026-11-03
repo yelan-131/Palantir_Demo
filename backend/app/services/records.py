@@ -720,7 +720,7 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
     _ensure_sort_field_allowed(sort_field, fields, visible_fields)
     query = select(DynamicRecord).where(*db_filters)
     query, search_pushed = _apply_record_search_query(query, DynamicRecord, query_fields, search)
-    query, filters_pushed = _apply_record_filters_query(query, DynamicRecord, query_fields, parsed_filters)
+    query, filters_pushed = _apply_record_filters_query(query, DynamicRecord, query_fields, parsed_filters, db.bind.dialect.name)
     _ensure_production_record_query_supported(search, parsed_filters, search_pushed, filters_pushed)
     if cursor_mode := (cursor_after_id is not None or cursor_before_id is not None):
         if (search and not search_pushed) or (parsed_filters and not filters_pushed):
@@ -757,7 +757,7 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
         if include_total and not cursor_mode:
             count_query = select(func.count(DynamicRecord.id)).where(*db_filters)
             count_query, _ = _apply_record_search_query(count_query, DynamicRecord, query_fields, search)
-            count_query, _ = _apply_record_filters_query(count_query, DynamicRecord, query_fields, parsed_filters)
+            count_query, _ = _apply_record_filters_query(count_query, DynamicRecord, query_fields, parsed_filters, db.bind.dialect.name)
             total = await db.scalar(count_query)
         result = await db.execute(query.offset(0 if cursor_mode else (page - 1) * page_size).limit(page_size + 1))
         rows = result.scalars().all()

@@ -1,4 +1,5 @@
-import {resolveListView, emptyFilterValue, clearedFilterValues, type FilterSettings, type ListSettings} from '../ComponentPages/businessComponents';
+import {sourceFilterConfig} from '../ComponentPages/filterControls';
+import {filterButtonActions, resolveListView, resolveListPresentation, emptyFilterValue, clearedFilterValues, type FilterSettings, type ListSettings} from '../ComponentPages/businessComponents';
 import { selectionCountError } from '@/utils/selectOptions';
 import FormImport from '@/components/FormImport';
 import FieldProtection, {protectCopy, type FieldPolicy} from '@/components/FieldProtection';
@@ -6,7 +7,8 @@ import FieldControl from '@/components/FormWidgets/FieldControl';
 import { enumOptions, choiceLabel, type ControlSettings } from '@/utils/formControls';
 import FormLayout from '@/components/FormLayout';
 import type { FormLayoutNode } from '@/utils/formLayout';
-import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {createPortal} from 'react-dom';
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import { useAuthStore } from '@/stores/authStore';
 import { canConfigureWorkspace, reconcilePublishedViewState } from './workspaceState';
@@ -322,7 +324,7 @@ function filterValueToPayload(filter: ViewFilterConfig, value: unknown) {
       value: [dayjs.isDayjs(start) ? start.format('YYYY-MM-DD') : start, dayjs.isDayjs(end) ? end.format('YYYY-MM-DD') : end],
     };
   }
-  return { field: filter.fieldName, op: filter.operator, value };
+  return { field: filter.fieldName, op: filter.operator, value: dayjs.isDayjs(value) ? value.format(filter.controlType==='date'?'YYYY-MM-DD':'YYYY-MM-DDTHH:mm:ss') : value };
 }
 
 function unwrapApiData<T>(payload: unknown): T | null {
@@ -342,6 +344,8 @@ function unwrapApiList<T>(payload: unknown): T[] {
 export interface RecordListComponentProps {
   formSlug?: string;
   embedded?: boolean;
+  /** Render list actions in its enclosing component header. */
+  toolbarTargetId?: string;
   filterSettings?: FilterSettings;
   listSettings?: ListSettings;
   tableDensity?: 'compact' | 'standard' | 'comfortable' | null;
@@ -354,7 +358,15 @@ export interface RecordListComponentProps {
   onMutated?: () => void;
   readOnly?: boolean;
 }
-export default function DynamicPage({formSlug, embedded = false, externalFilters, refreshKey = 0, onMutated, readOnly = false, display = 'all', filterSettings, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
+export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, display = 'all', filterSettings, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
+  const filterFormId = useId();
+  const allowedFilterActions = filterButtonActions(filterSettings);
+  const canQuery = allowedFilterActions.includes('query');
+  const canReset = allowedFilterActions.includes('reset');
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLElement | null>(null);
+  useEffect(()=>{
+    setToolbarTarget(toolbarTargetId ? document.getElementById(toolbarTargetId) : null);
+  },[toolbarTargetId]);
   const params = useParams<{ slug: string }>();
   const slug=formSlug||params.slug;
   const navigate = useNavigate();
@@ -483,11 +495,27 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   const [selectedViewTab, setSelectedViewTab] = useState('');
   const runtimeViewTabs = pageConfig?.config?.viewConfig?.tabs;
   const activeViewTab = runtimeViewTabs?.find((tab) => tab.id === selectedViewTab) || runtimeViewTabs?.[0];
-  const baseViewConfig = useMemo(
-    () => normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields),
-    [fields, activeViewTab, pageConfig?.config?.viewConfig],
-  );
-  const viewConfig = useMemo(()=>resolveListView(baseViewConfig,listSettings),[baseViewConfig,listSettings]);
+  const baseViewConfig = useMemo(() => {
+    const view=normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields);
+    if(!view||display!=='filters')return view;
+    const selectedNames=selectedFilterFields??view.filters.filter(item=>item.enabled).map(item=>item.fieldName);
+    const filters=selectedNames.flatMap((name,index)=>{
+      const field=fields.find(item=>item.field_name===name);
+      if(!field)return [];
+      const existing=view.filters.find(item=>item.fieldName===name);
+      return [sourceFilterConfig(field,index,existing)];
+    });
+    return {...view,filters};
+  },[fields,activeViewTab,pageConfig?.config?.viewConfig,display,selectedFilterFields]);
+  // Parents recreate configuration objects during inspector edits. Only content changes
+  // should invalidate the list query and reset pagination.
+  const listSettingsKey = JSON.stringify(listSettings ?? null);
+  const stableListSettings = useMemo(() => JSON.parse(listSettingsKey) as ListSettings | null, [listSettingsKey]);
+  const viewConfig = useMemo(()=>resolveListView(baseViewConfig,stableListSettings ?? undefined),[baseViewConfig,stableListSettings]);
+  const listPresentation = useMemo(()=>resolveListPresentation(stableListSettings),[stableListSettings]);
+  const effectiveSortField = sortState.field && viewConfig?.table.columns.some(column=>column.enabled&&column.sortable&&column.fieldName===sortState.field) ? sortState.field : undefined;
+  const effectiveSortOrder = effectiveSortField ? sortState.order : undefined;
+  useEffect(()=>{if(sortState.field&&!effectiveSortField)setSortState({});},[sortState.field,effectiveSortField]);
   const runtimeViewState = useRef({ selectedViewTab: '', viewConfig, filterValues, sortState });
   runtimeViewState.current = { selectedViewTab: activeViewTab?.id || '', viewConfig, filterValues, sortState };
   const switchViewTab = (id: string) => {
@@ -504,11 +532,13 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
 
   const activeFilters = useMemo(() => viewConfig ? sortByOrder(viewConfig.filters).filter((filter) => filter.enabled && (display !== 'filters' || selectedFilterFields == null || selectedFilterFields.includes(filter.fieldName))) : [], [viewConfig, display, selectedFilterFields]);
   const tableConfigColumns = useMemo(() => viewConfig ? sortByOrder(viewConfig.table.columns).filter((column) => column.enabled) : [], [viewConfig]);
-  const structuredFilters = useMemo(() => [...(externalFilters || []), ...(display === 'list' ? [] : activeFilters)
+  const externalFiltersKey = JSON.stringify(externalFilters ?? []);
+  const stableExternalFilters = useMemo(() => JSON.parse(externalFiltersKey) as NonNullable<RecordListComponentProps['externalFilters']>, [externalFiltersKey]);
+  const structuredFilters = useMemo(() => [...stableExternalFilters, ...(display === 'list' ? [] : activeFilters)
     .map((filter) => filterValueToPayload(filter, Object.prototype.hasOwnProperty.call(filterValues,filter.id) ? filterValues[filter.id] : filter.defaultValue))
-    .filter(Boolean)], [activeFilters, filterValues, externalFilters, display]);
-  useEffect(() => { setPage(1); }, [externalFilters, externalSearch]);
-  useEffect(()=>{setPage(1);setSortState({});setSelectedRowKeys([]);},[listSettings?.pageSize,listSettings?.defaultSort?.field,listSettings?.defaultSort?.order]);
+    .filter(Boolean)], [activeFilters, filterValues, stableExternalFilters, display]);
+  useEffect(() => { setPage(1); }, [stableExternalFilters, externalSearch]);
+  useEffect(()=>{setPage(1);setSortState({});setSelectedRowKeys([]);},[viewConfig?.table.pageSize,viewConfig?.table.defaultSort?.fieldName,viewConfig?.table.defaultSort?.order]);
   const filterCallback = useRef(onFilterChange);
   filterCallback.current = onFilterChange;
   const requiredFilterFields = filterSettings?.requiredFields || [];
@@ -518,10 +548,10 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   });
   const filterSignature = JSON.stringify({search:filterSettings?.showKeyword===false?'':search, filters: structuredFilters, ready});
   useEffect(()=>{
-    if(display!=='filters'||filterSettings?.queryMode!=='change'||!autoFilterRevision)return;
+    if(display!=='filters'||!canQuery||filterSettings?.queryMode!=='change'||!autoFilterRevision)return;
     const timer=window.setTimeout(()=>filterForm.submit(),350);
     return ()=>window.clearTimeout(timer);
-  },[display,filterSettings?.queryMode,autoFilterRevision,filterForm]);
+  },[display,canQuery,filterSettings?.queryMode,autoFilterRevision,filterForm]);
   const selectionQueryKey = JSON.stringify([slug,page,search,externalSearch,structuredFilters,sortState,listSettings?.selection]);
   useEffect(()=>{setSelectedRowKeys([]);},[selectionQueryKey]);
   useEffect(() => {
@@ -542,8 +572,8 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         page_size: viewConfig.table.pageSize,
         search: (externalSearch ?? search) || undefined,
         filters: structuredFilters.length ? JSON.stringify(structuredFilters) : undefined,
-        sort_field: sortState.field || viewConfig.table.defaultSort?.fieldName,
-        sort_order: sortState.order || (viewConfig.table.defaultSort ? (viewConfig.table.defaultSort.order === 'ascend' ? 'asc' : 'desc') : undefined),
+        sort_field: effectiveSortField || viewConfig.table.defaultSort?.fieldName,
+        sort_order: effectiveSortOrder || (viewConfig.table.defaultSort ? (viewConfig.table.defaultSort.order === 'ascend' ? 'asc' : 'desc') : undefined),
       });
       if (requestId !== requestIdRef.current) return;
       const records = unwrapApiList<any>(res);
@@ -592,17 +622,17 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         const numericFormId = Number(slug);
         let dbForm: PlatformForm | null = null;
         if (!Number.isNaN(numericFormId)) {
-          dbForm = unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope: 'list' }));
+          dbForm = unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope: display === 'filters' ? 'filters' : 'list' }));
         } else {
           try {
-            dbForm = unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope: 'list' }));
+            dbForm = unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope: display === 'filters' ? 'filters' : 'list' }));
           } catch (error: any) {
             if (!isCurrent()) return;
             if ([401, 403].includes(error?.response?.status)) throw error;
             const matchedForm = unwrapApiList<PlatformForm>(await listPlatformForms()).find((item) => item.code === slug) ?? null;
             if (!isCurrent()) return;
             dbForm = matchedForm
-              ? unwrapApiData<PlatformForm>(await getPlatformForm(matchedForm.id, { schema: 'published', scope: 'list' }))
+              ? unwrapApiData<PlatformForm>(await getPlatformForm(matchedForm.id, { schema: 'published', scope: display === 'filters' ? 'filters' : 'list' }))
               : null;
           }
         }
@@ -677,7 +707,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
       }
     })();
     return () => { active = false; requestIdRef.current += 1; };
-  }, [slug, aliasProgramRoute, configRevision, filterForm]);
+  }, [slug, aliasProgramRoute, configRevision, filterForm, display]);
 
   useEffect(() => { void loadData(); return () => { requestIdRef.current += 1; }; }, [loadData]);
 
@@ -810,7 +840,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
     </Suspense></div>}
     <div className="form-workspace-runtime" hidden={Boolean(editorTab)} style={editorTab ? { display: 'none' } : undefined}>{runtime}</div>
   </div>;
-  if (rowActions.length) {
+  if (rowActions.length && !toolbarTargetId) {
     (tableColumns as any[]).push({
       title: '操作', width: 180, fixed: 'right',
       render: (_val: any, record: any) => (
@@ -951,7 +981,14 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
   };
   const renderDynamicFilterControl = (filter: ViewFilterConfig) => {
     const field = fields.find((item) => item.field_name === filter.fieldName);
-    const placeholder = filter.placeholder || filter.label;
+    const placeholder = field?.placeholder || filter.placeholder || filter.label;
+    if(display==='filters'&&field){
+      if(filter.controlType==='relation'&&platformForm)return <RelationPicker formId={platformForm.id} fieldName={field.field_name} contextData={Object.fromEntries((viewConfig?.filters||[]).map(item=>[item.fieldName,filterForm.getFieldValue(item.id)]))} modelName="" placeholder={placeholder} allowClear={field.typeSettings?.allowClear!==false} showSearch={field.typeSettings?.displayMode!=='dropdown'}/>;
+      if(field.controlType==='switch'||field.field_type==='boolean')return <Select allowClear placeholder={placeholder} options={[{value:true,label:field.typeSettings?.checkedText||'是'},{value:false,label:field.typeSettings?.uncheckedText||'否'}]}/>;
+      if(filter.controlType==='select')return <FieldControl type="select" label={filter.label} settings={{...field.typeSettings,allowCreateOption:false}} options={field.enum_values} placeholder={placeholder}/>;
+      if(filter.controlType==='date'||filter.controlType==='dateRange')return <FieldControl type="datetime" label={filter.label} settings={{dateMode:field.field_type==='date'?'date':field.typeSettings?.dateMode??'datetime',...field.typeSettings}} placeholder={placeholder}/>;
+      if(filter.controlType==='number')return <FieldControl type="number" label={filter.label} settings={field.typeSettings} placeholder={placeholder}/>;
+    }
     if (filter.controlType === 'dateRange') return <DatePicker.RangePicker style={{ width: '100%' }} />;
     if (filter.controlType === 'date') return <DatePicker style={{ width: '100%' }} placeholder={placeholder} />;
     if(filter.controlType==='relation'&&field?.relation_config&&platformForm)return <RelationPicker formId={platformForm.id} fieldName={field.field_name} contextData={{}} modelName="" placeholder={placeholder}/>;
@@ -986,13 +1023,29 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
     );
   }
 
+  const filterActions = (
+<Space>
+            {canReset&&<Button onClick={() => {
+              if(!canReset)return;
+              setAutoFilterRevision(0);
+              if(filterSettings?.resetMode==='clear'){
+                const cleared=clearedFilterValues(activeFilters);
+                filterForm.setFields([{name:'keyword',value:'',errors:[]},...Object.entries(cleared).map(([name,value])=>({name,value,errors:[]}))]);
+                setFilterValues(cleared);
+              }else{filterForm.resetFields();setFilterValues({});}
+              setSearch('');setPage(1);
+            }}>{filterSettings?.resetLabel||'重置'}</Button>}
+            {canQuery&&filterSettings?.queryMode!=='change'&&<Button type="primary" htmlType="submit" form={filterFormId} icon={<SearchOutlined />}>{filterSettings?.queryLabel||'查询'}</Button>}
+          </Space>
+  );
   const filterContent = (
-      <Form onValuesChange={()=>setAutoFilterRevision(value=>value+1)} key={activeViewTab?.id || 'default'}
+      <Form id={filterFormId} onValuesChange={()=>setAutoFilterRevision(value=>value+1)} key={activeViewTab?.id || 'default'}
         className="app-business-search-grid app-business-configured-search dynamic-business-filter"
         form={filterForm}
         colon={false}
         layout="horizontal"
         onFinish={(values) => {
+          if(display==='filters'&&!canQuery)return;
           setPage(1);
           setSearch(filterSettings?.showKeyword===false?'':String(values.keyword || ''));
           setFilterValues(values);
@@ -1008,48 +1061,40 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
           </Form.Item>
         ))}
         </div>
-        <Form.Item className="app-business-search-actions dynamic-view-filter-actions">
-          <Space>
-            <Button onClick={() => {
-              setAutoFilterRevision(0);
-              if(filterSettings?.resetMode==='clear'){
-                const cleared=clearedFilterValues(activeFilters);
-                filterForm.setFields([{name:'keyword',value:'',errors:[]},...Object.entries(cleared).map(([name,value])=>({name,value,errors:[]}))]);
-                setFilterValues(cleared);
-              }else{filterForm.resetFields();setFilterValues({});}
-              setSearch('');setPage(1);
-            }}>{filterSettings?.resetLabel||'重置'}</Button>
-            {filterSettings?.queryMode!=='change'&&<Button type="primary" htmlType="submit" icon={<SearchOutlined />}>{filterSettings?.queryLabel||'查询'}</Button>}
-          </Space>
-        </Form.Item>
+        {!(display==='filters'&&toolbarTargetId)&&<Form.Item className="app-business-search-actions dynamic-view-filter-actions">{filterActions}</Form.Item>}
       </Form>
   );
   const missingFilterBinding = requiredFilterFields.some(name=>!activeFilters.some(filter=>filter.fieldName===name));
-  if (display === 'filters') return <div className="component-record-filter">{missingFilterBinding&&<Alert type="warning" showIcon message="必填筛选字段已失效，请重新配置筛选字段。" style={{marginBottom:12}} />}{filterSettings?.queryMode==='change'&&<p className="component-query-hint">条件变更后自动查询，必填条件校验通过后生效。</p>}{configError && <Alert type="warning" message={configError} />}{filterContent}</div>;
+  if (display === 'filters') return <div className="component-record-filter">{toolbarTargetId&&toolbarTarget&&createPortal(filterActions,toolbarTarget)}{missingFilterBinding&&<Alert type="warning" showIcon message="必填筛选字段已失效，请重新配置筛选字段。" style={{marginBottom:12}} />}{canQuery&&filterSettings?.queryMode==='change'&&<p className="component-query-hint">条件变更后自动查询，必填条件校验通过后生效。</p>}{configError && <Alert type="warning" message={configError} />}{filterContent}</div>;
 
-  return renderWorkspace(
-    <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`app-business-page dynamic-business-page${display === 'list' ? ' component-page-list' : ''}`}>
-      <div className="app-business-content dynamic-business-content">
-      <div className="app-business-title-row dynamic-business-title-row">
+  const previewToolbar = Boolean(toolbarTargetId && readOnly);
+  const listToolbar = (
         <Space className="dynamic-business-toolbar-actions" size={6} wrap>
-          {toolbarActions.includes('create') && canRunAction('create') && (
+          {(toolbarActions.includes('create') && (previewToolbar || canRunAction('create'))) && (
             <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
-              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} onClick={openCreateModal} />
+              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal} />
             </Tooltip>
           )}
           {toolbarActions.includes('refresh')&&<Tooltip title="刷新">
-            <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} onClick={loadData} />
+            <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} disabled={!toolbarActions.includes('refresh') || runtimePermissions.refresh === false} onClick={loadData} />
           </Tooltip>}
-          {toolbarActions.includes('import')&&canRunAction('import')&&canRunAction('create')&&<Button aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)} />}
-      {toolbarActions.includes('export')&&canRunAction('export')&&<Button aria-label="导出当前页" title="导出当前页" icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
+          {(toolbarActions.includes('import')&&(previewToolbar || canRunAction('import')&&canRunAction('create')))&&<Button disabled={readOnly || !toolbarActions.includes('import') || !canRunAction('import') || !canRunAction('create')} aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)} />}
+      {(toolbarActions.includes('export')&&(previewToolbar || canRunAction('export')))&&<Button disabled={readOnly || !toolbarActions.includes('export') || !canRunAction('export')} aria-label="导出当前页" title="导出当前页" icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
         if(!platformForm)return;setExporting(true);
-        try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:(externalSearch??search)||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:sortState.field||viewConfig.table.defaultSort?.fieldName,sort_order:sortState.order||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
+        try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:(externalSearch??search)||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:effectiveSortField||viewConfig.table.defaultSort?.fieldName,sort_order:effectiveSortOrder||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
           const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
       }} />}
         </Space>
+  );
+
+  return renderWorkspace(
+    <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`app-business-page dynamic-business-page${display === 'list' ? ' component-page-list' : ''}`}>
+      <div className="app-business-content dynamic-business-content">
+      {toolbarTargetId ? toolbarTarget && createPortal(listToolbar, toolbarTarget) : <div className="app-business-title-row dynamic-business-title-row">
+        {listToolbar}
         {!embedded && workspaceEntry}
-      </div>
+      </div>}
 
       {listError&&<Alert type="error" showIcon message={listError} action={<Button size="small" onClick={()=>void loadData()}>重试</Button>} />}
       {listSettings?.columns?.some(name=>!baseViewConfig?.table.columns.some(column=>column.enabled&&column.fieldName===name))&&<Alert type="warning" showIcon message="部分配置列在当前发布视图中不可用，已自动隐藏。" />}
@@ -1059,9 +1104,9 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         items={runtimeViewTabs.map((tab) => ({ key: tab.id, label: tab.name }))} />}
       {display !== 'list' && filterContent}
 
-      <div className="app-business-list-toolbar dynamic-business-list-toolbar">
+      {!toolbarTargetId&&<div className="app-business-list-toolbar dynamic-business-list-toolbar">
         <Typography.Text type="secondary">共 {total} 条记录{selectedRowKeys.length>0&&` · 已选 ${selectedRowKeys.length} 条`}</Typography.Text>
-      </div>
+      </div>}
 
       <Table
         className="app-business-data-table dynamic-business-table"
@@ -1069,7 +1114,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
         columns={tableColumns}
         rowKey="id"
         rowSelection={listSettings?.selection&&listSettings.selection!=='none'?{type:listSettings.selection==='single'?'radio':'checkbox',selectedRowKeys,onChange:keys=>setSelectedRowKeys(keys)}:undefined}
-        locale={listSettings?.emptyText?{emptyText:<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listSettings.emptyText} />}:undefined}
+        locale={listPresentation.emptyText?{emptyText:<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listPresentation.emptyText} />}:undefined}
         onRow={record=>({onClick:event=>{
           if((event.target as HTMLElement).closest('button,a,input,.ant-select,.ant-popover'))return;
           if(viewConfig.table.rowClickAction==='detail')void openDetail(record);
@@ -1093,7 +1138,7 @@ export default function DynamicPage({formSlug, embedded = false, externalFilters
           current: page,
           total,
           pageSize: viewConfig.table.pageSize,
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (t) => `共 ${t} 条${selectedRowKeys.length ? ` · 已选 ${selectedRowKeys.length} 条` : ''}`,
           onChange: (p) => setPage(p),
         }}
       />

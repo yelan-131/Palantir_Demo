@@ -239,6 +239,9 @@ async def call_page_control(bridge, arguments):
         try:
             await bridge.event_sink('ui.action', command)
             return await asyncio.wait_for(future, timeout=20)
+        except asyncio.TimeoutError:
+            await bridge.event_sink('ui.action.cancel', {'id': command['id']})
+            raise
         finally:
             bridge.page_actions.pop(command['id'], None)
 
@@ -292,7 +295,26 @@ async def call_page_control(bridge, arguments):
                 'result': result.get('state') or {}, 'message': result.get('error') or
                 '页面调用已完成。修改仅存在于当前设计器，未保存或发布；等待用户点击最终确认卡片。'}
     except asyncio.TimeoutError:
-        return {'status': 'blocked', 'message': '页面没有完成操作，请保持网页打开并处理未保存修改提示后重试'}
+        return {'status': 'blocked', 'message': '等待页面操作回执超时，已通知页面移除该操作。页面可能保留部分草稿修改，请检查当前设计器；未检测到是否存在未保存修改弹窗，不要据此认定有弹窗，也不要直接重复新建草稿。'}
+
+
+def page_control_model_result(result: dict) -> dict:
+    """Keep full receipts in the browser/bridge; send a compact acknowledgement to the model.
+
+    Repeating the entire designer and every field's rules after each change grows
+    the SDK history with successive copies of the same draft. Never summarize
+    failures, whose diagnostics are needed to decide whether execution can continue.
+    """
+    if result.get('status') != 'completed':
+        return result
+    state = result.get('result') or {}
+    compact = {key: state[key] for key in ('draft_id', 'form_id', 'form_code', 'saved', 'published') if key in state}
+    fields = state.get('fields')
+    if isinstance(fields, list):
+        compact['field_count'] = len(fields)
+        compact['fields'] = [{key: item[key] for key in ('field_name', 'label', 'field_type', 'required') if key in item}
+                             for item in fields if isinstance(item, dict)]
+    return {**result, 'result': compact}
 
 
 class PageControlResult(BaseModel):

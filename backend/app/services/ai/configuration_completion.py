@@ -32,6 +32,8 @@ def expects_configuration(message, context):
         return False
     text = message.strip().lower()
     # Explicit consultation, cancellation and negation must never force a write proposal.
+    if re.search(r'(仅咨询|纯咨询|仅作咨询|不(?:创建|修改|写入|提交)(?:或(?:创建|修改|写入|提交))*(?:任何)?(?:数据|表单|配置|审批))', text):
+        return False
     if re.search(r'^(怎么|如何|为什么|什么情况下|会不会|是否|能否|请解释|解释|介绍|what\b|how\b|why\b)', text):
         return False
     if re.search(r'(怎么|如何|是什么|什么意思|有什么作用|what is\b|how to\b)', text):
@@ -42,7 +44,7 @@ def expects_configuration(message, context):
         return True
     if re.search(r'(?:新建|创建|建)(?:一[个张]|[个张])?表', text):
         return True
-    target = r'(表单|字段|配置|菜单|审批|规则|页面|form\b|field\b|configuration\b|workflow\b)'
+    target = r'(看板|仪表盘|图表|指标|表单|字段|配置|菜单|审批|规则|页面|dashboard\b|form\b|field\b|configuration\b|workflow\b)'
     operation = r'(创建|新建|新增|添加|生成|配置|修改|调整|设置|改成|改为|设为|建[一个张]*表|create\b|add\b|update\b|configure\b|change\b)'
     if re.search(target, text) and re.search(operation, text):
         return True
@@ -52,6 +54,8 @@ def expects_configuration(message, context):
 
 def expects_native_designer(message, context):
     if not context.get('pageControlsSupported') or context.get('surface') == 'knowledge':
+        return False
+    if re.search(r'(看板|仪表盘|dashboard)', message, re.I) or (context.get('designerContext') or {}).get('kind') == 'analysis':
         return False
     if re.search(r'(一条记录|填报记录|业务记录|提交记录)', message):
         return False

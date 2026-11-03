@@ -48,9 +48,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("DB init skipped: %s", exc)
     memory_cleanup = asyncio.create_task(cleanup_ai_memories())
+    from app.services.workflow_dispatch import run_worker
+    dispatch_worker = asyncio.create_task(run_worker())
     try:
         yield
     finally:
+        dispatch_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await dispatch_worker
         memory_cleanup.cancel()
         with suppress(asyncio.CancelledError):
             await memory_cleanup

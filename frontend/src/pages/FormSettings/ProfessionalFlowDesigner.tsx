@@ -1,3 +1,6 @@
+import {getPlatformForm, listPlatformForms, type PlatformForm, type PlatformFormField} from '@/services/api';
+import {PropertyGroup, PropertyRow} from '@/components/PropertyInspector';
+import {createPortal} from 'react-dom';
 import './designer-dialog.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -47,7 +50,8 @@ export interface FlowAssigneeRule {
 export interface FlowExternalAction {
   enabled: boolean;
   system?: string;
-  action?: 'webhook' | 'api' | 'message';
+  action?: 'webhook' | 'api' | 'message' | 'form';
+  targetFormId?: number;
   endpoint?: string;
   fieldMappings?: Array<{ id: string; sourceField?: string; targetField?: string }>;
 }
@@ -225,7 +229,7 @@ const assigneeTargetTypeOptions = [
 const externalActionTypeOptions = [
   { value: 'api', label: '调用 API' },
   { value: 'webhook', label: 'Webhook' },
-  { value: 'message', label: '消息队列' },
+  { value: 'form', label: '创建站内表单草稿' },
 ];
 
 const approvalModeOptions = [
@@ -600,6 +604,8 @@ function portsForNode(node: FlowDesignerNode): FlowPortSide[] {
 
 export default function ProfessionalFlowDesigner({
   config,
+  externalInspector = false,
+  propertiesTarget,
   fields,
   roles,
   roleOptions,
@@ -607,6 +613,8 @@ export default function ProfessionalFlowDesigner({
   onChange,
 }: {
   config: FlowDesignerConfig;
+  externalInspector?:boolean;
+  propertiesTarget?:HTMLElement|null;
   fields: FlowDesignerField[];
   roles: string[];
   roleOptions?: Array<{ value: string; label: string }>;
@@ -663,6 +671,23 @@ export default function ProfessionalFlowDesigner({
     return visibleNodeGroups.flatMap((group) => group.items).filter((item) => quickKeys.has(item.key));
   }, [visibleNodeGroups]);
   const selectedNode = selection.type === 'node' ? config.nodes.find((node) => node.id === selection.id) : undefined;
+  const [dispatchForms,setDispatchForms]=useState<PlatformForm[]>([]);
+  const [dispatchFields,setDispatchFields]=useState<PlatformFormField[]>([]);
+  const [dispatchLoadError,setDispatchLoadError]=useState('');
+  const dispatchTargetId=selectedNode?.externalAction?.targetFormId;
+  useEffect(()=>{
+    if(selectedNode?.type!=='serviceTask')return;
+    let current=true;
+    listPlatformForms().then(response=>{if(current){const data=response.data?.data??response.data;setDispatchForms((Array.isArray(data)?data:data?.items??[]).filter((form:PlatformForm)=>form.status==='published'));}}).catch(()=>{if(current)setDispatchLoadError('目标表单加载失败');});
+    return()=>{current=false;};
+  },[selectedNode?.type]);
+  useEffect(()=>{
+    setDispatchFields([]);setDispatchLoadError('');
+    if(!dispatchTargetId)return;
+    let current=true;
+    getPlatformForm(dispatchTargetId,{schema:'published'}).then(response=>{if(current){const form=response.data?.data??response.data;setDispatchFields((form.fields??[]).filter((field:PlatformFormField)=>!field.archived));}}).catch(()=>{if(current)setDispatchLoadError('目标字段加载失败，请检查表单权限');});
+    return()=>{current=false;};
+  },[dispatchTargetId]);
   const selectedEdge = selection.type === 'edge' ? config.edges.find((edge) => edge.id === selection.id) : undefined;
   const selectedNodeIds = selection.type === 'nodes' ? selection.ids : selection.type === 'node' ? [selection.id] : [];
   const selectedNodeIdSet = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
@@ -1288,6 +1313,7 @@ export default function ProfessionalFlowDesigner({
         enabled: patch.enabled ?? externalAction.enabled ?? false,
         action: patch.action ?? externalAction.action ?? 'api',
         system: patch.system ?? externalAction.system,
+        targetFormId: patch.targetFormId ?? externalAction.targetFormId,
         endpoint: patch.endpoint ?? externalAction.endpoint,
         fieldMappings: patch.fieldMappings ?? externalAction.fieldMappings ?? [],
       };
@@ -1297,28 +1323,17 @@ export default function ProfessionalFlowDesigner({
     };
     return (
       <div className="professional-flow-props">
-        <section>
-          <div className="professional-flow-section-title">节点身份</div>
-          <label className="professional-flow-node-kind-row">
-            <span>节点类型</span>
-            <div className="professional-flow-node-kind">
-              <span className="professional-flow-node-kind-icon">{getNodeIcon(selectedNode)}</span>
-              <div>
-                <strong>{selectedNodeTypeLabel}</strong>
-              </div>
-            </div>
-          </label>
-          <label><span>标题</span><Input aria-label="节点标题" value={selectedNode.label} readOnly /></label>
-          <label><span>业务说明</span><Input aria-label="节点业务说明" value={selectedNode.description} readOnly /></label>
-        </section>
+        <PropertyGroup title="节点身份">
+
+          <PropertyRow label="节点类型"><Input aria-label="节点类型" value={selectedNodeTypeLabel} readOnly /></PropertyRow>
+          <PropertyRow label="标题"><Input aria-label="节点标题" placeholder="输入节点标题" maxLength={100} value={selectedNode.label} onChange={event=>patchNode(selectedNode.id,{label:event.target.value})}/></PropertyRow>
+          <PropertyRow label="业务说明"><Input.TextArea aria-label="节点业务说明" placeholder="说明此节点的业务用途" maxLength={500} autoSize={{minRows:2,maxRows:5}} value={selectedNode.description} onChange={event=>patchNode(selectedNode.id,{description:event.target.value})}/></PropertyRow>
+        </PropertyGroup>
 
         {approvalTaskTypes.has(selectedNode.type) && (
-          <section>
-            <div className="professional-flow-section-head">
-              <div className="professional-flow-section-title">处理人规则</div>
-              <Button aria-label="添加处理对象" title="添加处理对象" icon={<PlusOutlined />} size="small" type="text"
-                onClick={() => patchAssigneeRules([...assigneeRules, { id: makeId('assignee'), type: 'role', approvalMode: 'orSign' }])} />
-            </div>
+          <PropertyGroup title="处理人规则" actions={<> <Button aria-label="添加处理对象" title="添加处理对象" icon={<PlusOutlined />} size="small" type="text"
+                onClick={() => patchAssigneeRules([...assigneeRules, { id: makeId('assignee'), type: 'role', approvalMode: 'orSign' }])} /> </>}>
+
             <div className="professional-flow-assignee-head"><span>对象类型</span><span>处理对象</span><span>审批方式</span><span /></div>
             <div className="professional-flow-assignee-list">
               {assigneeRules.map((rule) => (
@@ -1347,18 +1362,19 @@ export default function ProfessionalFlowDesigner({
                 </div>
               ))}
             </div>
-          </section>
+          </PropertyGroup>
         )}
 
         {selectedNode.type === 'serviceTask' && (
-          <section>
-            <div className="professional-flow-section-title">外部系统推送</div>
-            <label><span>启用推送</span><Switch checked={externalAction.enabled} onChange={(enabled) => patchExternalAction({ enabled })} /></label>
-            <label><span>目标系统</span><Input placeholder="例如 ERP / MES / WMS" value={externalAction.system} onChange={(event) => patchExternalAction({ system: event.target.value })} /></label>
+          <PropertyGroup title="数据下发" hint="流程经过此自动任务后异步执行。站内表单创建草稿；API/Webhook 使用 POST 并携带幂等键，失败可在实例下发记录中重试。">
+
+            <label><span>启用下发</span><Switch checked={externalAction.enabled} onChange={(enabled) => patchExternalAction({ enabled })} /></label>
+
             <label><span>推送方式</span><Select value={externalAction.action || 'api'} options={externalActionTypeOptions} onChange={(action) => patchExternalAction({ action })} /></label>
-            <label><span>接口地址</span><Input placeholder="/api/external/receive" value={externalAction.endpoint} onChange={(event) => patchExternalAction({ endpoint: event.target.value })} /></label>
+            {externalAction.action==='form'?<PropertyRow label="目标表单"><Select aria-label="下发目标表单" showSearch optionFilterProp="label" placeholder="选择已发布表单" value={externalAction.targetFormId} options={dispatchForms.map(form=>({value:form.id,label:form.name}))} onChange={targetFormId=>patchExternalAction({targetFormId,fieldMappings:(externalAction.fieldMappings||[]).map(item=>({...item,targetField:undefined}))})}/></PropertyRow>:<><PropertyRow label="目标系统"><Input placeholder="例如 ERP / MES / WMS" value={externalAction.system} onChange={event=>patchExternalAction({system:event.target.value})}/></PropertyRow><PropertyRow label="接口地址"><Input placeholder="https://example.com/api/receive" value={externalAction.endpoint} onChange={event=>patchExternalAction({endpoint:event.target.value})}/></PropertyRow></>}
+            {dispatchLoadError&&<Typography.Text type="danger">{dispatchLoadError}</Typography.Text>}
             <div className="professional-flow-mapping-list">
-              <div className="professional-flow-mapping-head"><span>表单字段</span><span>外部字段</span><span /></div>
+              <div className="professional-flow-mapping-head"><span>表单字段</span><span>{externalAction.action==='form'?'目标字段':'外部字段'}</span><span /></div>
               {(externalAction.fieldMappings || []).map((mapping) => (
                 <div className="professional-flow-mapping-row" key={mapping.id}>
                   <Select
@@ -1369,13 +1385,7 @@ export default function ProfessionalFlowDesigner({
                       fieldMappings: (externalAction.fieldMappings || []).map((item) => (item.id === mapping.id ? { ...item, sourceField } : item)),
                     })}
                   />
-                  <Input
-                    placeholder="外部字段名"
-                    value={mapping.targetField}
-                    onChange={(event) => patchExternalAction({
-                      fieldMappings: (externalAction.fieldMappings || []).map((item) => (item.id === mapping.id ? { ...item, targetField: event.target.value } : item)),
-                    })}
-                  />
+                  {externalAction.action==='form'?<Select aria-label="下发目标字段" placeholder="选择目标字段" value={mapping.targetField} options={dispatchFields.map(field=>({value:field.field_name,label:field.label}))} onChange={targetField=>patchExternalAction({fieldMappings:(externalAction.fieldMappings||[]).map(item=>item.id===mapping.id?{...item,targetField}:item)})}/>:<Input placeholder="外部字段名" value={mapping.targetField} onChange={event=>patchExternalAction({fieldMappings:(externalAction.fieldMappings||[]).map(item=>item.id===mapping.id?{...item,targetField:event.target.value}:item)})}/>}
                   <Button
                     aria-label="删除字段映射"
                     icon={<DeleteOutlined />}
@@ -1393,11 +1403,11 @@ export default function ProfessionalFlowDesigner({
                 添加字段映射
               </Button>
             </div>
-          </section>
+          </PropertyGroup>
         )}
 
-        {approvalTaskTypes.has(selectedNode.type) && <section>
-          <div className="professional-flow-section-title">节点字段权限</div>
+        {approvalTaskTypes.has(selectedNode.type) && <PropertyGroup title="节点字段权限" defaultOpen={false}>
+
           <div className="professional-flow-field-matrix">
             <div className="professional-flow-field-head"><span>字段</span><span>可见</span><span>可填</span><span>必填</span></div>
             {fields.map((field) => {
@@ -1412,7 +1422,7 @@ export default function ProfessionalFlowDesigner({
               );
             })}
           </div>
-        </section>}
+        </PropertyGroup>}
 
       </div>
     );
@@ -1445,8 +1455,8 @@ export default function ProfessionalFlowDesigner({
     });
     return (
       <div className="professional-flow-props">
-        <section>
-          <div className="professional-flow-section-title">连线规则</div>
+        <PropertyGroup title="连线规则">
+
           <label><span>动作结果</span><Input value={selectedEdge.label} onChange={(event) => patchEdge(selectedEdge.id, { label: event.target.value })} /></label>
           <label>
             <span>条件规则</span>
@@ -1484,7 +1494,7 @@ export default function ProfessionalFlowDesigner({
             <span>线条排布</span>
             <Button size="small" disabled={selectedEdge.routeY === undefined} onClick={() => patchEdge(selectedEdge.id, { routeY: undefined })}>重置</Button>
           </label>
-        </section>
+        </PropertyGroup>
         <Modal
           className="form-designer-dialog"
           title="设置条件规则"
@@ -1539,8 +1549,8 @@ export default function ProfessionalFlowDesigner({
 
   const renderCanvasProperties = () => (
     <div className="professional-flow-props">
-      <section>
-        <div className="professional-flow-section-title">表单触发</div>
+      <PropertyGroup title="表单触发">
+
         {config.triggerBindings.map((binding, index) => (
           <div className="professional-flow-trigger" key={binding.action}>
             <Switch
@@ -1558,7 +1568,7 @@ export default function ProfessionalFlowDesigner({
             <Tag>{binding.action}</Tag>
           </div>
         ))}
-      </section>
+      </PropertyGroup>
     </div>
   );
 
@@ -1572,7 +1582,7 @@ export default function ProfessionalFlowDesigner({
   const selectedType = selection.type === 'nodes' ? '多选节点' : selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '画布属性';
 
   return (
-    <div className="professional-flow-designer">
+    <div className={"professional-flow-designer"+(externalInspector?" professional-flow-external-inspector":"")}>
       <aside className="professional-flow-library form-designer-left">
         <div className="professional-flow-panel-head designer-panel-head">
           <strong>节点</strong>
@@ -1831,7 +1841,9 @@ export default function ProfessionalFlowDesigner({
         ))}
       </main>
 
-      <aside className="professional-flow-properties">
+      {externalInspector?(propertiesTarget?createPortal(<aside className="professional-flow-properties">
+        {renderProperties()}
+      </aside>,propertiesTarget):null):<aside className="professional-flow-properties">
         <div className="professional-flow-panel-head">
           <div>
             <strong>{selectedType}</strong>
@@ -1840,7 +1852,7 @@ export default function ProfessionalFlowDesigner({
           {selection.type === 'canvas' && <Button size="small" icon={<PlusOutlined />} onClick={() => addNode(nodeGroups[1].items[0])}>审批</Button>}
         </div>
         {renderProperties()}
-      </aside>
+      </aside>}
     </div>
   );
 }

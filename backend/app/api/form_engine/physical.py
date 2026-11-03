@@ -218,7 +218,7 @@ async def _ensure_physical_code_indexes(db: AsyncSession, table_name: str, field
             )
 
 
-def _physical_filter_clause(fields: list, visible_fields: set[str], filters: list[dict]) -> tuple[list[str], dict]:
+def _physical_filter_clause(fields: list, visible_fields: set[str], filters: list[dict], dialect="sqlite") -> tuple[list[str], dict]:
     clauses: list[str] = []
     params: dict = {}
     allowed = _queryable_field_names(fields) & visible_fields
@@ -235,9 +235,27 @@ def _physical_filter_clause(fields: list, visible_fields: set[str], filters: lis
         if op == "contains":
             clauses.append(f"LOWER(CAST({column_name} AS TEXT)) LIKE :{key}")
             params[key] = f"%{str(expected).lower()}%"
+        elif op == "in":
+            if not isinstance(expected, list) or not expected or len(expected)>100:
+                raise HTTPException(400, 'Invalid selection filter')
+            placeholders=[]
+            for choice_index, choice in enumerate(expected):
+                choice_key=f"{key}_{choice_index}"
+                params[choice_key]=str(choice)
+                placeholders.append(f":{choice_key}")
+            choices=', '.join(placeholders)
+            array_text=f"CASE WHEN CAST({column_name} AS TEXT) LIKE '[%' THEN CAST({column_name} AS TEXT) ELSE '[]' END"
+            elements=f"jsonb_array_elements_text(CAST(({array_text}) AS JSONB))" if dialect == 'postgresql' else f"json_each({array_text})"
+            alias="filter_choices(value)" if dialect == 'postgresql' else "filter_choices"
+            clauses.append(f"(CAST({column_name} AS TEXT) IN ({choices}) OR EXISTS (SELECT 1 FROM {elements} AS {alias} WHERE CAST(filter_choices.value AS TEXT) IN ({choices})))")
         elif op == "equals":
-            clauses.append(f"CAST({column_name} AS TEXT) = :{key}")
-            params[key] = str(expected)
+            if isinstance(expected, bool):
+                clauses.append(f"LOWER(CAST({column_name} AS TEXT)) IN (:{key}, :{key}_bool)")
+                params[key] = 'true' if expected else 'false'
+                params[f"{key}_bool"] = '1' if expected else '0'
+            else:
+                clauses.append(f"CAST({column_name} AS TEXT) = :{key}")
+                params[key] = str(expected)
         elif op == "between":
             if not isinstance(expected, list) or len(expected) != 2:
                 raise HTTPException(400, f"Invalid between filter for field: {field}")
@@ -304,7 +322,7 @@ async def _list_physical_records(
                 search_clauses.append(f"LOWER(CAST({column_name} AS TEXT)) LIKE :{key}")
                 params[key] = f"%{search.lower()}%"
             clauses.append(f"({' OR '.join(search_clauses)})")
-    filter_clauses, filter_params = _physical_filter_clause(fields, visible_fields, parsed_filters)
+    filter_clauses, filter_params = _physical_filter_clause(fields, visible_fields, parsed_filters, db.bind.dialect.name)
     clauses.extend(filter_clauses)
     params.update(filter_params)
 

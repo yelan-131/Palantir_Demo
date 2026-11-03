@@ -124,11 +124,13 @@ The low-code layer is implemented and persisted:
   `FormVersion`, `WorkflowBinding`; AI draft persistence is in `AIDraft`.
 - API: `/api/v1/forms`.
 
-Creating a form or field is metadata-only. Business records are stored in
-`dynamic_records.data` as JSON/JSONB. Published forms create immutable
-`form_versions.snapshot` records, and dynamic records carry `schema_version`.
-Physical table generation is a future admin-controlled capability, not current
-behavior.
+Forms support dynamic JSON records in `dynamic_records.data` and managed
+physical-table storage through the shared form engine. Physical form creation
+and field addition can provision tables/columns before publication; archiving a
+field does not drop its physical column. Published forms retain
+`form_versions.snapshot`, and dynamic records carry `schema_version`. This does
+not imply historical edits always validate against the creation-time schema:
+current shared runtime field resolution uses the latest published fields.
 
 ## Tenant Platform
 
@@ -195,6 +197,10 @@ The AI assistant currently has two related surfaces:
 The default provider settings now point at GLM-compatible model names
 (`glm-4-flash`, `glm-4-plus`, `embedding-3`, `glm-4v-plus`). Keep secrets in
 environment variables or a backend-managed secret store; do not commit API keys.
+
+The current DSH execution boundary, skill-loading gaps and tool contract rules are documented in
+[AI Agent Skill/Tool Contract](../architecture/ai-agent-skill-contract.md), current specification dated 2026-11-03.
+The sequence below is a target enforcement requirement; the current DSH bridge does not yet bind every call to an active Skill identity and allowlist.
 
 State-changing AI actions must keep this order:
 

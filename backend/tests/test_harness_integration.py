@@ -16,14 +16,16 @@ from fastapi.responses import StreamingResponse
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('read_skill', [False, True])
 @pytest.mark.parametrize('confirmation', [False, True, 'write'])
-async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(monkeypatch, tmp_path, confirmation):
+async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(monkeypatch, tmp_path, confirmation, read_skill):
     from app.api.ai_harness import router
     from app.services.ai import harness_runtime as mod
     from app.services.ai import agent_registry
     from app.services.ai.tool_envelope import tool_execution_envelope
     from app.services.ai.settings import settings_snapshot
     from app.services.ai.policies import decide_tool_permission
+    from app.services.ai.skill_loader import SKILL_TOOL, FORM_SKILL
 
     monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
     user = {'tenant_id': 1, 'sub': 'harness-integration', 'is_admin': True, 'roles': ['admin']}
@@ -57,7 +59,13 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         calls.append(body)
         pattern = 'forms_create_form_definition_' if confirmation == 'write' else 'forms_query_records_'
         query_tool = next(t['function']['name'] for t in body.get('tools', []) if pattern in t['function']['name'])
-        if not any(m['role'] == 'tool' for m in body['messages']) and '平台恢复' not in str(body['messages']):
+        skill_read = any(m['role'] == 'tool' and 'instructions' in str(m.get('content')) for m in body['messages'])
+        business_result = any(m['role'] == 'tool' and 'instructions' not in str(m.get('content')) for m in body['messages'])
+        if read_skill and not skill_read and '平台恢复' not in str(body['messages']):
+            skill_tool = next(t['function']['name'] for t in body['tools'] if 'platform_skills_read_' in t['function']['name'])
+            delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'skill-read', 'type': 'function', 'function': {'name': skill_tool, 'arguments': json.dumps({'name': FORM_SKILL})}}]}
+            reason = 'tool_calls'
+        elif not business_result and '平台恢复' not in str(body['messages']):
             delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'test-call', 'type': 'function', 'function': {'name': query_tool, 'arguments': json.dumps({'form': {'name': '测试表单', 'code': 'test'}, 'fields': [{'field_name': 'name', 'label': '名称', 'field_type': 'string'}]} if confirmation == 'write' else {'form_code': 'test'})}}]}
             reason = 'tool_calls'
         else:
@@ -83,15 +91,18 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         result = await mod.run_sdk(settings, user, '查询测试表单', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
         assert result.finish_reason == 'completed'
         assert result.final_response
-        assert len(calls) == 2
+        assert len(calls) == 2 + int(read_skill)
+        if read_skill:
+            assert bridge.loaded_skills[FORM_SKILL]['version'] == '1.0.0'
+            assert 'draft_new' in str(calls[1]['messages'])
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512
         assert calls[0]['reasoning_effort'] == 'low'
-        assert all(t['function']['name'].removeprefix('mcp__platform__') in {mod.tool_alias(tool.name) for tool in mod.tool_registry().values()} for t in calls[0]['tools'])
+        assert all(t['function']['name'].removeprefix('mcp__platform__') in {mod.tool_alias(SKILL_TOOL), *[mod.tool_alias(tool.name) for tool in mod.tool_registry().values()]} for t in calls[0]['tools'])
         settings['maxTokens'] = 384
         resumed = await mod.run_sdk(settings, user, '平台恢复的历史：助手已读取 1 条记录。继续上次的对话', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
         assert resumed.finish_reason == 'completed'
-        assert len(calls) == 3
+        assert len(calls) == 3 + int(read_skill)
         assert calls[-1]['max_tokens'] == 384
         assert '平台恢复的历史' in str(calls[-1]['messages'])
         assert resumed.session_id != result.session_id

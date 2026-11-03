@@ -1,3 +1,4 @@
+import {createPortal} from 'react-dom';
 import { useAiWorkbench } from '@/components/AiChatWidget/context';
 import type { PageAction, NewFormDraft } from '@/components/AiChatWidget/pageControls';
 import StaticOptionsEditor from './StaticOptionsEditor';
@@ -6,7 +7,7 @@ import { createUuid } from '@/utils/uuid';
 import { previewFieldPermission, previewFlowNodes as associatedPreviewNodes } from './previewPermissions';
 import { RuleInlineSelect } from './RuleInlineCell';
 import CalculationExpressionEditor from './CalculationExpressionEditor';
-import {PropertyInspectorHeader, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
+import {PropertyInspectorHeader, PropertyHelp, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
 import { calculationSources, type CalculationRule } from '@/utils/formCalculations';
 import {protectCopy} from '@/components/FieldProtection';
 import FieldControl from '@/components/FormWidgets/FieldControl';
@@ -188,6 +189,9 @@ interface AnalyticsWidget {
 }
 
 interface AnalyticsStyle {
+  gridSize?: number;
+  cardOpacity?: number;
+  cardBlur?: number;
   preset: 'clean' | 'executive' | 'factory' | 'dark';
   background: string;
   componentGap: number;
@@ -213,10 +217,11 @@ interface AnalyticsDesign {
 
 function makeDefaultAnalyticsStyle(): AnalyticsStyle {
   return {
+    gridSize: 44, cardOpacity: 0.78, cardBlur: 12,
     preset: 'clean',
     background: '#f6f8fa',
-    componentGap: 12,
-    cardRadius: 8,
+    componentGap: 16,
+    cardRadius: 12,
     cardBorder: 'light',
     chartPalette: 'manufacturing',
     tableDensity: 'standard',
@@ -1372,6 +1377,9 @@ const tabs = [
   { key: 'permission', label: '权限设计', icon: <LockOutlined /> },
 ];
 
+// Component pages own their list, filter and permission settings.
+const embeddedBusinessTabs = tabs.filter(item=>item.key==='form'||item.key==='flow');
+
 const analyticsTabs = [
   { key: 'dashboard', label: '看板画布', icon: <BarChartOutlined /> },
   { key: 'dataset', label: '数据与指标', icon: <DatabaseOutlined /> },
@@ -2341,10 +2349,16 @@ function getFlowConnectorPath(from: FlowNode, fromSide: FlowPortSide, to: FlowNo
   return roundedOrthogonalPath([start, startLead, ...bridge, endLead, end]);
 }
 
+export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;footer:HTMLElement|null;status:HTMLElement|null}
+
 export interface FormSettingsPageProps {
+  workspaceTargets?: SourceEditorTargets;
+  requestExitRef?:React.MutableRefObject<(()=>void)|null>;
   formId?: string;
   embedded?: boolean;
   initialTab?: 'form' | 'filter' | 'flow' | 'permission';
+  requestedTab?: 'form' | 'flow';
+  onTabChange?: (tab:'form'|'flow')=>void;
   onExit?: () => void;
   onPublished?: () => void;
 }
@@ -2411,7 +2425,7 @@ function applyNativeFieldProperties(control: LayoutControl, field: DesignerField
   };
 }
 
-export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, onExit, onPublished }: FormSettingsPageProps = {}) {
+export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps = {}) {
   const { formId: routeFormId } = useParams();
   const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
@@ -2680,8 +2694,15 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     scaleY: number;
   } | null>(null);
   const isAnalysisDesigner = baseConfig.kind === 'analysis';
-  const designerTabs = isAnalysisDesigner ? analyticsTabs : tabs;
+  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
   const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
+
+  // External tab navigation changes only the visible panel, never reinitializes drafts.
+  useEffect(()=>{
+    if(embedded && requestedTab && activeTab!==requestedTab && designerTabs.some(item=>item.key===requestedTab)) {
+      setActiveTab(requestedTab);setSelectedControlId('');
+    }
+  },[embedded,requestedTab,designerTabs,activeTab]);
 
   useEffect(() => {
     const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
@@ -2743,7 +2764,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setDraftReviewReady(false);
     const nextControls = baseConfig.fields.map(makeFieldControl);
     const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
-    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : tabs;
+    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
     const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
     const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
     setActiveTab(nextTab);
@@ -3325,8 +3346,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     };
     if (selectedEffectiveControlType === 'text' || selectedEffectiveControlType === 'textarea') {
       return (
-        <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">文本设置</strong>
+        <PropertyGroup title="文本设置" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <label>
             <span>字符范围</span>
             <div className="designer-inline-fields">
@@ -3350,13 +3370,12 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           {selectedEffectiveControlType === 'textarea' && (
             <label><span>默认行数</span><InputNumber min={2} max={12} value={typeSettings.rows || 3} onChange={(rows) => updateSelectedTypeSettings({ rows: Number(rows || 3) })} /></label>
           )}
-        </section>
+        </PropertyGroup>
       );
     }
     if (selectedEffectiveControlType === 'number') {
       return (
-        <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">数值设置</strong>
+        <PropertyGroup title="数值设置" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <label>
             <span>取值范围</span>
             <div className="designer-inline-fields">
@@ -3367,13 +3386,12 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           <label><span>小数位</span><InputNumber min={0} max={6} value={typeSettings.precision ?? 0} onChange={(precision) => updateSelectedTypeSettings({ precision: Number(precision || 0) })} /></label>
           <label><span>单位后缀</span><Input allowClear placeholder="例如：小时、件、%" value={typeSettings.unit || ''} onChange={(event) => updateSelectedTypeSettings({ unit: event.target.value })} /></label>
           <label><span>千分位</span><Switch size="small" checked={Boolean(typeSettings.thousandSeparator)} onChange={(thousandSeparator) => updateSelectedTypeSettings({ thousandSeparator })} /></label>
-        </section>
+        </PropertyGroup>
       );
     }
     if (selectedEffectiveControlType === 'select' || selectedEffectiveControlType === 'relation') {
       return (
-        <section className="designer-prop-section">
-          {renderPropertyHeading('选择设置', '设置如何选择和展示选项；候选内容在数据来源中配置。问号可查看每项设置的效果与适用范围。')}
+        <PropertyGroup title="选择设置" hint="设置如何选择和展示选项；候选内容在数据来源中配置。问号可查看每项设置的效果与适用范围。" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <div className="designer-property-rule-row">{renderRuleLabel('选择模式', '单选每次选择一项，多选可同时选择多项。固定选项支持多选；字典和关联记录来源当前仅支持单选。', true)}<Select aria-label="选择模式" value={typeSettings.selectionMode || 'single'} options={(selectedReferenceSourceKind !== 'static')?selectionModeOptions.filter(option=>option.value==='single'):selectionModeOptions} onChange={(selectionMode) => updateSelectedTypeSettings({ selectionMode })} /></div>
           <div className="designer-property-rule-row">{renderRuleLabel('展示方式', '下拉适合普通选项；搜索可按选项文字查找；单复选会直接铺开选项；标签按多选方式填写。', true)}<Select aria-label="展示方式" value={typeSettings.displayMode || (selectedReferenceSourceKind !== 'static' ? 'search' : 'dropdown')} options={(selectedReferenceSourceKind !== 'static')?selectionDisplayOptions.filter(option=>['dropdown','search'].includes(String(option.value))):selectionDisplayOptions.map(option => option.value === 'radio' ? { ...option, label: typeSettings.selectionMode === 'multiple' ? '平铺复选' : '平铺单选' } : option)} onChange={(displayMode) => updateSelectedTypeSettings({ displayMode })} /></div>
           {(typeSettings.displayMode || (selectedReferenceSourceKind !== 'static' ? 'search' : 'dropdown')) === 'search' && <div className="designer-property-rule-row">
@@ -3392,37 +3410,34 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           {selectedReferenceSourceKind === 'static' && typeSettings.selectionMode === 'multiple' && typeSettings.displayMode !== 'radio' && (
             <div className="designer-property-rule-row">{renderRuleLabel('允许临时项', '多选或标签模式下，可输入候选项以外的新值；单选及单复选展示不支持。新值只保存到当前记录，不会自动新增来源数据。', true)}<Switch aria-label="允许临时项" size="small" checked={Boolean(typeSettings.allowCreateOption)} onChange={(allowCreateOption) => updateSelectedTypeSettings({ allowCreateOption })} /></div>
           )}
-        </section>
+        </PropertyGroup>
       );
     }
     if (selectedEffectiveControlType === 'datetime') {
       return (
-        <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">日期设置</strong>
+        <PropertyGroup title="日期设置" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <label><span>日期类型</span><Select value={typeSettings.dateMode || 'datetime'} options={dateModeOptions} onChange={(dateMode) => updateSelectedTypeSettings({ dateMode })} /></label>
           <label><span>默认值</span><Select value={typeSettings.defaultDate || 'none'} options={defaultDateOptions} onChange={(defaultDate) => updateSelectedTypeSettings({ defaultDate })} /></label>
           <label><span>禁选过去</span><Switch size="small" checked={Boolean(typeSettings.disablePast)} onChange={(disablePast) => updateSelectedTypeSettings({ disablePast })} /></label>
-        </section>
+        </PropertyGroup>
       );
     }
     if (selectedEffectiveControlType === 'upload') {
       return (
-        <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">上传设置</strong>
+        <PropertyGroup title="上传设置" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <label><span>文件数量</span><InputNumber min={1} max={20} value={typeSettings.maxFiles || 5} onChange={(maxFiles) => updateSelectedTypeSettings({ maxFiles: Number(maxFiles || 1) })} /></label>
           <label><span>单个大小</span><InputNumber min={1} max={200} addonAfter="MB" value={typeSettings.maxFileSize || 20} onChange={(maxFileSize) => updateSelectedTypeSettings({ maxFileSize: Number(maxFileSize || 1) })} /></label>
           <label><span>文件类型</span><Input allowClear value={typeSettings.fileTypes || ''} onChange={(event) => updateSelectedTypeSettings({ fileTypes: event.target.value })} /></label>
-        </section>
+        </PropertyGroup>
       );
     }
     if (selectedEffectiveControlType === 'switch') {
       return (
-        <section className="designer-prop-section">
-          <strong className="designer-prop-section-title">布尔设置</strong>
+        <PropertyGroup title="布尔设置" className="designer-prop-section" titleClassName="designer-prop-section-title">
           <label><span>默认状态</span><Switch size="small" checked={Boolean(typeSettings.defaultChecked)} onChange={(defaultChecked) => updateSelectedTypeSettings({ defaultChecked })} /></label>
           <label><span>开启文案</span><Input value={typeSettings.checkedText || '是'} onChange={(event) => updateSelectedTypeSettings({ checkedText: event.target.value })} /></label>
           <label><span>关闭文案</span><Input value={typeSettings.uncheckedText || '否'} onChange={(event) => updateSelectedTypeSettings({ uncheckedText: event.target.value })} /></label>
-        </section>
+        </PropertyGroup>
       );
     }
     return null;
@@ -3478,8 +3493,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const renderDataSourceProperties = () => {
     if (!selectedControl || !selectedControlUsesDataSource) return null;
     return (
-      <section className="designer-prop-section">
-        <strong className="designer-prop-section-title">数据来源</strong>
+      <PropertyGroup title="数据来源" className="designer-prop-section" titleClassName="designer-prop-section-title">
         <label>
           <span>来源类型</span>
           <Select
@@ -3525,22 +3539,18 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           {selectedReferenceSourceKind==='externalApi'?<Input aria-label="API 值字段" value={selectedControl.referenceValueField||'id'} onChange={event=>updateSelectedControl({referenceValueField:event.target.value})}/>:<Input readOnly value={selectedReferenceSourceKind==='static'?'value（选项值）':selectedReferenceSourceKind==='dictionary'?'value（字典项编码）':'id（记录 ID）'}/>}
 
         </label>
-        {selectedReferenceSourceKind==='externalApi'&&<><label><span>选项数组路径</span><Input aria-label="API 数组路径" placeholder="data.items；根数组留空" value={selectedControl.referenceItemsPath??'data'} onChange={event=>updateSelectedControl({referenceItemsPath:event.target.value})}/></label><small>只读 GET；接口 URL、认证头及内网访问许可在数据连接中维护，表单只保存数据源 ID 和映射。最多 1000 项。</small></>}
+        {selectedReferenceSourceKind==='externalApi'&&<><label><span>选项数组路径</span><Input aria-label="API 数组路径" placeholder="data.items；根数组留空" value={selectedControl.referenceItemsPath??'data'} onChange={event=>updateSelectedControl({referenceItemsPath:event.target.value})}/></label><PropertyHelp>只读 GET；接口 URL、认证头及内网访问许可在数据连接中维护，表单只保存数据源 ID 和映射。最多 1000 项。</PropertyHelp></>}
         {selectedReferenceSourceKind!=='static'&&<Button loading={testingOptionSource} disabled={!platformForm||!selectedControl.optionSource} onClick={async()=>{if(!platformForm||!selectedControl.fieldKey)return;setTestingOptionSource(true);try{const response=await previewFormReferenceOptions(platformForm.id,selectedControl.fieldKey,layoutControls,{});const options=response.data.data||[];Modal.info({className:'form-designer-dialog',title:`真实选项预览（${options.length} 项）`,content:<div style={{maxHeight:300,overflow:'auto'}}>{options.slice(0,20).map((option:any)=><div key={String(option.id)}>{option.label} · {String(option.id)}</div>)}{!options.length&&'当前来源没有启用的选项'}</div>});}catch(error:any){message.error(error?.response?.data?.detail||'选项读取失败');}finally{setTestingOptionSource(false);}}}>读取真实选项</Button>}
-      </section>
+      </PropertyGroup>
     );
   };
 
   const renderEncodingProperties = () => {
     if (!selectedControlUsesEncoding || !selectedEncodingRule) return null;
     return (
-      <section className="designer-prop-section designer-prop-section-primary">
-        <strong className="designer-prop-section-title">
-          <span>编码规则</span>
-          <Button className="encoding-heading-add" aria-label="新增编码规则" title="新增编码规则"
+      <PropertyGroup title="编码规则" actions={<Button className="encoding-heading-add" aria-label="新增编码规则" title="新增编码规则"
             icon={<PlusOutlined />} onClick={() => { encodingRuleTargetRef.current = { controlId: selectedControlId, rule: selectedEncodingRule }; setEncodingSettingsDraft({ ...makeEncodingRule(selectedField),
-              id: `rule-${createUuid()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] }); }} size="small" type="text" />
-        </strong>
+              id: `rule-${createUuid()}`, name: `编码规则 ${getEncodingRules(selectedEncodingRule).length + 1}`, conditions: [] }); }} size="small" type="text" />} className="designer-prop-section designer-prop-section-primary" titleClassName="designer-prop-section-title">
         {getEncodingRules(selectedEncodingRule).map((rule, index) => (
           <label key={rule.id || index}>
             <span title={rule.name}>{rule.name || `编码规则 ${index + 1}`}</span>
@@ -3559,11 +3569,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
             </div>
           </label>
         ))}
-      </section>
+      </PropertyGroup>
     );
   };
 
-  const renderPropertyHeading = (title: string, help: string) => <strong className="designer-prop-section-title"><span>{title}</span><Tooltip title={help}><button className="designer-property-help" type="button" aria-label={`${title}说明`}><QuestionCircleOutlined /></button></Tooltip></strong>;
 
   const renderDisplayProperties = () => {
     if (!selectedControl) return null;
@@ -3735,19 +3744,18 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const renderDefaultRuleProperties = () => (
-    <section className="designer-prop-section">
-      <strong className="designer-prop-section-title">{embedded ? '校验与数据保护' : '默认交互规则'}</strong>
+    <PropertyGroup title={embedded ? '校验与数据保护' : '默认交互规则'} className="designer-prop-section" titleClassName="designer-prop-section-title">
       {!embedded && <><label><span>默认显示</span>{controlRuleToggle('visible')}</label>
       <label><span>默认只读</span>{controlRuleToggle('readonly')}</label>
       {!isLayoutContainer(selectedControl || undefined) && <label><span>默认必输</span>{controlRuleToggle('required')}</label>}</>}
       <label><span>唯一校验</span>{controlRuleToggle('unique')}</label>
       <label><span>默认脱敏</span>{controlRuleToggle('masked')}</label>
       <label><span>允许复制</span>{controlRuleToggle('copyable')}</label>
-      <small>唯一校验在保存时由后台执行；脱敏作用于记录读取；复制限制作用于运行页复制和剪切。</small>
+      <PropertyHelp>唯一校验在保存时由后台执行；脱敏作用于记录读取；复制限制作用于运行页复制和剪切。</PropertyHelp>
       {!embedded && renderDefaultValueProperties()}
       {renderAssignmentRules()}
       {hiddenRequiredControls.length > 0 && <Tag color="red">存在隐藏且必填冲突</Tag>}
-    </section>
+    </PropertyGroup>
   );
 
   const renderRuleLabel = (title: string, help: string, clickOnly = false) => <span className="designer-rule-label">{title}<Tooltip title={help} trigger={clickOnly ? ['click'] : ['hover', 'focus']}><button className="designer-property-help" type="button" aria-label={`${title}说明`} onClick={event => event.preventDefault()}><QuestionCircleOutlined /></button></Tooltip></span>;
@@ -3920,8 +3928,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const renderCommonRuleProperties = () => (
-    <section className="designer-prop-section designer-common-rules">
-      {renderPropertyHeading('填写规则', '唯一性校验在正式保存时执行；脱敏控制记录读取，复制限制作用于运行页的复制和剪切。齿轮可配置条件规则。')}
+    <PropertyGroup title="填写规则" hint="唯一性校验在正式保存时执行；脱敏控制记录读取，复制限制作用于运行页的复制和剪切。齿轮可配置条件规则。" className="designer-prop-section designer-common-rules" titleClassName="designer-prop-section-title">
       <label>{renderRuleLabel('必填', '开启后，此字段必须填写才能提交。通过齿轮可设置必填条件。')}{controlRuleToggle('required')}</label>
       <label>{renderRuleLabel('只读', '开启后，使用者可查看此字段，但不能修改。通过齿轮可设置只读条件。')}{controlRuleToggle('readonly')}</label>
       <label>{renderRuleLabel('显示字段', '开启后，字段在表单中显示；关闭后隐藏。通过齿轮可设置显示条件。')}{controlRuleToggle('visible')}</label>
@@ -3930,12 +3937,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       <label>{renderRuleLabel('允许复制', '开启后，使用者可以在运行表单中复制或剪切字段内容。')}{controlRuleToggle('copyable')}</label>
       {renderDefaultValueProperties()}
       {hiddenRequiredControls.length > 0 && <Tag color="red">存在隐藏且必填冲突</Tag>}
-    </section>
+    </PropertyGroup>
   );
 
   const renderAutomationProperties = () => (
-    <section className="designer-prop-section">
-      {renderPropertyHeading('提示与联动', '占位提示显示在输入框内，帮助说明显示在字段下方；赋值规则可在关联字段变化后回填其他字段。')}
+    <PropertyGroup title="提示与联动" hint="占位提示显示在输入框内，帮助说明显示在字段下方；赋值规则可在关联字段变化后回填其他字段。" className="designer-prop-section" titleClassName="designer-prop-section-title">
       <label>
         <span>占位提示</span>
         <Input
@@ -3956,11 +3962,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       </label>
       {renderCalculationProperties()}
       {embedded && renderAssignmentRules()}
-      {!embedded && <><small>关联字段变更后，按下方已保存的赋值规则执行回填。</small>
+      {!embedded && <><PropertyHelp>关联字段变更后，按下方已保存的赋值规则执行回填。</PropertyHelp>
       <label><span>联动刷新</span><Input value="未绑定联动规则" readOnly /></label>
       <label><span>异常提示</span><Input value="使用字段校验提示" readOnly /></label>
       <label><span>角色差异</span><Input value="在权限设计中统一配置" readOnly /></label></>}
-    </section>
+    </PropertyGroup>
   );
 
   const markUnsaved = () => setHasUnsavedChanges(true);
@@ -4537,6 +4543,12 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     });
   };
 
+  useEffect(()=>{
+    if(!requestExitRef)return;
+    requestExitRef.current=warnBeforeLeave;
+    return ()=>{requestExitRef.current=null;};
+  },[requestExitRef,warnBeforeLeave]);
+
   const applyTwoColumnLayout = () => {
     commitLayoutChange((current) => current.map((control) => ({ ...control, width: 'half' })));
     message.success('已应用两列布局');
@@ -4772,7 +4784,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft]);
   useEffect(() => {
     if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig) return;
-    setDesignerContext({ form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, unsaved_changes: hasUnsavedChanges,
+    setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, unsaved_changes: hasUnsavedChanges,
       selected_field: layoutControls.find(control => control.id === selectedControlId)?.fieldKey,
       fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey,
         label: control.name, required: control.rules.required.enabled, readonly: control.rules.readonly.enabled,
@@ -4780,7 +4792,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
         width: control.width, settings: control.typeSettings, presentation: control.presentation,
         options: enumOptions(control.optionSource), encoding: control.encodingRule ? { prefix: control.encodingRule.prefix, date_pattern: control.encodingRule.datePattern, sequence_length: control.encodingRule.sequenceLength, reset_cycle: control.encodingRule.resetCycle } : undefined })) });
-  }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, selectedControlId, hasUnsavedChanges, setDesignerContext]);
+  }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.kind, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, selectedControlId, hasUnsavedChanges, setDesignerContext]);
   useEffect(() => {
     if (aiFormDraft && platformForm?.id && !hasUnsavedChanges && !isPersistingFlow) {
       navigate(`/form-settings/${platformForm.id}?tab=form&legacy=1`, { replace: true });
@@ -5167,16 +5179,16 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     const updateLayout = (patch: NonNullable<LayoutControl['layout']>) => updateSelectedControl({ layout: { ...control.layout, ...patch } });
     const parentOptions = layoutControls.filter(item => isLayoutContainer(item) && !layoutDescendants(layoutControls, control.id).has(item.id));
     const parent = layoutControls.find(item => item.id === control.parentId);
-    return <section className="designer-prop-section"><strong className="designer-prop-section-title">{isLayoutContainer(control) ? '容器配置' : '所在位置'}</strong>
+    return <PropertyGroup title={isLayoutContainer(control) ? '容器配置' : '所在位置'} className="designer-prop-section" titleClassName="designer-prop-section-title">
       <label><span>所属容器</span><Select aria-label="所属容器" value={control.parentId || 'root'} options={[{ value: 'root', label: '画布顶层' }, ...parentOptions.map(item => ({ value: item.id, label: item.name }))]} onChange={value => commitLayoutChange(current => placeLayoutControl(current, control.id, value === 'root' ? undefined : value))} /></label>
       {parent && <label><span>容器位置</span><Select aria-label="容器位置" value={control.slotId} options={layoutSlots(parent).map(slot => ({ value: slot.id, label: slot.label }))} onChange={value => { commitLayoutChange(current => placeLayoutControl(current, control.id, parent.id, value)); if (parent.controlType === 'tabs') setContainerTabs(current => ({ ...current, [parent.id]: value })); }} /></label>}
       {isLayoutContainer(control) && <>
         <label><span>内容间距</span><InputNumber aria-label="内容间距" min={0} max={40} value={control.layout?.gap ?? 12} onChange={gap => updateLayout({ gap: gap ?? 12 })} suffix="px" /></label>
         {control.controlType === 'container' && <><label><span>允许折叠</span><Switch size="small" checked={Boolean(control.layout?.collapsible)} onChange={collapsible => updateLayout({ collapsible })} /></label>{control.layout?.collapsible && <label><span>默认收起</span><Switch size="small" checked={Boolean(control.layout.defaultCollapsed)} onChange={defaultCollapsed => updateLayout({ defaultCollapsed })} /></label>}</>}
-        {control.controlType === 'two-columns' && <><label><span>列数</span><Select aria-label="列数" value={control.layout?.columns || 2} options={[2,3,4].map(value => ({ value, label: `${value} 列` }))} onChange={columns => updateLayout({ columns, ratios: Array.from({ length: columns }, (_, i) => control.layout?.ratios?.[i] || 1) })} /></label><small>减少列数时，原列中的控件会移至第一列。</small>{layoutSlots(control).map((slot, index) => <label key={slot.id}><span>{slot.label}比例</span><InputNumber min={1} max={12} value={control.layout?.ratios?.[index] || 1} onChange={value => updateLayout({ ratios: layoutSlots(control).map((_, i) => i === index ? value || 1 : control.layout?.ratios?.[i] || 1) })} /></label>)}</>}
-        {control.controlType === 'tabs' && <><div className="designer-container-tab-settings">{layoutSlots(control).map(slot => <div key={slot.id}><Input aria-label={`页签名称：${slot.label}`} value={slot.label} onChange={event => updateLayout({ tabs: layoutSlots(control).map(tab => tab.id === slot.id ? { ...tab, label: event.target.value } : tab) })} /><Button danger size="small" disabled={layoutSlots(control).length < 2} onClick={() => { const remaining = layoutSlots(control).filter(tab => tab.id !== slot.id); updateLayout({ tabs: remaining }); setContainerTabs(current => ({ ...current, [control.id]: remaining[0].id })); }}>移除</Button></div>)}</div><Button size="small" icon={<PlusOutlined />} onClick={() => updateLayout({ tabs: [...layoutSlots(control), { id: `tab-${createUuid()}`, label: `页签 ${layoutSlots(control).length + 1}` }] })}>新增页签</Button><small>移除页签后，其控件会保留在第一个页签。</small></>}
+        {control.controlType === 'two-columns' && <><label><span>列数</span><Select aria-label="列数" value={control.layout?.columns || 2} options={[2,3,4].map(value => ({ value, label: `${value} 列` }))} onChange={columns => updateLayout({ columns, ratios: Array.from({ length: columns }, (_, i) => control.layout?.ratios?.[i] || 1) })} /></label><PropertyHelp>减少列数时，原列中的控件会移至第一列。</PropertyHelp>{layoutSlots(control).map((slot, index) => <label key={slot.id}><span>{slot.label}比例</span><InputNumber min={1} max={12} value={control.layout?.ratios?.[index] || 1} onChange={value => updateLayout({ ratios: layoutSlots(control).map((_, i) => i === index ? value || 1 : control.layout?.ratios?.[i] || 1) })} /></label>)}</>}
+        {control.controlType === 'tabs' && <><div className="designer-container-tab-settings">{layoutSlots(control).map(slot => <div key={slot.id}><Input aria-label={`页签名称：${slot.label}`} value={slot.label} onChange={event => updateLayout({ tabs: layoutSlots(control).map(tab => tab.id === slot.id ? { ...tab, label: event.target.value } : tab) })} /><Button danger size="small" disabled={layoutSlots(control).length < 2} onClick={() => { const remaining = layoutSlots(control).filter(tab => tab.id !== slot.id); updateLayout({ tabs: remaining }); setContainerTabs(current => ({ ...current, [control.id]: remaining[0].id })); }}>移除</Button></div>)}</div><Button size="small" icon={<PlusOutlined />} onClick={() => updateLayout({ tabs: [...layoutSlots(control), { id: `tab-${createUuid()}`, label: `页签 ${layoutSlots(control).length + 1}` }] })}>新增页签</Button><PropertyHelp>移除页签后，其控件会保留在第一个页签。</PropertyHelp></>}
       </>}
-    </section>;
+    </PropertyGroup>;
   };
 
   const renderCanvasControl = (control: LayoutControl, trial = false, inheritedReadonly = false): React.ReactNode => {
@@ -5342,7 +5354,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const renderTableProperties = () => {
     if (!selectedControl || !['editable-table','readonly-table'].includes(selectedControl.controlType)) return null;
     const editable=selectedControl.controlType==='editable-table';const settings=selectedControl.typeSettings||{};const columns=settings.columns||[];
-    return <section className="designer-prop-section"><strong className="designer-prop-section-title">{editable?'明细表配置':'关联表配置'}</strong>
+    return <PropertyGroup title={editable?'明细表配置':'关联表配置'} className="designer-prop-section" titleClassName="designer-prop-section-title">
       <small>{editable?'绑定 JSON 字段后，明细随主记录一起保存。':'绑定 JSON 字段并填写来源表单 ID，按当前用户权限读取关联记录。'}</small>
       {!editable&&<label><span>来源表单 ID</span><InputNumber min={1} value={settings.sourceFormId} onChange={value=>updateSelectedTypeSettings({sourceFormId:value||undefined})}/></label>}
       {columns.map((column,index)=><div className="designer-detail-column" key={index}>
@@ -5354,7 +5366,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       </div>)}
       <Button size="small" icon={<PlusOutlined/>} onClick={()=>updateSelectedTypeSettings({columns:[...columns,{key:`column_${columns.length+1}`,label:`字段 ${columns.length+1}`,type:'string'}]})}>新增明细列</Button>
       {editable&&<><label><span>允许新增行</span><Switch size="small" checked={settings.allowAdd!==false} onChange={allowAdd=>updateSelectedTypeSettings({allowAdd})}/></label><label><span>允许删除行</span><Switch size="small" checked={settings.allowDelete!==false} onChange={allowDelete=>updateSelectedTypeSettings({allowDelete})}/></label><label><span>最少行数</span><InputNumber min={0} max={200} value={settings.minRows||0} onChange={value=>updateSelectedTypeSettings({minRows:value||0})}/></label><label><span>最多行数</span><InputNumber min={1} max={200} value={settings.maxRows||200} onChange={value=>updateSelectedTypeSettings({maxRows:value||200})}/></label></>}
-    </section>;
+    </PropertyGroup>;
   };
 
   const activeRule = ruleModal && selectedControl?.id === ruleModal.controlId
@@ -6154,9 +6166,20 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     );
   }
 
+  const sourcePortal = (node:React.ReactNode,target:HTMLElement|null|undefined) => workspaceTargets ? target?createPortal(node,target):null : node;
+  const sourceStatus = hasUnsavedChanges?'未保存修改':viewConfigMeta.status==='published'?'与线上版本一致':'草稿待发布';
   return (
-    <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}`}>
-      <header className="form-designer-toolbar">
+    <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}${workspaceTargets?' form-designer-unified':''}`}>
+      {workspaceTargets&&<>
+        {sourcePortal(<Tooltip title={sourceStatus}><span className={'analytics-save-indicator'+(hasUnsavedChanges?' is-dirty':viewConfigMeta.status!=='published'?' is-pending':'')} role="status" aria-label={sourceStatus} tabIndex={0}/></Tooltip>,workspaceTargets.status)}
+        {sourcePortal(<Space size={0}>
+          <><Tooltip title="撤销布局修改"><Button type="text" size="small" aria-label="撤销布局修改" icon={<UndoOutlined/>} disabled={activeTab!=='form'||!history.length||isPersistingFlow} onClick={undoLayoutChange}/></Tooltip><Tooltip title="重做布局修改"><Button type="text" size="small" aria-label="重做布局修改" icon={<RedoOutlined/>} disabled={activeTab!=='form'||!future.length||isPersistingFlow} onClick={redoLayoutChange}/></Tooltip></>
+          <Tooltip title="试填表单"><Button type="text" size="small" aria-label="试填表单" icon={<EyeOutlined/>} disabled={isPersistingFlow} onClick={()=>setPreviewOpen(true)}/></Tooltip>
+          <Tooltip title="数据源版本管理"><Button type="text" size="small" aria-label="数据源版本管理" icon={<HistoryOutlined/>} disabled={isPersistingFlow} onClick={()=>setVersionPanelOpen(true)}/></Tooltip>
+        </Space>,workspaceTargets.actions)}
+        {sourcePortal(<div className="analytics-settings-actions"><div><Button icon={<SaveOutlined/>} loading={isPersistingFlow} onClick={saveDraft}>保存草稿</Button><Button type="primary" icon={<CheckCircleOutlined/>} loading={isPersistingFlow} onClick={publishConfig}>发布更改</Button></div></div>,workspaceTargets.footer)}
+      </>}
+      {!workspaceTargets&&<header className="form-designer-toolbar">
         <div className="form-designer-title">
           {embedded ? <>
             <Tooltip title="返回数据列表"><Button className="form-editor-back" aria-label="返回数据" icon={<ArrowLeftOutlined />} disabled={isPersistingFlow} onClick={warnBeforeLeave} /></Tooltip>
@@ -6178,9 +6201,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           activeKey={activeTab}
           onChange={(key) => {
             setActiveTab(key as DesignerTab);
+            if(key==='form'||key==='flow')onTabChange?.(key);
             setSelectedControlId('');
           }}
-          items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', filter: '列表与筛选', flow: '流程与审批', permission: '权限管理' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
+          items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', flow: '流程与审批' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
         />
         <Space className="form-designer-actions" size={4} wrap={false}>
           {!embedded && <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>返回表单</Button>}
@@ -6199,7 +6223,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           {<Button size="small" title={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} aria-label={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft}>{aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'}</Button>}
           {<Button className="designer-publish-button" size="small" type="primary" disabled={Boolean(aiFormDraft && !platformForm)} icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>{embedded ? '发布更改' : '发布配置'}</Button>}
         </Space>
-      </header>
+      </header>}
 
       <section className={`form-designer-shell ${isNoLeftTab ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' || activeTab === 'style' || activeTab === 'dataset' || activeTab === 'dashboard' ? 'form-designer-shell-data-view' : ''} ${activeTab === 'flow' ? 'form-designer-shell-flow' : ''} ${activeTab === 'permission' ? 'form-designer-shell-permission' : ''}`}>
         {!isNoLeftTab && (
@@ -6422,14 +6446,14 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                   {layoutControls.filter(control => !control.parentId).map(control => renderCanvasControl(control))}
                   {isCanvasDragActive && !dropHint && <div className="canvas-drop-end-indicator">拖到这里放在末尾</div>}
                 </div>
-                <div className="create-form-actions">
+                {!workspaceTargets&&<div className="create-form-actions">
                   <span className="designer-business-actions-note">{embedded ? '调整完成后，先试填检查效果' : '业务表单按钮区 · 预览时可体验'}</span>
                   {embedded ? <Button className="form-editor-preview-action" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>试填表单</Button> : <div className="create-form-action-buttons">
                     <Button disabled title="表单设计预览">取消</Button>
                     <Button disabled title="设计预览，不写入业务数据">保存草稿</Button>
                     <Button type="primary" disabled title="设计预览，不提交业务数据">提交</Button>
                   </div>}
-                </div>
+                </div>}
               </div>
             </div>
           )}
@@ -6449,6 +6473,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
           {activeTabKey === 'flow' && (
             <ProfessionalFlowDesigner
+              externalInspector={Boolean(workspaceTargets)} propertiesTarget={workspaceTargets?.properties}
               config={professionalFlowConfig}
               fields={baseConfig.fields.map((field) => ({
                 key: field.key,
@@ -6758,17 +6783,17 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         </main>
 
         {!isAnalysisDesigner && !(['permission', 'filter', 'flow', 'approval'] as DesignerTab[]).includes(activeTab) && (
-        <aside className="form-designer-right property-inspector">
+        sourcePortal(<aside className="form-designer-right property-inspector">
           <PropertyInspectorHeader title={selectedControl ? `${isLayoutContainer(selectedControl) ? '容器' : selectedControl.fieldKey ? '字段' : '控件'}属性` : '画布属性'} context={selectedControl?.name || baseConfig.name} />
           {selectedControl ? (
             <div className="designer-props">
               {renderControlIdentityProperties()}
               {renderDisplayProperties()}
               {selectedControl.controlType === 'divider' ? <>
-                <section className="designer-prop-section"><strong className="designer-prop-section-title">显示设置</strong><label><span>显示分割符</span>{controlRuleToggle('visible')}</label></section>
+                <PropertyGroup title="显示设置" className="designer-prop-section" titleClassName="designer-prop-section-title"><label><span>显示分割符</span>{controlRuleToggle('visible')}</label></PropertyGroup>
                 {renderContainerProperties()}
               </> : embedded ? <>
-                {isLayoutContainer(selectedControl) ? <>{renderContainerProperties()}<section className="designer-prop-section"><strong className="designer-prop-section-title">容器交互</strong><label><span>显示容器</span>{controlRuleToggle('visible')}</label><label><span>只读</span>{controlRuleToggle('readonly')}</label><small>同时作用于容器内的字段。</small></section></> : <>{renderCommonRuleProperties()}{renderTypeSpecificProperties()}{renderAutomationProperties()}{renderDataSourceProperties()}</>}
+                {isLayoutContainer(selectedControl) ? <>{renderContainerProperties()}<PropertyGroup title="容器交互" hint="同时作用于容器内的字段。" className="designer-prop-section" titleClassName="designer-prop-section-title"><label><span>显示容器</span>{controlRuleToggle('visible')}</label><label><span>只读</span>{controlRuleToggle('readonly')}</label></PropertyGroup></> : <>{renderCommonRuleProperties()}{renderTypeSpecificProperties()}{renderAutomationProperties()}{renderDataSourceProperties()}</>}
                 {!isLayoutContainer(selectedControl) && <>
                   {renderContainerProperties()}
                   {renderEncodingProperties()}
@@ -6776,7 +6801,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 </>}
               </> : <>
                 {renderContainerProperties()}
-                {isLayoutContainer(selectedControl) ? <section className="designer-prop-section"><strong className="designer-prop-section-title">容器交互</strong><label><span>默认显示</span>{controlRuleToggle('visible')}</label><label><span>默认只读</span>{controlRuleToggle('readonly')}</label><small>容器的显示和只读规则同时作用于内部控件。</small></section> : renderDefaultRuleProperties()}
+                {isLayoutContainer(selectedControl) ? <PropertyGroup title="容器交互" hint="容器的显示和只读规则同时作用于内部控件。" className="designer-prop-section" titleClassName="designer-prop-section-title"><label><span>默认显示</span>{controlRuleToggle('visible')}</label><label><span>默认只读</span>{controlRuleToggle('readonly')}</label></PropertyGroup> : renderDefaultRuleProperties()}
                 {renderTypeSpecificProperties()}
                 {!isLayoutContainer(selectedControl) && renderAutomationProperties()}
                 {renderDataSourceProperties()}
@@ -6786,42 +6811,36 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
             </div>
           ) : (
             <div className="designer-props">
-              <button type="button" className={`designer-validation-summary ${localErrorCount ? 'has-errors' : ''}`} onClick={() => setValidationOpen(true)}>
-                <span><CheckCircleOutlined /> 本地配置检查 <span>查看规则 →</span></span>
-                <small>{localErrorCount} 个阻断项 · {localWarningCount} 个提醒</small>
-                <small className="designer-validation-trigger">随配置修改自动更新 · 发布时另做服务器检查</small>
-              </button>
-              <details className="designer-prop-section designer-canvas-property-group" open>
-                <summary className="designer-prop-section-title">基本信息</summary>
-                <label><span>表单名称</span><Input value={baseConfig.name} readOnly /></label>
-                <label><span>新增标题</span><Input value={baseConfig.createTitle} readOnly /></label>
-                <label className="designer-description-row"><span>表单说明</span><Input.TextArea value={baseConfig.description} readOnly autoSize={{ minRows: 2, maxRows: 5 }} /></label>
-              </details>
-              <details className="designer-prop-section designer-canvas-property-group" open>
-                <summary className="designer-prop-section-title">布局设置</summary>
-                <label><span>默认列数</span><Select value={String(canvasSettings.columns)} onChange={value=>{const columns=Number(value);setCanvasSettings(current=>({...current,columns}));commitLayoutChange(current=>current.map(c=>!c.parentId&&!isLayoutContainer(c)&&c.controlType!=='divider'?{...c,width:columns===1?'full':columns===3?'third':'half'}:c));}} options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></label>
-                <label><span>字段间距</span><Select value={String(canvasSettings.gap)} onChange={value=>{setCanvasSettings(current=>({...current,gap:Number(value)}));setHasUnsavedChanges(true);}} options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></label>
-              </details>
-              <details className="designer-prop-section designer-canvas-property-group" open>
-                <summary className="designer-prop-section-title">数据绑定</summary>
-                <label><span>数据表</span><Input value={baseConfig.dataSource} readOnly /></label>
-                <label><span>主键字段</span><Input value={baseConfig.primaryKey} readOnly /></label>
-              </details>
-              <details className="designer-prop-section designer-canvas-property-group">
-                <summary className="designer-prop-section-title">系统容量规则</summary>
-                <label><span>字段数量</span><Input aria-label="表单字段数量上限" readOnly value={`${baseConfig.fields.length} / ${DEFAULT_FORM_LIMITS.fields} 个`} /></label>
-                <label><span>单条记录</span><Input aria-label="单条记录容量上限" readOnly value="2 MiB" /></label>
-                <small className="designer-capacity-note">系统默认，设计中不可修改。按实际填写的数据校验，不预占空间；附件文件不计入记录正文。</small>
-              </details>
-              {recommendedRules.length > 0 && <details className="designer-prop-section designer-canvas-property-group" open>
-                <summary className="designer-prop-section-title">内置配置参考</summary>
+              <PropertyGroup title="配置检查" hint="随配置修改自动更新；发布时另做服务器检查。" actions={<Button type="text" size="small" onClick={()=>setValidationOpen(true)}>查看规则</Button>}>
+                <PropertyRow label="阻断项"><Input readOnly value={`${localErrorCount} 项`} status={localErrorCount?'error':undefined}/></PropertyRow>
+                <PropertyRow label="提醒"><Input readOnly value={`${localWarningCount} 项`}/></PropertyRow>
+              </PropertyGroup>
+              <PropertyGroup title="基本信息" defaultOpen={true} className="designer-canvas-property-group">
+                <PropertyRow label="表单名称"><Input value={baseConfig.name} readOnly /></PropertyRow>
+                <PropertyRow label="新增标题"><Input value={baseConfig.createTitle} readOnly /></PropertyRow>
+                <PropertyRow label="表单说明" className="designer-description-row"><Input.TextArea value={baseConfig.description} readOnly autoSize={{ minRows: 2, maxRows: 5 }} /></PropertyRow>
+              </PropertyGroup>
+              <PropertyGroup title="布局设置" defaultOpen={true} className="designer-canvas-property-group">
+                <PropertyRow label="默认列数"><Select value={String(canvasSettings.columns)} onChange={value=>{const columns=Number(value);setCanvasSettings(current=>({...current,columns}));commitLayoutChange(current=>current.map(c=>!c.parentId&&!isLayoutContainer(c)&&c.controlType!=='divider'?{...c,width:columns===1?'full':columns===3?'third':'half'}:c));}} options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></PropertyRow>
+                <PropertyRow label="字段间距"><Select value={String(canvasSettings.gap)} onChange={value=>{setCanvasSettings(current=>({...current,gap:Number(value)}));setHasUnsavedChanges(true);}} options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></PropertyRow>
+              </PropertyGroup>
+              <PropertyGroup title="数据绑定" defaultOpen={true} className="designer-canvas-property-group">
+                <PropertyRow label="数据表"><Input value={baseConfig.dataSource} readOnly /></PropertyRow>
+                <PropertyRow label="主键字段"><Input value={baseConfig.primaryKey} readOnly /></PropertyRow>
+              </PropertyGroup>
+              <PropertyGroup title="系统容量规则" defaultOpen={false} className="designer-canvas-property-group">
+                <PropertyRow label="字段数量"><Input aria-label="表单字段数量上限" readOnly value={`${baseConfig.fields.length} / ${DEFAULT_FORM_LIMITS.fields} 个`} /></PropertyRow>
+                <PropertyRow label="单条记录"><Input aria-label="单条记录容量上限" readOnly value="2 MiB" /></PropertyRow>
+                <PropertyHelp>系统默认，设计中不可修改。按实际填写的数据校验，不预占空间；附件文件不计入记录正文。</PropertyHelp>
+              </PropertyGroup>
+              {recommendedRules.length > 0 && <PropertyGroup title="内置配置参考" defaultOpen={true} className="designer-canvas-property-group">
                 <small className="designer-recommendation-note"><strong>来源：平台预置规则</strong><span>按字段名称匹配，仅供参考；需手动配置后生效。</span></small>
                 {recommendedRules.map((rule) => <div className="designer-rule-pill" key={rule}>{rule}</div>)}
-              </details>}
+              </PropertyGroup>}
 
             </div>
           )}
-        </aside>
+        </aside>,workspaceTargets?.properties)
         )}
       </section>
 
@@ -7102,6 +7121,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       </Modal>
 
       <VersionManager
+        title={workspaceTargets ? '数据源版本管理' : '版本管理'}
         open={versionPanelOpen}
         form={platformForm}
         name={baseConfig.name}

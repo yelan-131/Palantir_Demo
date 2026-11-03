@@ -855,7 +855,7 @@ function generateUnavailableReply(): AssistantReply {
 
 export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
-  const { knowledgeContext, enqueuePageAction, designerContext } = useAiWorkbench();
+  const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext } = useAiWorkbench();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [sessions, setSessions] = useState<AgentSession[]>([]);
@@ -1217,6 +1217,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         page: AI_WORKBENCH_PAGE,
         context: runtimeContext,
       }, ({ event, data }) => {
+        if (event === 'ui.action.cancel') {
+          if (typeof data.id === 'string') finishPageAction(data.id);
+          return;
+        }
         if (event === 'ui.action') {
           if (typeof data.draft_id === 'string') setNativeDraftReview({ sessionId, draftId: data.draft_id });
           enqueuePageAction(data as unknown as PageAction);

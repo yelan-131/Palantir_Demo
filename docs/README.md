@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-28
 
+Pending development release: [0.3.19 — AI 看板、组件页面与流程下发增强](operations/release-0.3.19.md), updated 2026-11-03; includes dashboard AI usage, page permissions, workflow dispatch, and incremental registry activation instructions.
+
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
 are product design or Palantir-inspired reference material.

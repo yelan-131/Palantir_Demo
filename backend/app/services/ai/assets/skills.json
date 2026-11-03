@@ -204,5 +204,49 @@
     "output_schema": {
       "type": "answer"
     }
+  },
+  "analysis.manage_dashboard": {
+    "name": "analysis.manage_dashboard",
+    "title": "管理业务看板",
+    "description": "复用平台看板来源、指标、权限、草稿与发布能力。",
+    "capability_level": "agentic",
+    "risk_level": "high",
+    "default_tool": "dashboards.preview_source",
+    "allowed_tools": [
+      "dashboards.preview_source",
+      "dashboards.create",
+      "dashboards.get",
+      "dashboards.save_draft",
+      "dashboards.publish"
+    ],
+    "required_permissions": [
+      "config"
+    ],
+    "confirmation_policy": "confirm",
+    "permission_capability": "config",
+    "domain": "analysis",
+    "output_schema": {
+      "type": "answer"
+    }
+  },
+  "analysis.query_dashboard": {
+    "name": "analysis.query_dashboard",
+    "title": "查询看板指标",
+    "description": "复用平台看板来源、指标、权限、草稿与发布能力。",
+    "capability_level": "qa",
+    "risk_level": "low",
+    "default_tool": "dashboards.query",
+    "allowed_tools": [
+      "dashboards.query"
+    ],
+    "required_permissions": [
+      "qa"
+    ],
+    "confirmation_policy": "none",
+    "permission_capability": "qa",
+    "domain": "analysis",
+    "output_schema": {
+      "type": "answer"
+    }
   }
 }

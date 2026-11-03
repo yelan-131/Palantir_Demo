@@ -43,3 +43,10 @@
 .property-inspector-group:not([open])>:not(summary) { display:none; }
 .form-designer-right.property-inspector .designer-props .property-inspector-advanced>summary { justify-content:flex-start;gap:7px;padding:8px 10px;font-size:11px; }
 .form-designer-right.property-inspector .designer-props .property-inspector-advanced>summary::after { display:none; }
+
+.property-inspector-help {display:inline-flex;align-items:center;justify-content:center;width:18px;height:20px;padding:0;border:0;background:transparent;color:var(--mf-faint);font:inherit;font-size:12px;cursor:help;flex:none;vertical-align:middle;}
+.property-inspector-group-title>.property-inspector-help {margin-inline-start:auto;}
+.property-inspector-help:focus-visible {outline:2px solid var(--mf-primary);outline-offset:2px;border-radius:3px;}
+
+.property-inspector-group-actions {display:inline-flex;align-items:center;gap:2px;margin-inline-start:auto;}
+.property-inspector-group-actions .ant-btn {width:24px;height:24px;padding:0;}

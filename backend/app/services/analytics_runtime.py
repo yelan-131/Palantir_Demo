@@ -188,7 +188,7 @@ def filter_rows(rows, filters):
             for key, value in filters.items())]
 
 
-def build_data(design, datasets, fields_by_dataset, filters=None, widget_filters=None, limit=500):
+def build_data(design, datasets, fields_by_dataset, filters=None, widget_filters=None, limit=500, *, widget_rows=None):
     filters, widget_filters = filters or {}, widget_filters or {}
     metrics = {item['id']: item for item in design.get('metrics') or []}
     metric_values, errors, widget_data = {}, [], {}
@@ -219,7 +219,10 @@ def build_data(design, datasets, fields_by_dataset, filters=None, widget_filters
         metric_values.update(values(rows, list(metrics), dataset_id))
     for widget in design.get('widgets') or []:
         dataset_id = widget.get('datasetId')
-        rows = filter_rows(filtered.get(dataset_id, []), widget_filters.get(widget['id'], {}))
+        rows = filtered.get(dataset_id, [])
+        if widget_rows is not None and widget['id'] in widget_rows:
+            rows = filter_rows(widget_rows[widget['id']], {field: value for field, value in filters.items() if ('date' if field=='dateRange' else field) in fields_by_dataset.get(dataset_id, set())})
+        rows = filter_rows(rows, widget_filters.get(widget['id'], {}))
         ids, dimension = widget.get('metricIds') or [], widget.get('dimension')
         groups = defaultdict(list)
         if dimension and dimension in fields_by_dataset.get(dataset_id, set()):
@@ -227,6 +230,8 @@ def build_data(design, datasets, fields_by_dataset, filters=None, widget_filters
         series = [{'name': name, **values(group, ids, dataset_id)} for name, group in sorted(groups.items())]
         if widget.get('type') == 'rank-table': series.sort(key=lambda point: point.get(ids[0]) or 0 if ids else 0, reverse=True)
         widget_data[widget['id']] = {'metricValues': values(rows, ids, dataset_id), 'series': series[:limit], 'rows': rows[:limit], 'total': len(rows), 'truncated': len(series) > limit or len(rows) > limit}
+        if widget_rows is not None and widget['id'] in widget_rows:
+            metric_values.update(widget_data[widget['id']]['metricValues'])
     options = {key: sorted({str(row[key]) for rows in scoped.values() for row in rows if key in row and row[key] is not None})[:500] for key in design.get('globalFilters') or [] if key != 'dateRange'}
     return {'metricValues': metric_values, 'widgets': widget_data, 'filterOptions': options, 'errors': errors}
 

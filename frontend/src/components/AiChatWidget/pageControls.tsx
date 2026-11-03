@@ -42,12 +42,17 @@ export function AiPageActionRouter() {
   const currentLocation = useRef(location);
   currentLocation.current = location;
   const action = pageActions[0];
+  const activeAction = useRef<string>();
+  activeAction.current = action?.id;
   useEffect(() => {
     if (!action) return;
     const timer = window.setTimeout(() => {
-      if (!running.current.has(action.id)) {
+      if (activeAction.current === action.id) {
+        activeAction.current = undefined;
         const atDesigner = currentLocation.current.pathname === (action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`);
-        void acknowledgePageAction(action.id, { ok: false, error: atDesigner ? '设计器尚未加载完成，请稍后重试。' : '未能进入设计器，请重试；如果页面出现未保存修改提示，请先处理该提示。' }).catch(() => undefined);
+        const error = running.current.has(action.id) ? '设计器操作未及时完成，已停止等待；页面可能保留部分修改，请检查当前草稿。' : atDesigner ? '设计器尚未加载完成，请稍后重试。' : '未能进入设计器，请检查当前页面状态后重试。';
+        void acknowledgePageAction(action.id, { ok: false, error }).catch(() => undefined);
+        running.current.delete(action.id);
         navigating.current.delete(action.id);
         finishPageAction(action.id);
       }
@@ -75,9 +80,10 @@ export function AiPageActionRouter() {
     void (async () => {
       try {
         const state = await controller(action);
+        if (activeAction.current !== action.id) return;
         await acknowledgePageAction(action.id, { ok: true, state });
       } catch (error) {
-        await acknowledgePageAction(action.id, { ok: false, error: error instanceof Error ? error.message : '页面操作失败' }).catch(() => undefined);
+        if (activeAction.current === action.id) await acknowledgePageAction(action.id, { ok: false, error: error instanceof Error ? error.message : '页面操作失败' }).catch(() => undefined);
       } finally {
         running.current.delete(action.id);
         navigating.current.delete(action.id);

@@ -363,7 +363,7 @@ def _form_layout_field_names(config: Optional[dict]) -> list[str]:
 
 
 async def _scope_runtime_view_tabs(payload: dict, user: dict, db: AsyncSession, scope: str) -> dict:
-    if scope != 'list':
+    if scope not in {'list', 'filters'}:
         return payload
     from app.core.permissions import get_user_org_ids
     from app.services.form_view_tabs import runtime_view_config
@@ -386,7 +386,7 @@ def _scoped_form_payload(payload: dict, scope: str) -> dict:
     scoped = copy.deepcopy(payload)
     fields = [field for field in (scoped.get("fields") or []) if not field.get("archived")]
     config = scoped.get("config") if isinstance(scoped.get("config"), dict) else {}
-    if scope == "list":
+    if scope in {"list", "filters"}:
         view = config.get('viewConfig') or {}
         views = view.get('tabs') if isinstance(view.get('tabs'), list) else [view]
         referenced_names = {item.get('fieldName') for current in views for item in [
@@ -394,7 +394,7 @@ def _scoped_form_payload(payload: dict, scope: str) -> dict:
         ] if isinstance(item, dict)}
         scoped["fields"] = [
             field for field in fields
-            if field.get("visible_in_list") or field.get("searchable") or field.get("sortable") or field.get("field_name") in referenced_names
+            if scope == "filters" or field.get("visible_in_list") or field.get("searchable") or field.get("sortable") or field.get("field_name") in referenced_names
         ]
         scoped["config"] = {
             "viewConfig": config.get("viewConfig"),
@@ -568,6 +568,10 @@ async def _start_form_workflows(
             state['execution_node_ids'] = [step['node_id'] for step in steps]
         _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
         title = _workflow_instance_title(form, record_payload, binding.config)
+        from app.services.workflow_dispatch import enqueue
+        enqueue(state, steps, 0, first_step_index if any(step.get('type')=='approval' for step in steps) else len(steps))
+        if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps):
+            state.update(current_node='end',current_step=max(0,len(steps)-1))
         instance = WorkflowInstance(
             tenant_id=tenant_id,
             workflow_id=workflow_def.id,
@@ -576,7 +580,7 @@ async def _start_form_workflows(
             initiator_id=initiator_id,
             form_data=json.dumps(form_data, ensure_ascii=False, default=str),
             workflow_state=json.dumps(state, ensure_ascii=False, default=str),
-            status="pending",
+            status="approved" if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps) else "pending",
         )
         db.add(instance)
         await db.flush()
@@ -1321,7 +1325,7 @@ async def get_form_version(
 async def get_form_by_code(
     form_code: str,
     schema: str = Query(default="draft", pattern="^(draft|published)$"),
-    scope: str = Query(default="designer", pattern="^(list|create|edit|designer)$"),
+    scope: str = Query(default="designer", pattern="^(list|filters|create|edit|designer)$"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -1338,7 +1342,7 @@ async def get_form_by_code(
 async def get_form(
     form_id: int,
     schema: str = Query(default="draft", pattern="^(draft|published)$"),
-    scope: str = Query(default="designer", pattern="^(list|create|edit|designer)$"),
+    scope: str = Query(default="designer", pattern="^(list|filters|create|edit|designer)$"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):

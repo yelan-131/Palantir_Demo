@@ -5,7 +5,7 @@ import json
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, case, select, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -71,6 +71,12 @@ def _record_matches_filters(record, fields: list, filters: list[dict]) -> bool:
                 return False
         elif op == "equals":
             if str(actual) != str(expected):
+                return False
+        elif op == "in":
+            if not isinstance(expected, list) or not expected or len(expected)>100:
+                raise HTTPException(400, 'Invalid selection filter')
+            actual_values = actual if isinstance(actual, list) else [actual]
+            if not any(str(value) == str(choice) for value in actual_values for choice in expected):
                 return False
         elif op == "between":
             if not isinstance(expected, list) or len(expected) != 2:
@@ -157,7 +163,20 @@ def _apply_record_search_query(query, record_model, fields: list, search: Option
     return query.where(or_(*conditions)), True
 
 
-def _apply_record_filters_query(query, record_model, fields: list, filters: list[dict]):
+def _selection_filter_clause(expr, expected, dialect="sqlite"):
+    if not isinstance(expected, list) or not expected or len(expected)>100:
+        raise HTTPException(400, 'Invalid selection filter')
+    choices = [str(value) for value in expected]
+    array_text = case((expr.like('[%'), expr), else_='[]')
+    if dialect == 'postgresql':
+        from sqlalchemy.dialects.postgresql import JSONB
+        elements = func.jsonb_array_elements_text(cast(array_text, JSONB)).table_valued('value').render_derived(name='filter_choices')
+    else:
+        elements = func.json_each(array_text).table_valued('value').alias('filter_choices')
+    return or_(expr.in_(choices), select(1).select_from(elements).where(cast(elements.c.value, String).in_(choices)).exists())
+
+
+def _apply_record_filters_query(query, record_model, fields: list, filters: list[dict], dialect="sqlite"):
     if not filters:
         return query, True
     allowed_fields = _queryable_field_names(fields)
@@ -172,8 +191,10 @@ def _apply_record_filters_query(query, record_model, fields: list, filters: list
         expr = _json_text_expr(record_model.data, field)
         if op == "contains":
             query = query.where(func.lower(expr).like(f"%{str(expected).lower()}%"))
+        elif op == "in":
+            query = query.where(_selection_filter_clause(expr, expected, dialect))
         elif op == "equals":
-            query = query.where(expr == str(expected))
+            query = query.where(expr.in_(['true','1'] if expected else ['false','0']) if isinstance(expected,bool) else expr == str(expected))
         elif op == "between":
             if not isinstance(expected, list) or len(expected) != 2:
                 raise HTTPException(400, f"Invalid between filter for field: {field}")

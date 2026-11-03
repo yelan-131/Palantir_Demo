@@ -16,6 +16,8 @@ def validate_graph(config):
     nodes, edges = config['nodes'], config.get('edges') or []
     if not isinstance(nodes, list) or not isinstance(edges, list) or any(not isinstance(n, dict) for n in nodes) or any(not isinstance(e, dict) for e in edges):
         raise HTTPException(422, '流程节点和连线必须为对象列表')
+    from app.services.workflow_dispatch import validate_actions
+    validate_actions(config)
     if len(nodes) > 1000 or len(edges) > 4000:
         raise HTTPException(422, '流程节点或连线数量超出限制')
     ids = [n.get('id') for n in nodes]

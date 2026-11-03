@@ -1,10 +1,17 @@
 # Configuration Lifecycle Design Notes
 
-Last updated: 2026-05-25
+Last updated: 2026-10-28
 
 Status: design. This document defines recommended lifecycle rules for
 configurable assets. Current implementation details should be verified against
 the relevant API and UI modules.
+
+Implementation correction (0.3.18): this document remains lifecycle design guidance.
+Current physical form creation/add-field paths can provision tables/columns before
+publication; JSON and physical storage are both implemented. Statements below
+calling physical provisioning future work or all saves metadata-only are historical
+design assumptions, not current behavior. See [Form Management](form-management.md)
+and the [current capability audit](../reference/business-form/README.md).
 
 Scope: Application Management, Form Management, Application Assembly
 

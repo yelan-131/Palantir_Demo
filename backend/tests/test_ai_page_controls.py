@@ -84,6 +84,31 @@ DRAFT = {'name': '入库单', 'code': 'new_inbound', 'fields': [
 ]}
 
 
+@pytest.mark.asyncio
+async def test_timeout_cancels_browser_queue_without_claiming_an_unsaved_dialog(monkeypatch):
+    from app.services.ai import page_controls as mod
+    from app.services.ai.harness_runtime import PlatformBridge
+    db = AsyncMock()
+    db.scalar.return_value = None
+    manager = AsyncMock(); manager.__aenter__.return_value = db
+    monkeypatch.setattr(mod, 'db_session', lambda: manager)
+    monkeypatch.setattr(mod, 'decide_ai_permission', lambda *args, **kwargs: SimpleNamespace(allowed=True))
+    bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
+    bridge.event_sink = AsyncMock()
+    async def timeout(future, timeout):
+        future.cancel()
+        raise asyncio.TimeoutError()
+    monkeypatch.setattr(mod.asyncio, 'wait_for', timeout)
+    result = await mod.call_page_control(bridge, {'action': 'draft_new', 'draft': DRAFT})
+    calls = bridge.event_sink.await_args_list
+    assert [call.args[0] for call in calls] == ['ui.action', 'ui.action.cancel']
+    assert calls[0].args[1]['id'] == calls[1].args[1]['id']
+    assert result['status'] == 'blocked'
+    assert '未检测到' in result['message']
+    assert not bridge.page_actions
+    db.commit.assert_not_awaited()
+
+
 @pytest.mark.parametrize('draft', [
     {**DRAFT, 'fields': []},
     {**DRAFT, 'code': '../overwrite'},

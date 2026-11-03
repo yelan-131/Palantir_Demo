@@ -1,5 +1,9 @@
 # AI Capability Map
 
+当前 DSH / Skills / Tools 的工程分工、代码偏差及整改顺序以
+[AI Agent Skill/Tool Contract 的 2026-11-03 当前规范](ai-agent-skill-contract.md) 为准。
+下文保留早期能力规划；其中运行模式和默认配置说明不代表当前实现。
+
 Last updated: 2026-05-29
 
 Status: roadmap/design with implemented scaffolding called out. This document

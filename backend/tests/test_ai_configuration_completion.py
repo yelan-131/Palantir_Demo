@@ -22,6 +22,9 @@ from app.services.ai.configuration_completion import expects_configuration, REPO
     ('配置是什么意思', {}, False),
     ('请问如何创建表单？', {}, False),
     ('不要创建表单，先聊一下', {}, False),
+    ('这是AI验收测试，仅咨询，不创建或修改任何数据。请说明当前页面用途，并说明你是否已经为我创建了表单或提交了审批。', {}, False),
+    ('本轮纯咨询，请说明创建表单的条件', {}, False),
+    ('不创建或修改任何数据，请说明表单配置的作用', {}, False),
     ('取消刚才的配置', {}, False),
     ('Do not create a form', {}, False),
     ('这个页面是干什么的？', {}, False),
@@ -54,6 +57,29 @@ def proposal():
     from app.services.ai.schemas import SkillAction
     return SkillAction(skill='forms.create_form_definition', title='新建表单', risk_level='high',
         payload={'form': {'name': '入库单', 'code': 'inbound'}, 'fields': []}, requires_confirmation=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('has_pending', [False, True])
+async def test_output_limit_preserves_prepared_actions_without_retry(runtime, monkeypatch, has_pending):
+    mod, settings = runtime
+    from app.services.ai.schemas import AgentRequest
+    async def run(*args, **kwargs):
+        if has_pending:
+            mod.BRIDGES[kwargs['token']].pending.append(proposal())
+        return result('截断的回复', finish='max-tokens')
+    runner = AsyncMock(side_effect=run)
+    monkeypatch.setattr(mod, 'run_sdk', runner)
+    response = await mod.HarnessRuntime().run(AgentRequest(message='帮我创建入库表单'), user=USER)
+    assert runner.await_count == 1
+    assert response.requires_confirmation is has_pending
+    assert len(response.actions) == int(has_pending)
+    if has_pending:
+        assert response.risk_level == 'high'
+        assert '后续操作可能尚未生成' in response.answer
+    else:
+        assert str(settings['maxTokens']) in response.answer
+        assert response.items[-1]['status'] == 'failed'
 
 
 @pytest.mark.asyncio
@@ -133,7 +159,7 @@ async def test_actual_tool_validation_failure_is_not_retried_or_hidden(runtime, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('message,mode', [('如何创建表单', 'qa'), ('帮我创建入库表单', 'pending'), ('帮我创建入库表单', 'error')])
+@pytest.mark.parametrize('message,mode', [('如何创建表单', 'qa'), ('这是AI验收测试，仅咨询，不创建或修改任何数据。请说明当前页面用途，并说明你是否已经为我创建了表单或提交了审批。', 'qa'), ('帮我创建入库表单', 'pending'), ('帮我创建入库表单', 'error')])
 async def test_consultation_existing_card_and_model_failure_do_not_retry(runtime, monkeypatch, message, mode):
     mod, _ = runtime
     from app.services.ai.schemas import AgentRequest

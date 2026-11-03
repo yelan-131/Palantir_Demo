@@ -7,6 +7,7 @@ import { compareVersions, filterVersions, formatVersionTime, getVersionFields, s
 import './version-manager.css';
 
 interface Props {
+  title?: string;
   open: boolean;
   form: PlatformForm | null;
   name: string;
@@ -97,7 +98,7 @@ export default function VersionManager(props: Props) {
 
   return <>
     <Drawer open={open} onClose={() => { if (!action) props.onClose(); }} width={960}
-      rootClassName="form-version-workbench" title={<div className="vm-heading"><HistoryOutlined /><div><strong>版本管理</strong><span>{name}</span></div></div>}
+      rootClassName="form-version-workbench" title={<div className="vm-heading"><HistoryOutlined /><div><strong>{props.title || '版本管理'}</strong><span>{name}</span></div></div>}
       extra={<Button type="text" onClick={props.onEdit} disabled={Boolean(action)}>返回编辑器 <ArrowRightOutlined /></Button>}>
       <div className="vm-workspace">
         <section className="vm-draft">
