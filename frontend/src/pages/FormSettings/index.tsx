@@ -2430,6 +2430,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const businessDataDesigner = searchParams.get('source') === 'business-data';
   const location = useLocation();
   const aiFormDraft = formId === 'new' ? location.state?.aiFormDraft as (NewFormDraft & { id: string }) | undefined : undefined;
   const staticBaseConfig = useMemo(
@@ -2558,15 +2559,15 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   useEffect(() => {
-    if (!embedded && platformForm?.config?.componentPageEnabled && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
+    if (!embedded && !businessDataDesigner && platformForm && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
       navigate(`/program/${encodeURIComponent(platformForm.code)}`, {replace: true}); return;
     }
     const liveAnalytics = platformForm?.config?.analyticsDesign;
     const hasRuntimeDashboard = Boolean(platformForm?.published_version || platformForm?.config?.publishedSchemaVersion || (liveAnalytics && typeof liveAnalytics === 'object' && !Array.isArray(liveAnalytics)));
-    if (embedded || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
+    if (embedded || businessDataDesigner || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
     const panel = ({dataset: 'data', filter: 'filters', style: 'style'} as Record<string, string>)[searchParams.get('tab') || ''];
     navigate(`/program/${encodeURIComponent(platformForm.code)}?edit=1${panel ? `&panel=${panel}` : ''}`, {replace: true});
-  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded]);
+  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded, businessDataDesigner]);
   const viewConfigMeta = getViewConfigMeta(platformForm);
   useEffect(()=>{if(!previewOpen||baseConfig.kind==='analysis'||!platformForm?.id)return;const epoch=++previewEpoch.current;let active=true;const timer=setTimeout(()=>{previewDesignerRules(platformForm.id,layoutControls,previewValues).then(response=>{if(!active||epoch!==previewEpoch.current)return;const result=response.data?.data;setPreviewStates(result?.states||{});previewForm.setFieldsValue(result?.data||{});setPreviewRuleError('');}).catch((error)=>{if(active)setPreviewRuleError(error?.response?.data?.detail || '规则预览失败，请检查条件配置或网络连接。');});},250);return()=>{active=false;clearTimeout(timer);};},[previewOpen,platformForm?.id,layoutControls,previewValues,previewForm]);
 
@@ -2694,7 +2695,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     scaleY: number;
   } | null>(null);
   const isAnalysisDesigner = baseConfig.kind === 'analysis';
-  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
+  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded || businessDataDesigner ? embeddedBusinessTabs : tabs;
   const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
 
   // External tab navigation changes only the visible panel, never reinitializes drafts.
@@ -2764,7 +2765,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setDraftReviewReady(false);
     const nextControls = baseConfig.fields.map(makeFieldControl);
     const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
-    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
+    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded || businessDataDesigner ? embeddedBusinessTabs : tabs;
     const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
     const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
     setActiveTab(nextTab);
@@ -2810,7 +2811,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setFlowNodes(nextFlowNodes);
     setFlowConnections(makeFlowConnections(nextFlowNodes));
     setPendingFlowPort(null);
-  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, initialTab]);
+  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, businessDataDesigner, initialTab]);
 
   useEffect(() => {
     if (!previewFlowNodeOptions.length) {
@@ -4236,7 +4237,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     const nextConfig: Record<string, unknown> = mode === 'draft'
       ? {
           ...currentConfig,
-          viewConfigDraft: nextViewConfig,
+          ...(!businessDataDesigner ? {viewConfigDraft: nextViewConfig} : {}),
           formLayout: runtimeFormLayout,
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
@@ -4245,8 +4246,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         }
       : {
           ...currentConfig,
-          viewConfig: nextViewConfig,
-          viewConfigDraft: nextViewConfig,
+          ...(!businessDataDesigner ? {viewConfig: nextViewConfig, viewConfigDraft: nextViewConfig} : {}),
           formLayout: runtimeFormLayout,
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
@@ -4255,14 +4255,16 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         };
     const response = await updatePlatformForm(form.id, { config: nextConfig });
     const updatedForm = (response.data?.data || { ...form, config: nextConfig }) as PlatformForm;
-    await upsertPlatformFormLayout(form.id, 'view', {
-      layout_type: 'view',
-      config: {
-        draft: nextConfig.viewConfigDraft,
-        published: nextConfig.viewConfig,
-        meta: nextConfig.viewConfigMeta,
-      },
-    });
+    if (!businessDataDesigner) {
+      await upsertPlatformFormLayout(form.id, 'view', {
+        layout_type: 'view',
+        config: {
+          draft: nextConfig.viewConfigDraft,
+          published: nextConfig.viewConfig,
+          meta: nextConfig.viewConfigMeta,
+        },
+      });
+    }
     await upsertPlatformFormLayout(form.id, 'form', {
       layout_type: 'form',
       config: runtimeFormLayout,
@@ -4497,7 +4499,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       setVersion(`v${schemaVersion}`);
       setPublishCheckOpen(false);
       setHasUnsavedChanges(false);
-      message.success('配置已发布，运行页会读取新的数据筛选和表格配置');
+      message.success(businessDataDesigner ? '表单字段、录入与审批配置已发布' : '配置已发布，运行页会读取新的数据筛选和表格配置');
     } catch (error) {
       console.error('workflow publish failed', error);
       const report = (error as any)?.response?.data?.detail?.report as PlatformFormPublishReport | undefined;
@@ -4513,12 +4515,15 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const warnBeforeLeave = () => {
-    if (!embedded || !onExit) {
+    const exit = businessDataDesigner
+      ? () => navigate(`/studio/business-data?form=${encodeURIComponent(formId || '')}`)
+      : embedded ? onExit : undefined;
+    if (!exit) {
       navigate(`/program/${baseConfig.id}`);
       return;
     }
     if (isPersistingFlow) return;
-    if (!hasUnsavedChanges) { onExit(); return; }
+    if (!hasUnsavedChanges) { exit(); return; }
     let savingBeforeExit = false;
     const confirmation = Modal.confirm({
       className: 'form-designer-dialog',
@@ -4534,10 +4539,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           confirmation.update({ cancelButtonProps: { disabled: false }, keyboard: true });
           throw new Error('草稿保存失败，请重试');
         }
-        onExit();
+        exit();
       },
       footer: (_, { OkBtn, CancelBtn }) => <Space wrap>
-        <Button type="text" danger disabled={savingBeforeExit} onClick={() => { if (savingBeforeExit) return; confirmation.destroy(); onExit(); }}>放弃修改并返回</Button>
+        <Button type="text" danger disabled={savingBeforeExit} onClick={() => { if (savingBeforeExit) return; confirmation.destroy(); exit(); }}>放弃修改并返回</Button>
         <CancelBtn /><OkBtn />
       </Space>,
     });
@@ -6168,6 +6173,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const sourcePortal = (node:React.ReactNode,target:HTMLElement|null|undefined) => workspaceTargets ? target?createPortal(node,target):null : node;
   const sourceStatus = hasUnsavedChanges?'未保存修改':viewConfigMeta.status==='published'?'与线上版本一致':'草稿待发布';
+  const returnLabel = businessDataDesigner ? '返回业务数据' : '返回表单';
   return (
     <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}${workspaceTargets?' form-designer-unified':''}`}>
       {workspaceTargets&&<>
@@ -6207,7 +6213,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', flow: '流程与审批' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
         />
         <Space className="form-designer-actions" size={4} wrap={false}>
-          {!embedded && <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>返回表单</Button>}
+          {!embedded && <Button size="small" type="text" title={returnLabel} aria-label={returnLabel} icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>{returnLabel}</Button>}
           {embedded && activeTab === 'form' && <><Tooltip title="撤销布局修改"><Button size="small" type="text" aria-label="撤销布局修改" disabled={!history.length} icon={<UndoOutlined />} onClick={undoLayoutChange} /></Tooltip><Tooltip title="重做布局修改"><Button size="small" type="text" aria-label="重做布局修改" disabled={!future.length} icon={<RedoOutlined />} onClick={redoLayoutChange} /></Tooltip></>}
           <Button size="small" type="text" title={embedded ? '试填表单' : '预览'} aria-label={embedded ? '试填表单' : '预览'} icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>{embedded ? '试填表单' : '预览'}</Button>
           <Button

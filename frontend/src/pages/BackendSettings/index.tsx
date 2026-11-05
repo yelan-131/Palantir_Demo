@@ -40,7 +40,7 @@ export default function BackendSettings({ section }: { section: string }) {
   };
 
   if (section === 'model-tools') return <Space direction="vertical" style={{ width: '100%' }}>
-    <Alert type="info" showIcon message="旧版模型工具" description="管理旧版元模型、动态页面与菜单。新业务表单请使用「应用配置 → 应用、表单与菜单」。应用构建器保留为配置预览。" />
+    <Alert type="info" showIcon message="旧版模型工具" description="管理旧版元模型、动态页面与菜单。新业务表单请使用「应用配置 → 业务数据」。应用构建器保留为配置预览。" />
     <Suspense fallback={<Spin />}><Tabs destroyOnHidden items={[
       { key: 'models', label: '模型设计器', children: <ModelDesigner /> },
       { key: 'pages', label: '页面生成器', children: <PageGenerator /> },

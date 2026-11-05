@@ -121,6 +121,7 @@ class MenuNodeCreate(BaseModel):
     title: str
     icon: Optional[str] = None
     form_id: Optional[int] = None
+    page_code: Optional[str] = Field(default=None, max_length=100)
     route_path: Optional[str] = None
     visible: bool = True
     default_entry: bool = False
@@ -134,6 +135,7 @@ class MenuNodeUpdate(BaseModel):
     title: Optional[str] = None
     icon: Optional[str] = None
     form_id: Optional[int] = None
+    page_code: Optional[str] = Field(default=None, max_length=100)
     route_path: Optional[str] = None
     visible: Optional[bool] = None
     default_entry: Optional[bool] = None

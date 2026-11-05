@@ -11,6 +11,11 @@
 .app-admin-workspace:has(> .app-assembly-workspace) { flex: 1 1 0; min-width: 0; height: 100%; }
 .app-assembly-workspace { height: 100%; min-height: 0; }
 .app-assembly-workspace .assembly-grid { flex: 1 1 0; }
+.tech-white-shell .app-assembly-workspace.assembly-business-data .assembly-grid {
+  grid-template-columns: minmax(240px, 1fr) minmax(360px, 2fr);
+  min-width: 0;
+}
+.assembly-business-data .assembly-resources-card .assembly-form-card { grid-template-columns: 24px minmax(0, 1fr); }
 .assembly-grid > .ant-col > .ant-card > .ant-card-head { flex-shrink: 0; position: sticky; top: 0; z-index: 2; }
 .assembly-grid > .ant-col > .ant-card > .ant-card-body { min-height: 0; }
 .assembly-grid > .ant-col > .assembly-property-card { container-type: inline-size; }
@@ -19,6 +24,12 @@
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+.assembly-property-card > .ant-card-body:has(> .assembly-property-switch) {
+  background: var(--inspector-tab-surface,#e9ebee);
+}
+.assembly-property-switch ~ :is(.assembly-property-editor,.assembly-node-editor) > .assembly-property-scroll {
+  background: var(--inspector-tab-surface,#e9ebee);
 }
 .assembly-property-card .assembly-property-editor,
 .assembly-property-card .assembly-node-editor {
@@ -32,11 +43,6 @@
   border: 0;
 }
 .assembly-property-scroll { flex: 1 1 0; min-height: 0; overflow: auto; padding: 20px; }
-.assembly-property-identity { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.assembly-identity-icon { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 10px; background: var(--mf-rail, #f4f6f8); color: var(--mf-primary, #384e65); font-size: 20px; }
-.assembly-property-identity > div { min-width: 0; }
-.assembly-property-identity .ant-typography-secondary { font-size: 12px; }
-.assembly-property-identity h5.ant-typography { margin: 2px 0 0; overflow-wrap: anywhere; }
 .assembly-property-section { margin: 0 0 20px; }
 .assembly-property-section h3, .assembly-field-summary > .ant-typography { margin: 0 0 14px; font-size: 13px; font-weight: 600; }
 .assembly-property-section + .assembly-property-section { border-top: 1px solid var(--mf-border, #e7ebef); padding-top: 20px; }
@@ -46,9 +52,6 @@
 .assembly-property-fields .ant-form-item-label { padding-bottom: 6px; }
 .assembly-property-fields .ant-form-item-label > label { font-size: 12px; color: var(--mf-text-secondary, #6b7785); }
 .assembly-field-wide { grid-column: 1 / -1; }
-.assembly-property-card .assembly-property-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0; padding: 14px 20px; border-top: 1px solid var(--mf-border, #e7ebef); background: #fff; }
-.assembly-property-actions > .assembly-design-link { margin-right: auto; }
-.assembly-property-card .assembly-field-summary { margin: 4px 0 0; padding-top: 20px; border-top: 1px solid var(--mf-border, #e7ebef); }
 .assembly-property-card .node-editor-hero { display: block; padding: 0; margin-bottom: 20px; background: transparent; border: 0; }
 .assembly-property-card .node-state-switches { display: flex; justify-content: flex-start; gap: 32px; }
 .assembly-property-card .node-title-input { font-size: 14px; font-weight: 400; }
@@ -60,20 +63,11 @@
 }
 
 /* Grouped inspector: open sections, explicit access source and a persistent action footer. */
-.assembly-property-card .assembly-access-section { padding-top: 20px; border-top: 1px solid var(--mf-border); }
 .assembly-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .assembly-section-heading h3, .assembly-section-heading strong { margin: 0; font-size: 13px; font-weight: 600; }
 .assembly-section-heading h3 > span:not(.anticon), .assembly-section-heading strong > span:not(.anticon) { color: var(--mf-text-secondary); font-size: 12px; font-weight: 400; }
-.assembly-role-identity strong { display: block; color: var(--mf-text); font-size: 13px; font-weight: 500; }
-.assembly-role-identity small { display: block; color: var(--mf-text-secondary); font-size: 11px; margin-top: 2px; }
-.assembly-role-allowed { color: var(--mf-text); white-space: nowrap; font-size: 12px; }
-.assembly-role-allowed .anticon { color: #377460; }
-.assembly-role-denied { color: var(--mf-text-secondary); font-size: 12px; }
 .assembly-access-note { display: flex; gap: 7px; align-items: flex-start; color: var(--mf-text-secondary); font-size: 12px; margin: 14px 0 0; }
 .assembly-access-note .anticon { flex-shrink: 0; margin-top: 3px; }
-.assembly-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 0; }
-.assembly-setting-row strong { font-size: 13px; font-weight: 500; }
-.assembly-setting-row p { margin: 4px 0 0; color: var(--mf-text-secondary); font-size: 12px; }
 .assembly-property-card .assembly-field-summary .ant-table { font-size: 12px; }
 .assembly-field-summary code { font-size: 11px; color: var(--mf-text-secondary); }
 .assembly-property-drawer .ant-drawer-footer { text-align: right; padding: 16px 24px; }
@@ -81,9 +75,6 @@
 .assembly-drawer-intro { color: var(--mf-text-secondary); font-size: 12px; margin: 0 0 24px; }
 .assembly-property-drawer .ant-form-item-label > label { font-size: 12px; }
 
-.assembly-property-identity h5.ant-typography { font-size: 20px; font-weight: 600; }
-.tech-white-shell .app-content .assembly-access-section .ant-table table { min-width: 0; table-layout: fixed; }
-.assembly-role-identity { overflow-wrap: anywhere; }
 
 .assembly-editable-field { cursor: pointer; }
 .assembly-field-summary .ant-btn-link { padding-inline: 0; height: auto; white-space: normal; text-align: left; }
@@ -95,28 +86,30 @@
 .assembly-page-heading h2 { margin: 0; font-size: 24px; font-weight: 600; color: var(--mf-text); }
 .assembly-page-heading p { margin: 8px 0 0; font-size: 13px; color: var(--mf-text-secondary); }
 .assembly-app-switcher { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px; background: var(--mf-panel); border: 1px solid var(--mf-border); border-radius: 12px; flex-shrink: 0; }
-.assembly-app-tabs { display: flex; gap: 8px; overflow-x: auto; min-width: 0; }
-.assembly-app-tab { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border: 1px solid transparent; background: transparent; border-radius: 8px; color: var(--mf-text-secondary); white-space: nowrap; cursor: pointer; font: inherit; font-size: 13px; }
-.assembly-app-tab .application-icon { display: grid; place-items: center; width: 28px; height: 28px; background: var(--mf-panel-soft); border-radius: 7px; color: var(--mf-primary); font-size: 17px; }
-.assembly-app-tab:hover { background: var(--mf-hover); color: var(--mf-text); }
-.assembly-app-tab.is-active { background: var(--mf-selected); border-color: var(--mf-border-strong); color: var(--mf-primary-strong); font-weight: 600; }
-.assembly-app-tab:focus-visible { outline: 2px solid var(--mf-focus); outline-offset: -2px; }
-.assembly-app-tab:disabled { cursor: wait; opacity: .65; }
+.assembly-app-tabs.inspector-tabs {
+  flex: 1;
+  --inspector-tab-flex: 0 0 auto;
+  --inspector-tab-list-width: max-content;
+  --inspector-tab-inset: 8px;
+  --inspector-tab-padding: 12px;
+  --inspector-tab-overflow: hidden;
+}
+.assembly-app-tab-label { display: inline-flex; align-items: center; gap: 6px; }
+.assembly-resource-tabs { --inspector-tab-inset: 8px; }
 .assembly-app-switcher > .ant-btn { flex-shrink: 0; }
 .tech-white-shell .app-assembly-workspace .assembly-grid { grid-template-columns: minmax(220px, .8fr) minmax(260px, 1fr) minmax(360px, 1.35fr); min-width: 880px; gap: 16px; }
 .tech-white-shell .app-assembly-workspace .ant-card-head { min-height: 54px; background: var(--mf-panel); }
 .tech-white-shell .app-assembly-workspace .ant-card-head-title { font-size: 14px; font-weight: 600; }
 .tech-white-shell .app-content .app-assembly-workspace .assembly-resources-card > .ant-card-body { display: flex; flex-direction: column; gap: 16px; overflow: hidden; padding: 16px !important; }
 .assembly-resource-tools { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
-.assembly-resource-tools .ant-segmented { font-size: 12px; }
 .assembly-resources-card .assembly-form-list { flex: 1; min-height: 0; gap: 8px; padding: 1px; }
-.assembly-resources-card .assembly-form-card { grid-template-columns: 30px minmax(0, 1fr) 24px; gap: 8px; min-height: 64px; padding: 10px 8px; border: 1px solid var(--mf-border); border-radius: 8px; outline: none; background: var(--mf-panel); }
+.assembly-resources-card .assembly-form-card { grid-template-columns: 24px minmax(0, 1fr) 24px; gap: 6px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--mf-border); border-radius: 8px; outline: none; background: var(--mf-panel); }
 .assembly-resources-card .assembly-form-card:hover, .assembly-resources-card .assembly-form-card.is-selected { border-color: var(--mf-border-strong); background: var(--mf-hover); }
 .assembly-resources-card .assembly-form-card.is-selected { box-shadow: inset 3px 0 var(--mf-primary); }
-.assembly-resource-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.assembly-resource-copy { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .assembly-resource-copy .ant-typography { font-size: 12px; font-weight: 500; }
-.assembly-resource-copy small { font-size: 11px; color: var(--mf-text-secondary); }
-.assembly-resources-card .assembly-row-icon { width: 30px; height: 30px; background: var(--mf-selected); font-size: 16px; }
+.assembly-resource-copy small { flex: none; white-space: nowrap; font-size: 11px; color: var(--mf-text-secondary); }
+.assembly-resources-card .assembly-row-icon { width: 24px; height: 24px; background: var(--mf-selected); font-size: 14px; }
 .assembly-resource-hint, .assembly-menu-hint { margin: 0; color: var(--mf-text-secondary); font-size: 11px; line-height: 1.7; }
 .assembly-resource-hint { padding-top: 12px; border-top: 1px solid var(--mf-border); flex-shrink: 0; }
 .assembly-menu-hint { padding: 2px 4px 14px; }
@@ -125,8 +118,8 @@
 .app-assembly-workspace .assembly-menu-card .ant-tree-indent-unit { width: 16px; }
 .tech-white-shell .app-content .app-assembly-workspace .assembly-property-card > .ant-card-body { padding: 0 !important; }
 .app-assembly-workspace .assembly-property-scroll { padding: 24px; }
-.app-assembly-workspace .assembly-property-actions { background: var(--mf-panel-soft); padding: 16px 20px; }
 @media (max-width: 1100px) {
+  .tech-white-shell .app-assembly-workspace.assembly-business-data .assembly-grid { grid-template-columns: minmax(0, 1fr); }
   .tech-white-shell .content-surface:has(.app-assembly-workspace) { overflow: auto; }
   .tech-white-shell .navigation-area-page:has(> .app-admin-workspace > .app-assembly-workspace), .tech-white-shell .app-admin-workspace:has(> .app-assembly-workspace), .app-assembly-workspace { height: auto; }
   .tech-white-shell .app-assembly-workspace .assembly-grid { min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
@@ -146,3 +139,85 @@
 .app-assembly-workspace .assembly-menu-hint { flex-shrink: 0; }
 .app-assembly-workspace .assembly-menu-dropzone { flex: 1; min-height: 0; overflow: auto; }
 .app-assembly-workspace .assembly-menu-card .ant-tree { min-height: 0; }
+
+.assembly-property-card > .ant-card-head .ant-card-head-wrapper { column-gap: 8px; }
+.assembly-property-card > .ant-card-head .ant-card-head-title { min-width: 0; }
+.assembly-inspector-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  padding-block: 4px;
+}
+.app-assembly-workspace .assembly-inspector-content {
+  padding: 16px;
+  background: var(--mf-panel-soft, #f7f9fb);
+}
+.assembly-inspector-content .assembly-property-section {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--mf-border, #e7ebef);
+  border-radius: 8px;
+  background: var(--mf-panel, #fff);
+}
+.assembly-inspector-content .assembly-property-section:last-child { margin-bottom: 0; }
+.assembly-inspector-content .assembly-property-section h3 { margin-bottom: 8px; }
+.assembly-inspector-content .assembly-section-heading h3 { margin-bottom: 0; }
+.assembly-inspector-content .assembly-section-note { margin: 0 0 12px; }
+.assembly-inspector-content .assembly-property-fields > .ant-form-item { margin-bottom: 0; }
+.assembly-inspector-content .assembly-property-fields { row-gap: 10px; }
+.assembly-inspector-content .form-config-form { margin-bottom: 10px; }
+
+.assembly-resources-card .assembly-form-card:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: -2px; }
+.assembly-menu-card.is-resource-drop-target > .ant-card-body { outline: 2px dashed var(--mf-primary); outline-offset: -3px; }
+.assembly-menu-card .ant-tree-treenode:has(.is-resource-drop-target) .ant-tree-node-content-wrapper {
+  background: var(--mf-selected);
+  box-shadow: inset 0 0 0 1px var(--mf-primary);
+}
+
+.assembly-property-empty { margin-top: 24px; }
+.assembly-role-switches {
+  overflow: hidden;
+  border: 1px solid var(--mf-border, #e7ebef);
+  border-radius: 6px;
+}
+.assembly-role-switches table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.assembly-role-switches :is(th, td) {
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assembly-role-switches th { background: var(--mf-panel-soft, #f7f9fb); font-size: 12px; font-weight: 600; }
+.assembly-role-switches td { border-top: 1px solid var(--mf-border, #e7ebef); }
+.assembly-role-switches td:nth-child(2) { color: var(--mf-text-secondary); font-size: 11px; }
+.assembly-role-switches :is(th, td):last-child { width: 74px; text-align: right; }
+
+.assembly-property-form.property-inspector { --property-label-width: 132px; }
+.assembly-property-form .property-inspector-group > .ant-form-item:not(.assembly-role-field) {
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--property-border), transparent 55%);
+}
+.assembly-property-form .property-inspector-group > .ant-form-item:last-child { border-bottom: 0; }
+.assembly-property-form .property-inspector-group > .ant-form-item:not(.assembly-role-field) > .ant-form-item-row {
+  display: grid;
+  grid-template-columns: var(--property-label-width) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.assembly-property-form .ant-form-item-label { padding: 0; text-align: left; }
+.assembly-property-form .ant-form-item-label > label { color: var(--mf-muted); font-size: 12px; font-weight: 500; }
+.assembly-property-form .ant-form-item-control-input { min-height: var(--property-control-height); }
+.assembly-property-form .ant-form-item-control-input-content { min-width: 0; }
+.assembly-property-form .assembly-switch-field .ant-form-item-control-input-content { text-align: right; }
+
+.assembly-property-form .assembly-role-field { margin: 0; padding: 8px 10px; }
+.assembly-property-form .assembly-inspector-note {
+  margin: 0;
+  padding: 7px 10px;
+  color: var(--mf-text-secondary);
+  font-size: 12px;
+}

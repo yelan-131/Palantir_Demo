@@ -1,19 +1,25 @@
+import InspectorTabs from '@/components/PropertyInspector/InspectorTabs';
 import ToolbarGroups from './ToolbarGroups';
 import OptionPicker from '@/components/OptionPicker';
 import BusinessProperties from './BusinessProperties';
 import type {ViewConfig} from '@/utils/viewConfig';
 import React from 'react';
-import {Alert, Button, ConfigProvider, Empty, Input, InputNumber, Popconfirm, Select, Switch, ColorPicker, Tabs} from 'antd';
+import {Alert, Button, ConfigProvider, Empty, Input, InputNumber, Popconfirm, Select, Switch, ColorPicker} from 'antd';
 import {BarChartOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, FilterOutlined, NumberOutlined, PlusOutlined, SafetyCertificateOutlined, SkinOutlined, TableOutlined} from '@ant-design/icons';
 import {PropertyInspectorHeader, PropertyHelp, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
 import type {PlatformForm, PlatformFormField} from '@/services/api';
 import {bindWidgetSource, widgetSourceId, type PageDefinition, type PageWidget, type WidgetType} from './model';
-import {widgetPalettes} from '../AppPrograms/analyticsWidgetAppearance';
+import {widgetFontOptions, widgetPalettes} from '../AppPrograms/analyticsWidgetAppearance';
 import '../AppPrograms/analytics-editor-panel.css';
 
 export type Panel = 'widget' | 'style' | 'data' | 'filters' | 'add' | 'permissions';
 export type WidgetTab = 'basic' | 'data' | 'form' | 'flow';
 export type BusinessTab = 'form' | 'flow';
+const textAlignmentOptions = [
+  {value:'left',label:'左对齐'},
+  {value:'center',label:'居中'},
+  {value:'right',label:'右对齐'},
+] as const;
 export const sections: Array<{key: Panel; label: string; icon: React.ReactNode}> = [
   {key:'style',label:'页面与布局',icon:<SkinOutlined />},
   {key:'filters',label:'全局筛选',icon:<FilterOutlined />},
@@ -85,7 +91,7 @@ export default function Inspector(props: Props) {
         <PropertyRow label="位置"><InputNumber min={1} max={definition.widgets.length} value={definition.widgets.findIndex(item=>item.id===widget.id)+1} onChange={value=>{if(!value)return;const widgets=definition.widgets.filter(item=>item.id!==widget.id);widgets.splice(value-1,0,widget);onChange({...definition,widgets});}} /></PropertyRow>
         <PropertyRow label="自定义宽度" hint="单位 px；清空后使用布局占比。"><InputNumber min={160} max={3840} suffix="px" placeholder="自动" value={widget.customWidth} onChange={customWidth=>update({customWidth})}/></PropertyRow>
         <PropertyRow label="自定义高度" hint="单位 px；清空后随内容自适应。"><InputNumber min={120} max={3000} suffix="px" placeholder="自动" value={widget.customHeight} onChange={customHeight=>update({customHeight})}/></PropertyRow>
-        <PropertyRow label="布局占比"><OptionPicker numericValues={[25,50,75,100]} value={String(widget.width)} options={[{value:'6',label:'25%'},{value:'12',label:'50%'},{value:'18',label:'75%'},{value:'24',label:'整行'}]} onChange={value=>update({width:Number(value) as PageWidget['width']})} /></PropertyRow>
+        <PropertyRow label="布局占比"><OptionPicker numericValues={[25,33.33,50,75,100]} value={String(widget.width)} options={[{value:'6',label:'25%'},{value:'8',label:'33%'},{value:'12',label:'50%'},{value:'18',label:'75%'},{value:'24',label:'整行'}]} onChange={value=>update({width:Number(value) as PageWidget['width']})} /></PropertyRow>
         {statistical&&<PropertyRow label="组件配色"><OptionPicker value={appearance.palette||'inherit'} options={[{value:'inherit',label:'跟随页面主题'},...Object.keys(widgetPalettes).map(value=>({value,label:paletteNames[value as keyof typeof paletteNames]}))]} onChange={value=>patchAppearance({palette:value==='inherit'?undefined:value as keyof typeof paletteNames})} /></PropertyRow>}
         <PropertyAdvanced title="外观及高级设置">
           <PropertyRow label="跟随页面材质"><Switch size="small" checked={appearance.cardOpacity==null&&appearance.cardBlur==null} onChange={follow=>patchAppearance(follow?{cardOpacity:undefined,cardBlur:undefined}:{cardOpacity:definition.style?.cardOpacity??.78,cardBlur:definition.style?.cardBlur??12})} /></PropertyRow>
@@ -102,8 +108,57 @@ export default function Inspector(props: Props) {
       </PropertyGroup>
       <PropertyGroup key="widget-heading" title={widget.type==='record-list'||widget.type==='record-filter'?'标题、说明与按钮':'标题与说明'} defaultOpen={widget.type==='record-list'||widget.type==='record-filter'}>
         <PropertyRow label="显示标题" hint="控制画布卡片标题；标题栏中已配置的操作按钮仍保留。"><Switch size="small" checked={appearance.showTitle!==false} onChange={showTitle=>patchAppearance({showTitle})}/></PropertyRow>
-        {appearance.showTitle!==false&&<PropertyRow label="标题字号"><InputNumber min={10} max={24} suffix="px" value={appearance.titleFontSize??12} onChange={value=>patchAppearance({titleFontSize:value??12})}/></PropertyRow>}
-        <PropertyRow label="组件说明" hint="向页面使用者说明组件用途或数据范围。"><Input.TextArea value={appearance.subtitle} maxLength={160} autoSize={{minRows:2,maxRows:4}} onChange={event=>patchAppearance({subtitle:event.target.value})}/></PropertyRow>
+        {appearance.showTitle!==false&&<>
+          <PropertyRow label="标题文字" hint="与基本信息中的组件名称同步，修改后立即更新画布标题。">
+            <Input maxLength={100} value={widget.title} onChange={event=>update({title:event.target.value})} />
+          </PropertyRow>
+          <PropertyAdvanced title="标题高级选项">
+            <PropertyRow label="标题字号">
+              <InputNumber min={10} max={24} precision={0} suffix="px" value={appearance.titleFontSize??12} onChange={value=>patchAppearance({titleFontSize:value??12})} />
+            </PropertyRow>
+            <PropertyRow label="标题字体">
+              <Select value={appearance.titleFontFamily??'inherit'} options={widgetFontOptions} onChange={titleFontFamily=>patchAppearance({titleFontFamily})} />
+            </PropertyRow>
+            <PropertyRow label="标题颜色">
+              <ColorPicker value={appearance.titleColor??''} disabledAlpha allowClear showText onClear={()=>patchAppearance({titleColor:undefined})}
+                onChange={color=>patchAppearance({titleColor:color.toHexString()})} />
+            </PropertyRow>
+            <PropertyRow label="标题字重">
+              <Select<'inherit' | 'normal' | 'bold'> value={appearance.titleWeight??'inherit'} options={[{value:'inherit',label:'跟随主题'},{value:'normal',label:'常规'},{value:'bold',label:'加粗'}]}
+                onChange={value=>patchAppearance({titleWeight:value==='normal'||value==='bold'?value:undefined})} />
+            </PropertyRow>
+            <PropertyRow label="标题斜体">
+              <Switch size="small" checked={appearance.titleItalic===true} onChange={titleItalic=>patchAppearance({titleItalic})} />
+            </PropertyRow>
+            <PropertyRow label="标题对齐">
+              <Select value={appearance.titleAlign??'left'} options={[...textAlignmentOptions]} onChange={titleAlign=>patchAppearance({titleAlign})} />
+            </PropertyRow>
+            <PropertyRow label="标题下间距">
+              <InputNumber min={0} max={40} precision={0} suffix="px" value={appearance.titleGap??0} onChange={value=>patchAppearance({titleGap:value??0})} />
+            </PropertyRow>
+          </PropertyAdvanced>
+        </>}
+        <PropertyRow label="显示说明" hint="有内容时显示在卡片正文顶部。关闭后保留已填写的文字。">
+          <Switch size="small" checked={appearance.showSubtitle!==false} onChange={showSubtitle=>patchAppearance({showSubtitle})} />
+        </PropertyRow>
+        {appearance.showSubtitle!==false&&<>
+          <PropertyRow label="组件说明">
+            <Input.TextArea value={appearance.subtitle} maxLength={160} placeholder="填写组件用途或数据范围" autoSize={{minRows:2,maxRows:4}}
+              onChange={event=>patchAppearance({subtitle:event.target.value})} />
+          </PropertyRow>
+          <PropertyAdvanced title="说明高级选项">
+            <PropertyRow label="说明字号">
+              <InputNumber min={10} max={24} precision={0} suffix="px" value={appearance.subtitleFontSize??12} onChange={value=>patchAppearance({subtitleFontSize:value??12})} />
+            </PropertyRow>
+            <PropertyRow label="说明颜色">
+              <ColorPicker value={appearance.subtitleColor??''} disabledAlpha allowClear showText onClear={()=>patchAppearance({subtitleColor:undefined})}
+                onChange={color=>patchAppearance({subtitleColor:color.toHexString()})} />
+            </PropertyRow>
+            <PropertyRow label="说明对齐">
+              <Select value={appearance.subtitleAlign??'left'} options={[...textAlignmentOptions]} onChange={subtitleAlign=>patchAppearance({subtitleAlign})} />
+            </PropertyRow>
+          </PropertyAdvanced>
+        </>}
         {(widget.type==='record-list'||widget.type==='record-filter')&&<BusinessProperties roles={roles} widget={widget} tab="toolbar" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} />}
       </PropertyGroup>
       {statistical&&<PropertyGroup title="显示格式">
@@ -120,8 +175,18 @@ export default function Inspector(props: Props) {
 
     </>}
     {tab === 'data' && <>
-      <PropertyGroup title="数据来源"><PropertyRow label="业务来源"><Select disabled={widget.type==='record-filter'&&Boolean(widget.targetWidgetIds?.length)} aria-label="组件业务来源" showSearch optionFilterProp="label" placeholder="选择业务数据来源" value={widgetSourceId(definition, widget)} options={forms.map(form=>({label:form.name,value:form.id}))} onChange={formId=>onChange(bindWidgetSource(definition, widget.id, formId))} /></PropertyRow></PropertyGroup>
-      {widget.type === 'record-filter' ? <BusinessProperties roles={roles} widget={widget} tab="data" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} /> : widget.type !== 'record-list' ? <PropertyGroup title="统计口径"><PropertyRow label="统计方式"><Select value={widget.aggregate} options={[{label:'记录数',value:'count'},{label:'数值求和',value:'sum'},{label:'平均值',value:'avg'},{label:'最小值',value:'min'},{label:'最大值',value:'max'}]} onChange={aggregate=>update({aggregate})} /></PropertyRow>{widget.aggregate!=='count'&&<PropertyRow label="数值字段"><Select value={widget.measure} options={numeric} onChange={measure=>update({measure})} /></PropertyRow>}{widget.type==='chart'&&<PropertyRow label="分组字段"><Select value={widget.dimension} options={options} onChange={dimension=>update({dimension})} /></PropertyRow>}</PropertyGroup> : <><BusinessProperties roles={roles} widget={widget} tab="data" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} /><PropertyGroup title="关联筛选" hint={<>独立筛选组件放在列表上方，只查询关联的列表，可分别配置字段与查询方式。</>}><Button size="small" disabled={disabled||sourceOpen||!widgetSourceId(definition,widget)} onClick={props.onListFilter}>{definition.widgets.some(item=>item.type==='record-filter'&&item.targetWidgetIds?.includes(widget.id)&&widgetSourceId(definition,item)===widgetSourceId(definition,widget))?'配置关联筛选':'添加关联筛选'}</Button></PropertyGroup></>}
+      {statistical&&<PropertyGroup title="自定义指标" defaultOpen={Boolean(widget.expression)} hint={<>支持 count()、sum、avg、min、max、count_distinct、count_if 及四则运算；字段使用业务编码。百分比公式返回比例，例如 sum(actual) / sum(target)。清空后沿用下方统计方式。</>}>{widget.sharedMetricId&&<Alert type="info" message={`共享指标 · v${widget.sharedMetricVersion}`} description="公式由指标库管理，发布新口径时同步更新引用。" action={<Button size="small" onClick={()=>update({sharedMetricId:null,sharedMetricVersion:null,sharedFields:[]})}>转为独立指标</Button>}/>}<PropertyRow label="指标公式"><Input.TextArea disabled={Boolean(widget.sharedMetricId)} value={widget.expression||''} maxLength={512} autoSize={{minRows:2,maxRows:5}} placeholder="例如 sum(actual) / sum(target)" onChange={event=>update({expression:event.target.value||null})}/></PropertyRow></PropertyGroup>}
+      <PropertyGroup title="数据来源"><PropertyRow label="业务来源" hint="来源统一在「应用配置 → 业务数据」中管理。也可右键组件，选择「业务配置 → 字段与录入」打开当前来源。"><Select disabled={widget.type==='record-filter'&&Boolean(widget.targetWidgetIds?.length)} aria-label="组件业务来源" showSearch optionFilterProp="label" placeholder="选择业务数据来源" value={widgetSourceId(definition, widget)} options={forms.map(form=>({label:form.name,value:form.id}))} onChange={formId=>onChange(bindWidgetSource(definition, widget.id, formId))} /></PropertyRow></PropertyGroup>
+      {widget.type === 'record-filter' ? <BusinessProperties roles={roles} widget={widget} tab="data" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} /> : widget.type !== 'record-list' ? <PropertyGroup title="统计口径"><PropertyRow label="统计方式"><Select value={widget.aggregate} options={[{label:'记录数',value:'count'},{label:'数值求和',value:'sum'},{label:'平均值',value:'avg'},{label:'最小值',value:'min'},{label:'最大值',value:'max'}]} onChange={aggregate=>update({aggregate})} /></PropertyRow>{widget.aggregate!=='count'&&<PropertyRow label="数值字段"><Select value={widget.measure} options={numeric} onChange={measure=>update({measure})} /></PropertyRow>}{widget.type==='chart'&&<PropertyRow label="分组字段"><Select value={widget.dimension} options={options} onChange={dimension=>update({dimension})} /></PropertyRow>}</PropertyGroup> : <><BusinessProperties roles={roles} widget={widget} tab="data" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} /><div className="property-inspector-group">
+        <PropertyRow label="关联筛选" hint="独立筛选组件放在列表上方，只查询关联的列表，可分别配置字段与查询方式。">
+          <Button className="component-linked-filter-button" size="small"
+            disabled={disabled||sourceOpen||!widgetSourceId(definition,widget)}
+            onClick={props.onListFilter}>
+            {definition.widgets.some(item=>item.type==='record-filter'&&item.targetWidgetIds?.includes(widget.id)&&widgetSourceId(definition,item)===widgetSourceId(definition,widget))
+              ? '配置关联筛选' : '添加关联筛选'}
+          </Button>
+        </PropertyRow>
+      </div></>}
     </>}
     {(tab === 'form'||tab === 'flow') && <div className="component-source-properties form-designer-embedded" ref={props.sourceSlots?.properties}/>}
   </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击左侧组件配置属性" />;
@@ -141,7 +206,7 @@ export default function Inspector(props: Props) {
       <PropertyRow label="卡片圆角"><InputNumber min={0} max={20} addonAfter="px" value={definition.style?.cardRadius??8} onChange={cardRadius=>updateStyle({cardRadius:cardRadius??8})} /></PropertyRow>
       <PropertyRow label="表格密度"><Select allowClear placeholder="沿用业务表单" value={definition.style?.tableDensity??undefined} options={[{label:'紧凑',value:'compact'},{label:'标准',value:'standard'},{label:'宽松',value:'comfortable'}]} onChange={tableDensity=>updateStyle({tableDensity})} /></PropertyRow>
       <PropertyRow label="筛选器布局"><Select value={definition.style?.filterTheme??'toolbar'} options={[{label:'顶部工具栏',value:'toolbar'},{label:'嵌入画布',value:'inline'},{label:'侧边筛选面板',value:'panel'}]} onChange={filterTheme=>updateStyle({filterTheme})} /></PropertyRow>
-      <PropertyAdvanced title="刷新设置"><PropertyRow label="自动刷新"><Select value={definition.style?.refreshInterval??0} options={[{label:'关闭',value:0},{label:'每 30 秒',value:30},{label:'每 1 分钟',value:60},{label:'每 5 分钟',value:300}]} onChange={refreshInterval=>updateStyle({refreshInterval})} /></PropertyRow></PropertyAdvanced>
+      <PropertyAdvanced title="刷新设置"><PropertyRow label="刷新间隔" hint="0 表示关闭；单位为秒。编辑页面时暂停刷新，同页多个来源采用最短间隔。"><InputNumber min={0} max={86400} step={10} value={definition.style?.refreshInterval??0} addonAfter="秒" onChange={value=>updateStyle({refreshInterval:value??0})} /></PropertyRow></PropertyAdvanced>
     </PropertyGroup>
   </>;
   else if(panel==='filters') content=<PropertyGroup title="全局筛选" hint={<>直接使用左侧画布中的筛选器检验结果，独立筛选组件仅影响其关联的业务列表。</>}><PropertyRow label="筛选字段" hint="同时作用于列表、指标和图表。"><Select mode="multiple" maxCount={12} value={definition.filterFields} options={options} onChange={filterFields=>onChange({...definition,filterFields})} /></PropertyRow></PropertyGroup>;
@@ -156,8 +221,8 @@ export default function Inspector(props: Props) {
     </>} />
     {props.status&&<div className="analytics-editor-heading-status">{props.status}</div>}
     </div>
-    {panel==='widget'&&widget&&<Tabs className="analytics-widget-tabs" size="small" activeKey={tab} onChange={value=>onTab(value as WidgetTab)} items={[{key:'basic',label:'基本',disabled:disabled},{key:'data',label:'数据',disabled:disabled},{key:'form',label:'录入',disabled:disabled||!props.sourceIsBusiness},{key:'flow',label:'流程',disabled:disabled||!props.sourceIsBusiness}]} />}
-    {panel!=='widget'&&panel!=='add'&&<Tabs className="analytics-widget-tabs" aria-label="页面设置分类" size="small" activeKey={panel} onChange={value=>onPanel(value as Panel)} items={[
+    {panel==='widget'&&widget&&<InspectorTabs activeKey={tab} onChange={value=>onTab(value as WidgetTab)} items={[{key:'basic',label:'基本',disabled:disabled},{key:'data',label:'数据',disabled:disabled},{key:'form',label:'录入',disabled:disabled||!props.sourceIsBusiness},{key:'flow',label:'流程',disabled:disabled||!props.sourceIsBusiness}]} />}
+    {panel!=='widget'&&panel!=='add'&&<InspectorTabs aria-label="页面设置分类" activeKey={panel} onChange={value=>onPanel(value as Panel)} items={[
       {key:'style',label:'布局'},
       {key:'data',label:'数据'},
       {key:'filters',label:'筛选'},

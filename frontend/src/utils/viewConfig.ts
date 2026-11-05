@@ -18,7 +18,7 @@ export interface ViewFilterConfig {
   label: string;
   controlType: ViewControlType;
   operator: ViewFilterOperator;
-  defaultValue?: string | string[] | number | null;
+  defaultValue?: string | (string | number)[] | number | null;
   placeholder?: string;
   enabled: boolean;
   advanced: boolean;

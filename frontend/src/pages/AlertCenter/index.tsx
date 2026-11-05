@@ -22,7 +22,8 @@ const statusLabel = (value?: string) => value && value in statuses ? statuses[va
 function statusTag(status: AlertStatus) { const item = statuses[status]; return <Tag color={item?.color}>{item?.label || status}</Tag>; }
 function isOverdue(row: AlertRecord) { const due = parseServerDate(row.due_at); return !['resolved', 'closed'].includes(row.status) && !!due && due.getTime() < Date.now(); }
 
-export default function AlertCenter() {
+export default function AlertCenter({recordId, createOnly=false, readOnly=false, onClose, onMutated}: {recordId?:number;createOnly?:boolean;readOnly?:boolean;onClose?:()=>void;onMutated?:()=>void}={}) {
+  const embedded = Boolean(recordId||createOnly);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const [data, setData] = useState<AlertList | null>(null);
@@ -31,11 +32,11 @@ export default function AlertCenter() {
   const [query, setQuery] = useState({ q: '', status: '', page: 1, page_size: 20 });
   const [search, setSearch] = useState('');
   const [revision, setRevision] = useState(0);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(recordId??null);
   const [detail, setDetail] = useState<AlertRecord | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(createOnly);
   const [action, setAction] = useState<AlertAction | null>(null);
   const [saving, setSaving] = useState(false);
   const [users, setUsers] = useState<{ id: number; display_name?: string; username: string }[]>([]);
@@ -46,6 +47,7 @@ export default function AlertCenter() {
   const detailRequest = useRef(0);
 
   useEffect(() => {
+    if (embedded) return;
     const request = ++listRequest.current;
     setLoading(true); setLoadError('');
     listAlerts(query).then((response) => {
@@ -57,7 +59,7 @@ export default function AlertCenter() {
     }).catch((error) => { if (request === listRequest.current) { setData(null); setLoadError(alertError(error)); } })
       .finally(() => { if (request === listRequest.current) setLoading(false); });
     return () => { listRequest.current++; };
-  }, [query, revision]);
+  }, [query, revision, embedded]);
 
   const loadDetail = useCallback(async (id: number) => {
     const request = ++detailRequest.current;
@@ -88,7 +90,7 @@ export default function AlertCenter() {
     setSaving(true);
     try {
       const response = await actOnAlert(detail.id, { action, expected_status: detail.status, comment: values.comment.trim(), ...(action === 'assign' ? { owner_id: values.owner_id } : {}) });
-      setDetail(response.data.data); setAction(null); setRevision((value) => value + 1); message.success('告警已更新');
+      setDetail(response.data.data); setAction(null); setRevision((value) => value + 1); onMutated?.(); message.success('告警已更新');
     } catch (error) {
       message.error(alertError(error));
       await loadDetail(detail.id); setRevision((value) => value + 1);
@@ -102,7 +104,7 @@ export default function AlertCenter() {
     setSaving(true);
     try {
       const response = await createAlert({ title: values.title.trim(), device: values.device?.trim(), level: values.level, source: values.source.trim(), occurred_at: values.occurred_at.toISOString(), due_at: values.due_at?.toISOString() });
-      setCreateOpen(false); createForm.resetFields(); setRevision((value) => value + 1); setDetailId(response.data.data.id); message.success('告警已登记');
+      setCreateOpen(false); createForm.resetFields(); setRevision((value) => value + 1); setDetailId(response.data.data.id); onMutated?.(); message.success('告警已登记');
     } catch (error) { message.error(alertError(error)); }
     finally { setSaving(false); }
   };
@@ -113,6 +115,7 @@ export default function AlertCenter() {
   const canHandle = !!detail && !!user && (user.is_admin || detail.owner_id === user.id);
 
   return <div className="alert-center">
+    {!embedded&&<>
     <div className="alert-center-header">
       <Typography.Text type="secondary">跟进设备、质量与供应风险的处置进展。</Typography.Text>
       <Space wrap><Button onClick={() => navigate('/program/material-application')}>料号申请</Button><Button icon={<ReloadOutlined />} onClick={() => { setRevision((value) => value + 1); if (detailId !== null) void loadDetail(detailId); }}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateOpen(true); }}>登记告警</Button></Space>
@@ -130,7 +133,8 @@ export default function AlertCenter() {
       { title: '发生时间', dataIndex: 'occurred_at', width: 180, render: (value) => formatServerDateTime(value) },
       { title: '处理时限', key: 'due', width: 180, render: (_, row) => <Space direction="vertical" size={0}><span>{formatServerDateTime(row.due_at)}</span>{isOverdue(row) && <Tag color="red">已逾期</Tag>}</Space> },
     ]} />
-    <Drawer title="告警详情" width={620} open={detailId !== null} onClose={() => { if (!saving) { setDetailId(null); setAction(null); } }} className="alert-center-detail">
+    </>}
+    <Drawer title="告警详情" width={620} open={detailId !== null} onClose={() => { if (!saving) { setDetailId(null); setAction(null); onClose?.(); } }} className="alert-center-detail">
       <Spin spinning={detailLoading}>
         {detailError && <Alert type="error" showIcon message={detailError} action={<Button size="small" onClick={() => detailId !== null && loadDetail(detailId)}>重试</Button>} />}
         {detail && <><Space wrap>{statusTag(detail.status)}<Tag>{detail.level}</Tag>{isOverdue(detail) && <Tag color="red">已逾期</Tag>}</Space><div className="overlay-record-heading"><Typography.Title level={4}>{detail.title}</Typography.Title><Typography.Text type="secondary">{detail.alert_id}</Typography.Text></div>
@@ -138,17 +142,17 @@ export default function AlertCenter() {
           <Typography.Title level={5}>处置历史</Typography.Title>
           {detail.resolution && <Alert type="info" showIcon message="处置结论" description={<div className="alert-center-history-comment">{detail.resolution}</div>} style={{ marginBottom: 20 }} />}
           {detail.history?.length ? <Timeline items={detail.history.map((item, index) => ({ key: index, color: item.to_status === 'closed' ? 'green' : 'blue', children: <div><strong>{historyLabels[item.action || ''] || item.action || '记录更新'}</strong><div><Typography.Text type="secondary">{formatServerDateTime(item.created_at || item.at || item.time)} · {item.actor_name || item.actor || '系统'}</Typography.Text></div>{(item.from_status || item.to_status) && <div>{statusLabel(item.from_status)} → {statusLabel(item.to_status)}</div>}{item.comment && <div className="alert-center-history-comment">{item.comment}</div>}</div> }))} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无处置记录" />}
-          <div className="alert-center-detail-actions"><Space wrap>
+          <div className="alert-center-detail-actions">{!readOnly&&<Space wrap>
             {detail.status === 'pending' && <Button type="primary" disabled={saving} onClick={() => void openAction('acknowledge')}>确认告警</Button>}
             {detail.status !== 'closed' && detail.status !== 'resolved' && <Button disabled={saving || !user} onClick={() => void openAction('assign')}>{user?.is_admin ? '分派责任人' : '认领给我'}</Button>}
             {detail.status === 'acknowledged' && canHandle && <Button type="primary" disabled={saving} onClick={() => void openAction('start')}>开始处理</Button>}
             {detail.status === 'in_progress' && canHandle && <Button type="primary" disabled={saving} onClick={() => void openAction('resolve')}>提交处置结论</Button>}
             {detail.status === 'resolved' && canHandle && <Button type="primary" disabled={saving} onClick={() => void openAction('close')}>验证并关闭</Button>}
-          </Space><div style={{ marginTop: 12 }}><Typography.Text type="secondary">待处理 → 已确认 → 处理中 → 待验证 → 已关闭。处置和关闭由责任人或管理员完成。</Typography.Text></div></div>
+          </Space>}<div style={{ marginTop: 12 }}><Typography.Text type="secondary">待处理 → 已确认 → 处理中 → 待验证 → 已关闭。处置和关闭由责任人或管理员完成。</Typography.Text></div></div>
         </>}
       </Spin>
     </Drawer>
-    <Modal title="登记告警" open={createOpen} onCancel={() => !saving && setCreateOpen(false)} onOk={() => void submitCreate()} confirmLoading={saving} okText="登记" cancelText="取消">
+    <Modal title="登记告警" open={createOpen} onCancel={() => {if(!saving){setCreateOpen(false);onClose?.();}}} onOk={() => void submitCreate()} confirmLoading={saving} okText="登记" cancelText="取消">
       <Form form={createForm} layout="vertical" initialValues={{ level: '一般', source: '人工上报' }}>
         <Form.Item className="form-field-primary" name="title" label="告警标题" rules={[{ required: true, whitespace: true, message: '请填写告警标题' }, { max: 200 }]}><Input maxLength={200} placeholder="描述需要处置的异常" /></Form.Item>
         <Form.Item name="device" label="设备 / 对象" rules={[{ max: 200 }]}><Input maxLength={200} placeholder="设备编号、产线或业务对象（可选）" /></Form.Item>

@@ -1,8 +1,10 @@
 # ManuFoundry / Palantir Demo
 
-Current version: 0.3.19.
+Current development version: 0.3.20 (draft, updated 2026-11-05).
 
-Release: [0.3.19 — AI 看板、组件页面与流程下发增强](docs/operations/release-0.3.19.md), updated 2026-11-03. Released 2026-11-03; dashboard AI tools require the documented incremental registry upgrade after backend deployment.
+Draft notes: [0.3.20 — 业务数据、页面设计与应用菜单](docs/operations/release-0.3.20.md).
+
+Latest published release: [0.3.19 — AI 看板、组件页面与流程下发增强](docs/operations/release-0.3.19.md), released 2026-11-03. Dashboard AI tools require the documented incremental registry upgrade after backend deployment.
 
 Version numbering and release lifecycle: [project version policy](docs/operations/version-policy.md).
 

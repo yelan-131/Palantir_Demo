@@ -1,6 +1,9 @@
 """Independent pages with versioned, per-component business data bindings."""
 from __future__ import annotations
 
+import ast
+import re
+
 from typing import Literal
 from uuid import uuid4
 
@@ -56,11 +59,21 @@ class WidgetAppearance(BaseModel):
     showMetricLabel: bool = True
     showMetricInfo: bool = True
     titleFontSize: int = Field(default=12, ge=10, le=24)
+    titleAlign: Literal['left', 'center', 'right'] = 'left'
+    titleFontFamily: str | None = Field(default=None, max_length=100)
+    titleColor: str | None = Field(default=None, pattern=r'^#[0-9a-fA-F]{6}$')
+    titleWeight: Literal['normal', 'bold'] | None = None
+    titleItalic: bool = False
+    titleGap: int = Field(default=0, ge=0, le=40)
     valueFontSize: int = Field(default=30, ge=16, le=64)
     contentPadding: int = Field(default=18, ge=0, le=40)
     contentAlign: Literal['left', 'center', 'right'] = 'left'
     metricColumns: int | None = Field(default=None, ge=1, le=6)
     subtitle: str = Field(default='', max_length=160)
+    showSubtitle: bool = True
+    subtitleFontSize: int = Field(default=12, ge=10, le=24)
+    subtitleColor: str | None = Field(default=None, pattern=r'^#[0-9a-fA-F]{6}$')
+    subtitleAlign: Literal['left', 'center', 'right'] = 'left'
     palette: Literal['manufacturing', 'business', 'warning', 'mono'] | None = None
     radius: int | None = Field(default=None, ge=0, le=24)
     showLegend: bool = True
@@ -96,6 +109,7 @@ class FilterScheme(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=50)
     showKeyword: bool = False
+    fieldControls: dict[str, Literal['dropdown', 'radio', 'multi-dropdown', 'checkbox']] = Field(default_factory=dict, max_length=30)
     groups: list[ToolbarGroup] = Field(default_factory=list, max_length=20)
 
 
@@ -134,12 +148,16 @@ class PageWidget(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     type: Literal['record-list', 'record-filter', 'metric', 'chart']
     title: str = Field(min_length=1, max_length=100)
-    width: Literal[6, 12, 18, 24] = 24
+    width: Literal[6, 8, 12, 18, 24] = 24
     roleIds: list[int] = Field(default_factory=list, max_length=100)
     dataBinding: DataBinding | None = None
     dimension: str | None = Field(default=None, max_length=200)
     measure: str | None = Field(default=None, max_length=200)
     aggregate: Literal['count', 'sum', 'avg', 'min', 'max'] = 'count'
+    expression: str | None = Field(default=None, max_length=512)
+    sharedMetricId: str | None = Field(default=None, max_length=100)
+    sharedMetricVersion: int | None = Field(default=None, gt=0)
+    sharedFields: list[str] = Field(default_factory=list, max_length=200)
     customWidth: int | None = Field(default=None, ge=160, le=3840)
     customHeight: int | None = Field(default=None, ge=120, le=3000)
     height: int = Field(default=280, ge=160, le=600)
@@ -168,7 +186,7 @@ class PageStyle(BaseModel):
     chartPalette: Literal['manufacturing', 'business', 'warning', 'mono'] = 'manufacturing'
     tableDensity: Literal['compact', 'standard', 'comfortable'] | None = None
     filterTheme: Literal['toolbar', 'inline', 'panel'] = 'toolbar'
-    refreshInterval: int = Field(default=0, ge=0, le=3600)
+    refreshInterval: int = Field(default=0, ge=0, le=86400)
 
 
 class PageDefinition(BaseModel):
@@ -216,6 +234,7 @@ class PagePreview(RuntimeQuery):
 
 class PageBinding(BaseModel):
     blank: bool = False
+    populate: bool = False
     existingCode: str | None = Field(default=None, max_length=100)
 
 
@@ -295,6 +314,13 @@ async def source_form(db, user, definition):
     return form
 
 
+def expression_fields(expression):
+    from app.services.analytics_runtime import parse_expression
+    root = parse_expression(expression, set(re.findall(r'\b[A-Za-z_]\w*\b', expression)))
+    functions = {id(node.func) for node in ast.walk(root) if isinstance(node, ast.Call)}
+    return {node.id for node in ast.walk(root) if isinstance(node, ast.Name) and id(node) not in functions}
+
+
 def analytics_design(definition):
     dimensions = set(definition.filterFields)
     measures, metrics, widgets = set(), [], []
@@ -305,9 +331,13 @@ def analytics_design(definition):
             dimensions.add(widget.dimension)
         if widget.measure:
             measures.add(widget.measure)
+        if widget.expression:
+            measures.update(expression_fields(widget.expression))
+        measures.update(widget.sharedFields if widget.sharedMetricId else [])
         metrics.append({'id': widget.id, 'name': widget.title, 'datasetId': 'source',
-                        'expression': f'{widget.aggregate}({widget.measure})' if widget.aggregate != 'count' else 'count()',
-                        'format': widget.format, 'unit': widget.unit, 'threshold': widget.threshold})
+                        'expression': widget.expression or (f'{widget.aggregate}({widget.measure})' if widget.aggregate != 'count' else 'count()'),
+                        'format': widget.format, 'unit': widget.unit, 'threshold': widget.threshold,
+                        'sharedMetricId': widget.sharedMetricId, 'sharedMetricVersion': widget.sharedMetricVersion})
         widgets.append({'id': widget.id, 'title': widget.title, 'datasetId': 'source', 'metricIds': [widget.id],
                         'type': 'metric-card' if widget.type == 'metric' else widget.chartType, 'dimension': widget.dimension})
     return {'datasets': [{'id': 'source', 'name': '业务数据', 'sourceType': 'businessForm',
@@ -352,7 +382,7 @@ async def validate_publish(db, user, definition):
 
 async def validate_source_publish(db, user, definition):
     form = await source_form(db, user, definition)
-    if (form.config or {}).get('assemblyKind') in {'analysis', 'analytics', 'dashboard', 'report'}:
+    if (form.config or {}).get('assemblyKind') in {'analysis', 'analytics', 'dashboard', 'report'} and not (form.config or {}).get('analyticsDesign'):
         raise HTTPException(422, '请在页面设置中选择业务表单作为数据来源')
     if form.status != 'published':
         raise HTTPException(422, '请先发布业务数据来源')
@@ -375,7 +405,10 @@ async def validate_source_publish(db, user, definition):
                 if len({scheme.id for scheme in schemes}) != len(schemes):
                     raise HTTPException(422, '筛选方案 ID 不能重复')
                 for scheme in schemes:
-                    if len({field for group in scheme.groups for field in (group.columns or [])}) > 30:
+                    scheme_fields = {field for group in scheme.groups for field in (group.columns or [])}
+                    if set(scheme.fieldControls) - scheme_fields:
+                        raise HTTPException(422, '筛选控件必须对应方案已启用的字段')
+                    if len(scheme_fields) > 30:
                         raise HTTPException(422, '每个筛选方案最多配置 30 个字段')
                     if len({group.id for group in scheme.groups}) != len(scheme.groups):
                         raise HTTPException(422, '筛选字段权限组 ID 不能重复')
@@ -421,7 +454,14 @@ async def validate_source_publish(db, user, definition):
             references.add(widget.dimension)
         if widget.type == 'chart' and (set(widget.targetWidgetIds) - {w.id for w in definition.widgets if w.id != widget.id and w.type != 'record-filter'}):
             raise HTTPException(422, '图表联动目标不存在或指向自身')
-        if widget.aggregate != 'count':
+        if widget.expression and widget.type in {'metric', 'chart'}:
+            from app.services.analytics_runtime import AnalyticsError, parse_expression
+            try:
+                parse_expression(widget.expression, set(available))
+                references.update(expression_fields(widget.expression))
+            except AnalyticsError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        elif widget.aggregate != 'count':
             if widget.measure not in available or available[widget.measure].field_type not in {'int', 'integer', 'float', 'decimal', 'number'}:
                 raise HTTPException(422, '求和需要有效的数值字段')
             references.add(widget.measure)
@@ -431,8 +471,10 @@ async def validate_source_publish(db, user, definition):
     if roles != set(definition.roleIds):
         raise HTTPException(422, '页面角色不属于当前租户')
     if any(w.type in {'metric', 'chart'} for w in definition.widgets):
-        errors = design_errors(analytics_design(definition))
-        errors += await source_errors(db, form.tenant_id, form, analytics_design(definition),
+        from app.services.analytics_metric_library import hydrate_design
+        design, errors = await hydrate_design(db, form.tenant_id, analytics_design(definition))
+        errors += design_errors(design)
+        errors += await source_errors(db, form.tenant_id, form, design,
                                      [{'field_name': f.field_name, 'archived': f.archived} for f in fields])
         if errors:
             raise HTTPException(422, {'message': '页面数据配置无效', 'errors': errors})
@@ -548,9 +590,13 @@ async def resolve_form_page(slug: str, db: AsyncSession = Depends(get_db), user=
     if form is None:
         return {'enabled': False, 'code': None}
     config = form.config or {}
-    if not config.get('componentPageEnabled') and not config.get('componentPageCode'):
+    if not user.get('is_admin') and not config.get('componentPageEnabled') and not config.get('componentPageCode'):
         return {'enabled': False, 'code': None}
     await check_host(db, user, form)
+    if config.get('componentPageLegacyFallback') and not user.get('is_admin'):
+        page = await find_page(db, user, config['componentPageCode'])
+        if not page.published_version:
+            return {'enabled': False, 'code': None}
     return {'enabled': True, 'code': config.get('componentPageCode'), 'form': host_payload(form)}
 
 
@@ -579,12 +625,20 @@ async def bind_form_page(form_id: int, body: PageBinding | None = None,
                    if analysis else [{'id': 'filters', 'type': 'record-filter', 'title': '业务筛选', 'width': 24, 'targetWidgetIds': ['records']},
                                      {'id': 'records', 'type': 'record-list', 'title': form.name, 'width': 24, 'showFilters': False}])
         blank = bool(body and body.blank)
-        definition = PageDefinition(title=form.name, sourceFormId=None if blank and analysis else form.id,
+        definition = PageDefinition(title=form.name, sourceFormId=None if blank else form.id,
                                     widgets=[] if blank else widgets)
+        if body and body.populate and (config.get('analyticsDesign') or form.status == 'published'):
+            from app.services.page_content_migration import content_definition
+            try:
+                definition = await content_definition(db, form)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
         page = ComponentPage(tenant_id=form.tenant_id, code=f'page-{uuid4().hex[:12]}',
                              draft=definition.model_dump(), revision=1, published_version=0)
         db.add(page)
         await db.flush()
+    if not config.get('componentPageEnabled'):
+        config['componentPageLegacyFallback'] = True
     config.update(componentPageEnabled=True, componentPageCode=page.code)
     form.config = config
     await change_audit(db, tenant_id=form.tenant_id, user_id=current_user_id(user),
@@ -664,7 +718,9 @@ def resolve_filter_schemes(widget, roles, user_id=None, org_unit_ids=None):
     for scheme in schemes:
         groups = [group for group in scheme.get('groups', []) if audience_matches(group, roles, user_id, org_unit_ids)]
         if groups:
-            visible.append({**scheme, 'groups': groups})
+            visible_fields = {field for group in groups for field in (group.get('columns') or [])}
+            controls = {field: mode for field, mode in (scheme.get('fieldControls') or {}).items() if field in visible_fields}
+            visible.append({**scheme, 'groups': groups, 'fieldControls': controls})
     if not visible:
         return None
     return {**widget, 'filterSettings': {**settings, 'schemes': visible}}
@@ -838,7 +894,7 @@ def linked_record_queries(definition, filter_queries, chart_values):
     return {target: {'ready': all(q['ready'] for q in queries), 'search': ' '.join(q['search'] for q in queries if q['search']), 'filters': [c for q in queries for c in q['filters']]} for target, queries in result.items()}
 
 # A section release stores a complete runtime snapshot but merges only its own fields.
-_SECTION_DATA = {'dataBinding', 'dimension', 'measure', 'aggregate', 'filterFields', 'filterSettings'}
+_SECTION_DATA = {'dataBinding', 'dimension', 'measure', 'aggregate', 'expression', 'sharedMetricId', 'sharedMetricVersion', 'sharedFields', 'filterFields', 'filterSettings'}
 _SECTION_LIST_DATA = {'sortableColumns', 'displayGroups', 'columns', 'pageSize', 'defaultSort', 'emptyText'}
 _SECTION_FILTER_DATA = {'showKeyword', 'expandAdvanced', 'requiredFields', 'schemes'}
 

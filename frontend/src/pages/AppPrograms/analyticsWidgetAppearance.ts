@@ -12,6 +12,13 @@ export const widgetPalettes = {
   warning: ['#cb494b', '#cc8a23', '#6d8d35'],
   mono: ['#2c6e84', '#628fa1', '#99b4be'],
 };
+export const widgetFontOptions = [
+  {value:'inherit',label:'跟随主题'},
+  {value:'sans-serif',label:'无衬线字体'},
+  {value:'serif',label:'衬线字体'},
+  {value:'monospace',label:'等宽字体'},
+  {value:'PingFang SC, Microsoft YaHei, sans-serif',label:'苹方 / 微软雅黑'},
+];
 export type AnalyticsWidgetAppearance = {
   showTooltip?: boolean;
   animate?: boolean;
@@ -97,6 +104,10 @@ export type AnalyticsWidgetAppearance = {
   contentAlign?: 'left' | 'center' | 'right';
   metricColumns?: number;
   subtitle?: string;
+  showSubtitle?: boolean;
+  subtitleFontSize?: number;
+  subtitleColor?: string;
+  subtitleAlign?: 'left' | 'center' | 'right';
   palette?: keyof typeof widgetPalettes;
   height?: number;
   radius?: number;

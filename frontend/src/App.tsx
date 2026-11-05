@@ -52,7 +52,6 @@ const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => 
 
 const SchedulerPage = lazy(() => import('./pages/Scheduler'));
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
-const AlertCenterPage = lazy(() => import('./pages/AlertCenter'));
 const ComponentPages = lazy(() => import('./pages/ComponentPages'));
 const FormPageEntry = lazy(() => import('./pages/ComponentPages/FormPageEntry'));
 const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
@@ -657,10 +656,10 @@ function AppContent() {
                   <Route path="/account-center" element={<AccountEntry currentApplication={currentApplication} />} />
 
                   <Route path="/dynamic/:slug" element={<FormPageEntry kind="business" />} />
-                  <Route path="/pages" element={<Navigate to="/studio/applications" replace />} />
-                  <Route path="/pages/new" element={<Navigate to="/studio/applications" replace />} />
+                  <Route path="/pages" element={<Navigate to="/studio/page-design" replace />} />
+                  <Route path="/pages/new" element={<Navigate to="/studio/page-design?new=1" replace />} />
                   <Route path="/pages/:code" element={<ComponentPages />} />
-                  <Route path="/program/alert-center" element={<AlertCenterPage />} />
+                  <Route path="/program/alert-center" element={<FormPageEntry kind="program" formSlug="alert-center" />} />
                   <Route path="/program/material-application" element={<MaterialApplicationsPage />} />
                   <Route path="/program/:programId" element={<FormPageEntry kind="program" />} />
                   <Route path="/form-settings/:formId" element={<FormSettingsPage />} />

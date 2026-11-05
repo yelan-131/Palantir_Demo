@@ -1,6 +1,7 @@
 import type {ViewConfig} from '@/utils/viewConfig';
 
-export interface FilterScheme {id:string;name:string;showKeyword:boolean;groups:ToolbarGroup[];}
+export type FilterControlMode = "dropdown" | "radio" | "multi-dropdown" | "checkbox";
+export interface FilterScheme {id:string;name:string;showKeyword:boolean;groups:ToolbarGroup[];fieldControls?:Record<string,FilterControlMode>;}
 export interface FilterSettings {
   schemes?: FilterScheme[] | null;
   toolbarGroups?: ToolbarGroup[] | null;

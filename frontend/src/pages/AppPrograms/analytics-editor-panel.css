@@ -318,27 +318,7 @@
 .analytics-editor-heading-status .analytics-settings-history { min-height:24px; }
 .analytics-editor-heading-status .analytics-settings-history .ant-btn { height:24px;width:25px;padding:0; }
 .analytics-editor-heading-status .analytics-save-status { font-size:10px; }
-/* Compact browser-style tabs: rounded tabs, neutral active fill, no underline. */
-.analytics-editor-panel .analytics-widget-tabs { flex:none;padding:0 12px;background:var(--mf-surface,#fff); }
-.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-nav { margin:0;padding:4px 0 0;border-bottom:0; }
-.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-nav::before { display:none; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-nav-list { width:100%;gap:3px; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab { flex:1;justify-content:center;min-height:0;height:28px;box-sizing:border-box;margin:0!important;padding:4px 0;border-radius:8px 8px 0 0;background:transparent;font-size:12px;line-height:20px;transition:background 160ms ease; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:hover { background:#f2f3f5; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active,
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active:hover { background:#e9ebee; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-btn { color:var(--mf-muted);font-weight:500;text-shadow:none;line-height:20px; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { color:var(--mf-text);font-weight:600;text-shadow:none; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-ink-bar { display:none; }
-/* The active tab flows into the panel with outward bottom corners. */
-.analytics-editor-panel .analytics-widget-tabs .ant-tabs-nav-wrap { overflow:visible; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active { z-index:1; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before,
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { content:'';position:absolute;bottom:0;width:8px;height:8px;pointer-events:none; }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before { left:-8px;background:radial-gradient(circle at 0 0,transparent 8px,#e9ebee 8.5px); }
-.analytics-editor-panel .analytics-widget-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { right:-8px;background:radial-gradient(circle at 100% 0,transparent 8px,#e9ebee 8.5px); }
-.analytics-editor-panel:has(> .analytics-widget-tabs) > .analytics-editor-panel-body { background:#e9ebee; }
-.analytics-editor-panel .analytics-widget-tabs > .ant-tabs-content-holder { display:none; }
+.analytics-editor-panel:has(> .inspector-tabs) > .analytics-editor-panel-body { background:var(--inspector-tab-surface,#e9ebee); }
 .analytics-editor-heading .property-inspector-header > div:first-child { gap:7px; }
 .analytics-editor-heading .property-inspector-header .analytics-save-indicator { flex:none;overflow:visible;margin-inline:0 3px; }
 .analytics-editor-form-inspector .analytics-appearance-group { margin-bottom:10px; }

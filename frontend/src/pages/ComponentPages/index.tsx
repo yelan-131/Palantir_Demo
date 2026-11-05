@@ -1,6 +1,6 @@
 import {flushSync} from 'react-dom';
 import React, {lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {useBlocker, useNavigate, useParams} from 'react-router-dom';
+import {useBlocker, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {Alert, Button, Card, Col, Dropdown, Drawer, Modal, Row, Select, Space, Spin, Tooltip, Typography, message} from 'antd';
 import {DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@ant-design/icons';
 import StatisticalWidget from './StatisticalWidget';
@@ -13,6 +13,7 @@ import {useShellPageTitle} from '@/components/ShellPageTitle';
 import DynamicPage from '../DynamicPage';
 import type {RuntimeAnalyticsData} from '../AppPrograms/analyticsTypes';
 import {ensureListFilter, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget, type WidgetType} from './model';
+import {pagePresentation} from './model';
 import Inspector, {sections, type BusinessTab, type Panel, type WidgetTab} from './Inspector';
 import {buildAnalyticsContextMenu} from '../AppPrograms/AnalyticsContextMenu';
 import '../AppPrograms/analytics-workspace.css';
@@ -34,7 +35,10 @@ const unwrap = <T,>(response: {data: unknown}): T => {
 };
 type RouteExit = {proceed: () => void; reset: () => void};
 function NavigationGuard({enabled,onBlocked}: {enabled: boolean;onBlocked:(value: RouteExit)=>void}) {
-  const blocker = useBlocker(({currentLocation,nextLocation})=>enabled&&currentLocation.pathname!==nextLocation.pathname);
+  const blocker = useBlocker(({currentLocation,nextLocation})=>enabled&&(
+    currentLocation.pathname !== nextLocation.pathname ||
+    new URLSearchParams(currentLocation.search).get('edit') !== new URLSearchParams(nextLocation.search).get('edit')
+  ));
   useEffect(()=>{if(blocker.state==='blocked')onBlocked({proceed:blocker.proceed,reset:blocker.reset});},[blocker.state,onBlocked]);
   return null;
 }
@@ -44,6 +48,8 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
   const {code: routeCode} = useParams<{code: string}>();
   const code = pageCode || routeCode;
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
+  const [searchParams] = useSearchParams();
+  const startInEditor = admin && !pageCode && searchParams.get('edit') === '1';
   const accountKey = useAuthStore(state=>state.user?`${state.user.tenant_id}:${state.user.id}:${state.user.is_admin}`:'anonymous');
   const [forms, setForms] = useState<PlatformForm[]>([]);
   const [roles, setRoles] = useState<Array<{id: number; name: string; label?: string}>>([]);
@@ -88,7 +94,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
   const request = useRef(0);
   const resolvedIdentity = useRef<string>();
   const dirty = Boolean(draft && state && JSON.stringify(draft) !== JSON.stringify(state.definition));
-  const active = editing ? draft : state?.publishedDefinition;
+  const {draftPreview, definition:active} = pagePresentation(state,admin,editing,draft);
   const selectedWidget = active?.widgets.find(item=>item.id===selected);
   const sourceId = panel === 'widget' || sourceEditor ? widgetSourceId(active, selectedWidget) : active?.sourceFormId;
   const sourceActive = Boolean(editing && draft && sourceEditor && sourceId);
@@ -100,7 +106,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
   useShellPageTitle(active?.title || '页面与组件');
 
   useEffect(() => {
-    const identity = JSON.stringify([code,accountKey]);
+    const identity = JSON.stringify([code,accountKey,startInEditor]);
     // Fast Refresh reruns effects: keep a loaded session for the same page/user kind.
     // Mark only completed loads, so StrictMode's cancelled first request still retries.
     if(resolvedIdentity.current===identity)return;
@@ -113,7 +119,15 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
         if (!code) return;
         if (admin) {
           const response = await api.get<PageState>(`/pages/${code}/editor`);
-          if (current) { resolvedIdentity.current=identity;setState(response.data); setDraft(response.data.definition); setEditing(!response.data.publishedVersion);setPanel(response.data.definition.widgets.length ? 'widget' : 'style'); }
+          if (current) {
+            const definition = response.data.definition;
+            resolvedIdentity.current = identity;
+            setState(response.data);
+            setDraft(definition);
+            setEditing(startInEditor || pagePresentation(response.data, admin, false).startEditing);
+            setPanel(definition.widgets.length ? 'widget' : startInEditor ? 'add' : 'style');
+            if (startInEditor) setSelected(definition.widgets[0]?.id);
+          }
         } else {
           const response = await api.get(`/pages/${code}`);
           if (current) {resolvedIdentity.current=identity;setState({...response.data, revision: 0, publishedDefinition: response.data.definition});}
@@ -122,7 +136,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
       finally { if (current) setLoading(false); }
     })();
     return () => { current = false; };
-  }, [code, admin, accountKey]);
+  }, [code, admin, accountKey, startInEditor]);
 
   useEffect(() => {
     if (!admin) return;
@@ -130,7 +144,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     Promise.allSettled([listPlatformForms(), api.get('/admin/roles')]).then(results => {
       if (!current) return;
       if (results[0].status === 'fulfilled') {
-        const items = unwrap<PlatformForm[]>(results[0].value).filter(form => !['analysis', 'analytics', 'dashboard', 'report'].includes(String(form.config?.assemblyKind)));
+        const items = unwrap<PlatformForm[]>(results[0].value).filter(form => form.config?.analyticsDesign || !['analysis', 'analytics', 'dashboard', 'report'].includes(String(form.config?.assemblyKind)));
         setForms(items);
       } else setError(errorText(results[0].reason));
       if (results[1].status === 'fulfilled') setRoles(unwrap(results[1].value));
@@ -176,20 +190,20 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     return ()=>window.clearInterval(timer);
   },[editing,active?.style?.refreshInterval,refresh]);
   useEffect(() => {
-    if (!code || !active || (!publishedVersion && !editing)) return;
+    if (!code || !active || (!publishedVersion && !editing && !draftPreview)) return;
     let current = true;
     const token = ++request.current;
     setLoadingData(true); setDataError(''); setData(undefined);
-    api.post(`/pages/${code}/${editing?'preview':'data'}`, editing?{definition:active,filters,filter_queries:widgetFilters,chart_values:chartFilters}:{filters,filter_queries:widgetFilters,chart_values:chartFilters}).then(response => {
+    api.post(`/pages/${code}/${editing||draftPreview?'preview':'data'}`, editing||draftPreview?{definition:active,filters,filter_queries:widgetFilters,chart_values:chartFilters}:{filters,filter_queries:widgetFilters,chart_values:chartFilters}).then(response => {
       if (!current || token !== request.current) return;
-      if (!editing && response.data.publishedVersion !== publishedVersion) {
+      if (!editing && !draftPreview && response.data.publishedVersion !== publishedVersion) {
         setDataError('页面已发布新版本，请重新加载页面'); return;
       }
       setData(response.data.analyticsData || undefined);
     }).catch(failure => { if (current) setDataError(errorText(failure)); })
       .finally(() => { if (current) setLoadingData(false); });
     return () => { current = false; };
-  }, [code, filterSignature, dataSignature, publishedVersion, refreshKey, editing]);
+  }, [code, filterSignature, dataSignature, publishedVersion, refreshKey, editing, draftPreview]);
 
   useEffect(() => {
     if (!dirty && !saving) return;
@@ -290,6 +304,22 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     if(routeExit.current){const exit=routeExit.current;routeExit.current=undefined;exit.proceed();}
   };
   const requestExit = () => {if(!saving){if(dirty)setExitPrompt(true);else leaveEditor();}};
+  useEffect(() => {
+    if (!editing) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented || saving || exitPrompt) return;
+      // Observe overlays before their own handlers close them, so one Esc only closes one layer.
+      const overlayOpen = Array.from(document.querySelectorAll<HTMLElement>(
+        '.ant-modal-wrap, .ant-drawer-open .ant-drawer-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-dropdown:not(.ant-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-popover:not(.ant-popover-hidden)',
+      )).some(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+      if (overlayOpen) return;
+      event.preventDefault();
+      if (sourceActive) sourceExitRequest.current?.();
+      else requestExit();
+    };
+    window.addEventListener('keydown', onEscape, true);
+    return () => window.removeEventListener('keydown', onEscape, true);
+  }, [editing, saving, exitPrompt, sourceActive, dirty, state]);
   const cancelExit = () => {setExitPrompt(false);routeExit.current?.reset();routeExit.current=undefined;};
   const beginEditing = async (next:Panel, id?:string, tab:WidgetTab='basic') => {
     if(saving||sourceActive)return;
@@ -328,7 +358,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     if (item.type === 'record-filter') return source?.status === 'published' ? <FilterWidget key={`${source.id}:${item.id}`} widget={item} sourceId={source.id} onChange={value=>setWidgetFilters(previous=>({...previous,[item.id]:value}))}/> : <Alert type="info" message="请先发布来源业务表单" />;
     const query = componentQuery(active!, widgetFilters, chartFilters, item.id);
     if(!query.ready)return <Alert type="info" showIcon message="请先填写必填筛选条件并查询" description="关联的筛选组件校验通过后，将显示列表数据。" />;
-    if (item.type === 'record-list') return source?.status==='published' ? <DynamicPage key={`${item.id}:${source.id}`} formSlug={String(source.id)} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} display={item.showFilters === false ? 'list' : 'all'} readOnly={editing} externalSearch={query.search} tableDensity={active?.style?.tableDensity} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
+    if (item.type === 'record-list') return source?.status==='published' ? <DynamicPage key={`${item.id}:${source.id}`} formSlug={String(source.id)} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} display={item.showFilters === false ? 'list' : 'all'} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={active?.style?.tableDensity} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
     if (loadingData) return <div className="component-widget-preview"><Spin /></div>;
     const widgetErrors = data?.widgetErrors?.[item.id] ?? data?.errors;
     if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用" description={dataError || widgetErrors?.join('；')} />;
@@ -365,21 +395,39 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
       </div>}
       {!active.widgets.length&&<div className="component-page-empty"><Typography.Title level={4}>空白页面</Typography.Title><Typography.Paragraph>{admin?'右键添加组件，开始搭建业务页面。':'此页面暂未添加组件。'}</Typography.Paragraph></div>}
       <div className="component-page-grid" onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event)}>
-        <Row gutter={[active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=><Col key={item.id} xs={24} lg={item.width} style={item.customWidth?{flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'}:undefined}>
+        <Row gutter={[active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
+          const appearance = item.appearance;
+          const titleAlign = appearance?.titleAlign ?? 'left';
+          const titleStyle: React.CSSProperties = {
+            textAlign: titleAlign,
+            fontSize: appearance?.titleFontSize,
+            fontFamily: appearance?.titleFontFamily,
+            fontWeight: appearance?.titleWeight,
+            fontStyle: appearance?.titleItalic ? 'italic' : undefined,
+            color: appearance?.titleColor,
+            marginBottom: appearance?.showTitle === false ? undefined : appearance?.titleGap,
+            lineHeight: appearance?.titleFontSize ? Math.max(20, Math.ceil(appearance.titleFontSize * 1.25)) + 'px' : undefined,
+          };
+          return <Col key={item.id} xs={24} lg={item.width} style={item.customWidth?{flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'}:undefined}>
           <Card data-component-widget-id={item.id} style={{height:item.customHeight??undefined,borderRadius:item.appearance?.radius??active.style?.cardRadius??12, '--analytics-card-opacity':item.appearance?.cardOpacity??active.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${item.appearance?.cardBlur??active.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties}
             onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event,item.id)}
             className={'component-page-widget component-page-widget-'+item.type+(editing?' analytics-editable-widget':'')+(editing&&panel==='widget'&&selected===item.id?' analytics-selected-widget':'')}
             onClick={event=>{if(editing&&!(event.target instanceof Element&&event.target.closest('input,textarea,button,a,[role="combobox"]')))selectWidget(item.id);}}
-            title={item.appearance?.showTitle===false?undefined:editing?<button className="analytics-widget-select" style={{fontSize:item.appearance?.titleFontSize}} type="button" draggable disabled={saving||sourceActive} aria-label={'配置'+item.title}
+            styles={{title:titleStyle}}
+            title={appearance?.showTitle===false?undefined:editing?<button className="analytics-widget-select"
+              style={{justifyContent:titleAlign==='center'?'center':titleAlign==='right'?'flex-end':'flex-start',textAlign:'inherit'}} type="button" draggable disabled={saving||sourceActive} aria-label={'配置'+item.title}
               onClick={()=>selectWidget(item.id)}
               onKeyDown={event=>{if(event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();move(item.id,event.key==='ArrowUp'?-1:1);}}}
               onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
-              onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:<span style={{fontSize:item.appearance?.titleFontSize}}>{item.title}</span>} extra={<Space size={6}>{(item.type==='record-list'||item.type==='record-filter')&&<span className="component-list-header-actions" id={`component-toolbar-${item.id}`} />}{chartFilters[item.id]!==undefined&&<Button type="text" size="small" onClick={()=>setChartFilters(previous=>{const next={...previous};delete next[item.id];return next;})}>清除联动</Button>}</Space>}>
-            {item.appearance?.subtitle&&<p className="component-widget-subtitle">{item.appearance.subtitle}</p>}
+              onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:item.title} extra={<Space size={6}>{(item.type==='record-list'||item.type==='record-filter')&&<span className="component-list-header-actions" id={`component-toolbar-${item.id}`} />}{chartFilters[item.id]!==undefined&&<Button type="text" size="small" onClick={()=>setChartFilters(previous=>{const next={...previous};delete next[item.id];return next;})}>清除联动</Button>}</Space>}>
+            {appearance?.showSubtitle!==false&&appearance?.subtitle?.trim()&&
+              <p className="component-widget-subtitle" style={{fontSize:appearance.subtitleFontSize,color:appearance.subtitleColor,textAlign:appearance.subtitleAlign}}>
+                {appearance.subtitle}
+              </p>}
             {renderWidget(item)}
             {editing&&!saving&&!sourceActive&&<ResizeHandle title={item.title} onCommit={size=>{if(draft)changeDraft({...draft,widgets:draft.widgets.map(widget=>widget.id===item.id?{...widget,...size}:widget)});}}/>}
           </Card>
-        </Col>)}</Row>
+        </Col>;})}</Row>
       </div>
     </>}
   </main>;

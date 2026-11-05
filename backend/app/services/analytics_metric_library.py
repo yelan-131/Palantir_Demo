@@ -263,6 +263,14 @@ async def references(db, user, metric_id):
     tenant_id = current_tenant_id(user)
     await _metric(db, tenant_id, metric_id)
     _, result, _ = await _reference_rows(db, tenant_id, metric_id)
+    from app.services.component_shared_metrics import reference_pages, reference_payload
+    for page, states in await reference_pages(db, tenant_id, metric_id):
+        for state, definition in states:
+            result['references'].append(reference_payload(page, state, definition, metric_id))
+    for state in ('published', 'draft'):
+        count = len({r['pageCode'] for r in result['references'] if r.get('pageCode') and r['state'] == state})
+        if count:
+            result['counts'][f'{state}Pages'] = count
     return result
 
 
@@ -300,6 +308,16 @@ async def impact(db, user, metric_id, body, *, include_plan=False):
             except HTTPException as exc:
                 errors.append(f'{form.name}（{"线上" if state == "published" else "草稿"}）：{exc.detail}')
         plan.append(board_plan)
+    from app.services.component_shared_metrics import impact_pages
+    page_plans, page_refs, page_signatures, page_errors = await impact_pages(db, user, metric_id, number, definition)
+    plan.extend(page_plans)
+    result['references'].extend(page_refs)
+    signatures.extend(page_signatures)
+    errors.extend(page_errors)
+    for state in ('published', 'draft'):
+        count = len({r['pageCode'] for r in page_refs if r['state'] == state})
+        if count:
+            result['counts'][f'{state}Pages'] = count
     unchanged = bool(current and current.definition == definition)
     result.update(definition=definition, nextVersion=number, unchanged=unchanged, errors=list(dict.fromkeys(errors)),
         impactToken=_hash([revision(row), definition, signatures]))
@@ -323,6 +341,10 @@ async def publish_metric(db, user, metric_id, body):
     published_boards = []
     try:
         for item in plan:
+            if 'componentPage' in item:
+                from app.services.component_shared_metrics import apply_page_plan
+                await apply_page_plan(db, item, current_user_id(user), now)
+                continue
             form, previous = item['form'], item['version']
             config = copy.deepcopy(form.config or {})
             if 'draft' in item:

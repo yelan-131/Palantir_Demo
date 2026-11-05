@@ -757,6 +757,7 @@ async def _menu_node_payload(db: AsyncSession, node) -> dict:
         "title": node.title,
         "icon": node.icon,
         "form_id": node.form_id,
+        "page_code": (node.route_path or "").removeprefix("/pages/") if node.node_type == "page" else None,
         "route_path": node.route_path,
         "visible": node.visible,
         "default_entry": node.default_entry,
@@ -1173,6 +1174,24 @@ async def list_application_menu_nodes(
     return {"data": [await _menu_node_payload(db, node) for node in nodes]}
 
 
+async def _set_menu_page_target(db: AsyncSession, user: dict, values: dict, node=None) -> None:
+    from app.api.component_pages import find_page, published
+
+    page_code = values.pop("page_code", None)
+    if page_code is not None:
+        if values.get("form_id") is not None:
+            raise HTTPException(422, "请选择一个菜单目标")
+        page = await find_page(db, user, page_code)
+        if await published(db, page) is None:
+            raise HTTPException(409, "请先发布目标页面")
+        values.update(node_type="page", form_id=None, route_path=f"/pages/{page.code}")
+    elif values.get("node_type") == "page" or (
+        node is not None and node.node_type == "page"
+        and {"node_type", "form_id", "route_path"}.intersection(values)
+    ):
+        raise HTTPException(422, "请选择目标页面")
+
+
 @router.post("/applications/{application_id}/menu-nodes")
 async def create_application_menu_node(
     application_id: int,
@@ -1193,7 +1212,8 @@ async def create_application_menu_node(
     if body.parent_id is not None and (not parent or parent.tenant_id != tenant_id):
         raise HTTPException(404, "Parent menu node not found")
 
-    values = body.dict()
+    values = body.model_dump()
+    await _set_menu_page_target(db, user, values)
     values["config"] = _normalized_menu_node_config(values.get("config"))
     if values.get("form_id") and not values.get("route_path"):
         form_config = form.config or {}
@@ -1207,8 +1227,8 @@ async def create_application_menu_node(
     db.add(node)
     await db.flush()
     await _sync_menu_node_entry_permissions(db, node)
-    if body.form_id is not None:
-        await _ensure_application_form_binding(db, application_id, body.form_id)
+    if node.form_id is not None:
+        await _ensure_application_form_binding(db, application_id, node.form_id)
     await db.commit()
     await db.refresh(node)
     return {"data": await _menu_node_payload(db, node)}
@@ -1228,7 +1248,8 @@ async def update_application_menu_node(
     node = await db.get(ApplicationMenuNode, node_id)
     if not node or node.application_id != application_id or node.tenant_id != tenant_id:
         raise HTTPException(404, "Menu node not found")
-    updates = body.dict(exclude_unset=True)
+    updates = body.model_dump(exclude_unset=True)
+    await _set_menu_page_target(db, user, updates, node)
     form = await db.get(Form, updates["form_id"]) if "form_id" in updates and updates["form_id"] is not None else None
     if "form_id" in updates and updates["form_id"] is not None and (not form or form.tenant_id != tenant_id):
         raise HTTPException(404, "Form not found")

@@ -520,6 +520,10 @@ async def authorized_records(db, user, form, *, include_deleted=False, decorate=
     fields = await runtime_fields(db, form, cache=cache)
     result = []
     async for record in iter_raw(db, form, include_deleted=include_deleted, fields=fields):
+        if form.code == 'alert-center':
+            from app.services.alert_service import is_material_request
+            if is_material_request(record['data']):
+                continue
         if raw_records is not None:
             raw_records[(form.id, record['id'])] = record
         if not await record_allowed(db, user, form, "view", record, cache=cache):
@@ -542,7 +546,7 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
     form = await resolve_form(db, user, form_id=form_id)
     from app.services.field_policies import has_presentation_rules
     has_policies=has_presentation_rules(await runtime_fields(db,form))
-    if user.get("is_admin") and not has_policies and not (_uses_physical_form_table(form) and (cursor_after_id is not None or cursor_before_id is not None)):
+    if user.get("is_admin") and form.code != 'alert-center' and not has_policies and not (_uses_physical_form_table(form) and (cursor_after_id is not None or cursor_before_id is not None)):
         return await _list_admin_records(form_id, db, user, include_deleted=include_deleted, search=search,
             filters_json=filters_json, sort_field=sort_field, sort_order=sort_order,
             cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id,

@@ -16,3 +16,14 @@ test('date and personnel fields retain their source control semantics',()=>{
  assert.equal(sourceFilterConfig({field_name:'date',label:'日期',field_type:'string',controlType:'datetime',typeSettings:{dateMode:'range'}},0).operator,'between');
  assert.equal(sourceFilterConfig({field_name:'flag',label:'是否',field_type:'boolean',controlType:'switch'},0).controlType,'select');
 });
+
+test('choice presentation preserves compatible defaults and queries multivalue fields by membership',()=>{
+ const field={field_name:'priority',label:'紧急程度',field_type:'enum',controlType:'select'};
+ const multi=sourceFilterConfig(field,0,{defaultValue:'normal'},'checkbox');
+ assert.equal(multi.operator,'in');
+ assert.deepEqual(Array.from(multi.defaultValue),['normal']);
+ const single=sourceFilterConfig({...field,typeSettings:{selectionMode:'multiple'}},0,{defaultValue:['urgent']},'radio');
+ assert.equal(single.operator,'in');
+ assert.equal(single.defaultValue,'urgent');
+ assert.equal(sourceFilterConfig(field,0,undefined,'dropdown').operator,'equals');
+});

@@ -6,7 +6,7 @@ import './column-picker.css';
 
 type Option = {value:string;label:string;sortable?:boolean};
 const pageSize=10;
-export default function ColumnPicker({value,options,disabled,onChange,sortableColumns,onSortingChange,mode='columns'}: {mode?:'columns'|'filters';value:string[];options:Option[];disabled:boolean;onChange:(columns:string[])=>void;sortableColumns:string[];onSortingChange:(columns:string[])=>void}) {
+export default function ColumnPicker({value,options,disabled,onChange,sortableColumns,onSortingChange,renderFieldSettings,mode='columns'}: {mode?:'columns'|'filters';value:string[];options:Option[];disabled:boolean;onChange:(columns:string[])=>void;sortableColumns:string[];onSortingChange:(columns:string[])=>void;renderFieldSettings?:(name:string)=>React.ReactNode}) {
   const controlId=useId();
   const isFilter=mode==='filters',limit=isFilter?30:100;
   const heading=isFilter?'筛选字段':'显示列';
@@ -36,6 +36,7 @@ export default function ColumnPicker({value,options,disabled,onChange,sortableCo
           <span className={'component-inline-column-handle'+(selected?'':' is-hidden')} title="拖动调整显示顺序"><HolderOutlined/></span>
           {selected?<Dropdown trigger={['click']} menu={{items:[{key:'top',label:'移到最前',disabled:disabled||index===0},{key:'up',label:'上移一位',disabled:disabled||index===0},{key:'down',label:'下移一位',disabled:disabled||index===value.length-1},{key:'bottom',label:'移到最后',disabled:disabled||index===value.length-1}],onClick:({key})=>move(option.value,key==='top'?0:key==='bottom'?value.length-1:index+(key==='up'?-1:1))}}><button className="component-inline-column-rank" type="button" aria-label={'调整顺序 '+option.label} title="点击调整顺序" disabled={disabled}>{index+1}</button></Dropdown>:<span className="component-inline-column-rank is-empty">—</span>}
           <label className="component-inline-column-label" htmlFor={controlId+'-'+option.value} title={option.label+' · '+option.value}>{option.label}{!valid&&'（已失效）'}</label>
+          {selected&&renderFieldSettings?.(option.value)}
           <Checkbox className="component-inline-column-check" id={controlId+'-'+option.value} aria-label={(isFilter?'筛选字段 ':'显示字段 ')+option.label} checked={selected} disabled={disabled||!selected&&(!valid||value.length>=limit)} onChange={event=>onChange(event.target.checked?[...value,option.value]:value.filter(name=>name!==option.value))}/>
           {!isFilter&&<Checkbox className="component-inline-column-check" aria-label={'允许排序 '+option.label} title={!selected?'先勾选可看':option.sortable===false?'来源字段未启用排序索引':'允许按此字段排序'} checked={selected&&sortableColumns.includes(option.value)} disabled={disabled||!selected||!valid||option.sortable===false} onChange={event=>onSortingChange(event.target.checked?[...sortableColumns,option.value]:sortableColumns.filter(name=>name!==option.value))}/>}
         </div>;

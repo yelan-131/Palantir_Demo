@@ -7,12 +7,13 @@ import {useAuthStore} from '@/stores/authStore';
 const ComponentPages = lazy(() => import('./index'));
 const DynamicPage = lazy(() => import('../DynamicPage'));
 const AppProgramPage = lazy(() => import('../AppPrograms'));
+const AlertCenter = lazy(() => import('../AlertCenter'));
 
 /** Existing form routes resolve their own page; no third creation entry is needed. */
-export default function FormPageEntry({kind}: {kind: 'business' | 'program'}) {
+export default function FormPageEntry({kind, formSlug}: {kind: 'business' | 'program'; formSlug?:string}) {
   const params = useParams<{slug: string; programId: string}>();
   const [searchParams] = useSearchParams();
-  const slug = params.slug || params.programId;
+  const slug = formSlug || params.slug || params.programId;
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
   const [binding, setBinding] = useState<{enabled: boolean; code?: string; form?: {id: number}}>();
   const [error, setError] = useState('');
@@ -24,7 +25,7 @@ export default function FormPageEntry({kind}: {kind: 'business' | 'program'}) {
         const response = await api.get(`/pages/forms/${encodeURIComponent(slug || '')}/binding`);
         let value = response.data;
         if (value.enabled && !value.code && admin) {
-          const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: true});
+          const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: true, populate: true});
           value = {...value, code: created.data.code};
         }
         if (current) setBinding(value);
@@ -38,6 +39,6 @@ export default function FormPageEntry({kind}: {kind: 'business' | 'program'}) {
   if (!binding) return <div style={{padding: 80, textAlign: 'center'}}><Spin /></div>;
   return <Suspense fallback={<Spin />}>
     {searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} /> : <Empty description="此表单的页面尚未发布" />
-      : kind === 'business' ? <DynamicPage /> : <AppProgramPage />}
+      : slug === 'alert-center' ? <AlertCenter /> : kind === 'business' ? <DynamicPage /> : <AppProgramPage />}
   </Suspense>;
 }

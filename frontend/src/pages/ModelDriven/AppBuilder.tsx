@@ -169,7 +169,7 @@ export default function AppBuilder() {
         </Space>
       </section>
 
-      <Alert type="info" showIcon message="配置预览：此旧版构建器尚未接入保存与发布，请在应用、表单与菜单中配置正式表单。" style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon message="配置预览：此旧版构建器尚未接入保存与发布，请在「应用配置 → 业务数据」中配置正式表单。" style={{ marginBottom: 16 }} />
       <Row gutter={[16, 16]} className="semantic-contract-summary">
         <Col xs={24} lg={8}>
           <SummaryCard icon={<NodeIndexOutlined />} label="绑定对象" value={contract.entity_detail?.name ?? contract.entity} detail={contract.entity_detail?.source ?? '-'} />

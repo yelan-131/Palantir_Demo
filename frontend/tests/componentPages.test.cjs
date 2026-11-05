@@ -163,3 +163,18 @@ test('switching a source clears filter schemes with references to its old fields
  assert.equal(next.widgets[0].filterFields,null);
  assert.equal(value.widgets[0].filterSettings.schemes.length,1);
 });
+
+test('leaving an unpublished populated editor returns to saved admin preview without publishing drafts',()=>{
+ const saved={title:'专用零部件表单',widgets:[{id:'records',type:'record-list'}]};
+ const pending={...saved,title:'未保存修改'};
+ const state={code:'parts',publishedVersion:0,definition:saved};
+ const {pagePresentation}=context.exports;
+ assert.equal(pagePresentation(state,true,false).definition,saved);
+ assert.equal(pagePresentation(state,true,false).draftPreview,true);
+ assert.equal(pagePresentation(state,true,false).startEditing,false);
+ assert.equal(pagePresentation(state,true,true,pending).definition,pending);
+ assert.equal(pagePresentation(state,false,false).definition,undefined);
+ const published={title:'线上页面',widgets:[]};
+ assert.equal(pagePresentation({...state,publishedVersion:1,publishedDefinition:published},true,false).definition,published);
+ assert.equal(pagePresentation({...state,definition:{...saved,widgets:[]}},true,false).startEditing,true);
+});

@@ -1,8 +1,9 @@
+import { PropertyGroup } from '@/components/PropertyInspector';
 import { useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Popconfirm, Drawer, Form, Input, InputNumber, Select, Space, Table, message } from 'antd';
+import { Alert, Button, Empty, Popconfirm, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, message } from 'antd';
 import type { PlatformFormField } from '@/services/api';
 import type { FormInstance } from 'antd';
-import { CheckOutlined, InfoCircleOutlined, PlusOutlined, SafetyCertificateOutlined, TableOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined, PlusOutlined, SafetyCertificateOutlined, TableOutlined } from '@ant-design/icons';
 import { adminCreateRole } from '@/services/api';
 import { propertyError, fieldStorageSize, supportsFieldByteLimit } from './assemblyPersistence';
 
@@ -18,24 +19,37 @@ export const fieldTypeOptions = [
 ];
 export function fieldTypeLabel(type: string) { return fieldTypeOptions.find(item => item.value === type)?.label || type; }
 
-function RoleChecklist({ roles, inheritedIds, custom, value = [], onChange, onNewRole, disabled }: {
-  roles: AssemblyRole[]; inheritedIds: number[]; custom: boolean; value?: number[];
-  onChange?: (ids: number[]) => void; onNewRole: () => void; disabled?: boolean;
+export function RoleChecklist({ roles, inheritedIds, custom = false, value = [], onChange, onNewRole, disabled }: {
+  roles: AssemblyRole[]; inheritedIds: number[]; custom?: boolean; value?: number[];
+  onChange?: (ids: number[]) => void; onNewRole?: () => void; disabled?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const selected = custom ? value : inheritedIds;
   return <>
     <div className="assembly-section-heading"><strong>角色清单 <span>{selected.length} 个可访问</span></strong>
-      <Button size="small" icon={<PlusOutlined />} onClick={onNewRole} disabled={disabled}>新建角色</Button></div>
-    <Table<AssemblyRole> rowKey="id" size="small" pagination={false} dataSource={expanded ? roles : roles.slice(0, 8)}
-      columns={[
-        { title: '角色', key: 'role', render: (_, role) => <div className="assembly-role-identity"><strong>{role.label || role.name}</strong><small>{role.name}</small></div> },
-        { title: custom ? '允许访问' : '访问状态', width: 124, align: 'right', key: 'access', render: (_, role) => custom
-          ? <Checkbox aria-label={`允许${role.label || role.name}访问`} checked={value.includes(role.id)} disabled={disabled}
-              onChange={event => onChange?.(event.target.checked ? [...value, role.id] : value.filter(id => id !== role.id))} />
-          : <span className={selected.includes(role.id) ? 'assembly-role-allowed' : 'assembly-role-denied'}>{selected.includes(role.id) ? <><CheckOutlined /> 允许访问</> : '未授权'}</span> },
-      ]} />
-    {roles.length > 8 && <Button type="link" size="small" onClick={() => setExpanded(!expanded)}>{expanded ? '收起角色清单' : `展开全部 ${roles.length} 个角色`}</Button>}
+      {onNewRole && <Button size="small" icon={<PlusOutlined />} onClick={onNewRole} disabled={disabled}>新建角色</Button>}</div>
+    {roles.length ? (
+      <div className="assembly-role-switches">
+        <table aria-label="访问角色">
+          <thead>
+            <tr><th scope="col">角色名称</th><th scope="col">角色编码</th><th scope="col">允许访问</th></tr>
+          </thead>
+          <tbody>
+            {roles.map(role => {
+              const name = role.label || role.name;
+              return <tr key={role.id}>
+                <td title={name}>{name}</td>
+                <td title={role.name}>{role.name}</td>
+                <td>
+                  <Switch size="small" aria-label={`允许${name}访问`} checked={selected.includes(role.id)}
+                    disabled={disabled || !custom}
+                    onChange={checked => onChange?.(checked ? [...value, role.id] : value.filter(id => id !== role.id))} />
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无角色" />}
   </>;
 }
 
@@ -43,7 +57,7 @@ export function MenuAccessPanel({ form, roles, inheritedIds, applicationName, on
   form: FormInstance; roles: AssemblyRole[]; inheritedIds: number[]; applicationName: string;
   onRoleCreated: (role: AssemblyRole) => void; disabled?: boolean;
 }) {
-  const mode = Form.useWatch('permissionMode', form) || 'inherit';
+  const mode = Form.useWatch('permissionMode', { form, preserve: true }) || 'inherit';
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -65,18 +79,17 @@ export function MenuAccessPanel({ form, roles, inheritedIds, applicationName, on
     } catch (failure: any) { if (!failure?.errorFields) setError(propertyError(failure, '新建角色失败，请重试')); }
     finally { lock.current = false; setBusy(false); }
   };
-  return <section className="assembly-property-section assembly-access-section" aria-label="访问权限">
-    <h3><SafetyCertificateOutlined /> 访问权限</h3>
+  return <PropertyGroup title="访问权限">
     <Form.Item name="permissionMode" label="权限来源"><Select options={[
       { label: '跟随应用权限', value: 'inherit' }, { label: '为此菜单单独设置', value: 'custom' },
     ]} /></Form.Item>
-    <p className="assembly-section-note">{mode === 'custom' ? '仅调整此菜单的访问角色，应用内其他菜单保持原有设置。' : `与「${applicationName}」保持一致，应用授权变化时同步生效。`}</p>
-    <Form.Item name="roleIds" dependencies={['permissionMode']} rules={[{ validator: (_, value) =>
+    <p className="assembly-inspector-note">{mode === 'custom' ? '仅调整此菜单的访问角色，应用内其他菜单保持原有设置。' : `与「${applicationName}」保持一致，应用授权变化时同步生效。`}</p>
+    <Form.Item className="assembly-role-field" name="roleIds" dependencies={['permissionMode']} rules={[{ validator: (_, value) =>
       form.getFieldValue('permissionMode') !== 'custom' || value?.length ? Promise.resolve() : Promise.reject(new Error('请至少选择一个访问角色')) }]}>
       <RoleChecklist roles={roles} inheritedIds={inheritedIds} custom={mode === 'custom'} disabled={disabled}
         onNewRole={() => { roleForm.resetFields(); setError(''); setOpen(true); }} />
     </Form.Item>
-    <p className="assembly-access-note"><InfoCircleOutlined /> 控制此菜单的可见与进入权限；记录和字段权限由表单设计管理。</p>
+    <p className="assembly-inspector-note"><InfoCircleOutlined /> 控制此菜单的可见与进入权限；记录和字段权限由表单设计管理。</p>
     <Drawer title="新建角色" width={420} open={open} onClose={() => !busy && setOpen(false)} maskClosable={!busy} closable={!busy}
       destroyOnClose className="assembly-property-drawer" footer={<Space><Button disabled={busy} onClick={() => setOpen(false)}>取消</Button><Button type="primary" loading={busy} onClick={save}>创建角色</Button></Space>}>
       <p className="assembly-drawer-intro">创建后，可在角色清单中选择是否授权。</p>
@@ -88,7 +101,7 @@ export function MenuAccessPanel({ form, roles, inheritedIds, applicationName, on
       </Form>
       <p className="assembly-access-note"><SafetyCertificateOutlined /> 角色成员与数据权限在角色管理中维护。</p>
     </Drawer>
-  </section>;
+  </PropertyGroup>;
 }
 
 export function FieldStructurePanel({ fields, formName, onCreate, onUpdate, onDelete, disabled }: {
@@ -130,7 +143,7 @@ export function FieldStructurePanel({ fields, formName, onCreate, onUpdate, onDe
     } catch (failure) { setError(propertyError(failure, '删除字段失败，请重试')); }
     finally { lock.current = false; setBusy(false); }
   };
-  return <section className="assembly-field-summary" aria-label="字段结构">
+  return <section className="assembly-property-section assembly-field-summary" aria-label="字段结构">
     <div className="assembly-section-heading"><h3><TableOutlined /> 字段结构 <span>{fields.length}</span></h3>
       <Button size="small" disabled={disabled} icon={<PlusOutlined />} onClick={() => { setEditing(null); fieldForm.resetFields(); setError(''); setOpen(true); }}>新增字段</Button></div>
     <p className="assembly-section-note">维护字段定义；必填、列表展示与布局请进入表单设计配置。</p>

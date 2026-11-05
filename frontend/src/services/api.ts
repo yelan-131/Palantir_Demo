@@ -1075,6 +1075,7 @@ export interface PlatformMenuNode {
   title: string;
   icon?: string | null;
   form_id?: number | null;
+  page_code?: string | null;
   route_path?: string | null;
   visible: boolean;
   default_entry: boolean;

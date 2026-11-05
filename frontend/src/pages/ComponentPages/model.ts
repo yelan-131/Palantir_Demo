@@ -5,12 +5,16 @@ export interface PageWidget {
   id: string;
   type: WidgetType;
   title: string;
-  width: 6 | 12 | 18 | 24;
+  width: 6 | 8 | 12 | 18 | 24;
   roleIds?: number[];
   accessGroups?: ToolbarGroup[] | null;
   dataBinding?: {formId: number} | null;
   dimension?: string | null;
   aggregate: 'count' | 'sum' | 'avg' | 'min' | 'max';
+  expression?: string | null;
+  sharedMetricId?: string | null;
+  sharedMetricVersion?: number | null;
+  sharedFields?: string[];
   measure?: string | null;
   height?: number;
   customWidth?: number | null;
@@ -46,6 +50,15 @@ export interface PageState {
   publishedDefinition?: PageDefinition | null;
   hostForm?: {id: number; code: string; name: string; kind: string; status: string} | null;
 }
+/** An unpublished page remains usable as an admin preview after leaving its editor. */
+export function pagePresentation(state: PageState | undefined, admin: boolean, editing: boolean, draft?: PageDefinition) {
+  const draftPreview = Boolean(admin && state && !state.publishedVersion && !editing);
+  return {
+    draftPreview,
+    definition: editing ? draft : state?.publishedDefinition ?? (draftPreview ? state?.definition : undefined),
+    startEditing: Boolean(admin && state && !state.publishedVersion && !state.definition.widgets.length),
+  };
+}
 export function moveWidget(definition: PageDefinition, source: string, target: string): PageDefinition {
   const from = definition.widgets.findIndex(widget => widget.id === source);
   const to = definition.widgets.findIndex(widget => widget.id === target);
@@ -64,7 +77,8 @@ export function retainFilters(filters: Record<string, string>, fields: string[])
 /** Presentation edits keep current results; source, formula or filter changes reload them. */
 export function pageDataSignature(definition?: PageDefinition | null) {
   return JSON.stringify(definition && {sourceFormId: definition.sourceFormId, filterFields: definition.filterFields,
-    widgets: definition.widgets.map(({id, type, dataBinding, dimension, aggregate, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}) => ({id, type, dataBinding, dimension, aggregate, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}))});
+    sharedBindings:definition.widgets.map(({id,sharedMetricId,sharedMetricVersion,sharedFields})=>({id,sharedMetricId,sharedMetricVersion,sharedFields})),
+    widgets: definition.widgets.map(({id, type, dataBinding, dimension, aggregate, expression, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}) => ({id, type, dataBinding, dimension, aggregate, expression, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}))});
 }
 
 export interface FilterContribution {schemeId?: string;ready?: boolean; search: string; filters: Array<{field: string; op: string; value: unknown}>}
@@ -87,7 +101,7 @@ export function bindWidgetSource(definition: PageDefinition, id: string, formId?
   const next = {...definition, schemaVersion: 2 as const, widgets: definition.widgets.map(item => item.id !== id && !linked.includes(item.id) ? item : {
     ...item, dataBinding: formId ? {formId} : null, dimension: undefined, measure: undefined,
     filterFields: null, filterSettings: {...item.filterSettings, requiredFields: [], schemes:null},
-    listSettings: {...item.listSettings, columns: null, displayGroups:null, defaultSort: null}, aggregate: 'count' as const,
+    listSettings: {...item.listSettings, columns: null, displayGroups:null, defaultSort: null}, aggregate: 'count' as const, expression: null, sharedMetricId:null, sharedMetricVersion:null, sharedFields:[],
     targetWidgetIds: linked.includes(item.id) ? item.targetWidgetIds?.filter(target=>target===id) : [],
   })};
   return {...next, widgets: next.widgets.map(item => ({...item, targetWidgetIds: item.targetWidgetIds?.filter(targetId => {

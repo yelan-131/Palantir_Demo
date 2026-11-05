@@ -38,6 +38,89 @@ async def create_publish(client, user, value=None):
 
 
 @pytest.mark.asyncio
+async def test_shared_form_lists_publish_as_an_application_page(environment, monkeypatch):
+    from app.api import applications
+    from app.api.deps import get_db
+    from app.models.relational import Application
+
+    db, factory, _, user, client = environment
+    user['is_admin'] = True
+    app_api = client._transport.app
+    app_api.include_router(component_pages.router, prefix='/pages')
+    app_api.include_router(applications.router, prefix='/applications')
+
+    async def fresh_session():
+        async with factory() as session:
+            yield session
+
+    async def query_fixture_database(query):
+        async with factory() as session:
+            return await query(session)
+
+    app_api.dependency_overrides[get_db] = fresh_session
+    monkeypatch.setattr(applications, 'safe_db_call', query_fixture_database)
+
+    source_response = await client.post('/forms', json={
+        'name': '业务申请', 'code': 'shared-request-source', 'config': {'assemblyKind': 'interaction'},
+    })
+    assert source_response.status_code == 200, source_response.text
+    source_id = source_response.json()['data']['id']
+    for name, label in [('title', '申请主题'), ('status', '处理状态')]:
+        response = await client.post(f'/forms/{source_id}/fields', json={
+            'field_name': name, 'label': label, 'field_type': 'string', 'sortable': True,
+        })
+        assert response.status_code == 200, response.text
+    response = await client.post(f'/forms/{source_id}/publish')
+    assert response.status_code == 200, response.text
+    source_schema = await client.get(f'/forms/{source_id}?schema=published&scope=list')
+    assert source_schema.status_code == 200, source_schema.text
+    assert not source_schema.json()['data']['config']['viewConfig']
+    for title, status in [('新申请', '待审批'), ('旧申请', '已通过')]:
+        response = await client.post(f'/forms/{source_id}/records', json={'data': {'title': title, 'status': status}})
+        assert response.status_code == 200, response.text
+
+    draft = await client.post('/pages', json={'title': '申请处理'})
+    assert draft.status_code == 200, draft.text
+    page = draft.json()
+    binding = {'formId': source_id}
+    definition = {**page['definition'], 'widgets': [
+        {'id': 'pending', 'type': 'record-list', 'title': '待审批申请', 'dataBinding': binding,
+         'listSettings': {'columns': ['title', 'status'], 'rowClick': 'detail'}},
+        {'id': 'approved', 'type': 'record-list', 'title': '已通过申请', 'dataBinding': binding,
+         'listSettings': {'columns': ['status', 'title'], 'rowClick': 'none'}},
+        {'id': 'filter', 'type': 'record-filter', 'title': '状态筛选', 'dataBinding': binding,
+         'filterFields': ['status'], 'targetWidgetIds': ['pending']},
+    ]}
+    response = await client.post(f'/pages/{page["code"]}/publish', json={
+        'definition': definition, 'expectedRevision': page['revision'],
+    })
+    assert response.status_code == 200, response.text
+
+    app = Application(tenant_id=1, name='申请管理', code='request-management', status='published')
+    db.add(app)
+    await db.commit()
+    menu = await client.post(f'/forms/applications/{app.id}/menu-nodes', json={
+        'title': '申请处理', 'node_type': 'page', 'page_code': page['code'],
+    })
+    assert menu.status_code == 200, menu.text
+    menu_response = await client.get(f'/applications/{app.id}/menus')
+    assert menu_response.status_code == 200, menu_response.text
+    [entry] = menu_response.json()['data']
+    assert entry['route_path'] == f'/pages/{page["code"]}'
+    loaded = await client.get(entry['route_path'])
+    assert loaded.status_code == 200, loaded.text
+    first, second, filter_widget = loaded.json()['definition']['widgets']
+    assert first['dataBinding'] == second['dataBinding'] == binding
+    assert first['listSettings']['columns'] == ['title', 'status']
+    assert second['listSettings']['columns'] == ['status', 'title']
+    assert (first['listSettings']['rowClick'], second['listSettings']['rowClick']) == ('detail', 'none')
+    assert filter_widget['targetWidgetIds'] == ['pending']
+    records = await client.get(f'/forms/{source_id}/records')
+    assert records.status_code == 200, records.text
+    assert {row['data']['status'] for row in records.json()['data']} == {'待审批', '已通过'}
+
+
+@pytest.mark.asyncio
 async def test_page_drafts_do_not_publish_business_or_page_changes(pages_environment):
     db, form, user, client = pages_environment
     form.config = {'viewConfigDraft': {'privateDraft': True}, 'permissionDesignDraft': {'roles': {}},
@@ -443,6 +526,10 @@ async def test_metric_card_title_and_content_appearance_survives_publication(pag
     value = definition()
     appearance = {'showTitle': False, 'showMetricLabel': False, 'showMetricInfo': False,
                   'titleFontSize': 18, 'valueFontSize': 42, 'contentPadding': 24,
+                  'titleAlign': 'center', 'titleFontFamily': 'serif', 'titleColor': '#123456',
+                  'titleWeight': 'normal', 'titleItalic': True, 'titleGap': 8,
+                  'subtitle': '仅统计已授权的产线数据。', 'showSubtitle': False,
+                  'subtitleFontSize': 14, 'subtitleColor': '#536775', 'subtitleAlign': 'right',
                   'contentAlign': 'center', 'metricColumns': 2, 'widthColumns': 7, 'cardHeight': 420, 'cardOpacity': .65, 'cardBlur': 8,
                   'groupBackground': True, 'legendPosition': 'bottom', 'showAxisLabels': False,
                   'showGrid': False, 'horizontal': True, 'barWidth': 30, 'lineWidth': 4,
@@ -662,7 +749,7 @@ async def test_existing_business_and_board_entries_can_initialize_blank_canvas(p
         page = response.json()
         assert page['definition']['widgets'] == []
         assert page['hostForm']['id'] == form_id
-        assert page['definition']['sourceFormId'] == (1 if form_id == 1 else None)
+        assert page['definition']['sourceFormId'] is None
         assert (await client.get(f'/pages/forms/{slug}/binding')).json()['code'] == page['code']
         # Reopening never replaces an already bound page or changes form lifecycle.
         assert (await client.post(f'/pages/forms/{form_id}/binding', json={'blank': True})).json()['code'] == page['code']
@@ -1101,7 +1188,7 @@ async def test_display_group_default_sort_round_trip_and_group_boundaries(pages_
 
 def test_filter_schemes_project_tabs_and_fields_by_any_matching_subject():
     widget = {'filterSettings': {'schemes': [
-        {'id': 'common', 'name': '常用', 'groups': [{'id': 'public', 'columns': ['title']},
+        {'id': 'common', 'name': '常用', 'fieldControls': {'qty': 'checkbox'}, 'groups': [{'id': 'public', 'columns': ['title']},
             {'id': 'role', 'roleIds': [4], 'columns': ['qty']}]},
         {'id': 'user', 'name': '个人', 'groups': [{'id': 'u', 'userIds': [12], 'columns': ['qty']}]},
         {'id': 'org', 'name': '部门', 'groups': [{'id': 'o', 'orgUnitIds': [8], 'columns': ['title']}]}]}}
@@ -1110,9 +1197,11 @@ def test_filter_schemes_project_tabs_and_fields_by_any_matching_subject():
     ordinary = resolve(widget, set(), 99, set())['filterSettings']['schemes']
     assert [scheme['id'] for scheme in ordinary] == ['common']
     assert [group['id'] for group in ordinary[0]['groups']] == ['public']
+    assert ordinary[0]['fieldControls'] == {}
     mixed = resolve(widget, {4}, 12, {8})['filterSettings']['schemes']
     assert [scheme['id'] for scheme in mixed] == ['common', 'user', 'org']
     assert [group['id'] for group in mixed[0]['groups']] == ['public', 'role']
+    assert mixed[0]['fieldControls'] == {'qty': 'checkbox'}
     assert widget == before
     assert resolve({'filterSettings': {}}, set()) == {'filterSettings': {}}
     assert resolve({'filterSettings': {'schemes': [widget['filterSettings']['schemes'][1]]}}, set(), 99) is None
@@ -1206,3 +1295,107 @@ async def test_audience_templates_extract_subjects_without_importing_fields_or_a
     assert (await client.post('/pages/permission-templates', json={'scope':'audience','name':'非法按钮','groups':[{**group,'actions':['query']}]})).status_code == 422
     user['tenant_id'] = 2
     assert (await client.get('/pages/permission-templates?scope=audience')).json()['data'] == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_form_shared_designer_preserves_runtime_until_publication(pages_environment):
+    db, form, user, client = pages_environment
+    await seed(db, 'Keep business record')
+    form.config = {'assemblyKind': 'interaction', 'viewConfigDraft': {'private': True}}
+    await db.commit()
+    assert (await client.get(f'/pages/forms/{form.code}/binding')).json()['enabled'] is False
+    user['is_admin'] = True
+    pending = (await client.get(f'/pages/forms/{form.code}/binding')).json()
+    assert pending['enabled'] and pending['form']['id'] == form.id
+    page = (await client.post(f'/pages/forms/{form.id}/binding', json={'blank': True})).json()
+    assert page['definition']['widgets'] == []
+    assert page['definition']['sourceFormId'] is None
+    await db.refresh(form)
+    assert form.config['viewConfigDraft'] == {'private': True}
+    assert form.status == 'published'
+    user['is_admin'] = False
+    assert (await client.get(f'/pages/forms/{form.code}/binding')).json()['enabled'] is False
+    user['is_admin'] = True
+    response = await client.post(f'/pages/{page["code"]}/publish', json={
+        'definition': page['definition'], 'expectedRevision': page['revision']})
+    assert response.status_code == 200, response.text
+    user['is_admin'] = False
+    assert (await client.get(f'/pages/forms/{form.code}/binding')).json()['code'] == page['code']
+    assert len((await client.get('/forms/1/records')).json()['data']) == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_page_formula_calculation_and_missing_field_validation(pages_environment):
+    db, _, user, client = pages_environment
+    await seed(db, 'Formula record')
+    value = definition()
+    value['widgets'] = [{'id': 'formula', 'type': 'metric', 'title': '平均数量',
+                         'expression': 'sum(qty) / count()', 'width': 6}]
+    page = await create_publish(client, user, value)
+    response = await client.post(f'/pages/{page["code"]}/data', json={})
+    assert response.status_code == 200, response.text
+    assert response.json()['analyticsData']['metricValues']['formula'] == 2
+    for expression in ('sum(missing)', '__import__("os")', 'sum('):
+        invalid = copy.deepcopy(value)
+        invalid['widgets'][0]['expression'] = expression
+        response = await client.post(f'/pages/{page["code"]}/publish', json={
+            'definition': invalid, 'expectedRevision': page['revision']})
+        assert response.status_code == 422, response.text
+
+
+@pytest.mark.asyncio
+async def test_menu_page_target_rejects_drafts_and_obeys_page_audience(environment, monkeypatch):
+    from app.api import applications
+    from app.models.relational import Application, ApplicationRole, ComponentPage, Role, UserRole
+
+    db, factory, _, user, client = environment
+    user['is_admin'] = True
+    app_api = client._transport.app
+    app_api.include_router(component_pages.router, prefix='/pages')
+    app_api.include_router(applications.router, prefix='/applications')
+
+    async def query_fixture_database(query):
+        async with factory() as session:
+            return await query(session)
+
+    monkeypatch.setattr(applications, 'safe_db_call', query_fixture_database)
+    app = Application(tenant_id=1, name='流程应用', code='request-app', status='published')
+    db.add_all([app, Role(id=2, tenant_id=1, name='reviewer', label='Reviewer'),
+                ComponentPage(tenant_id=2, code='other-page', draft={'title': '其他租户页面'})])
+    await db.flush()
+    db.add(ApplicationRole(tenant_id=1, application_id=app.id, role_id=1))
+    await db.commit()
+
+    draft = await client.post('/pages', json={'title': '审批页面'})
+    assert draft.status_code == 200, draft.text
+    page = draft.json()
+    path = f'/forms/applications/{app.id}/menu-nodes'
+    assert (await client.post(path, json={'title': '审批', 'page_code': page['code']})).status_code == 409
+    assert (await client.post(path, json={'title': '其他', 'page_code': 'other-page'})).status_code == 404
+
+    legacy = await client.post(path, json={'title': '审批', 'form_id': 1, 'route_path': '/dynamic/record-contract'})
+    assert legacy.status_code == 200, legacy.text
+    entry = legacy.json()['data']
+    assert entry['route_path'] == '/dynamic/record-contract'
+    published = await client.post(f'/pages/{page["code"]}/publish', json={
+        'definition': {**page['definition'], 'roleIds': [2]},
+        'expectedRevision': page['revision'],
+    })
+    assert published.status_code == 200, published.text
+    migrated = await client.put(f'{path}/{entry["id"]}', json={'page_code': page['code']})
+    assert migrated.status_code == 200, migrated.text
+    [saved] = (await client.get(path)).json()['data']
+    assert (saved['id'], saved['title'], saved['form_id'], saved['page_code'], saved['route_path']) == (
+        entry['id'], '审批', None, page['code'], f'/pages/{page["code"]}',
+    )
+
+    user['is_admin'] = False
+    runtime_path = f'/applications/{app.id}/menus'
+    hidden = await client.get(runtime_path)
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json()['data'] == []
+    db.add(UserRole(tenant_id=1, user_id=user['uid'], role_id=2))
+    await db.commit()
+    visible = await client.get(runtime_path)
+    assert visible.status_code == 200, visible.text
+    assert [item['route_path'] for item in visible.json()['data']] == [saved['route_path']]

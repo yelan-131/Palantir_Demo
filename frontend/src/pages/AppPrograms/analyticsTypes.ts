@@ -109,8 +109,8 @@ export interface SharedMetricEntry {
   versions?: Array<{version: number; definition: SharedMetricDefinition; publishedAt: string; note: string | null}>;
 }
 export interface SharedMetricReferences {
-  counts: {publishedBoards: number; publishedCharts: number; draftBoards: number; draftCharts: number};
-  references: Array<{formId: number; programId: string; boardName: string; state: 'published' | 'draft'; version?: number | null; metricCount: number; widgets: Array<{id: string; title: string; type: string}>}>;
+  counts: {publishedBoards: number; publishedCharts: number; draftBoards: number; draftCharts: number; publishedPages?:number; draftPages?:number};
+  references: Array<{formId: number; programId: string; pageCode?:string; boardName: string; state: 'published' | 'draft'; version?: number | null; metricCount: number; widgets: Array<{id: string; title: string; type: string}>}>;
 }
 export interface SharedMetricImpact extends SharedMetricReferences {
   definition: SharedMetricDefinition;

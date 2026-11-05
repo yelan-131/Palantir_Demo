@@ -14,7 +14,11 @@ export default function BusinessProperties({widget,tab,fields,view,onChange,disa
 }) {
   const options = fields.map(field=>({label:field.label,value:field.field_name}));
   const sourceFilters = view?.filters?.filter(filter=>filter.enabled!==false).map(filter=>filter.fieldName);
-  const filterOptions = options;
+  const filterOptions = fields.map(field=>({
+    label:field.label,value:field.field_name,
+    choice:!field.ui_config?.relation_config&&field.ui_config?.controlType!=='relation'&&
+      (field.ui_config?.controlType==='select'||field.field_type==='enum'),
+  }));
   const sourceColumns = view?.table?.columns?.filter(column=>column.enabled!==false).map(column=>column.fieldName);
   const columnOptions = options.filter(option=>!sourceColumns||sourceColumns.includes(option.value));
   const filter = widget.filterSettings || {};

@@ -45,4 +45,5 @@ test('settings selection follows canonical data routes and distinguishes work pr
   assert.equal(key('/account-center', '?tab=preferences'), '/account-center?tab=preferences');
   assert.equal(key('/account-center'), '/account-center');
   assert.equal(key('/form-settings/12'), '/studio/applications');
+  assert.equal(key('/form-settings/12', '?source=business-data'), '/studio/business-data');
 });

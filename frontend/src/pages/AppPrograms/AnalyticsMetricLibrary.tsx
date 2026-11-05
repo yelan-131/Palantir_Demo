@@ -145,9 +145,9 @@ export default function AnalyticsMetricLibrary({design, focusId, refreshKey, dis
   };
   const renderReferences = (value?: SharedMetricReferences) => value && <>
     <div className="analytics-library-impact-summary"><div><strong>{value.counts.publishedBoards}</strong><span>线上看板</span></div><div><strong>{value.counts.publishedCharts}</strong><span>线上图表</span></div></div>
-    <p className="analytics-library-help">另有 {value.counts.draftBoards} 张已保存草稿、{value.counts.draftCharts} 个草稿图表。历史版本保持原口径；未保存的引用不计入此清单。</p>
+    <p className="analytics-library-help">另有 {value.counts.draftBoards} 张已保存草稿、{value.counts.draftCharts} 个草稿图表。通用页面：{value.counts.publishedPages||0} 个线上页面、{value.counts.draftPages||0} 个草稿。历史版本保持原口径；未保存的引用不计入此清单。</p>
     {value.references.length ? <div className="analytics-library-references">{value.references.map(item => <article key={`${item.formId}-${item.state}`}>
-      <div><a href={`/program/${encodeURIComponent(item.programId)}`} target="_blank" rel="noreferrer">{item.boardName}</a><Tag color={item.state === 'published' ? 'green' : 'default'}>{item.state === 'published' ? '线上' : '草稿'}{item.version ? ` v${item.version}` : ''}</Tag></div>
+      <div><a href={`/${item.pageCode?'pages':'program'}/${encodeURIComponent(item.pageCode||item.programId)}`} target="_blank" rel="noreferrer">{item.boardName}</a><Tag color={item.state === 'published' ? 'green' : 'default'}>{item.state === 'published' ? '线上' : '草稿'}{item.version ? ` v${item.version}` : ''}</Tag></div>
       <ul>{item.widgets.map(widget => <li key={widget.id}>{widget.title}</li>)}</ul>{!item.widgets.length && <p>已引用此指标，暂未用于图表</p>}
     </article>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前还没有已保存的看板引用" />}
   </>;

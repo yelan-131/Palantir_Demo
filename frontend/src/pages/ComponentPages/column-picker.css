@@ -24,3 +24,5 @@
 .component-inline-column>.component-inline-column-check {display:flex;justify-content:center;width:30px;flex:0 0 30px;}
 
 .component-filter-field-picker .component-inline-columns-table-heading {grid-template-columns:minmax(0,1fr) 30px;}
+.component-filter-control-mode {width:86px;flex:none;}
+.component-filter-control-mode .ant-select-selection-item {font-size:11px;}

@@ -35,14 +35,13 @@ export async function persistForm(api: FormApi, current: { id: string; status: s
     ? (await api.getPlatformForm(current.id, { schema: 'draft', scope: 'designer' })).data.data
     : undefined;
   if (latest && values.code !== undefined && values.code !== latest.code) {
-    throw new Error('已保存的表单编码不能修改，请创建新的表单或看板');
+    throw new Error('已保存的表单编码不能修改');
   }
   const config = {
     ...(latest?.config || current.config || {}),
-    assemblyKind: values.category === 'analytics' ? 'analysis' : 'interaction',
-    analyticsMode: values.mode, entityLabel: values.entity,
+    ...(!latest ? { assemblyKind: 'interaction' } : {}),
+    entityLabel: values.entity,
     structureLocked: true,
-    ...(!latest ? {componentPageEnabled: true} : {}),
   };
   // Publication must use /publish so that the schema/layout version is saved.
   // Editing the metadata must never change a form's lifecycle state.

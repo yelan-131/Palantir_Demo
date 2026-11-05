@@ -26,7 +26,9 @@ export const NAVIGATION_ENTRIES: NavigationEntry[] = [
   { path: '/', label: '我的工作台', area: 'business' },
   { path: '/workflow', label: '流程与待办', area: 'business' },
   { path: '/scheduler', label: '日常任务', area: 'business' },
-  { path: '/studio/applications', label: '应用、表单与菜单', area: 'studio', adminOnly: true },
+  { path: '/studio/applications', label: '应用与菜单', area: 'studio', adminOnly: true },
+  { path: '/studio/business-data', label: '业务数据', area: 'studio', adminOnly: true },
+  { path: '/studio/page-design', label: '页面设计', area: 'studio', adminOnly: true },
   { path: '/studio/templates', label: '模板中心', area: 'studio' },
   { path: '/plugins', label: '插件与扩展', area: 'plugins' },
   { path: '/data-center/sources', label: '数据接入', area: 'data', group: '数据接入' },
@@ -136,7 +138,9 @@ export function dataCenterDestination(pathname: string, search = ''): string | u
 /** All tabs and legacy URLs highlight their parent workspace. */
 export function settingsDestinationKey(pathname: string, search = '') {
   if (pathname === '/account-center') return new URLSearchParams(search).get('tab') === 'preferences' ? '/account-center?tab=preferences' : '/account-center';
-  if (pathname.startsWith('/form-settings/')) return '/studio/applications';
+  if (pathname.startsWith('/form-settings/')) {
+    return new URLSearchParams(search).get('source') === 'business-data' ? '/studio/business-data' : '/studio/applications';
+  }
   const canonical = LEGACY_ROUTES[pathname] || pathname;
   return dataCenterDestination(canonical, search)?.split('?')[0] || canonical;
 }

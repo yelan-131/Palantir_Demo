@@ -19,18 +19,16 @@ test('property saves merge latest designer config and preserve field labels and 
 });
 test('new form stays draft until the explicit publish operation',async()=>{
  let payload;
- const saved=await persistForm({createPlatformForm:async data=>{payload=data;return response({id:8,...data});}},{id:'draft-1',status:'draft'},{name:'看板',code:'test-board',category:'analytics',status:'published'});
- assert.equal(payload.status,'draft'); assert.equal(payload.config.assemblyKind,'analysis');assert.equal(saved.id,8);
- assert.equal(payload.config.componentPageEnabled,true);
+ const saved=await persistForm({createPlatformForm:async data=>{payload=data;return response({id:8,...data});}},{id:'draft-1',status:'draft'},{name:'表单',code:'test-form',status:'published'});
+ assert.equal(payload.status,'draft'); assert.equal(payload.config.assemblyKind,'interaction');assert.equal(saved.id,8);
+ assert.equal(payload.config.componentPageEnabled,undefined);
 });
-test('business creation uses the same component-page capability and existing forms keep their renderer',async()=>{
- let created,updated;
- const api={createPlatformForm:async payload=>{created=payload;return response({id:12,...payload});},getPlatformForm:async()=>response({id:7,code:'old',status:'published',config:{assemblyKind:'interaction'},fields:[]}),updatePlatformForm:async(id,payload)=>{updated=payload;return response({id,...payload});}};
- await persistForm(api,{id:'draft-new',status:'draft'},{name:'业务',code:'business-new',category:'interaction'});
- assert.equal(created.config.componentPageEnabled,true);
- assert.equal(created.config.assemblyKind,'interaction');
- await persistForm(api,{id:'7',status:'published'},{name:'旧业务',code:'old',category:'interaction'});
- assert.equal(updated.config.componentPageEnabled,undefined);
+test('existing dashboards keep their renderer and page binding when saving shared metadata',async()=>{
+ let updated;
+ const config={assemblyKind:'analysis',analyticsMode:'cockpit',componentPageEnabled:true,componentPageCode:'legacy-page'};
+ const api={getPlatformForm:async()=>response({id:7,code:'old',status:'published',config,fields:[]}),updatePlatformForm:async(id,payload)=>{updated=payload;return response({id,...payload});}};
+ await persistForm(api,{id:'7',status:'published'},{name:'旧看板',code:'old'});
+ for (const [key,value] of Object.entries(config)) assert.equal(updated.config[key],value);
 });
 test('failed save rejects instead of reporting a local success',async()=>{
  const error=new Error('database unavailable');

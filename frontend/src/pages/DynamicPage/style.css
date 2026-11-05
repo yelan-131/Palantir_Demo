@@ -193,6 +193,20 @@
   min-width: 0;
   flex: auto;
 }
+.dynamic-filter-fields .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.dynamic-filter-fields .ant-radio-group > .ant-radio-wrapper {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  margin-inline-end: 0;
+  white-space: nowrap;
+}
 .tech-white-shell .app-content .dynamic-business-filter .dynamic-view-filter-actions {
   display: flex;
   justify-content: flex-end;

@@ -1,0 +1,21 @@
+/* Compact browser-style tabs: rounded tabs, neutral active fill, no underline. */
+.inspector-tabs { flex:none;min-width:0;padding:0 var(--inspector-tab-inset,12px);background:var(--mf-surface,#fff); }
+.inspector-tabs.ant-tabs > .ant-tabs-nav { margin:0;padding:4px 0 0;border-bottom:0; }
+.inspector-tabs > .ant-tabs-nav::before { display:none; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-nav-list { width:var(--inspector-tab-list-width,100%);gap:3px; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab { flex:var(--inspector-tab-flex,1);justify-content:center;min-height:0;height:28px;box-sizing:border-box;margin:0!important;padding:4px var(--inspector-tab-padding,0);border-radius:8px 8px 0 0;background:transparent;font-size:12px;line-height:20px;transition:background 160ms ease; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-disabled):not(.ant-tabs-tab-active):hover { background:#f2f3f5; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active,
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active:hover { background:var(--inspector-tab-surface,#e9ebee); }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-btn { color:var(--mf-muted);font-weight:500;text-shadow:none;line-height:20px; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { color:var(--mf-text);font-weight:600;text-shadow:none; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-ink-bar { display:none; }
+/* The active tab flows into the panel with outward bottom corners. */
+.inspector-tabs .ant-tabs-nav-wrap { overflow:var(--inspector-tab-overflow,visible); }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active { z-index:1; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before,
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { content:'';position:absolute;bottom:0;width:8px;height:8px;pointer-events:none; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::before { left:-8px;background:radial-gradient(circle at 0 0,transparent 8px,var(--inspector-tab-surface,#e9ebee) 8.5px); }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active::after { right:-8px;background:radial-gradient(circle at 100% 0,transparent 8px,var(--inspector-tab-surface,#e9ebee) 8.5px); }
+.inspector-tabs > .ant-tabs-content-holder { display:none; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-disabled .ant-tabs-tab-btn { opacity:.55; }

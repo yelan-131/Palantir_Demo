@@ -1,3 +1,4 @@
+import InspectorTabs from '@/components/PropertyInspector/InspectorTabs';
 import {widgetInfoText} from './analyticsWidgetDescription';
 import OptionPicker from '@/components/OptionPicker';
 import {PropertyInspectorHeader, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
@@ -10,7 +11,7 @@ import type { AnalyticsEditorPanelName, AnalyticsWidgetTabName, RuntimeAnalytics
 import './analytics-editor-panel.css';
 import AnalyticsDatasetDialog from './AnalyticsDatasetDialog';
 import {applyAnalyticsDataset, reconcileAnalyticsBindings} from './analyticsEditorState';
-import {widgetAppearance, widgetPalettes, type AnalyticsWidgetAppearance} from './analyticsWidgetAppearance';
+import {widgetAppearance, widgetFontOptions, widgetPalettes, type AnalyticsWidgetAppearance} from './analyticsWidgetAppearance';
 import {detachSharedMetric} from './analyticsMetricLibraryState';
 
 export interface AnalyticsEditorPanelProps {
@@ -260,7 +261,7 @@ export default function AnalyticsEditorPanel({ panel, design, selectedWidgetId, 
     const appearance = widgetAppearance(selected, style);
     const chart = ['line','bar','pie'].includes(selected.type);
     const patchAppearance = (patch: Partial<AnalyticsWidgetAppearance>) => updateWidget({appearance:{...selected.appearance,...patch}});
-    const fontOptions = [{value:'inherit',label:'跟随主题'},{value:'sans-serif',label:'无衬线字体'},{value:'serif',label:'衬线字体'},{value:'monospace',label:'等宽字体'},{value:'PingFang SC, Microsoft YaHei, sans-serif',label:'苹方 / 微软雅黑'}];
+    const fontOptions = widgetFontOptions;
     const colorControl = (key: 'titleColor' | 'chartTextColor' | 'tableHeaderColor' | 'metricValueColor') => <Space size={6}><input type="color" aria-label={{titleColor:'标题颜色',chartTextColor:'文字颜色',tableHeaderColor:'表头背景',metricValueColor:'数值颜色'}[key]} value={appearance[key] || '#536775'} onChange={event=>patchAppearance({[key]:event.target.value})} /><Button size="small" type="text" onClick={()=>patchAppearance({[key]:undefined})}>重置</Button></Space>;
     const tableColumnOptions = selected.type==='rank-table'
       ? [{value:'name',label:'分组名称'},...(selected.metricIds || []).map(id=>({value:id,label:metrics.find(metric=>metric.id===id)?.name || id}))]
@@ -504,7 +505,7 @@ export default function AnalyticsEditorPanel({ panel, design, selectedWidgetId, 
     <PropertyInspectorHeader title={panel==='widget'?'组件属性':panelTitles[panel]} titleAccessory={headerStatus} actions={<>{panel==='widget' && selected && <><Button type="text" size="small" aria-label="复制组件" title="复制组件" disabled={disabled} icon={<CopyOutlined />} onClick={copyWidget} /><Button type="text" size="small" danger aria-label="删除组件" title="删除组件" disabled={disabled} icon={<DeleteOutlined />} onClick={removeWidget} /></>}{headerActions}{panel==='widget' && !embedded && navigation}{!embedded && <Button type="text" aria-label={closeLabel} title={closeLabel} icon={<CloseOutlined />} disabled={disabled} onClick={onClose} />}</>} />
     {status && <div className="analytics-editor-heading-status">{status}</div>}
     </div>
-    {panel==='widget' && selected && <Tabs className="analytics-widget-tabs" size="small" activeKey={activeWidgetTab} onChange={changeWidgetTab} items={[{key:'basic',label:'基础'},{key:'style',label:'图表布局'},{key:'data',label:'数据'},{key:'interaction',label:'交互'}]} />}
+    {panel==='widget' && selected && <InspectorTabs activeKey={activeWidgetTab} onChange={changeWidgetTab} items={[{key:'basic',label:'基础'},{key:'style',label:'图表布局'},{key:'data',label:'数据'},{key:'interaction',label:'交互'}]} />}
     {panel!=='widget' && navigation && <nav className="analytics-editor-panel-navigation" aria-label="看板配置分类">{navigation}</nav>}
     <ConfigProvider componentDisabled={disabled}>
       <div className="analytics-editor-panel-body" ref={panelBodyRef}>

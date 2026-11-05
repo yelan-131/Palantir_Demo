@@ -180,6 +180,25 @@ def _menu_rule_subject_matches(rule: dict, user: dict, role_ids: set[int], inher
 
 
 async def _user_can_access_menu_node(db: AsyncSession, user: dict, node, role_ids: list[int]) -> bool:
+    if node.node_type == "page":
+        from app.api.component_pages import bound_host, check_audience, check_host, find_page, published
+
+        route = node.route_path or ""
+        if not route.startswith("/pages/"):
+            return False
+        try:
+            page = await find_page(db, user, route.removeprefix("/pages/"))
+            definition = await published(db, page)
+            if definition is None:
+                return False
+            await check_audience(db, user, definition)
+            host = await bound_host(db, page)
+            if host:
+                await check_host(db, user, host)
+        except HTTPException as failure:
+            if failure.status_code in (403, 404):
+                return False
+            raise
     if user.get("is_admin"):
         return True
     if node.form_id is not None:

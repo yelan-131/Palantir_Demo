@@ -87,6 +87,7 @@
 }
 
 .tech-white-shell .app-content .component-page .property-inspector-group>.ant-btn {margin:8px 10px;}
+.component-linked-filter-button {justify-self:end;}
 
 /* Dashboard appearance settings apply equally in preview and published pages. */
 .component-widget-subtitle {margin:0 0 12px;color:var(--mf-muted);font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;}
@@ -224,6 +225,11 @@
 .component-page-widget {position:relative;}
 .component-page-widget[style*="height"] {display:flex;flex-direction:column;}
 .component-page-widget[style*="height"]>.ant-card-body {flex:1;min-height:0;overflow:auto;}
+
+/* Keep table height steady when the inspector opens or closes and columns start or stop overflowing. */
+.component-page-widget-record-list .dynamic-business-table .ant-table-body {
+  overflow-x: scroll !important;
+}
 .component-resize-handle {position:absolute;right:2px;bottom:2px;width:16px;height:16px;border:0;background:linear-gradient(135deg,transparent 50%,var(--mf-muted) 50%,var(--mf-muted) 57%,transparent 57%,transparent 70%,var(--mf-muted) 70%,var(--mf-muted) 77%,transparent 77%);cursor:nwse-resize;touch-action:none;opacity:.5;z-index:3;}
 .component-resize-handle:hover,.component-resize-handle:focus-visible {opacity:1;}
 
@@ -325,3 +331,8 @@
 
 .component-filter-scheme-heading {flex:1;min-width:0;}
 .component-filter-scheme-heading .ant-tabs {width:100%;}
+.component-table-striped > td { background: rgba(44,110,132,.04) !important; }
+
+.component-list-header-actions .component-header-keyword {margin:0;width:clamp(120px,15vw,205px);}
+.component-list-header-actions .component-header-keyword .ant-input-affix-wrapper {min-height:26px;padding-block:1px;}
+.component-page-widget-record-filter > .ant-card-head .ant-card-head-wrapper {flex-wrap:wrap;column-gap:8px;}

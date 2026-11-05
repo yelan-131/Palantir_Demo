@@ -15,8 +15,8 @@ export default function FilterWidget({widget,sourceId,onChange}: {widget:PageWid
       // Discard the previous scheme's conditions before mounting the next form.
       if(schemes){onChange({schemeId:id,search:'',filters:[],ready:true});setSelected(id);}
     }}/>}
-    <DynamicPage key={scheme?.id||'legacy'} formSlug={String(sourceId)} embedded toolbarTargetId={`component-toolbar-${widget.id}`} readOnly display="filters"
-      filterSettings={settings}
+    <DynamicPage key={JSON.stringify([scheme?.id,scheme?.fieldControls??{}])} formSlug={String(sourceId)} embedded toolbarTargetId={`component-toolbar-${widget.id}`} readOnly display="filters"
+      filterSettings={settings} fieldControls={scheme?.fieldControls}
       filterFields={fields} onFilterChange={value=>onChange({...value,...(scheme?{schemeId:scheme.id}:{})})}/>
   </div>;
 }
