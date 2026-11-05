@@ -2,9 +2,7 @@
 
 Last updated: 2026-11-05
 
-Pending development release: [0.3.20 — 业务数据、页面设计与应用菜单](operations/release-0.3.20.md), updated 2026-11-05.
-
-Latest published release: [0.3.19 — AI 看板、组件页面与流程下发增强](operations/release-0.3.19.md), released 2026-11-03.
+Latest published release: [0.3.20 — 业务数据、页面设计与应用菜单](operations/release-0.3.20.md), released 2026-11-05.
 
 This documentation set is organized by responsibility, not by file path. Some
 files under `docs/architecture/` describe current implementation, while others
@@ -83,7 +81,7 @@ Read these first when you want the current system truth:
 | [Release 0.3.7](operations/release-0.3.7.md) | Object and relation center persistence, external metadata scanning, runtime application rendering, workflow worklists, account avatars, and admin UX refresh. |
 | [Release 0.3.8](operations/release-0.3.8.md) | Agent tool-use protocol, runtime config, confirmation and budget governance, physical form tables, data quality rules, registry data, and ontology mapping layouts. |
 | [Version Policy](operations/version-policy.md) | Project numbering, draft/published states, immutable history, and release script checks. |
-| [Release 0.3.20](operations/release-0.3.20.md) | Draft: separate business data, page design, and application menus; refine filter schemes and dashboard compatibility. |
+| [Release 0.3.20](operations/release-0.3.20.md) | Separate business data, page design, and application menus; refine filter schemes and dashboard compatibility. |
 | [Release 0.3.19](operations/release-0.3.19.md) | Dashboard AI tools, component page permissions, workflow dispatch, and server verification. |
 | [Release 0.3.18](operations/release-0.3.18.md) | AI configuration cards, editable proposals, native designer integration, and expanded form design tools. |
 | [Release 0.3.17](operations/release-0.3.17.md) | Conditional approval routing, access checks, defaults, publish preview recovery, request-scoped read optimization, and local performance tools; updated through 2026-10-27. |
