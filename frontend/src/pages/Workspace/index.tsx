@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRightOutlined, BellOutlined, CheckOutlined, ClockCircleOutlined, FormOutlined, AppstoreOutlined,
-  ReloadOutlined, SearchOutlined, StarFilled, StarOutlined, HistoryOutlined, FieldTimeOutlined,
+  ReloadOutlined, SearchOutlined, StarFilled, StarOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Drawer, Empty, Input, Segmented, Skeleton, Tooltip, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -97,6 +97,7 @@ export default function WorkspacePage() {
   const groups = useMemo(() => workspaceGroups(items, forms), [items, forms]);
   const latestWork = useMemo(() => [...items].sort((a, b) => itemTime(b) - itemTime(a))[0], [items]);
   const overview = workspaceOverview(items);
+  const oldestWaiting = overview.oldestWaiting;
   const focusId = focus.key === focusKey ? focus.id : readFocus(focusKey);
   const current = groups.unfinished.find(item => item.id === focusId) || groups.unfinished[0] || groups.waiting[0];
   const isUnfinished = Boolean(current && groups.unfinished.some(item => item.id === current.id));
@@ -135,27 +136,31 @@ export default function WorkspacePage() {
   </div>)}</div>;
 
   return <div className="workspace-home wh-page">
-    <header className="wh-intro"><div><h1>让工作，从这里有序开始</h1><p>接续未完成的事项，掌握进展，快速开启下一项工作。</p></div><div className="wh-intro-actions">
+    <header className="wh-intro"><h1>工作台</h1><div className="wh-intro-actions">
       <Tooltip title="刷新首页数据"><Button type="text" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadWorkbench()} aria-label="刷新首页数据" /></Tooltip>
     </div></header>
     {loadError && <Alert type="warning" showIcon message={hasData ? '刷新失败，当前显示上次成功加载的数据' : '首页数据加载失败，请重试'} action={<Button size="small" loading={refreshing} onClick={() => void loadWorkbench()}>重试</Button>} />}
     {!hasData && refreshing ? <Skeleton active paragraph={{ rows: 9 }} /> : hasData && <>
       <nav className="wh-entry-overview" aria-label="工作空间快捷入口">
         <button type="button" className="wh-entry-metric wh-entry-activity" onClick={() => setActivityOpen(true)}>
-          <span className="wh-entry-metric-top"><span>近 7 日更新</span><span className="wh-entry-metric-icon"><HistoryOutlined /></span></span>
+          <span className="wh-entry-metric-label">近 7 日更新</span>
           <span className="wh-entry-metric-value">{overview.recentUpdates.length}<small>条记录</small></span>
-          <span className="wh-entry-metric-footer"><span>与我相关的工作动态</span><span>查看动态 <ArrowRightOutlined /></span></span>
+          <span className="wh-entry-metric-link">查看动态 <ArrowRightOutlined /></span>
         </button>
-        <button type="button" className="wh-entry-metric wh-entry-attention" disabled={!overview.oldestWaiting} onClick={() => overview.oldestWaiting && openItem(overview.oldestWaiting)}>
-          <span className="wh-entry-metric-top"><span>最久未更新的申请</span><span className="wh-entry-metric-icon"><FieldTimeOutlined /></span></span>
-          <span className="wh-entry-metric-value">{overview.oldestWaiting ? overview.unchangedDays === 0 ? '不足 1' : overview.unchangedDays : '—'}<small>{overview.oldestWaiting ? '天未更新' : '暂无流转中的申请'}</small></span>
-          <span className="wh-entry-metric-footer"><span title={overview.oldestWaiting?.title}>{overview.oldestWaiting?.title || '申请提交后可在这里跟进'}</span><span>{overview.oldestWaiting ? '查看进展' : '暂无记录'} <ArrowRightOutlined /></span></span>
-        </button>
-        <button type="button" className="wh-entry-metric wh-entry-latest" disabled={!latestWork} onClick={() => latestWork && openItem(latestWork, latestWork.views?.includes('pending') ? 'pending' : 'initiated')}>
-          <span className="wh-entry-metric-top"><span>最近一次工作</span><span className="wh-entry-metric-icon"><ClockCircleOutlined /></span></span>
-          <span className="wh-entry-metric-value wh-entry-metric-date">{latestWork ? itemDate(latestWork) : '暂无记录'}</span>
-          <span className="wh-entry-metric-footer"><span title={latestWork?.title}>{latestWork ? latestWork.title : '开始工作后在这里接续'}</span><span>{latestWork ? '打开记录' : '等待更新'} <ArrowRightOutlined /></span></span>
-        </button>
+        {oldestWaiting ? <button type="button" className="wh-entry-metric" onClick={() => openItem(oldestWaiting)}>
+          <span className="wh-entry-metric-label">最久未更新的申请</span>
+          <span className="wh-entry-metric-detail" title={oldestWaiting.title}>{oldestWaiting.title} · {overview.unchangedDays === 0 ? '不足 1' : overview.unchangedDays} 天未更新</span>
+          <span className="wh-entry-metric-link">查看进展 <ArrowRightOutlined /></span>
+        </button> : <div className="wh-entry-metric wh-entry-empty">
+          <span>最久未更新的申请</span><span>暂无流转中的申请</span>
+        </div>}
+        {latestWork ? <button type="button" className="wh-entry-metric" onClick={() => openItem(latestWork, latestWork.views?.includes('pending') ? 'pending' : 'initiated')}>
+          <span className="wh-entry-metric-label">最近一次工作</span>
+          <span className="wh-entry-metric-detail" title={latestWork.title}>{latestWork.title} · {itemDate(latestWork)}</span>
+          <span className="wh-entry-metric-link">打开记录 <ArrowRightOutlined /></span>
+        </button> : <div className="wh-entry-metric wh-entry-empty">
+          <span>最近一次工作</span><span>暂无记录</span>
+        </div>}
       </nav>
       <div className="wh-dashboard-grid"><div className="wh-dashboard-column">
         <div className="wh-feature-group">
@@ -164,13 +169,13 @@ export default function WorkspacePage() {
               {groups.unfinished.length > 0 && <small>{groups.unfinished.length} 项未完成</small>}{current && <span className={`wh-status ${current.status}`}>{statusLabel(current)}</span>}
             </div>
             <h2 title={current?.title} id="wh-current-title" ref={heroHeading} tabIndex={-1}>{current?.title || '当前没有未完成的申请'}</h2>
-            <p className="wh-feature-context">{current ? <>{itemLabel(current)}<span>更新于 {itemDate(current)}</span></> : '从下方业务表单开始新工作，已提交的申请可在右侧跟进。'}</p>
+            <p className="wh-feature-context">{current ? <>{itemLabel(current)}<span>更新于 {itemDate(current)}</span></> : '选择业务表单开始填报'}</p>
             {current && <>
               <ol className="wh-steps" aria-label="申请阶段">{['填写信息', '提交审核', '审核完成'].map((label, i) => <li key={label} className={i === step ? 'current' : i < step ? 'done' : ''} aria-current={i === step ? 'step' : undefined}><span>{i < step ? <CheckOutlined /> : i + 1}</span>{label}</li>)}</ol>
               <div className="wh-context-note"><span>{isUnfinished ? '下一步' : '当前进展'}</span><strong>{isUnfinished ? current.status === 'returned' ? '查看退回意见，修改后重新提交' : '继续完善申请，确认后提交审核' : displayNode(current) || '申请正在审核中，可查看流转详情'}</strong></div>
               {savedFields.length > 0 && <div className="wh-snapshot">{savedFields.slice(0, 2).map((field, i) => <span key={`${field.label}-${i}`}><small>{field.label}</small><strong title={fieldValue(field.value)}>{fieldValue(field.value)}</strong></span>)}</div>}
             </>}
-            <footer className="wh-feature-footer"><span><ClockCircleOutlined />{current ? isUnfinished ? '已保存的内容会在业务记录中恢复' : '审核期间可查看申请记录与流程' : '按当前账号权限展示可用业务入口'}</span>
+            <footer className="wh-feature-footer">
               <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => current ? openItem(current) : showCatalog()}>{current ? isUnfinished ? current.status === 'returned' ? '查看并修改' : '继续填写' : '查看进展' : '浏览业务表单'}</Button>
             </footer>
           </article>
@@ -181,15 +186,15 @@ export default function WorkspacePage() {
           </section>}
         </div>
         <section className="wh-panel wh-recent-panel" aria-labelledby="wh-recent-title"><div className="wh-section-head"><h2 id="wh-recent-title"><ClockCircleOutlined /> 最近工作 <small>按更新时间</small></h2><Segmented size="small" aria-label="筛选最近工作" value={recentFilter} onChange={value => setRecentFilter(String(value))} options={[{ label: '全部', value: 'all' }, { label: '我发起的', value: 'initiated' }, { label: '我已处理的', value: 'processed' }]} /></div>
-        {recent.length ? <div className="wh-recent-list">{recent.slice(0, 5).map(item => <button type="button" key={item.id} className="wh-recent-item" onClick={() => openItem(item, item.views?.includes('pending') ? 'pending' : 'initiated')}><span className="wh-icon"><FormOutlined /></span><span className="wh-recent-info"><strong>{item.title}</strong><small>{itemLabel(item)}</small></span><span className="wh-recent-end"><span className={`wh-status ${item.status}`}>{statusLabel(item)}</span><time>{itemDate(item)}</time></span><ArrowRightOutlined /></button>)}</div> : <div className="wh-recent-empty"><ClockCircleOutlined /><span>暂无其他工作记录</span><small>未完成的申请已收在上方，随时可以继续。</small></div>}
-        <footer className="wh-panel-footer"><Button type="link" size="small" onClick={() => navigate(`/workflow?tab=${recentFilter === 'processed' ? 'processed' : 'initiated'}`)}>查看全部记录 <ArrowRightOutlined /></Button><small>未完成工作已收在上方</small></footer>
+        {recent.length ? <div className="wh-recent-list">{recent.slice(0, 5).map(item => <button type="button" key={item.id} className="wh-recent-item" onClick={() => openItem(item, item.views?.includes('pending') ? 'pending' : 'initiated')}><span className="wh-icon"><FormOutlined /></span><span className="wh-recent-info"><strong>{item.title}</strong><small>{itemLabel(item)}</small></span><span className="wh-recent-end"><span className={`wh-status ${item.status}`}>{statusLabel(item)}</span><time>{itemDate(item)}</time></span><ArrowRightOutlined /></button>)}</div> : <div className="wh-recent-empty"><ClockCircleOutlined /><span>暂无其他工作记录</span></div>}
+        <footer className="wh-panel-footer"><Button type="link" size="small" onClick={() => navigate(`/workflow?tab=${recentFilter === 'processed' ? 'processed' : 'initiated'}`)}>查看全部记录 <ArrowRightOutlined /></Button></footer>
       </section>
       </div><div className="wh-dashboard-column">
         <aside className="wh-support">
           <section><div className="wh-section-head"><h2>需要我处理 <span className="wh-count">{counts.pending ?? 0}</span></h2><Button type="link" size="small" onClick={() => navigate('/workflow?tab=pending')}>全部 <ArrowRightOutlined /></Button></div>
-            {groups.pending.length ? groups.pending.slice(0, 2).map(item => <button type="button" key={item.id} className="wh-side-item" onClick={() => openItem(item, 'pending')}><span className="wh-icon"><BellOutlined /></span><span><strong>{item.title}</strong><small>{itemLabel(item)} · {statusLabel(item)}</small></span><ArrowRightOutlined /></button>) : <div className="wh-quiet"><CheckOutlined /><span>暂时没有需要处理的审批<small>新事项会在这里显示</small></span></div>}
+            {groups.pending.length ? groups.pending.slice(0, 2).map(item => <button type="button" key={item.id} className="wh-side-item" onClick={() => openItem(item, 'pending')}><span className="wh-icon"><BellOutlined /></span><span><strong>{item.title}</strong><small>{itemLabel(item)} · {statusLabel(item)}</small></span><ArrowRightOutlined /></button>) : <div className="wh-quiet"><CheckOutlined /><span>暂时没有需要处理的审批</span></div>}
           </section>
-          <section className="wh-waiting"><div className="wh-section-head"><h2>我发起的 <span className="wh-count">{counts.initiated ?? 0}</span></h2><Button type="link" size="small" onClick={() => navigate('/workflow?tab=initiated')}>全部 <ArrowRightOutlined /></Button></div><p>等待流转，无需重复操作</p>
+          <section className="wh-waiting"><div className="wh-section-head"><h2>我发起的 <span className="wh-count">{counts.initiated ?? 0}</span></h2><Button type="link" size="small" onClick={() => navigate('/workflow?tab=initiated')}>全部 <ArrowRightOutlined /></Button></div>
             {waiting.length ? waiting.map(item => <button className="wh-side-item" type="button" key={item.id} onClick={() => openItem(item)}><span className="wh-dot" /><span><strong>{item.title}</strong><small>{displayNode(item) || statusLabel(item)}</small></span><ArrowRightOutlined /></button>) : <div className="wh-side-empty">暂无审核中的申请</div>}
           </section>
           <button className="wh-processed" type="button" onClick={() => navigate('/workflow?tab=processed')}><span><CheckOutlined /> 我已处理的</span><strong>{counts.processed ?? 0}</strong><ArrowRightOutlined /></button>

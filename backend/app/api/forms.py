@@ -1199,6 +1199,13 @@ async def create_application_menu_node(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
+    from app.services.field_uniqueness import lock
+
+    await lock(db, current_tenant_id(user))
+    return await _create_application_menu_node(application_id, body, db, user)
+
+
+async def _create_application_menu_node(application_id, body, db, user, *, defer_commit=False):
     from app.models.relational import Application, ApplicationMenuNode, Form
 
     tenant_id = current_tenant_id(user)
@@ -1229,7 +1236,8 @@ async def create_application_menu_node(
     await _sync_menu_node_entry_permissions(db, node)
     if node.form_id is not None:
         await _ensure_application_form_binding(db, application_id, node.form_id)
-    await db.commit()
+    if not defer_commit:
+        await db.commit()
     await db.refresh(node)
     return {"data": await _menu_node_payload(db, node)}
 
@@ -1242,6 +1250,13 @@ async def update_application_menu_node(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
+    from app.services.field_uniqueness import lock
+
+    await lock(db, current_tenant_id(user))
+    return await _update_application_menu_node(application_id, node_id, body, db, user)
+
+
+async def _update_application_menu_node(application_id, node_id, body, db, user):
     from app.models.relational import ApplicationMenuNode, Form
 
     tenant_id = current_tenant_id(user)
@@ -1283,6 +1298,13 @@ async def delete_application_menu_node(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
+    from app.services.field_uniqueness import lock
+
+    await lock(db, current_tenant_id(user))
+    return await _delete_application_menu_node(application_id, node_id, db, user)
+
+
+async def _delete_application_menu_node(application_id, node_id, db, user, *, defer_commit=False):
     from app.models.relational import ApplicationMenuNode
 
     tenant_id = current_tenant_id(user)
@@ -1291,7 +1313,8 @@ async def delete_application_menu_node(
         raise HTTPException(404, "Menu node not found")
     await _delete_menu_node_entry_permissions(db, node)
     await db.delete(node)
-    await db.commit()
+    if not defer_commit:
+        await db.commit()
     return {"ok": True}
 
 

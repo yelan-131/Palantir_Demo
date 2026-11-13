@@ -106,7 +106,7 @@ export default function Inspector(props: Props) {
         </>}
 
       </PropertyGroup>
-      <PropertyGroup key="widget-heading" title={widget.type==='record-list'||widget.type==='record-filter'?'标题、说明与按钮':'标题与说明'} defaultOpen={widget.type==='record-list'||widget.type==='record-filter'}>
+      <PropertyGroup key="widget-heading" title={widget.type==='record-list'||widget.type==='record-filter'?'标题、说明与按钮':'标题与说明'} defaultOpen={false}>
         <PropertyRow label="显示标题" hint="控制画布卡片标题；标题栏中已配置的操作按钮仍保留。"><Switch size="small" checked={appearance.showTitle!==false} onChange={showTitle=>patchAppearance({showTitle})}/></PropertyRow>
         {appearance.showTitle!==false&&<>
           <PropertyRow label="标题文字" hint="与基本信息中的组件名称同步，修改后立即更新画布标题。">

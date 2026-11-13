@@ -18,7 +18,9 @@ async def main():
     seed = _load_registry_seed('tools.json')
     added = []
     async with db_session() as session:
-        existing = set((await session.scalars(select(AIAgentToolDefinition.name))).all())
+        existing = set((await session.scalars(
+            select(AIAgentToolDefinition.name).where(AIAgentToolDefinition.tenant_id == 1)
+        )).all())
         for name in FORM_DESIGN_TOOLS:
             if name in existing:
                 continue
@@ -28,7 +30,7 @@ async def main():
                 enabled=True, source='form-design-tools', version=1))
             added.append(name)
         await session.commit()
-    print(f'Added {len(added)} form design tools; existing entries preserved. Restart backend to refresh runtime registry.')
+    print(f'Added {len(added)} form design tools to tenant 1; existing entries preserved.')
 
 
 if __name__ == '__main__':

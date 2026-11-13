@@ -73,7 +73,11 @@ async def scan_data_source_metadata(
             if str(name).strip()
         ]
         declared_tables = config.get("metadata_tables") or config.get("declared_tables")
-        if source_type in {"postgresql", "database"} or config.get("type") == "postgresql":
+        if source.source_type in {"internal_form", "internal_workflow"}:
+            from app.services.internal_data_assets import internal_asset_table
+
+            tables = [await internal_asset_table(db, tenant_id, source.source_type, config.get("resource_id"))]
+        elif source_type in {"postgresql", "database"} or config.get("type") == "postgresql":
             tables = scan_postgresql(
                 config,
                 limit_tables=limit_tables,

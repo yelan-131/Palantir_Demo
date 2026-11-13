@@ -10,6 +10,8 @@ import {dashboardStyleDefaults} from '../AppPrograms/analyticsWidgetAppearance';
 import api, {getPlatformForm, listPlatformForms, type PlatformForm} from '@/services/api';
 import {useAuthStore} from '@/stores/authStore';
 import {useShellPageTitle} from '@/components/ShellPageTitle';
+import {useAiWorkbench} from '@/components/AiChatWidget/context';
+import {applyComponentOperations, componentNames, newComponent} from './componentOperations';
 import DynamicPage from '../DynamicPage';
 import type {RuntimeAnalyticsData} from '../AppPrograms/analyticsTypes';
 import {ensureListFilter, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget, type WidgetType} from './model';
@@ -20,7 +22,6 @@ import '../AppPrograms/analytics-workspace.css';
 import './style.css';
 import '../AppPrograms/analytics-paper.css';
 
-const names: Record<WidgetType, string> = {'record-list': '业务列表', 'record-filter': '业务筛选', metric: '指标卡', chart: '分组图表'};
 const FormSettings = lazy(() => import('../FormSettings'));
 const errorText = (error: unknown) => {
   const detail = (error as {response?: {data?: {detail?: unknown}}})?.response?.data?.detail;
@@ -48,6 +49,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
   const {code: routeCode} = useParams<{code: string}>();
   const code = pageCode || routeCode;
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
+  const {registerComponentPageController, setComponentPageContext} = useAiWorkbench();
   const [searchParams] = useSearchParams();
   const startInEditor = admin && !pageCode && searchParams.get('edit') === '1';
   const accountKey = useAuthStore(state=>state.user?`${state.user.tenant_id}:${state.user.id}:${state.user.is_admin}`:'anonymous');
@@ -216,6 +218,51 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     if (!draft || saving || JSON.stringify(next)===JSON.stringify(draft)) return;
     setPast(history=>[...history.slice(-79),draft]);setFuture([]);setDraft(next);setPublishCheck(undefined);
   };
+  const componentPageTitle = active?.title || draft?.title;
+  useEffect(() => {
+    if (!code || !admin || !componentPageTitle) return;
+    setComponentPageContext({code, title: componentPageTitle});
+    return () => setComponentPageContext(undefined);
+  }, [code, admin, componentPageTitle, setComponentPageContext]);
+  useLayoutEffect(() => {
+    if (!code || !admin || !draft || state?.code !== code) return;
+    return registerComponentPageController(code, async action => {
+      if (saving || loading || sourceActive || exitPrompt || publishCheck || sectionHistory) {
+        throw new Error('请先完成当前编辑器操作，再让 AI 修改组件');
+      }
+      const fieldsFor = (id: number) => (sources[id]?.fields ?? forms.find(form => form.id === id)?.fields)
+        ?.filter(field => !field.archived).map(field => field.field_name);
+      let next = draft;
+      let selectedWidgetId = selected;
+      if (action.action === 'apply') {
+        next = applyComponentOperations(draft, action.operations, fieldsFor);
+        const last = action.operations[action.operations.length - 1];
+        selectedWidgetId = last.widget_id;
+        flushSync(() => {
+          changeDraft(next);
+          setEditing(true);
+          setSourceEditor(undefined);
+          setSelected(last.widget_id);
+          setPanel('widget');
+          setWidgetTab(last.action === 'edit' && (last.properties?.dataBinding !== undefined || last.properties?.filterFields !== undefined) ? 'data' : 'basic');
+        });
+      }
+      const sourceIds = new Set([next.sourceFormId, ...next.widgets.map(widget => widgetSourceId(next, widget))]);
+      const requestedWidget = action.action === 'inspect' && action.widget_id
+        ? next.widgets.find(widget => widget.id === action.widget_id) : undefined;
+      if (action.action === 'inspect' && action.widget_id && !requestedWidget) throw new Error('找不到指定组件');
+      return {
+        page_code: code, title: next.title, source_form_id: next.sourceFormId,
+        selected_widget_id: selectedWidgetId,
+        ...(action.action === 'apply' ? {saved: false} : {}),
+        widget: requestedWidget,
+        widgets: next.widgets.map(({id, type, title, dataBinding, chartType, dimension, measure, aggregate, interaction, targetWidgetIds, filterFields, width, customWidth, customHeight}) =>
+          ({id, type, title, dataBinding, chartType, dimension, measure, aggregate, interaction, targetWidgetIds, filterFields, width, customWidth, customHeight,
+          })),
+        sources: [...sourceIds].flatMap(id => id ? [{form_id: id, fields: fieldsFor(id) ?? []}] : []),
+      };
+    });
+  });
   const undo = () => {
     if (!draft || !past.length || saving) return;
     setFuture(history=>[draft,...history]);setDraft(past[past.length-1]);setPast(history=>history.slice(0,-1));setPublishCheck(undefined);
@@ -282,7 +329,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
   const add = (type: WidgetType) => {
     if (!draft) return;
     const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    changeDraft({...draft, widgets: [...draft.widgets, {id, type, title: names[type], width: type === 'metric' ? 6 : 24, aggregate: 'count', showFilters: false, targetWidgetIds: type === 'record-filter' ? draft.widgets.filter(widget => widget.type === 'record-list' && widgetSourceId(draft,widget) === draft.sourceFormId).map(widget => widget.id) : undefined, dimension: type === 'chart' ? draft.filterFields[0] || fields[0]?.field_name : undefined}]});
+    changeDraft({...draft, widgets: [...draft.widgets, newComponent(draft, id, type, fields[0]?.field_name)]});
     setSelected(id);setPanel('widget');setWidgetTab('data');
   };
   const move = (id: string, offset: number) => {
@@ -295,7 +342,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     if (!editing || !draft) return;
     event.preventDefault(); event.stopPropagation();
     const type = event.dataTransfer.getData('component/type') as WidgetType;
-    if (Object.prototype.hasOwnProperty.call(names, type)) add(type);
+    if (Object.prototype.hasOwnProperty.call(componentNames, type)) add(type);
     else if (target) changeDraft(moveWidget(draft, event.dataTransfer.getData('component/id'), target));
   };
   const leaveEditor = () => {

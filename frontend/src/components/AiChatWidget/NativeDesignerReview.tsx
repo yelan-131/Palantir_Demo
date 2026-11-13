@@ -3,15 +3,21 @@ import { Alert, Button, Space, Tag } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import { useAiWorkbench } from './context';
 import { createUuid } from '@/utils/uuid';
+import type { NewFormDraft } from './pageControls';
 
 /** A review of the live native editor, never a second configuration form. */
-export function NativeDesignerReview({ draftId, disabled }: { draftId: string; disabled: boolean }) {
+export function NativeDesignerReview({ draftId, disabled, menuTarget, onSaved }: {
+  draftId: string; disabled: boolean; menuTarget?: NewFormDraft['menu_target']; onSaved: (formId: number) => void;
+}) {
   const { designerContext, getPageController } = useAiWorkbench();
   const locked = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  if (saved) return <article className="ai-skill-action-card ai-confirm-review"><Tag color="green">表单草稿已确认创建</Tag><p>已保存工作区中的最新配置，可在原设计器继续发布。</p></article>;
+  if (saved) return <article className="ai-skill-action-card ai-confirm-review">
+    <Tag color="green">表单草稿已确认创建</Tag>
+    <p>{menuTarget ? `目标菜单：${menuTarget.destination}` : '尚未挂载应用菜单。可以继续告诉 AI 要放到哪个应用。'}</p>
+  </article>;
   if (designerContext?.draft_id !== draftId || !designerContext.review_ready) return null;
   const fields = (designerContext.fields || []) as Array<{ field_name: string; label: string; required: boolean; readonly?: boolean; min?: number; max?: number;
     control_type?: string; options?: Array<{ label: string }>; settings?: { precision?: number; rows?: number; maxFiles?: number; maxFileSize?: number } }>;
@@ -37,6 +43,7 @@ export function NativeDesignerReview({ draftId, disabled }: { draftId: string; d
       const state = await controller({ id: createUuid(), type: 'form_designer', form_id: 0, draft_id: draftId, action: 'confirm_draft' });
       if (!state.saved || !state.form_id) throw new Error('创建尚未完成，请检查工作区提示后重试。');
       setSaved(true);
+      onSaved(Number(state.form_id));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '创建失败，请重试。');
     } finally {
@@ -47,6 +54,7 @@ export function NativeDesignerReview({ draftId, disabled }: { draftId: string; d
   return <article className="ai-skill-action-card ai-confirm-review" aria-label="表单搭建最终确认">
     <Space><strong>{String(designerContext.form_name || '新表单')}</strong><Tag color="orange">待最终确认</Tag></Space>
     <p>请复核工作区。确认后创建并保存当前草稿。</p>
+    <p>{menuTarget ? `保存后继续准备发布挂载：${menuTarget.destination}` : '本次保存为草稿，应用菜单待指定。'}</p>
     <div className="ai-confirm-field-list">{fields.map(field => <div className="ai-confirm-field-item" key={field.field_name}>
       <span>{field.label}</span><small>{describe(field)}</small>
     </div>)}</div>

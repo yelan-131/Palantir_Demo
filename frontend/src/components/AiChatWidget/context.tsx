@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState, useRef, useCallback, type ReactNode } from 'react';
 
-import type { PageAction, PageController } from './pageControls';
+import type { BrowserPageAction, ComponentPageController, PageController } from './pageControls';
 
 export type AiSurface = 'global' | 'knowledge';
 
@@ -20,8 +20,12 @@ export interface AiKnowledgeContext {
 }
 
 interface AiWorkbenchContextValue {
-  pageActions: PageAction[];
-  enqueuePageAction: (action: PageAction) => void;
+  pageActions: BrowserPageAction[];
+  enqueuePageAction: (action: BrowserPageAction) => void;
+  registerComponentPageController: (code: string, controller: ComponentPageController) => () => void;
+  getComponentPageController: (code: string) => ComponentPageController | undefined;
+  componentPageContext?: { code: string; title: string };
+  setComponentPageContext: (page?: { code: string; title: string }) => void;
   finishPageAction: (id: string) => void;
   registerPageController: (formId: number, controller: PageController) => () => void;
   getPageController: (formId: number) => PageController | undefined;
@@ -36,11 +40,18 @@ const AiWorkbenchContext = createContext<AiWorkbenchContextValue | undefined>(un
 
 export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
   const [knowledgeContext, setKnowledgeContext] = useState<AiKnowledgeContext | undefined>();
-  const [pageActions, setPageActions] = useState<PageAction[]>([]);
+  const [pageActions, setPageActions] = useState<BrowserPageAction[]>([]);
+  const [componentPageContext, setComponentPageContext] = useState<{ code: string; title: string }>();
+  const componentControllers = useRef(new Map<string, ComponentPageController>());
   const [controllerVersion, setControllerVersion] = useState(0);
   const [designerContext, setDesignerContext] = useState<Record<string, unknown>>();
   const controllers = useRef(new Map<number, PageController>());
-  const enqueuePageAction = useCallback((action: PageAction) => {
+  const enqueuePageAction = useCallback((action: BrowserPageAction) => {
+    if (action.type === 'component_page') {
+      if (!action.id || !action.page_code || !['inspect', 'apply'].includes(action.action)) return;
+      setPageActions(current => current.some(item => item.id === action.id) ? current : [...current, action]);
+      return;
+    }
     if (action.action === 'confirm_draft') return; // Only a user's final confirmation may invoke this local command.
     if (action.type !== 'form_designer' || !Number.isInteger(action.form_id) || action.form_id < 0 || !action.id) return;
     if (action.form_id === 0 && (!action.draft_id || !/^[a-f0-9]{32}$/.test(action.draft_id))) return;
@@ -56,9 +67,18 @@ export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   const getPageController = useCallback((formId: number) => controllers.current.get(formId), []);
+  const registerComponentPageController = useCallback((code: string, controller: ComponentPageController) => {
+    componentControllers.current.set(code, controller);
+    return () => {
+      if (componentControllers.current.get(code) === controller) componentControllers.current.delete(code);
+    };
+  }, []);
+  const getComponentPageController = useCallback((code: string) => componentControllers.current.get(code), []);
   const value = useMemo(() => ({ knowledgeContext, setKnowledgeContext, pageActions, enqueuePageAction, finishPageAction,
-    registerPageController, getPageController, controllerVersion, designerContext, setDesignerContext }),
-    [knowledgeContext, pageActions, enqueuePageAction, finishPageAction, registerPageController, getPageController, controllerVersion, designerContext]);
+    registerPageController, getPageController, controllerVersion, designerContext, setDesignerContext,
+    componentPageContext, setComponentPageContext, registerComponentPageController, getComponentPageController }),
+    [knowledgeContext, pageActions, enqueuePageAction, finishPageAction, registerPageController, getPageController, controllerVersion, designerContext,
+      componentPageContext, registerComponentPageController, getComponentPageController]);
   return <AiWorkbenchContext.Provider value={value}>{children}</AiWorkbenchContext.Provider>;
 }
 

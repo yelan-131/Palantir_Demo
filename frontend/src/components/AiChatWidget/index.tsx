@@ -11,8 +11,6 @@ import {
   MessageOutlined,
   PlusOutlined,
   SearchOutlined,
-  SendOutlined,
-  StopOutlined,
 } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import {
@@ -29,9 +27,11 @@ import {
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
 import { LEGACY_ACCOUNT_SECTIONS, navigationAreaForPath } from '@/config/navigation';
 import { useAiWorkbench } from './context';
-import type { PageAction } from './pageControls';
+import type { BrowserPageAction, PageAction } from './pageControls';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
+import { ChatComposer } from './ChatComposer';
+import type { ChatAttachment } from './ChatComposer';
 import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
 import { NativeDesignerReview } from './NativeDesignerReview';
 
@@ -64,6 +64,7 @@ interface AgentTraceItem {
   tool?: string;
   stepId?: string;
   resultCount?: number;
+  source?: 'dsh';
 }
 
 interface AgentActionState {
@@ -547,16 +548,13 @@ function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceIt
   return trace.length ? trace : undefined;
 }
 
-function getTraceText(data: Record<string, unknown>): string {
-  return String(data.message || data.summary || data.detail || '').trim();
-}
-
 function getTraceToolText(data: Record<string, unknown>, completed: boolean): string {
   const tool = stringifyStepValue(data.tool) || '工具';
   const resultCount = data.result_count !== undefined ? ` · 结果 ${data.result_count}` : '';
   const summary = data.summary ? ` · ${stringifyStepValue(data.summary)}` : '';
+  const failed = ['failed', 'error', 'blocked'].includes(String(data.status || ''));
   return completed
-    ? `${tool} 已完成${resultCount}${summary}`
+    ? `${tool} ${failed ? '执行失败' : '已完成'}${resultCount}${summary}`
     : `调用 ${tool}`;
 }
 
@@ -565,21 +563,41 @@ function appendAgentTraceItem(
   item: AgentTraceItem,
 ): AgentTraceItem[] {
   const previous = trace || [];
-  const filtered = item.stepId
-    ? previous.filter((existing) => existing.stepId !== item.stepId)
-    : previous;
-  const next = [...filtered, item];
-  return next.slice(-10);
+  if (item.source === 'dsh') {
+    return [...previous, { ...item, id: `${item.id}-${previous.length}` }];
+  }
+  const existingIndex = item.stepId
+    ? previous.findIndex((existing) => existing.stepId === item.stepId)
+    : -1;
+  return existingIndex < 0
+    ? [...previous, item]
+    : previous.map((existing, index) => index === existingIndex ? item : existing);
 }
 
 function createTraceItem(event: string, data: Record<string, unknown>): AgentTraceItem | undefined {
   if (event === 'harness.progress') {
     const phase = String(data.phase || '');
-    const labels: Record<string, string> = { 'turn/start': 'Harness 开始执行', 'step/start': `模型正在处理第 ${data.step || 1} 步`, 'step/end': `第 ${data.step || 1} 步完成`, 'assistant/message': '模型本步输出已接收', 'compaction/start': 'Harness 正在压缩上下文', 'compaction/end': '上下文压缩完成', 'turn/end': 'Harness 本轮执行结束', 'llm/retry': `模型将在等待后重试（第 ${data.retry || 1} 次）`, 'llm/retry-started': `模型正在重试（第 ${data.retry || 1} 次）` };
+    const step = data.step ?? 1;
+    const retry = data.retry ?? 1;
+    const labels: Record<string, string> = {
+      'turn/start': '开始执行',
+      'step/start': `开始模型步骤 ${step}`,
+      'step/end': `模型步骤 ${step} 完成`,
+      'assistant/message': `收到模型步骤 ${step} 的输出`,
+      'compaction/start': '开始压缩对话上下文',
+      'compaction/end': '对话上下文压缩完成',
+      'turn/end': '本轮执行结束',
+      'llm/retry': `模型步骤 ${step} 等待第 ${retry} 次重试`,
+      'llm/retry-started': `模型步骤 ${step} 开始第 ${retry} 次重试`,
+    };
+    const label = Object.prototype.hasOwnProperty.call(labels, phase) ? labels[phase] : undefined;
+    if (!label) return undefined;
     const usage = data.usage as Record<string, number> | undefined;
-    const accounting = usage && typeof usage.inputTokens === 'number' ? ` · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} Token` : '';
-    const stepId = (phase.startsWith('step/') || phase.startsWith('llm/retry')) ? `harness-step-${data.step}` : phase.startsWith('turn/') ? 'harness-turn' : phase.startsWith('compaction/') ? 'harness-compaction' : `harness-output-${data.step ?? data.sequence}`;
-    return { id: stepId, kind: 'note', content: (labels[phase] || phase) + accounting, status: phase.endsWith('/start') || phase.startsWith('llm/retry') ? 'active' : 'completed', stepId };
+    const accounting = typeof usage?.inputTokens === 'number' && typeof usage.outputTokens === 'number'
+      ? ` · 输入 ${usage.inputTokens} / 输出 ${usage.outputTokens} Token`
+      : '';
+    const stepId = `dsh-${phase}-${data.sequence ?? `${step}-${retry}`}`;
+    return { id: stepId, kind: 'note', content: label + accounting, source: 'dsh', stepId };
   }
   if (event === 'assistant.note') {
     return undefined;
@@ -589,11 +607,13 @@ function createTraceItem(event: string, data: Record<string, unknown>): AgentTra
     if (!['tool_call', 'tool_result', 'confirmation', 'validation', 'error'].includes(type)) return undefined;
     const tool = stringifyStepValue(data.tool);
     const completed = type !== 'tool_call';
-    const stepId = String(data.item_id || data.id || data.tool || Date.now());
+    const stepId = `${type}-${String(data.item_id || data.id || data.tool || Date.now())}`;
     return {
       id: `trace-item-${stepId}`,
       kind: type === 'tool_call' ? 'tool' : type === 'tool_result' ? 'result' : 'note',
-      content: tool ? getTraceToolText(data, completed) : stringifyStepValue(data.summary || data.title),
+      content: type === 'tool_call' || type === 'tool_result'
+        ? getTraceToolText(data, completed)
+        : [getAgentStepLabel(data), tool].filter(Boolean).join(' · '),
       status: String(data.status || (completed ? 'completed' : 'active')),
       tool,
       stepId,
@@ -602,7 +622,7 @@ function createTraceItem(event: string, data: Record<string, unknown>): AgentTra
   }
   if (event === 'tool.started' || event === 'tool.completed') {
     const completed = event === 'tool.completed';
-    const stepId = String(data.step_id || data.tool || Date.now());
+    const stepId = `${event}-${String(data.step_id || data.tool || Date.now())}`;
     return {
       id: `trace-tool-${stepId}`,
       kind: completed ? 'result' : 'tool',
@@ -724,7 +744,13 @@ function getDraftPreviewFields(payload?: Record<string, unknown>) {
 function getGenericActionReview(action: MockSkillAction) {
   if (getLowCodeReview(action)) return undefined;
   const payload = asRecord(action.payload);
-  const fields = getDraftPreviewFields(payload);
+  const preview = asRecord(payload._preview);
+  const fields = typeof preview.target === 'string'
+    ? [
+        { label: '操作对象', value: preview.target },
+        ...Object.entries(asRecord(preview.fields)).map(([label, value]) => ({ label, value: formatActionValue(value) })),
+      ]
+    : getDraftPreviewFields(payload);
   return {
     title: action.title,
     sourceDraftId: typeof payload._source_draft_id === 'string' ? payload._source_draft_id : '',
@@ -739,7 +765,7 @@ function getPendingStateFromAction(action: MockSkillAction): AgentActionState {
   return {
     skill: action.skill,
     status: 'collecting',
-    collected_slots: payload,
+    collected_slots: Object.fromEntries(Object.entries(payload).filter(([key]) => !key.endsWith('_snapshot'))),
     missing_slots: [],
   };
 }
@@ -756,8 +782,11 @@ function mapAgentActions(actions?: AgentSkillAction[]): MockSkillAction[] | unde
       summary: action.requires_confirmation
         ? '该动作需要你确认后才会写入或提交。'
         : '这是 Agent 基于当前上下文生成的建议动作。',
-      fields: Object.entries(payload).slice(0, 6).map(([label, value]) => ({
-        label,
+      fields: (action.skill === 'forms.publish_to_menu' ? [
+        ['业务表单', payload.form_name], ['菜单位置', payload.destination],
+        ['发布方式', payload.publish_required ? '首次发布并挂载' : '使用已发布版本'],
+      ] : Object.entries(payload).slice(0, 6)).map(([label, value]) => ({
+        label: String(label),
         value: formatActionValue(value),
       })),
       nextSteps: action.requires_confirmation
@@ -811,7 +840,7 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
   if (routePath) {
     return {
       kind: 'form_definition',
-      title: '表单已创建',
+      title: result.menu_id ? '表单已挂载到应用菜单' : '表单已创建',
       detail: routePath,
       href: routePath,
     };
@@ -855,7 +884,7 @@ function generateUnavailableReply(): AssistantReply {
 
 export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
-  const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext } = useAiWorkbench();
+  const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext, componentPageContext } = useAiWorkbench();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [sessions, setSessions] = useState<AgentSession[]>([]);
@@ -865,7 +894,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [historyScope, setHistoryScope] = useState<'recent' | 'archived'>('recent');
   const [archivedSessions, setArchivedSessions] = useState<AgentSession[]>([]);
   const [sending, setSending] = useState(false);
-  const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string }>();
+  const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string; menuTarget?: NonNullable<PageAction['draft']>['menu_target'] }>();
   const streamController = useRef<AbortController | null>(null);
   useEffect(() => () => streamController.current?.abort(), []);
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
@@ -1176,13 +1205,14 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     }
   };
 
-  const sendMessage = async (content: string, extraContext?: Record<string, unknown>) => {
+  const sendMessage = async (content: string, extraContext?: Record<string, unknown>, attachments: ChatAttachment[] = []) => {
     const trimmed = content.trim();
-    if (!trimmed || sending || !activeSession) return;
+    if (!trimmed || streamController.current || !activeSession) return;
 
     const controller = new AbortController();
     streamController.current = controller;
-    const userMessage = createUserMessage(trimmed);
+    const messageText = [trimmed, ...attachments.map(file => `📎 ${file.name}${file.sampled ? '（摘录）' : ''}`)].join('\n');
+    const userMessage = createUserMessage(messageText);
     const assistantMessageId = `assistant-stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const assistantPlaceholder: ChatMessage = {
       id: assistantMessageId,
@@ -1211,26 +1241,29 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         applicationName,
         knowledgeContext,
       });
-      Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {});
+      Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {}, { componentPageContext });
       await streamAgentChat({
-        message: trimmed,
+        message: messageText,
         page: AI_WORKBENCH_PAGE,
-        context: runtimeContext,
+        context: attachments.length ? { ...runtimeContext, chatAttachments: attachments } : runtimeContext,
       }, ({ event, data }) => {
         if (event === 'ui.action.cancel') {
           if (typeof data.id === 'string') finishPageAction(data.id);
           return;
         }
         if (event === 'ui.action') {
-          if (typeof data.draft_id === 'string') setNativeDraftReview({ sessionId, draftId: data.draft_id });
-          enqueuePageAction(data as unknown as PageAction);
+          const action = data as unknown as BrowserPageAction;
+          if (action.type === 'form_designer' && action.draft_id) setNativeDraftReview(previous => previous?.draftId === action.draft_id ? previous : {
+            sessionId, draftId: action.draft_id!, menuTarget: action.draft?.menu_target,
+          });
+          enqueuePageAction(action);
           return;
         }
         const traceItem = createTraceItem(event, data);
-        if (traceItem) {
+        if (traceItem || (event === 'harness.progress' && typeof data.text === 'string' && data.text)) {
           updateSessionMessage(sessionId, assistantMessageId, (message) => ({
             ...message,
-            trace: appendAgentTraceItem(message.trace, traceItem),
+            trace: traceItem ? appendAgentTraceItem(message.trace, traceItem) : message.trace,
             ...(event === 'harness.progress' && typeof data.text === 'string' && data.text ? { content: data.text, fullContent: data.text, typing: false } : {}),
           }));
           return;
@@ -1365,6 +1398,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         ? nested.result as Record<string, unknown>
         : nested;
       const executionResult = getExecutionResult(result);
+      if (result.menu_id) window.dispatchEvent(new Event('applications-changed'));
       const routePath = executionResult.href || '';
       updateSessionMessage(sessionId, message.id, (item) => {
         const currentContent = item.fullContent || item.content;
@@ -1523,23 +1557,27 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const canShowAssistantMeta = message.role === 'assistant' && !isTypingAssistant;
               const actionStateReview = message.role === 'assistant' ? getActionStateReview(message.actionState) : undefined;
               const traceItems = message.trace || [];
+              const hasDshTrace = traceItems.some((item) => item.source === 'dsh');
               const toolCalls = traceItems.filter((item) => item.kind === 'tool').length;
               const toolResults = traceItems.filter((item) => item.kind === 'result').length;
               const activeRun = sending && message.id === messages[messages.length - 1]?.id;
               const completedToolCount = activeRun ? toolResults : Math.max(toolCalls, toolResults);
               const runningToolCount = activeRun ? Math.max(0, toolCalls - toolResults) : 0;
               const toolTraceCount = completedToolCount + runningToolCount;
-              const traceSummary = runningToolCount
+              const toolSummary = runningToolCount
                 ? `正在运行 ${runningToolCount} 个工具`
                 : toolTraceCount
                   ? `已运行 ${completedToolCount} 个工具`
-                  : '已整理确认信息';
+                  : '';
+              const traceSummary = hasDshTrace
+                ? ['DSh 执行轨迹', toolSummary].filter(Boolean).join(' · ')
+                : toolSummary || '执行过程';
 
               return (
               <div className={`ai-chat-message ${message.role}`} key={message.id}>
                 <div className="ai-chat-bubble">
                   {message.role === 'assistant' && traceItems.length ? (
-                    <details className="ai-agent-trace" open={isPendingAssistant}>
+                    <details className="ai-agent-trace" open={activeRun || hasDshTrace || isPendingAssistant}>
                       <summary>{traceSummary}</summary>
                       <div className="ai-agent-trace-list">
                         {traceItems.map((item) => (
@@ -1548,7 +1586,6 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                             <div>
                               {item.kind === 'tool' ? <small>工具调用</small> : null}
                               {item.kind === 'result' ? <small>工具结果</small> : null}
-                              {item.kind === 'note' ? <small>状态</small> : null}
                               <span>{item.content}</span>
                             </div>
                           </div>
@@ -1815,25 +1852,24 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               </div>
               );
             })}
-            {nativeDraftReview && nativeDraftReview.sessionId === activeSession?.id && !sending && !messages[messages.length - 1]?.content.startsWith('执行失败') && <NativeDesignerReview key={nativeDraftReview.draftId} draftId={nativeDraftReview.draftId} disabled={sending || Boolean(confirmingRunId)} />}
+            {nativeDraftReview && nativeDraftReview.sessionId === activeSession?.id && !sending && !messages[messages.length - 1]?.content.startsWith('执行失败') && <NativeDesignerReview key={nativeDraftReview.draftId} draftId={nativeDraftReview.draftId} disabled={sending || Boolean(confirmingRunId)} menuTarget={nativeDraftReview.menuTarget} onSaved={formId => {
+              const target = nativeDraftReview.menuTarget;
+              if (!target) return;
+              void sendMessage(`请准备把刚保存的表单发布并挂载到应用菜单「${target.destination}」的确认卡片。`, {
+                formMenuDelivery: { form_id: formId, ...target },
+              });
+            }} />}
           </div>
 
-          <div className="ai-chat-input">
-            <Input.TextArea
-              value={input}
-              placeholder="问我当前页面的问题，或让我准备待确认操作..."
-              autoSize={{ minRows: 1, maxRows: 3 }}
-              disabled={sending}
-              onChange={(event) => setInput(event.target.value)}
-              onPressEnter={(event) => {
-                if (!event.shiftKey) {
-                  event.preventDefault();
-                  void sendMessage(input);
-                }
-              }}
-            />
-            {sending ? <Button danger aria-label="停止生成" title="停止生成" icon={<StopOutlined />} onClick={() => streamController.current?.abort()} /> : <Button type="primary" aria-label="发送消息" icon={<SendOutlined />} onClick={() => { void sendMessage(input); }} />}
-          </div>
+          <ChatComposer
+            key={activeSession?.id}
+            input={input}
+            enabled={Boolean(activeSession)}
+            sending={sending}
+            onChange={setInput}
+            onSend={(message, attachments) => sendMessage(message, undefined, attachments)}
+            onStop={() => streamController.current?.abort()}
+          />
     </div>
   );
 
@@ -1930,7 +1966,6 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       {enabled && <Tooltip title={open ? '收起 AI 助手' : '打开 AI 助手'} placement="left">
         <Button
           className="ai-edge-toggle"
-          type="primary"
           onClick={() => setOpen((prev) => !prev)}
           aria-label={open ? '收起 AI 助手' : '打开 AI 助手'}
           aria-expanded={open}

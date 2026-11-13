@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('read_skill', [False, True])
+@pytest.mark.parametrize('read_skill', [False, True, 'native', 'registry'])
 @pytest.mark.parametrize('confirmation', [False, True, 'write'])
 async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(monkeypatch, tmp_path, confirmation, read_skill):
     from app.api.ai_harness import router
@@ -28,10 +28,55 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
     from app.services.ai.skill_loader import SKILL_TOOL, FORM_SKILL
 
     monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
+    monkeypatch.setenv('AI_HARNESS_NATIVE_SKILLS', 'true' if read_skill == 'registry' else 'false')
+    if read_skill == 'registry':
+        from app.services.ai import harness_skills, skill_loader
+        from app.services.ai.skill_import import parse_skill_markdown
+        from app.services.ai.skills import SkillDefinition, skill_registry
+
+        imported = parse_skill_markdown(
+            '---\nname: external-review\ndescription: Review external reports\n---\n\nEXTERNAL_REVIEW_BODY\n'
+        )
+        external = SkillDefinition(**imported, title='External review', capability_level='qa')
+        hidden = external.model_copy(update={'name': 'hidden-review', 'model_invocable': False, 'user_invocable': False})
+        blocked = external.model_copy(update={'name': 'blocked-review'})
+        registry = {**skill_registry(), external.name: external, hidden.name: hidden, blocked.name: blocked}
+        monkeypatch.setattr(harness_skills, 'skill_registry', lambda: registry)
+        monkeypatch.setattr(skill_loader, 'skill_registry', lambda: registry)
+    if read_skill == 'native':
+        root = tmp_path / 'external-skills'
+        root.mkdir()
+        (root / 'external-review.md').write_text(
+            '---\nname: external-review\ndescription: Review external reports\n---\n\nEXTERNAL_REVIEW_BODY\n',
+            encoding='utf-8',
+        )
+        patch = tmp_path / 'native-skills.patch.yml'
+        patch.write_text(
+            "- insert:\n"
+            "  - name: '@deepseek-ai/dsh-skill'\n"
+            "  - name: '@deepseek-ai/dsh-skill-filesystem'\n"
+            "    config:\n"
+            "      includeDefaultRoots: false\n"
+            f"      customSkillDirs: [{json.dumps(root.as_posix())}]\n"
+            "      watch: false\n"
+            "  - name: '@deepseek-ai/dsh-tool-skill'\n",
+            encoding='utf-8',
+        )
+        original_options = mod.harness_options
+
+        def options_with_native_skills(*args, **kwargs):
+            options = original_options(*args, **kwargs)
+            options['patches'] += (str(patch),)
+            return options
+
+        monkeypatch.setattr(mod, 'harness_options', options_with_native_skills)
     user = {'tenant_id': 1, 'sub': 'harness-integration', 'is_admin': True, 'roles': ['admin']}
     settings = settings_snapshot()
     settings.update({'aiEnabled': True, 'qaEnabled': True, 'assistEnabled': True, 'agentMode': 'confirm', 'apiKey': 'local-test-key', 'chatModel': 'test-model', 'reasoningModel': 'test-model', 'timeoutSeconds': 5, 'retryCount': 0, 'maxTokens': 512})
     settings.pop('domains', None)
+    settings['rolePolicies'] = []
+    if read_skill == 'registry':
+        settings['forbiddenActions'] = ['blocked-review']
     settings['compactionPolicy'] = {'enabled': confirmation == 'write'}
     settings['harnessPolicy'] = {
         'reasoning_effort': 'low', 'contextWindow': 16000,
@@ -47,7 +92,7 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
     monkeypatch.setattr(tool_handlers, 'dispatch_tool_handler', handler)
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value={}))
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     bridge = mod.PlatformBridge(user=user, settings=settings, context={})
     token = uuid.uuid4().hex
     mod.BRIDGES[token] = bridge
@@ -59,11 +104,13 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         calls.append(body)
         pattern = 'forms_create_form_definition_' if confirmation == 'write' else 'forms_query_records_'
         query_tool = next(t['function']['name'] for t in body.get('tools', []) if pattern in t['function']['name'])
-        skill_read = any(m['role'] == 'tool' and 'instructions' in str(m.get('content')) for m in body['messages'])
-        business_result = any(m['role'] == 'tool' and 'instructions' not in str(m.get('content')) for m in body['messages'])
+        native_read = read_skill in {'native', 'registry'}
+        skill_marker = 'EXTERNAL_REVIEW_BODY' if native_read else 'instructions'
+        skill_read = any(m['role'] == 'tool' and skill_marker in str(m.get('content')) for m in body['messages'])
+        business_result = any(m['role'] == 'tool' and skill_marker not in str(m.get('content')) for m in body['messages'])
         if read_skill and not skill_read and '平台恢复' not in str(body['messages']):
-            skill_tool = next(t['function']['name'] for t in body['tools'] if 'platform_skills_read_' in t['function']['name'])
-            delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'skill-read', 'type': 'function', 'function': {'name': skill_tool, 'arguments': json.dumps({'name': FORM_SKILL})}}]}
+            skill_tool = 'skill' if native_read else next(t['function']['name'] for t in body['tools'] if 'platform_skills_read_' in t['function']['name'])
+            delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'skill-read', 'type': 'function', 'function': {'name': skill_tool, 'arguments': json.dumps({'name': 'external-review' if native_read else FORM_SKILL})}}]}
             reason = 'tool_calls'
         elif not business_result and '平台恢复' not in str(body['messages']):
             delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'test-call', 'type': 'function', 'function': {'name': query_tool, 'arguments': json.dumps({'form': {'name': '测试表单', 'code': 'test'}, 'fields': [{'field_name': 'name', 'label': '名称', 'field_type': 'string'}]} if confirmation == 'write' else {'form_code': 'test'})}}]}
@@ -91,18 +138,27 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         result = await mod.run_sdk(settings, user, '查询测试表单', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
         assert result.finish_reason == 'completed'
         assert result.final_response
-        assert len(calls) == 2 + int(read_skill)
-        if read_skill:
+        assert len(calls) == 2 + bool(read_skill)
+        if read_skill in {'native', 'registry'}:
+            assert 'external-review' in str(calls[0]['messages'])
+            assert 'EXTERNAL_REVIEW_BODY' in str(calls[1]['messages'])
+        if read_skill == 'registry':
+            assert 'low-code-create-form-definition' in str(calls[0]['messages'])
+            assert 'analysis-analyze-form-records' in str(calls[0]['messages'])
+            assert 'hidden-review' not in str(calls[0]['messages'])
+            assert 'blocked-review' not in str(calls[0]['messages'])
+            assert not any('platform_skills_read_' in t['function']['name'] for t in calls[0]['tools'])
+        elif read_skill is True:
             assert bridge.loaded_skills[FORM_SKILL]['version'] == '1.0.0'
             assert 'draft_new' in str(calls[1]['messages'])
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512
         assert calls[0]['reasoning_effort'] == 'low'
-        assert all(t['function']['name'].removeprefix('mcp__platform__') in {mod.tool_alias(SKILL_TOOL), *[mod.tool_alias(tool.name) for tool in mod.tool_registry().values()]} for t in calls[0]['tools'])
+        assert all(t['function']['name'].removeprefix('mcp__platform__') in {'skill', mod.tool_alias(SKILL_TOOL), *[mod.tool_alias(tool.name) for tool in mod.tool_registry().values()]} for t in calls[0]['tools'])
         settings['maxTokens'] = 384
         resumed = await mod.run_sdk(settings, user, '平台恢复的历史：助手已读取 1 条记录。继续上次的对话', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
         assert resumed.finish_reason == 'completed'
-        assert len(calls) == 3 + int(read_skill)
+        assert len(calls) == 3 + bool(read_skill)
         assert calls[-1]['max_tokens'] == 384
         assert '平台恢复的历史' in str(calls[-1]['messages'])
         assert resumed.session_id != result.session_id

@@ -322,14 +322,9 @@ body:has(.tech-white-shell) :is(.workflow-business-choice-tag, .quality-formula-
   color: var(--mf-text);
   border-color: var(--mf-border);
 }
-body:has(.tech-white-shell) .workflow-approval-card-status.ant-tag { border-radius: 999px; }
 body:has(.tech-white-shell) .designer-version-status-warning { color: var(--mf-warning) !important; background: var(--mf-warning-bg); }
 body:has(.tech-white-shell) :is(.designer-version-status-success, .designer-version-status-published) { color: var(--mf-success) !important; background: var(--mf-success-bg); }
 body:has(.tech-white-shell) .designer-version-status-history { color: var(--mf-muted) !important; background: var(--mf-rail); }
-body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-pending { color: var(--mf-warning); border-color: var(--mf-warning-border); }
-body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-running { color: var(--mf-primary); border-color: var(--mf-info-border); }
-body:has(.tech-white-shell) .workflow-approval-stamp.workflow-status-done { color: var(--mf-success); border-color: var(--mf-success-border); }
-body:has(.tech-white-shell) .workflow-approval-stamp:is(.workflow-status-returned, .workflow-status-rejected) { color: var(--mf-danger); border-color: var(--mf-danger-border); }
 
 /* A small type scale keeps ordinary reading comfortable while compact editor
    controls and metadata retain their existing layouts. Code fonts are untouched. */
@@ -568,8 +563,6 @@ body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-se
 body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
 .tech-white-shell .app-content .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover,
 body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover { background: #304359; border-color: #304359; }
-.tech-white-shell .app-menu .ant-menu-item-selected { font-weight: 600; box-shadow: inset 3px 0 0 var(--mf-primary-strong); }
-.tech-white-shell .ant-layout-sider-collapsed .app-menu .ant-menu-item-selected { box-shadow: none; }
 .tech-white-shell .app-content :is(.shell-page-heading,.runtime-page-bar) h3.ant-typography { font-size: 26px !important; font-weight: 650; letter-spacing: -.4px; }
 @media (max-width: 1100px) {
   .tech-white-shell .app-content .todo-metric-item { padding: 20px 16px; grid-template-columns: minmax(0,1fr); gap: 12px; }
@@ -722,12 +715,6 @@ body:has(.tech-white-shell) .workflow-business-sheet-value { color: var(--mf-tex
   border-color: var(--mf-border-strong);
 }
 .tech-white-shell .app-content .todo-metric-primary:hover strong { color: var(--mf-text); }
-.tech-white-shell .app-menu .ant-menu-item-selected {
-  color: var(--mf-text) !important;
-  box-shadow: inset 3px 0 0 var(--mf-focus);
-}
-.tech-white-shell .shell-rail-button.is-active,
-.tech-white-shell .shell-rail-button.is-active :is(.anticon, svg) { color: var(--mf-focus); }
 body:has(.tech-white-shell) :is(.ant-modal-header, .ant-drawer-header) {
   background: var(--mf-feature-bg);
   border-bottom-color: var(--mf-info-border);
@@ -786,11 +773,6 @@ body:has(.tech-white-shell) :is(.ant-modal-footer, .ant-drawer-footer) {
   color: var(--mf-text);
   background: var(--mf-selected);
 }
-body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
-  color: var(--mf-text);
-  background: var(--mf-selected);
-  font-weight: 600;
-}
 .tech-white-shell .app-content :is(.data-domain-list button.active, .data-source-compact-row.active, .semantic-list-item.active) {
   color: var(--mf-text);
   border-color: var(--mf-border-strong);
@@ -809,12 +791,6 @@ body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
 .tech-white-shell .app-content :is(.data-asset-metrics, .semantic-mapping-metrics) strong { color: var(--mf-text); }
 .tech-white-shell .app-content :is(.data-asset-metrics, .semantic-mapping-metrics) span { color: var(--mf-muted); }
 .tech-white-shell .app-content .data-asset-table .ant-table-tbody > tr.active-row > td { background: var(--mf-selected); }
-.tech-white-shell .app-content .ai-settings-savebar {
-  margin-right: 64px;
-  border-color: var(--mf-border);
-  border-radius: 14px;
-  box-shadow: 0 4px 20px rgba(43,67,103,.05);
-}
 .tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div {
   background: var(--mf-feature-bg);
   border-color: var(--mf-info-border);
@@ -850,3 +826,6 @@ body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
 .tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .ant-table-thead > tr > th {
   background: var(--mf-sidebar);
 }
+
+.workflow-approval-empty { margin: 0; padding: 16px; border: 1px solid var(--mf-border); border-radius: 8px; background: var(--mf-panel); color: var(--mf-muted); }
+.workflow-approval-tab-count { color: var(--mf-muted); font-size: 12px; font-variant-numeric: tabular-nums; }

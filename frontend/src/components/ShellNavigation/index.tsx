@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, FolderOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, EllipsisOutlined, FolderOutlined, HistoryOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
 import { Button, Card, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import AccountMenu, { type AccountMenuUser } from '../AccountMenu';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
@@ -24,20 +24,6 @@ export const shellIcons: Record<string, React.ReactNode> = {
   ShopOutlined: <ShopOutlined />, CheckOutlined: <CheckOutlined />, BookOutlined: <BookOutlined />,
 };
 export function shellIcon(name?: string) { return shellIcons[name || ''] || <AppstoreOutlined />; }
-
-// The rail uses a lighter line language than the content and configuration icons.
-function RailIcon({ name, selected }: { name: string; selected: boolean }) {
-  const paths: Record<string, React.ReactNode> = {
-    home: selected ? <path fill="currentColor" stroke="none" d="M3.5 10.2 12 3.5l8.5 6.7v9a1.3 1.3 0 0 1-1.3 1.3h-4.5v-6.2H9.3v6.2H4.8a1.3 1.3 0 0 1-1.3-1.3z" /> : <><path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9" /></>,
-    space: <><path d="m7 6 1-2 4 1 1 2 6 1a2 2 0 0 1 1.5 2.4l-1.6 7.2" /><path d="M4.4 8h4l2 2h5a2 2 0 0 1 2 2l-.8 7a2 2 0 0 1-2 1.8H5.3a2 2 0 0 1-2-1.8l-.9-9a2 2 0 0 1 2-2Z" /></>,
-    scheduler: <><path d="M12 3.5a8.5 8.5 0 1 1-8.3 6.6M12 7v5l-3 2M3.5 7.5V4h3.5" /></>,
-    plugins: <><path d="M16.8 7a7 7 0 1 0 1.7 8.2M16 8a4.4 4.4 0 1 0-3 7.5h2.5" /><path d="m12.5 9.5-2 3.5h8a3.5 3.5 0 0 0 0-7h-2" /></>,
-    data: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7" /></>,
-    workflow: <><path d="M8 4h8v4H8zM4 16h6v4H4zM16 16h6v4h-6zM12 8v4M7 16v-4h12v4" /></>,
-    more: <><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none" /></>,
-  };
-  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
 
 export const fixedShellApps = [
   { id: 'home', name: '工作台', icon: 'HomeOutlined', path: '/' },
@@ -74,6 +60,7 @@ interface ApplicationRailProps {
 
 export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, onHome }: ApplicationRailProps) {
   const navigate = useNavigate();
+  const fixedIcons: Record<string, React.ReactNode> = { home: <HomeOutlined />, workflow: <ApartmentOutlined />, scheduler: <HistoryOutlined />, more: <EllipsisOutlined /> };
   const railButton = (id: string, name: string, icon: React.ReactNode, onClick: () => void) => (
     <Tooltip title={name} placement="right" key={id}>
       <button type="button" className={`shell-rail-button ${activeKey === id ? 'is-active' : ''}`} aria-label={name} aria-pressed={activeKey === id} onClick={onClick}>{icon}</button>
@@ -81,10 +68,10 @@ export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, on
   );
   return <nav className="shell-app-rail" aria-label="应用栏">
     <div className="shell-rail-scroll">
-      {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => app.id === 'home' ? onHome() : navigate(app.path)))}
+      {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => app.id === 'home' ? onHome() : navigate(app.path)))}
       {library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
       {user?.is_admin && railButton('knowledge', '知识库', <BookOutlined />, () => navigate('/data-center/knowledge'))}
-      {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, <RailIcon name={app.id} selected={activeKey === app.id} />, () => navigate(app.path)))}
+      {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => navigate(app.path)))}
     </div>
     <div className="shell-rail-user"><AccountMenu compact active={activeKey === 'account'} user={user} onNavigate={navigate} onLogout={onLogout} /></div>
   </nav>;

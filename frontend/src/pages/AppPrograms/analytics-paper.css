@@ -1,5 +1,5 @@
-/* Dashboard material tokens; only dashboard content opts into the paper surface. */
-.app-content:has(:is(.runtime-analytics-page,.component-page)) {
+/* The business page grid is an alignment aid in the editor. */
+.app-content:has(:is(.runtime-analytics-page,.component-page.analytics-workspace-configuring)) {
   background-color: #f6f8fa;
   background-image: linear-gradient(rgba(99, 126, 145, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 126, 145, .10) 1px, transparent 1px);
   background-size: 44px 44px;
@@ -12,11 +12,13 @@
 }
 :is(.runtime-analytics-page,.component-page) {
   background-color: var(--analytics-paper, #f6f8fa);
-  background-image: linear-gradient(rgba(99, 126, 145, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 126, 145, .10) 1px, transparent 1px);
-  background-size: var(--analytics-grid-size, 44px) var(--analytics-grid-size, 44px);
   padding: 0;
   border: 0;
   border-radius: 0;
+}
+:is(.runtime-analytics-page,.component-page.analytics-workspace-configuring) {
+  background-image: linear-gradient(rgba(99, 126, 145, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 126, 145, .10) 1px, transparent 1px);
+  background-size: var(--analytics-grid-size, 44px) var(--analytics-grid-size, 44px);
 }
 .runtime-analytics-page .runtime-analytics-canvas { background: transparent; padding: 0; }
 .runtime-analytics-page .runtime-analytics-widget,
@@ -50,7 +52,7 @@
 }
 .tech-white-shell .app-content .runtime-analytics-page:not(.runtime-analytics-dark) .runtime-analytics-metrics > div { border-radius: var(--analytics-card-radius, 12px) !important; }
 .tech-white-shell .app-content .runtime-analytics-page .ant-card-head { background: transparent; }
-.app-content:has(:is(.runtime-analytics-page,.component-page)), .runtime-analytics-page { background-attachment: fixed; }
+.app-content:has(:is(.runtime-analytics-page,.component-page.analytics-workspace-configuring)), .runtime-analytics-page { background-attachment: fixed; }
 .runtime-analytics-page .analytics-metric-group { -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* KPI title and content areas inherit bounded widget appearance parameters. */
 .tech-white-shell .app-content .analytics-metric-group .analytics-widget-heading,
@@ -82,6 +84,13 @@
   backdrop-filter:blur(var(--analytics-card-blur,12px));
 }
 .tech-white-shell .app-content .component-page .component-page-widget>.ant-card-head {background:transparent;border-bottom-color:rgba(116,139,155,.12);}
+.tech-white-shell .app-content .component-page:not(.analytics-workspace-configuring) :is(.component-page-widget-record-filter,.component-page-widget-record-list,.component-page-filters) {
+  background: var(--mf-surface, #fff);
+  border-color: var(--mf-border);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 .tech-white-shell .app-content .component-page :is(.ant-table,.ant-table-container,.ant-table-tbody>tr>td,.ant-table-placeholder) {background:transparent;}
 .tech-white-shell .app-content .component-page .ant-table-thead>tr>th {background:rgba(239,244,247,.65);}
 

@@ -140,6 +140,14 @@ class AgentToolExecutor:
         if harness_tool:
             from .tool_handlers import dispatch_tool_handler
             arguments = {k: v for k, v in payload.items() if not k.startswith('_')}
+            from .application_menu_registry import SNAPSHOT_FIELDS
+            from .component_page_tools import PAGE_WRITE_REQUESTS
+            snapshot_field = "_page_snapshot" if harness_tool in PAGE_WRITE_REQUESTS else SNAPSHOT_FIELDS.get(harness_tool)
+            if snapshot_field:
+                snapshot = payload.get(snapshot_field)
+                if not isinstance(snapshot, str) or not snapshot:
+                    raise HTTPException(409, "缺少操作的确认快照，请重新发起操作")
+                arguments[snapshot_field] = snapshot
             if harness_tool in {'forms.update_record', 'forms.create_dynamic_record_draft'}:
                 arguments['_execution_run_id'] = run.get('run_id')
                 arguments['_execution_action_key'] = execution_key

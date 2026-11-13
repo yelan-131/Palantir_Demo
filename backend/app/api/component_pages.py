@@ -652,8 +652,11 @@ async def bind_form_page(form_id: int, body: PageBinding | None = None,
 @router.post('/{code}/publish')
 async def write_page(code: str, body: PageWrite, request: Request,
                      db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    return await save_page_definition(code, body, db, user, releasing=request.url.path.endswith('/publish'))
+
+
+async def save_page_definition(code, body, db, user, *, releasing):
     page = await find_page(db, user, code)
-    releasing = request.url.path.endswith('/publish')
     if releasing:
         await validate_publish(db, user, body.definition)
     else:

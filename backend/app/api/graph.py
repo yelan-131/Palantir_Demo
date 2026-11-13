@@ -555,7 +555,7 @@ async def sync_quality_demo_graph():
                 "status": card["status"],
                 "risk": "low",
                 "summary": card["scenario"],
-                "actions": card["guidance"][:3],
+                "actions": card["steps"][:3],
                 "source_id": card_id,
                 "source_system": "knowledge-base",
                 "updated_at": card["updated_at"],

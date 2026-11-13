@@ -221,3 +221,8 @@
   color: var(--mf-text-secondary);
   font-size: 12px;
 }
+
+.assembly-page-heading { justify-content: flex-end; }
+.assembly-menu-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.assembly-form-details { margin-top: 12px; }
+.assembly-form-details > summary { padding: 8px 0; color: var(--mf-muted); cursor: pointer; }

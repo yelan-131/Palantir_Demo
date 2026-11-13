@@ -1,6 +1,8 @@
 # ManuFoundry / Palantir Demo
 
-Current version: 0.3.20.
+Current development version: 0.3.21 (draft, updated 2026-11-13).
+
+Draft notes: [0.3.21 — AI 技能、应用页面与数据中心](docs/operations/release-0.3.21.md).
 
 Latest published release: [0.3.20 — 业务数据、页面设计与应用菜单](docs/operations/release-0.3.20.md), released 2026-11-05.
 

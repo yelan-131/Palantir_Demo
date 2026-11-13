@@ -9,7 +9,7 @@ const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/uti
 }).outputText;
 const context = { exports: {} };
 vm.runInNewContext(code, context);
-const { normalizeShellMenu, shellMenuAncestors, applicationNavigation } = context.exports;
+const { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage } = context.exports;
 
 test('group conversion preserves destinations, permissions and nested application menus without mutating input', () => {
   const input = [
@@ -37,6 +37,16 @@ test('direct links have no ancestors and empty menus remain safe', () => {
   assert.equal(JSON.stringify(normalizeShellMenu(undefined, 'icon')), '[]');
 });
 
+test('one reachable application page shows the menu, including in a nested group', () => {
+  const production = { key: '/production' };
+  const quality = { key: '/quality' };
+  const group = { key: 'boards', children: [production, { key: 'more-boards', children: [quality] }] };
+  assert.equal(hasApplicationPage(undefined), false);
+  assert.equal(hasApplicationPage([{ type: 'divider' }, { key: 'no-route' }, { ...quality, disabled: true }]), false);
+  assert.equal(hasApplicationPage([production]), true);
+  assert.equal(hasApplicationPage([{ key: 'boards', children: [production] }]), true);
+  assert.equal(hasApplicationPage([group]), true);
+});
 
 test('application navigation keeps home above only the selected application pages', () => {
   const home = { key: '/', label: '我的工作台' };

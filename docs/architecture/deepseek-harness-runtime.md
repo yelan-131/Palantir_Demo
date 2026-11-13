@@ -48,6 +48,20 @@ rechecks the latest policy and uses the existing business services; it never
 trusts the model to declare that an operation was confirmed. Confirmation
 tokens and run state prevent duplicate execution.
 
+## Skills
+
+The platform registry owns skill IDs, editable metadata, instructions, and
+enablement. Imports also preserve the original Markdown. Each business run
+projects permitted skills into a temporary directory read by the native DSH
+filesystem provider. DSH publishes the session catalog and loads instructions
+through its native `skill` tool. The runtime derives kebab-case aliases for
+legacy IDs and keeps the original IDs in the platform registry. The DSH provider
+scans only the temporary directory. Imported tool declarations do not grant
+platform permissions. Actual calls continue through the platform MCP bridge.
+
+`AI_HARNESS_NATIVE_SKILLS=false` restores the previous `platform.skills.read`
+path for rollback. Both paths apply the platform skill visibility rules.
+
 `draft` allows draft writes only; `readonly` excludes side-effecting tools and
 writes; `confirm` allows authorized writes after confirmation; `off` and the
 platform AI switch reject requests. An administrator is also subject to AI
@@ -159,6 +173,18 @@ only frontend assets is insufficient.
 
 Before a backend-only build, refresh packaged platform instructions and seed
 files with `python scripts/sync_ai_assets.py`. For an existing bundled registry,
+Skill definitions, imported Markdown and tool mappings are scoped to the active
+tenant. A tenant with no saved registry starts from the bundled definitions.
+Saving materializes that tenant's configuration, including disabled entries.
+The admin API and the MCP bridge derive the tenant from the authenticated user
+or the authenticated run. DSH stages the visible skills in the run's temporary
+directory. Tool execution and confirmation still use the platform's policy checks.
+
+Migration `0042_agent_registry_tenants` assigns the former global registry to
+tenant 1 because those rows did not record tenant ownership. It preserves row
+IDs, skill names, definitions and audit timestamps. Other tenants start from
+the bundle. SQLite development databases apply the same schema change at startup.
+
 `python scripts/upgrade_harness_registry.py` upgrades the old placeholder draft
 handler only when its original side effect and permission metadata match.
 Custom definitions are preserved. New registries are imported explicitly in

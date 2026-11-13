@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  Alert,
   Card,
+  Dropdown,
+  Spin,
   Table,
   Button,
   Modal,
@@ -37,10 +40,11 @@ import {
   getDataSource,
   deleteDataSource,
   testConnection,
-  triggerSync,
-  getSyncStatus,
   previewData,
 } from '@/services/api';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/authStore';
+import ConnectionWizard, { type ConnectionWizardActions } from './ConnectionWizard';
 import { formatServerDateTime } from '@/utils/dateTime';
 
 const { Option } = Select;
@@ -82,8 +86,12 @@ const DS_TYPES = [
 ];
 
 export default function DataSourcePage() {
+  const navigate = useNavigate();
+  const isAdmin = Boolean(useAuthStore(state => state.user?.is_admin));
+  const connectionWizard = useRef<ConnectionWizardActions>(null);
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewDataState, setPreviewDataState] = useState<{ columns: string[]; rows: Record<string, unknown>[] }>({
@@ -93,7 +101,6 @@ export default function DataSourcePage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewName, setPreviewName] = useState('');
   const [testingIds, setTestingIds] = useState<Set<number>>(new Set());
-  const [syncingIds, setSyncingIds] = useState<Set<number>>(new Set());
   const [form] = Form.useForm();
   const sourceType=Form.useWatch('type',form);
   const [editingSourceId,setEditingSourceId]=useState<number|null>(null);
@@ -102,8 +109,10 @@ export default function DataSourcePage() {
     setLoading(true);
     try {
       const res = await listDataSources();
+      setLoadFailed(false);
       setDataSources((Array.isArray(res.data)?res.data:res.data?.data??res.data?.items??[]).map((item:any)=>({...item,type:['api','rest_api'].includes(item.source_type||item.type)?'api':item.source_type||item.type,host:item.connection_address||item.host||'—'})));
     } catch {
+      setLoadFailed(true);
       message.error('加载数据源列表失败');
     } finally {
       setLoading(false);
@@ -156,39 +165,6 @@ export default function DataSourcePage() {
       message.error('连接测试请求失败');
     } finally {
       setTestingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
-  };
-
-  const handleSync = async (id: number) => {
-    setSyncingIds((prev) => new Set(prev).add(id));
-    try {
-      await triggerSync(id);
-      message.success('同步已触发');
-      fetchDataSources();
-      // Poll sync status
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await getSyncStatus(id);
-          if (statusRes.data?.status !== 'syncing') {
-            clearInterval(pollInterval);
-            setSyncingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            fetchDataSources();
-          }
-        } catch {
-          clearInterval(pollInterval);
-        }
-      }, 3000);
-    } catch {
-      message.error('触发同步失败');
-      setSyncingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
@@ -278,7 +254,10 @@ export default function DataSourcePage() {
       width: 280,
       render: (_: unknown, record: DataSource) => (
         <Space size="small">
-          {record.type==='api'&&<Button type="link" size="small" onClick={async()=>{try{const response=await getDataSource(record.id);const config=JSON.parse(response.data.connection_config||'{}');setEditingSourceId(record.id);form.setFieldsValue({name:record.name,type:'api',url:config.url||config.endpoint||config.base_url,headers:JSON.stringify(config.headers||{},null,2),allow_private_network:config.allow_private_network===true});setModalVisible(true);}catch{message.error('数据源配置加载失败');}}}>编辑</Button>}
+          {isAdmin && record.type === 'postgresql' && (
+            <Button type="link" size="small" onClick={() => void connectionWizard.current?.edit(record)}>编辑</Button>
+          )}
+          {isAdmin && record.type==='api'&&<Button type="link" size="small" onClick={async()=>{try{const response=await getDataSource(record.id);const config=JSON.parse(response.data.connection_config||'{}');setEditingSourceId(record.id);form.setFieldsValue({name:record.name,type:'api',url:config.url||config.endpoint||config.base_url,headers:JSON.stringify(config.headers||{},null,2),allow_private_network:config.allow_private_network===true});setModalVisible(true);}catch{message.error('数据源配置加载失败');}}}>编辑</Button>}
           <Button
             type="link"
             size="small"
@@ -292,12 +271,11 @@ export default function DataSourcePage() {
             type="link"
             size="small"
             icon={<SyncOutlined />}
-            loading={syncingIds.has(record.id)}
             disabled={record.type==='api'}
             title={record.type==='api'?'只读 API 按需读取，无需同步':undefined}
-            onClick={() => handleSync(record.id)}
+            onClick={() => navigate('/data-center/sources?tab=pipelines')}
           >
-            同步
+            同步任务
           </Button>
           <Button
             type="link"
@@ -322,8 +300,33 @@ export default function DataSourcePage() {
     },
   ];
 
+  const openCreate = () => {
+    setEditingSourceId(null);
+    form.resetFields();
+    setModalVisible(true);
+  };
+
+  const createButton = isAdmin ? (
+    <Dropdown.Button
+      type="primary"
+      onClick={() => connectionWizard.current?.create()}
+      menu={{ items: [{ key: 'other', label: '其他数据源' }], onClick: openCreate }}
+    >
+      新建 PostgreSQL 连接
+    </Dropdown.Button>
+  ) : <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建数据源</Button>;
+
   return (
     <div className="data-source-page">
+      {isAdmin && <ConnectionWizard ref={connectionWizard} onSaved={fetchDataSources} />}
+      {loadFailed && <Alert type="error" message="无法读取数据源" action={<Button size="small" onClick={fetchDataSources}>重试</Button>} />}
+      {dataSources.length === 0 ? (
+        loading ? <div className="data-center-empty"><Spin /></div> : !loadFailed && <section className="data-center-empty">
+          <h3>还没有数据源</h3>
+          <p>连接数据库或 API 后，可以查看来源数据并配置同步。</p>
+          {createButton}
+        </section>
+      ) : <>
       <Row className="page-summary-metrics" gutter={[16, 16]} style={{ marginBottom: 16, marginInline: 0 }}>
         <Col xs={12} md={6}>
           <Card className="hierarchy-kpi-primary">
@@ -369,9 +372,7 @@ export default function DataSourcePage() {
             <Button icon={<ReloadOutlined />} onClick={fetchDataSources}>
               刷新
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => (setEditingSourceId(null),form.resetFields(),setModalVisible(true))}>
-              新建数据源
-            </Button>
+            {createButton}
           </Space>
         }
       >
@@ -384,6 +385,7 @@ export default function DataSourcePage() {
           pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
         />
       </Card>
+      </>}
 
       <Modal
         title={editingSourceId?'编辑数据源':'新建数据源'}
@@ -401,7 +403,7 @@ export default function DataSourcePage() {
           </Form.Item>
           <Form.Item name="type" label="类型" rules={[{ required: true, message: '请选择数据源类型' }]}>
             <Select placeholder="选择类型">
-              {DS_TYPES.map((t) => (
+              {DS_TYPES.filter(t => !isAdmin || t.value !== 'postgresql').map((t) => (
                 <Option key={t.value} value={t.value}>
                   {t.label}
                 </Option>

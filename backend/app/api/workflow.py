@@ -849,6 +849,8 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
     configs_by_instance = await _configs_for_instances(db, workflow_instances, workflow_defs)
     user_ids: set[int] = set()
     for inst in workflow_instances:
+        if inst.initiator_id is not None:
+            user_ids.add(inst.initiator_id)
         state = _safe_json(inst.workflow_state, {})
         current_assignee_ids = state.get("current_assignee_ids") if isinstance(state, dict) else []
         if isinstance(current_assignee_ids, list):
@@ -957,6 +959,7 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
             })
         if isinstance(steps, list) and isinstance(current_step, int) and 0 <= current_step < len(steps):
             current_node = steps[current_step].get("name") or current_node
+        initiator = users_by_id.get(inst.initiator_id)
         item = {
             "id": key,
             "source": "workflow_instance",
@@ -974,6 +977,7 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
                 "id": inst.id,
                 "workflow_id": inst.workflow_id,
                 "initiator_id": inst.initiator_id,
+                "initiator_name": (initiator.display_name or initiator.username) if initiator else None,
                 "current_node_id": state.get('current_node'),
                 "approvals": [
                     {"id": approval.id, "node_id": approval.node_id, "approver_id": approval.approver_id,

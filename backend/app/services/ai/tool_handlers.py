@@ -15,7 +15,7 @@ from sqlalchemy import select
 from fastapi import HTTPException
 
 from app.core.db import db_session
-from app.models.relational import Application, Form, Role, User, UserRole
+from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Form, Role, User, UserRole
 
 from .form_record_tools import get_form_record, query_form_records, update_form_record
 from .knowledge_ingestion import search_ingested_knowledge
@@ -96,9 +96,29 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
     limit = max(1, min(int(payload.get("limit") or 20), 100))
     async with db_session() as session:
         if context.tool_name == "platform.application_settings.query":
+            from app.api.deps import require_admin
+            from .form_menu_tools import application_menus
+            await require_admin(context.current_user or {})
+            subject = payload.get('subject') or 'applications'
+            if subject == 'pages':
+                from app.api.component_pages import list_pages
+
+                pages = (await list_pages(session, context.current_user or {}))["items"]
+                items = [page for page in pages if page["publishedVersion"] > 0]
+                return {"subject": "pages", "items": items[:limit], "count": min(len(items), limit),
+                        "has_more": len(items) > limit}
+            if subject == 'menus':
+                if not payload.get('application_id'):
+                    raise HTTPException(422, '查询菜单需要 application_id')
+                return await application_menus(session, tenant_id, payload['application_id'], limit)
+            filters = [Application.tenant_id == tenant_id]
+            if payload.get('application_id'):
+                filters.append(Application.id == payload['application_id'])
+            if payload.get('application_name'):
+                filters.append(Application.name == payload['application_name'])
             rows = (
                 await session.execute(
-                    select(Application).where(Application.tenant_id == tenant_id).order_by(Application.sort_order, Application.id).limit(limit)
+                    select(Application).where(*filters).order_by(Application.sort_order, Application.id).limit(limit)
                 )
             ).scalars().all()
             items = [{"id": row.id, "name": row.name, "code": row.code, "status": row.status} for row in rows]
@@ -106,6 +126,19 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
 
         if context.tool_name == "platform.form_settings.query":
             statement = select(Form).where(Form.tenant_id == tenant_id)
+            if application_id := payload.get('application_id'):
+                bindings = select(ApplicationForm.form_id).where(
+                    ApplicationForm.tenant_id == tenant_id,
+                    ApplicationForm.application_id == application_id,
+                )
+                menus = select(ApplicationMenuNode.form_id).where(
+                    ApplicationMenuNode.tenant_id == tenant_id,
+                    ApplicationMenuNode.application_id == application_id,
+                    ApplicationMenuNode.form_id.is_not(None),
+                )
+                statement = statement.where(Form.id.in_(bindings.union(menus)))
+            if form_name := str(payload.get('form_name') or '').strip():
+                statement = statement.where(Form.name.contains(form_name, autoescape=True))
             form_id = payload.get("form_id")
             form_code = payload.get("form_code")
             if form_id:
@@ -159,6 +192,12 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
     return await _not_implemented(payload, context)
 
 
+async def _publish_form_to_menu(payload, context):
+    from .form_menu_tools import publish_form_to_menu
+    async with db_session() as session:
+        return await publish_form_to_menu(session, context.current_user or {}, payload)
+
+
 async def _create_record_draft(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
     from .dynamic_record_drafts import create_dynamic_record_draft_from_agent
     async with db_session() as session:
@@ -189,6 +228,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "forms.add_form_field": _forms_add_form_field,
     "ai.semantic_plan_low_code_form": _semantic_low_code_plan,
     "platform.query": _platform_query,
+    "forms.publish_to_menu": _publish_form_to_menu,
     "forms.preview_publish": _shared_form_handler("forms.preview_publish"),
     "forms.list_versions": _shared_form_handler("forms.list_versions"),
     "forms.get_version": _shared_form_handler("forms.get_version"),
@@ -212,6 +252,36 @@ def _dashboard_handler(operation):
 
 from .dashboard_tools import REQUESTS as DASHBOARD_REQUESTS
 TOOL_HANDLERS.update({name: _dashboard_handler(name) for name in DASHBOARD_REQUESTS})
+
+from .component_page_controls import TOOL_DETAILS as CANVAS_TOOLS, browser_required
+
+TOOL_HANDLERS.update(dict.fromkeys(CANVAS_TOOLS, browser_required))
+
+
+def _application_menu_handler(operation):
+    async def handler(payload, context):
+        from .application_menu_registry import execute_application_menu_tool
+        async with db_session() as session:
+            return await execute_application_menu_tool(operation, session, user=context.current_user or {}, payload=payload)
+    return handler
+
+
+from .application_menu_registry import REQUESTS as APPLICATION_MENU_REQUESTS
+
+TOOL_HANDLERS.update({name: _application_menu_handler(name) for name in APPLICATION_MENU_REQUESTS})
+
+
+from .component_page_tools import PAGE_REQUESTS, execute_page_tool
+
+
+def _component_page_handler(operation):
+    async def handler(payload, context):
+        async with db_session() as session:
+            return await execute_page_tool(operation, session, user=context.current_user or {}, payload=payload)
+    return handler
+
+
+TOOL_HANDLERS.update({name: _component_page_handler(name) for name in PAGE_REQUESTS})
 
 
 def list_tool_handler_keys() -> list[str]:

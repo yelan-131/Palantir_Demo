@@ -66,7 +66,7 @@ export default function NavigationAreaPage() {
     case '/data-center/graph': content = <Navigate to="/data-center/objects?view=graph" replace />; break;
     case '/admin/knowledge':
     case '/data-center/knowledge': content = <Knowledge />; break;
-    case '/admin/quality-impact': content = <><Alert type="info" showIcon message="质量影响与时间线（实验功能）" description="示例业务数据已入库。带时间戳的节点与关系按记录时间展示，拖动可查看关联形成过程；不代表完整历史状态回放。" /><QualityImpact /></>; break;
+    case '/admin/quality-impact': content = <><Alert type="info" showIcon message="质量影响与时间线（实验功能）" description="时间线按记录时间展示带时间戳的节点和关系，供追溯关联形成过程。" /><QualityImpact /></>; break;
     case '/admin/entity-timeline': content = <BackendTools key="entity-timeline" section="entity-timeline" />; break;
     case '/admin/graph-tools': content = <BackendTools key="graph-tools" section="graph-tools" />; break;
     case '/admin/model-tools': content = <BackendTools key="model-tools" section="model-tools" />; break;

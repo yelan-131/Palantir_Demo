@@ -17,6 +17,10 @@ class SkillDefinition(BaseModel):
     name: str
     title: str
     description: str
+    instructions: str | None = Field(default=None, max_length=30000)
+    source_markdown: str | None = Field(default=None, max_length=100_000)
+    model_invocable: bool = True
+    user_invocable: bool = True
     capability_level: CapabilityLevel
     risk_level: RiskLevel = "low"
     default_tool: str | None = None
@@ -40,7 +44,8 @@ def skill_registry() -> dict[str, SkillDefinition]:
 
 
 def list_skills() -> list[dict[str, Any]]:
-    return [definition.model_dump() for definition in skill_registry().values()]
+    private_fields = {"instructions", "source_markdown", "model_invocable", "user_invocable"}
+    return [definition.model_dump(exclude=private_fields) for definition in skill_registry().values()]
 
 
 def get_skill(name: str) -> SkillDefinition | None:

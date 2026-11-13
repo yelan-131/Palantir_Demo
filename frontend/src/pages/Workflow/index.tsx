@@ -3,14 +3,14 @@ import {
   ClockCircleOutlined,
   CloseOutlined,
   EditOutlined,
-  FileSearchOutlined,
-  FormOutlined,
   SearchOutlined,
-  HistoryOutlined,
+  ReloadOutlined,
+  RightOutlined,
   InboxOutlined,
   RollbackOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Drawer, Empty, Input, Modal, Select, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Input, Modal, Select, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { useAuthStore } from '../../stores/authStore';
 import { createRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getFormReferenceOptions, wfApproveOrReject, wfListBusinessItems } from '@/services/api';
@@ -72,6 +72,7 @@ type WorkflowBusinessItem = {
     id: number;
     workflow_id: number;
     initiator_id?: number | null;
+    initiator_name?: string | null;
     current_node_id?: string;
     approvals?: Array<{ id: number; node_id?: string | null; approver_id?: number | null; approver_name?: string | null; action?: string | null; comment?: string | null; acted_at?: string | null }>;
     current_assignees?: Array<{ id: number; name: string; username?: string | null }>;
@@ -207,22 +208,14 @@ function currentAssigneeLabel(item: WorkflowBusinessItem) {
   return assignees.map((assignee) => assignee.name || assignee.username || `用户 #${assignee.id}`).join('、');
 }
 
-function workflowCardPrimaryFields(item: WorkflowBusinessItem) {
-  const fields = Array.isArray(item.fields) ? item.fields : [];
-  return fields
-    .slice(0, 4)
-    .map((field) => ({
-      key: field.field_name,
-      label: field.label || field.field_name,
-      value: displayWorkflowValue(field, field.value),
-    }));
-}
-
-function workflowStatusClass(status: string) {
-  return `workflow-status-${statusMeta[status] ? status : 'default'}`;
-}
-
 export default function WorkflowPage() {
+  const currentUser = useAuthStore(state => state.user);
+  const initiatorLabel = (item: WorkflowBusinessItem) => {
+    const initiator = item.workflow;
+    if (initiator?.initiator_name) return initiator.initiator_name;
+    if (currentUser && initiator?.initiator_id === currentUser.id) return currentUser.display_name || currentUser.username;
+    return initiator?.initiator_id ? `用户 #${initiator.initiator_id}` : undefined;
+  };
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('section') === 'materials' ? 'initiated' : normalizedView(searchParams.get('tab'));
@@ -425,6 +418,7 @@ export default function WorkflowPage() {
     const metaFields = [
       { label: '所属应用', value: selectedItem.application?.name || '未绑定应用' },
       { label: '业务表单', value: selectedItem.form?.name || '未绑定表单' },
+      { label: '发起人', value: initiatorLabel(selectedItem) || '—' },
       { label: '记录编号', value: selectedItem.record?.id ? `#${selectedItem.record.id}` : '-' },
       { label: '当前节点', value: selectedItem.current_node || statusMeta[selectedItem.status].description },
       { label: '当前处理人', value: currentAssigneeLabel(selectedItem) },
@@ -434,43 +428,39 @@ export default function WorkflowPage() {
       label: field.label || field.field_name,
       value: fieldNewValue(field),
     }));
+    const approvals = selectedItem.workflow?.approvals || [];
+    const currentNodeId = selectedItem.workflow?.current_node_id;
+    const currentNodeName = selectedItem.current_node || statusMeta[selectedItem.status].label;
+    const currentPendingApprovals = approvals.filter(approval =>
+      currentNodeId && approval.node_id === currentNodeId && !approval.action && !approval.acted_at
+    );
+    const pendingNames = currentPendingApprovals.map(approval => approval.approver_name).filter(Boolean);
+    const currentAssignees = currentAssigneeLabel(selectedItem);
+    const waitingFor = currentAssignees === '-' ? pendingNames.join('、') : currentAssignees;
     const timelineItems = [
       {
         color: selectedItem.status === 'returned' ? 'red' : selectedItem.status === 'done' ? 'green' : 'blue',
         children: (
           <div className="workflow-step-item">
-            <strong>{selectedItem.current_node || statusMeta[selectedItem.status].label}</strong>
-            <span>{selectedItem.summary || '来自后台业务表单数据'}</span>
+            <strong>{currentNodeName}</strong>
+            {currentPendingApprovals.length > 0 && <span>{waitingFor ? `等待 ${waitingFor} 处理` : '等待处理'}</span>}
           </div>
         ),
       },
-      ...((selectedItem.workflow?.approvals || []).map((approval) => ({
+      ...approvals.filter(approval => !currentPendingApprovals.includes(approval)).map((approval) => ({
         color: approval.action === 'reject' ? 'red' : approval.action ? 'green' : 'gray',
         children: (
           <div className="workflow-step-item">
-            <strong>{approval.node_id || '审批节点'}</strong>
+            <strong>{currentNodeId && approval.node_id === currentNodeId ? currentNodeName : approval.node_id || '审批节点'}</strong>
             <span>{approval.action ? `${approval.approver_name || '处理人'} ${actionLabel(approval.action)} · ${formatTime(approval.acted_at)}` : `等待 ${approval.approver_name || '处理人'} 处理`}</span>
             {approval.comment && <span>意见：{approval.comment}</span>}
           </div>
         ),
-      }))),
+      })),
     ];
 
     return (
       <div className="workflow-detail-content">
-        <div className="workflow-detail-head workflow-approval-detail-head">
-          <FileSearchOutlined />
-          <div>
-            <Typography.Text strong>{selectedItem.title}</Typography.Text>
-            <Typography.Text type="secondary">
-              {selectedItem.form?.name || '未绑定表单'} / {selectedItem.application?.name || '未绑定应用'}
-            </Typography.Text>
-          </div>
-          <Tag color={statusMeta[selectedItem.status].color}>{statusMeta[selectedItem.status].label}</Tag>
-        </div>
-        <div className={`workflow-approval-stamp ${workflowStatusClass(selectedItem.status)}`}>
-          {statusMeta[selectedItem.status].label}
-        </div>
         <Tabs
           className="workflow-detail-tabs"
           items={[
@@ -480,7 +470,7 @@ export default function WorkflowPage() {
               children: (
                 <div className="workflow-tab-page">
                   <section className="workflow-business-sheet">
-                    <div className="workflow-business-sheet-grid">
+                    {detailFields.length > 0 && <div className={`workflow-business-sheet-grid${detailFields.length === 1 ? ' workflow-business-sheet-single' : ''}`}>
                       {detailFields.map((field) => (
                         <div className="workflow-business-sheet-cell" key={field.label}>
                           <span className="workflow-business-sheet-label">
@@ -490,7 +480,7 @@ export default function WorkflowPage() {
                           {renderBusinessFieldValue(field)}
                         </div>
                       ))}
-                    </div>
+                    </div>}
                     <div className="workflow-business-sheet-grid">
                       {metaFields.map(field => <div className="workflow-business-sheet-cell" key={field.label}>
                         <span className="workflow-business-sheet-label">{field.label}</span>
@@ -506,19 +496,9 @@ export default function WorkflowPage() {
               label: '流程进度',
               children: (
                 <div className="workflow-tab-page">
-                  <div className="workflow-progress-summary">
-                    <div>
-                      <span>当前节点</span>
-                      <strong>{selectedItem.current_node || statusMeta[selectedItem.status].label}</strong>
-                    </div>
-                    <div>
-                      <span>更新时间</span>
-                      <strong>{formatTime(selectedItem.updated_at || selectedItem.created_at)}</strong>
-                    </div>
-                    <Tag color={statusMeta[selectedItem.status].color}>{statusMeta[selectedItem.status].label}</Tag>
-                  </div>
                   <div className="workflow-progress-card">
-                    <div className="workflow-form-section-title">后台流程轨迹</div>
+                    <div className="workflow-form-section-title">审批记录</div>
+                    <p className="workflow-progress-updated">更新于 {formatTime(selectedItem.updated_at || selectedItem.created_at)}</p>
                     <Timeline items={timelineItems} />
                   </div>
 
@@ -557,81 +537,82 @@ export default function WorkflowPage() {
     <div className="workflow-page workflow-approval-page">
       {sourceScoped && <Alert style={{ marginBottom: 16 }} type="info" showIcon message="历史申请的原流程记录" description="此处只显示对应来源记录的流程。没有审批实例的历史申请不会自动生成新审批。" action={<Button onClick={() => setSearchParams({ tab: 'initiated' })}>返回我的申请</Button>} />}
 
-      <section className="workflow-approval-topbar">
-        <div>
-          <Typography.Text type="secondary">
-            新申请请从对应业务表单发起。
-          </Typography.Text>
-        </div>
-        <Space>
-          <Button icon={<HistoryOutlined />} onClick={loadItems}>刷新</Button>
-          <Button icon={<FormOutlined />} onClick={() => navigate('/')}>返回工作台</Button>
-        </Space>
-      </section>
-
       {instanceNotice && <Alert style={{ marginBottom: 16 }} type="warning" showIcon message={instanceNotice} />}
       {loadError && <Alert type="error" showIcon message="审批任务读取失败" description={loadError} action={<Button onClick={loadItems}>重试</Button>} />}
 
-      {!sourceScoped && <Tabs
-        className="workflow-approval-tabs"
-        activeKey={activeTab}
-        onChange={(key) => switchTab(key as WorkflowViewTab)}
-        items={approvalTabs.map((item) => ({
-          key: item.key,
-          label: (
-            <span className="workflow-approval-tab-label">
-              <span>{item.label}</span>
-              <em>{countByTab(item.key)}</em>
-            </span>
-          ),
-        }))}
-      />}
+      <section className="workflow-inbox" aria-label="审批申请">
+        {!sourceScoped && <Tabs
+          className="workflow-approval-tabs"
+          activeKey={activeTab}
+          onChange={(key) => switchTab(key as WorkflowViewTab)}
+          items={approvalTabs.map((item) => {
+            const count = countByTab(item.key);
+            return { key: item.key, label: (
+              <span className="workflow-approval-tab-label">
+                <span>{item.label}</span>
+                {count > 0 && <span className="workflow-approval-tab-count">{count}</span>}
+              </span>
+            ) };
+          })}
+        />}
 
-      <Space wrap style={{ padding: '0 4px' }}>
-        <Input allowClear prefix={<SearchOutlined />} placeholder="搜索申请、表单或编号" value={query} onChange={event => setQuery(event.target.value)} style={{ width: 300 }} />
-        <Select allowClear showSearch optionFilterProp="label" placeholder="所有来源表单" value={formFilter} onChange={setFormFilter} style={{ minWidth: 200 }} options={dataset.forms.map(form => ({ value: form.id, label: form.name }))} />
-        <Typography.Text type="secondary">共 {filteredItems.length} 条</Typography.Text>
-      </Space>
+        <Space wrap className="workflow-approval-filters">
+          <Input aria-label="搜索申请" allowClear prefix={<SearchOutlined />} placeholder="搜索申请、表单或编号" value={query} onChange={event => setQuery(event.target.value)} />
+          <Select aria-label="来源表单" allowClear showSearch optionFilterProp="label" placeholder="所有来源表单" value={formFilter} onChange={setFormFilter} options={dataset.forms.map(form => ({ value: form.id, label: form.name }))} />
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={loadItems}>刷新</Button>
+          <Button type="link" onClick={() => navigate('/')}>返回工作台</Button>
+        </Space>
 
-      <div className="workflow-approval-list">
-        {loading ? (
-          <div className="workflow-empty-state">正在读取后台表单数据...</div>
-        ) : filteredItems.length ? filteredItems.map((item) => {
-          const primaryFields = workflowCardPrimaryFields(item);
-          return (
-            <button className="workflow-approval-card" key={item.id} onClick={() => openWorkflowDetail(item)}>
-              <div className="workflow-approval-card-main">
-                <div className="workflow-approval-card-primary">
-                  {primaryFields.length ? primaryFields.map((field) => (
-                    <span key={field.key}>
-                      <small>{field.label}</small>
-                      <strong>{field.value}</strong>
-                    </span>
-                  )) : (
-                    <strong>{item.title}</strong>
-                  )}
-                </div>
-                <div className="workflow-approval-card-meta">
-                  <span>应用：{item.application?.name || '未绑定应用'}</span>
-                  <span>表单：{item.form?.name || '未绑定表单'}</span>
-                  <span>流程编号：{item.workflow?.id ? `#${item.workflow.id}` : '未提交'}</span>
-                  <span>当前处理人：{currentAssigneeLabel(item)}</span>
-                  <span>申请时间：{formatTime(item.created_at || item.updated_at)}</span>
-                </div>
-              </div>
-              <div className="workflow-approval-card-side">
-                <Tag className="workflow-approval-card-status" color={statusMeta[item.status].color}>{statusMeta[item.status].label}</Tag>
-              </div>
-            </button>
-          );
-        }) : (
-          <Empty description={loadError ? "读取失败，请点击重试" : sourceScoped ? "没有可查看的原流程记录" : query || formFilter ? "没有符合筛选条件的申请" : `暂无${approvalTabs.find(tab => tab.key === activeTab)?.label || '申请'}`} />
-        )}
-      </div>
+        <div className="workflow-approval-list" aria-busy={loading}>
+          {!loading && filteredItems.length > 0 && (
+            <div className="workflow-ledger-head" aria-hidden="true">
+              <span>申请事项</span>
+              <span>发起人</span>
+              <span>申请时间</span>
+              <span>状态</span>
+              <span>操作</span>
+            </div>
+          )}
+          {loading ? (
+            <div className="workflow-empty-state">正在读取后台表单数据...</div>
+          ) : filteredItems.length ? filteredItems.map((item) => {
+            const initiator = initiatorLabel(item);
+            const formName = item.form?.name;
+            const formPrefix = formName ? `${formName} - ` : '';
+            const title = formPrefix && item.title.startsWith(formPrefix)
+              ? item.title.slice(formPrefix.length) || item.title
+              : item.title;
+            return (
+              <button type="button" className="workflow-inbox-row" key={item.id} onClick={() => openWorkflowDetail(item)}>
+                <span className="workflow-inbox-request">
+                  <strong className="workflow-inbox-title">{title}</strong>
+                  {formName && formName !== title && <span className="workflow-inbox-source">{formName}</span>}
+                </span>
+                <span className="workflow-inbox-meta"><span>发起人</span>{initiator || '—'}</span>
+                <span className="workflow-inbox-meta workflow-inbox-time"><span>申请时间</span>{formatTime(item.created_at || item.updated_at)}</span>
+                <span className="workflow-inbox-status" data-status={item.status}>{statusMeta[item.status].label}</span>
+                <span className="workflow-inbox-action">
+                  {item.can_approve && activeTab === 'pending' ? '处理' : '查看详情'}
+                  <RightOutlined aria-hidden="true" />
+                </span>
+              </button>
+            );
+          }) : (
+            !loadError && <p className="workflow-approval-empty" role="status">{sourceScoped ? '没有可查看的原流程记录' : query || formFilter ? '没有符合筛选条件的申请' : activeTab === 'pending' ? '暂无待审批' : activeTab === 'initiated' ? '暂无发起的申请。新申请可从对应业务表单发起。' : '暂无已处理的申请'}</p>
+          )}
+        </div>
+      </section>
 
       <Drawer
         className="workflow-detail-drawer workflow-approval-drawer"
-        title={selectedItem?.title || '流程详情'}
+        title={selectedItem ? (
+          <div className="workflow-approval-drawer-heading">
+            <span>{selectedItem.title}</span>
+            <Tag className="workflow-approval-status" color={statusMeta[selectedItem.status].color}>
+              {statusMeta[selectedItem.status].label}
+            </Tag>
+          </div>
+        ) : '流程详情'}
         width="min(560px, calc(100vw - 12px))"
         placement="right"
         open={detailOpen}

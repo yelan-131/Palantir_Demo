@@ -1,6 +1,15 @@
 import type { MenuProps } from 'antd';
 import type { ReactNode } from 'react';
 
+/** Show navigation as soon as the application has a reachable page. */
+export function hasApplicationPage(items: MenuProps['items']): boolean {
+  return (items || []).some(item => {
+    if (!item || ('disabled' in item && item.disabled)) return false;
+    if ('children' in item && item.children?.length) return hasApplicationPage(item.children);
+    return 'key' in item && typeof item.key === 'string' && item.key.startsWith('/');
+  });
+}
+
 /** Keep a stable home link above the currently selected application's pages. */
 export function applicationNavigation(
   home: NonNullable<MenuProps['items']>[number],

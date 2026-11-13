@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import {
   Alert,
+  Spin,
   Button,
   Card,
   Checkbox,
@@ -43,7 +44,6 @@ import {
   Select,
   Slider,
   Space,
-  Steps,
   Switch,
   Table,
   Tabs,
@@ -73,7 +73,7 @@ import ReactFlow, {
   type NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { CSSProperties } from 'react';
 import GlobalSearch from '../../components/GlobalSearch';
 import NotificationCenter from '../../components/NotificationCenter';
@@ -84,13 +84,11 @@ import './knowledgeWorkspace.css';
 import {
   approveKnowledgeExtractionJob,
   commitKnowledgeExtractionJobToGraph,
-  createDataSource as createBackendDataSource,
   createSemanticDataQualityRule,
   createKnowledgeAgentConversation,
   createKnowledgeDocumentExtractionJob,
   createKnowledgeExtractionJob,
   createKnowledgeOntologyIntake,
-  deleteDataSource as deleteBackendDataSource,
   deleteSemanticDataQualityRule,
   enhanceKnowledgeDocumentOcr,
   exportKnowledgeExtractionJob,
@@ -99,13 +97,10 @@ import {
   getKnowledgeDocumentOcr,
   getKnowledgeOcrPipeline,
   KnowledgeOcrBlock,
-  getDataSource as getBackendDataSource,
   DataQualityRuleInfo,
   generateSemanticOntologyCandidates,
   getRelatedKnowledgeCards,
   getSemanticOntologyImpact,
-  adminListUsers,
-  getReferenceData,
   listGraphAssetEvidence,
   listGraphAssetNodes,
   listGraphAssetRelationships,
@@ -131,18 +126,13 @@ import {
   searchKnowledge,
   sendKnowledgeAgentMessage,
   saveKnowledgeDocumentOcrCorrections,
-  testDataSourceConfig,
-  updateDataSource as updateBackendDataSource,
   updateSemanticDataQualityRule,
   uploadKnowledgeAsset,
   getSemanticMappingWorkbench,
   createSemanticMappingCandidate,
   saveSemanticMappingLayout,
-  approveSemanticMappingCandidate,
-  rejectSemanticMappingCandidate,
   type SemanticMappingWorkbenchResponse,
 } from '../../services/api';
-import { useAuthStore } from '../../stores/authStore';
 
 cytoscape.use(dagre);
 
@@ -659,40 +649,6 @@ function getTableQualityRules(table?: DataAsset['tables'][number]): DataQualityR
 }
 
 type SemanticAssetCenterView = 'data' | 'mapping' | 'ontology';
-type DiscoveredSourceTable = { name: string; rows?: number };
-type GovernanceUserOption = { id: number; label: string; value: string; email?: string };
-type SourceConnectionDraft = {
-  type: string;
-  host: string;
-  port: number;
-  database: string;
-  schema: string;
-  auth_type: string;
-  username: string;
-  password: string;
-  ssl_enabled: boolean;
-};
-
-const DEFAULT_BUSINESS_DOMAINS = ['生产', '设备', '质量', '供应链', '仓储', '客户'];
-const ENABLED_DATA_SOURCE_TYPES = new Set(['postgresql']);
-const INVALID_SOURCE_TEXTS = new Set(['', 'undefined', 'null', 'none', 'nan']);
-const DEFAULT_SOURCE_CONNECTION_DRAFT: SourceConnectionDraft = {
-  type: 'postgresql',
-  host: 'localhost',
-  port: 15432,
-  database: 'mf_mes_execution',
-  schema: 'source',
-  auth_type: 'password',
-  username: 'mf_mes_readonly',
-  password: 'readonly_demo_123',
-  ssl_enabled: false,
-};
-const DATA_SENSITIVITY_OPTIONS = [
-  { value: 'internal', label: '内部', description: '可用于元数据扫描、AI 识别和对象建模。' },
-  { value: 'confidential', label: '敏感', description: '允许建模，AI 使用需记录审计，样例数据需谨慎。' },
-  { value: 'restricted', label: '受限', description: '默认禁止 AI 使用和图谱实例，避免高敏数据扩散。' },
-];
-
 const SEMANTIC_MAPPING_STATUS_OPTIONS = [
   { value: '', label: '全部' },
   { value: 'pending_review', label: '待审核' },
@@ -722,36 +678,13 @@ function SemanticMappingFlowNode({ data }: { data: any }) {
   );
 }
 
-const cleanSourceText = (value: unknown) => String(value ?? '').trim();
-
-const hasInvalidSourceText = (value: unknown) => {
-  const text = cleanSourceText(value).toLowerCase();
-  return INVALID_SOURCE_TEXTS.has(text) || text.includes('undefined://') || text.includes('/undefined');
-};
-
-const hasInvalidSourceName = (value: unknown) => {
-  const text = cleanSourceText(value).toLowerCase();
-  return !text || text.includes('undefined://') || text === 'undefined://undefined/undefined';
-};
-
-const editableSourceText = (value: unknown) => {
-  const text = cleanSourceText(value);
-  return hasInvalidSourceText(text) ? '' : text;
-};
-
-const normalizeWizardSourceType = (value: unknown) => {
-  const text = cleanSourceText(value).toLowerCase();
-  if (text === 'database' || INVALID_SOURCE_TEXTS.has(text)) {
-    return 'postgresql';
-  }
-  return text;
-};
-
 export default function SemanticAssetCenter({ view, onViewChange, embedded = false }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void; embedded?: boolean } = {}) {
-  const [dataSourceForm] = Form.useForm();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const requestedSource = Number(params.get('sourceId')) || undefined;
+  const requestedCandidate = Number(params.get('candidateId')) || undefined;
   const [qualityRuleForm] = Form.useForm();
   const [qualityScoreForm] = Form.useForm();
-  const currentUser = useAuthStore((state) => state.user);
   const [ontologyObjectForm] = Form.useForm();
   const [ontologyRelationForm] = Form.useForm();
   const [assets, setAssets] = useState<DataAsset[]>([]);
@@ -763,22 +696,12 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   const [selectedAssetId, setSelectedAssetId] = useState<number | undefined>();
   const [selectedTableId, setSelectedTableId] = useState<string | undefined>();
   const [selectedObjectId, setSelectedObjectId] = useState<string | undefined>();
-  const [selectedCandidateId, setSelectedCandidateId] = useState<number | undefined>();
+  const [selectedCandidateId, setSelectedCandidateId] = useState(requestedCandidate);
   const [assetSearch, setAssetSearch] = useState('');
   const [activeDomain, setActiveDomain] = useState('全部');
-  const [ontologyTab, setOntologyTab] = useState('objects');
-  const [sourceModalOpen, setSourceModalOpen] = useState(false);
+  const [ontologyTab, setOntologyTab] = useState(params.get('section') === 'candidates' ? 'candidates' : 'objects');
   const [objectModalOpen, setObjectModalOpen] = useState(false);
   const [relationModalOpen, setRelationModalOpen] = useState(false);
-  const [sourceStep, setSourceStep] = useState(0);
-  const [sourceEditingId, setSourceEditingId] = useState<number | undefined>();
-  const [sourceNameInput, setSourceNameInput] = useState('');
-  const [sourceConnectionDraft, setSourceConnectionDraft] = useState<SourceConnectionDraft>(DEFAULT_SOURCE_CONNECTION_DRAFT);
-  const [discoveredSourceTables, setDiscoveredSourceTables] = useState<DiscoveredSourceTable[]>([]);
-  const [businessDomainOptions, setBusinessDomainOptions] = useState(DEFAULT_BUSINESS_DOMAINS);
-  const [governanceUsers, setGovernanceUsers] = useState<GovernanceUserOption[]>([]);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState<'success' | 'error' | undefined>();
   const [scanning, setScanning] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [reviewingCandidateId, setReviewingCandidateId] = useState<number | undefined>();
@@ -787,23 +710,21 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   const [savingRelation, setSavingRelation] = useState(false);
   const [impactLoading, setImpactLoading] = useState(false);
   const [impactResult, setImpactResult] = useState<any>(null);
-  const [semanticReadyTables, setSemanticReadyTables] = useState<string[]>([]);
-  const [candidateCountByAsset, setCandidateCountByAsset] = useState<Record<number, number>>({});
-  const [candidateCountByTable, setCandidateCountByTable] = useState<Record<string, number>>({});
-  const [publishedTables, setPublishedTables] = useState<string[]>([]);
   const [qualityRuleState, setQualityRuleState] = useState<Record<string, string>>({});
   const [qualityRuleModalOpen, setQualityRuleModalOpen] = useState(false);
   const [qualityScoreStandardOpen, setQualityScoreStandardOpen] = useState(false);
   const [editingQualityRule, setEditingQualityRule] = useState<DataQualityRule | undefined>();
   const [savingQualityRule, setSavingQualityRule] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [assetLoadFailed, setAssetLoadFailed] = useState(false);
   const [semanticCenterTab, setSemanticCenterTab] = useState<SemanticAssetCenterView>(view ?? 'data');
   const [mappingWorkbench, setMappingWorkbench] = useState<SemanticMappingWorkbenchResponse | undefined>();
   const [mappingNodes, setMappingNodes] = useState<Node[]>([]);
   const [mappingEdges, setMappingEdges] = useState<Edge[]>([]);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [mappingObjectCode, setMappingObjectCode] = useState<string | undefined>();
-  const [mappingSourceId, setMappingSourceId] = useState<number | undefined>();
+  const [mappingSourceId, setMappingSourceId] = useState(requestedSource);
   const [mappingStatus, setMappingStatus] = useState<string>('');
   const [selectedMappingElement, setSelectedMappingElement] = useState<Node | Edge | undefined>();
   const [savingMappingLayout, setSavingMappingLayout] = useState(false);
@@ -822,16 +743,23 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     () => ontologyCandidates.find((item) => item.id === selectedCandidateId) ?? ontologyCandidates[0],
     [ontologyCandidates, selectedCandidateId],
   );
-  const selectedTableCandidates = useMemo(() => {
-    if (!selectedTable) return [];
-    return ontologyCandidates.filter((candidate) => {
-      const payloadSource = candidate.payload?.source as { entity_name?: unknown; source_id?: unknown } | undefined;
-      const entityName = String(payloadSource?.entity_name ?? '');
-      const sourceId = Number(payloadSource?.source_id ?? 0);
-      return (entityName === selectedTable.name || entityName === selectedTable.id)
-        && (!selectedAsset || !sourceId || sourceId === selectedAsset.id);
-    });
-  }, [ontologyCandidates, selectedAsset, selectedTable]);
+  const assetCandidates = ontologyCandidates.filter(candidate => {
+    const source = candidate.payload?.source as { source_id?: unknown } | undefined;
+    return selectedAsset && Number(source?.source_id) === selectedAsset.id;
+  });
+  const candidatesForTable = (table: { id: string; name: string }) => assetCandidates.filter(candidate => {
+    const source = candidate.payload?.source as { entity_name?: unknown } | undefined;
+    return source?.entity_name === table.name || source?.entity_name === table.id;
+  });
+  const selectedTableCandidates = selectedTable ? candidatesForTable(selectedTable) : [];
+  const openCandidateReview = (candidateId: number) => {
+    navigate(`/data-center/objects?view=ontology&section=candidates&candidateId=${candidateId}`);
+  };
+  const openMapping = () => {
+    const search = new URLSearchParams({ view: 'mapping' });
+    if (selectedAsset) search.set('sourceId', String(selectedAsset.id));
+    navigate(`/data-center/assets?${search}`);
+  };
   const selectedQualityRules = useMemo(() => getTableQualityRules(selectedTable), [selectedTable]);
   const selectedQualityRuleStats = useMemo(() => ({
     total: selectedQualityRules.length,
@@ -891,114 +819,50 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     const mappedCount = tables.filter((table) => objects.some((object) => object.source === table.id)).length;
     return { tableCount, fieldCount, totalRows, avgQuality, mappedCount };
   }, [objects, selectedAsset]);
-  const watchedSensitivity = Form.useWatch('sensitivity', dataSourceForm);
-
-  const hydrateConnectionForm = (draft: SourceConnectionDraft = sourceConnectionDraft) => {
-    dataSourceForm.setFieldsValue({
-      ...draft,
-      name: cleanSourceText(sourceNameInput || dataSourceForm.getFieldValue('name')),
-    });
-  };
-
-  const handleSourceFormValuesChange = (changedValues: Record<string, any>) => {
-    if (Object.prototype.hasOwnProperty.call(changedValues, 'name')) {
-      setSourceNameInput(changedValues.name ?? '');
-    }
-    const draftPatch: Partial<SourceConnectionDraft> = {};
-    (['type', 'host', 'port', 'database', 'schema', 'auth_type', 'username', 'password', 'ssl_enabled'] as const).forEach((key) => {
-      if (Object.prototype.hasOwnProperty.call(changedValues, key)) {
-        (draftPatch as any)[key] = changedValues[key];
-      }
-    });
-    if (Object.keys(draftPatch).length) {
-      setSourceConnectionDraft((prev) => ({ ...prev, ...draftPatch }));
-    }
-  };
-
-  const loadGovernanceOptions = async () => {
-    try {
-      const [refRes, userRes] = await Promise.all([getReferenceData(), adminListUsers()]);
-      const dictionaries = refRes.data?.data?.dictionaries ?? [];
-      const businessDomainDict = dictionaries.find((dict: any) => ['business_domain', 'data_asset_business_domain'].includes(String(dict.dictCode)));
-      const nextDomains = Array.isArray(businessDomainDict?.options)
-        ? businessDomainDict.options
-          .filter((item: any) => item.enabled !== false)
-          .map((item: any) => String(item.label || item.value))
-          .filter(Boolean)
-        : [];
-      setBusinessDomainOptions(nextDomains.length ? nextDomains : DEFAULT_BUSINESS_DOMAINS);
-
-      const users = userRes.data?.data ?? [];
-      const nextUsers = users
-        .filter((user: any) => user.is_active !== false)
-        .map((user: any) => ({
-          id: Number(user.id),
-          label: String(user.display_name || user.username),
-          value: String(user.display_name || user.username),
-          email: user.email,
-        }));
-      setGovernanceUsers(nextUsers);
-    } catch {
-      const fallbackUser = currentUser
-        ? [{ id: currentUser.id, label: currentUser.display_name || currentUser.username, value: currentUser.display_name || currentUser.username, email: currentUser.email }]
-        : [];
-      setBusinessDomainOptions(DEFAULT_BUSINESS_DOMAINS);
-      setGovernanceUsers(fallbackUser);
-    }
-  };
-
-  const applySensitivityPolicy = (sensitivity?: string) => {
-    if (sensitivity === 'restricted') {
-      const currentScope = dataSourceForm.getFieldValue('sync_scope');
-      dataSourceForm.setFieldsValue({
-        allow_ai: false,
-        allow_graph: false,
-        sync_scope: Array.isArray(currentScope)
-          ? currentScope.filter((item) => !['sample', 'full', 'incremental'].includes(item))
-          : ['metadata', 'profile'],
-      });
-      message.info('受限数据已自动关闭 AI 使用和图谱实例，并移除样例/全量/增量采集。');
-    }
-  };
-
   const load = async () => {
     setLoading(true);
     try {
-      const [assetRes, objectRes, relationRes, mappingRes, versionRes] = await Promise.all([
+      const [assetResult, ontologyResult] = await Promise.allSettled([
         listSemanticDataAssets(),
-        listSemanticOntologyObjects(),
-        listSemanticOntologyRelations(),
-        listSemanticOntologyMappings(),
-        listSemanticOntologyVersions(),
+        Promise.all([
+          listSemanticOntologyObjects(),
+          listSemanticOntologyRelations(),
+          listSemanticOntologyMappings(),
+          listSemanticOntologyVersions(),
+          listSemanticOntologyCandidates({ status: 'pending_review' }),
+        ]),
       ]);
-      const candidateRes = await listSemanticOntologyCandidates({ status: 'pending_review' });
-      const nextAssets = assetRes.data?.data ?? [];
+      setAssetLoadFailed(assetResult.status === 'rejected');
+      if (assetResult.status === 'fulfilled') {
+        const nextAssets: DataAsset[] = assetResult.value.data?.data ?? [];
+        setAssets(nextAssets);
+        setSelectedAssetId(prev => prev ?? nextAssets[0]?.id);
+        setSelectedTableId(prev => nextAssets.some(asset => asset.tables.some(table => table.id === prev)) ? prev : nextAssets[0]?.tables[0]?.id);
+      }
+      if (ontologyResult.status === 'rejected') throw ontologyResult.reason;
+      const [objectRes, relationRes, mappingRes, versionRes, candidateRes] = ontologyResult.value;
       const nextObjects = objectRes.data?.data ?? [];
       const nextCandidates = candidateRes.data?.data ?? [];
-      setAssets(nextAssets);
+      setLoadFailed(false);
       setObjects(nextObjects);
       setRelations(relationRes.data?.data ?? []);
       setOntologyCandidates(nextCandidates);
       setOntologyMappings(mappingRes.data?.data ?? []);
       setOntologyVersions(versionRes.data?.data ?? []);
-      setSelectedAssetId((prev) => prev ?? nextAssets[0]?.id);
-      setSelectedTableId((prev) => nextAssets.flatMap((asset: DataAsset) => asset.tables).some((table: DataAsset['tables'][number]) => table.id === prev) ? prev : nextAssets[0]?.tables[0]?.id);
       setSelectedObjectId((prev) => prev ?? nextObjects[0]?.id);
       setMappingObjectCode((prev) => prev ?? nextObjects[0]?.code);
       setSelectedCandidateId((prev) => prev ?? nextCandidates[0]?.id);
     } catch {
-      setAssets([]);
+      setLoadFailed(true);
       setObjects([]);
       setRelations([]);
       setOntologyCandidates([]);
       setOntologyMappings([]);
       setOntologyVersions([]);
-      setSelectedAssetId(undefined);
-      setSelectedTableId(undefined);
       setSelectedObjectId(undefined);
       setMappingObjectCode(undefined);
       setSelectedCandidateId(undefined);
-      message.warning('后端语义资产接口暂不可用，未展示本地兜底数据');
+      message.warning('暂时无法读取对象模型');
     } finally {
       setLoading(false);
     }
@@ -1006,7 +870,6 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
 
   useEffect(() => {
     load();
-    loadGovernanceOptions();
   }, []);
 
   useEffect(() => {
@@ -1014,268 +877,23 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   }, [view]);
 
   useEffect(() => {
-    applySensitivityPolicy(watchedSensitivity);
-  }, [watchedSensitivity]);
+    setMappingSourceId(requestedSource);
+  }, [requestedSource]);
+
+  useEffect(() => {
+    if (requestedCandidate) setSelectedCandidateId(requestedCandidate);
+  }, [requestedCandidate]);
+
+  const reviewRequested = params.get('section') === 'candidates';
+  useEffect(() => {
+    if (reviewRequested) setOntologyTab('candidates');
+  }, [reviewRequested]);
 
   useEffect(() => {
     if (filteredTables.length && !filteredTables.some((table) => table.id === selectedTableId)) {
       setSelectedTableId(filteredTables[0].id);
     }
   }, [filteredTables, selectedTableId]);
-
-  const openDataSourceWizard = () => {
-    setSourceEditingId(undefined);
-    setSourceStep(0);
-    setConnectionTestResult(undefined);
-    setDiscoveredSourceTables([]);
-    setSourceNameInput('');
-    setSourceConnectionDraft(DEFAULT_SOURCE_CONNECTION_DRAFT);
-    dataSourceForm.setFieldsValue({
-      name: '',
-      ...DEFAULT_SOURCE_CONNECTION_DRAFT,
-      owner: currentUser?.display_name || currentUser?.username || '平台管理员',
-      sync_frequency: '每 5 分钟',
-      sync_mode: 'metadata',
-      business_domain: '生产',
-      sensitivity: 'internal',
-      network_zone: '内网 Connector Agent',
-      ssl_enabled: false,
-      save_secret: true,
-      allow_ai: true,
-      allow_ontology: true,
-      allow_graph: false,
-      sync_scope: ['metadata', 'profile'],
-      tables: [],
-    });
-    setSourceModalOpen(true);
-  };
-
-  const openDataSourceEditor = async (asset: DataAsset, event?: { stopPropagation: () => void }) => {
-    event?.stopPropagation();
-    setSourceEditingId(asset.id);
-    setSourceStep(0);
-    setConnectionTestResult(undefined);
-    let config: Record<string, any> = {};
-    let schedule = asset.freshness || '每 5 分钟';
-    try {
-      const res = await getBackendDataSource(asset.id);
-      config = JSON.parse(res.data?.connection_config || '{}');
-      schedule = res.data?.schedule || schedule;
-    } catch {
-      config = {};
-    }
-    const savedTableNames = config.selected_tables || [];
-    const savedDiscoveredTables = Array.isArray(config.discovered_tables) && config.discovered_tables.length
-      ? config.discovered_tables
-      : (asset.tables?.length
-        ? asset.tables.map((table) => ({ name: table.name, rows: table.rows }))
-        : savedTableNames.map((name: string) => ({ name, rows: undefined })));
-    setDiscoveredSourceTables(savedDiscoveredTables);
-    const editorSourceType = normalizeWizardSourceType(config.type || config.source_type || asset.type);
-    const editableName = editableSourceText(asset.name);
-    const editorDraft: SourceConnectionDraft = {
-      type: ENABLED_DATA_SOURCE_TYPES.has(editorSourceType) ? editorSourceType : 'postgresql',
-      host: editableSourceText(config.host) || 'localhost',
-      port: Number(config.port || 5432),
-      database: editableSourceText(config.database) || '',
-      schema: config.schema || config.schema_name || 'source',
-      auth_type: config.auth_type || 'password',
-      username: editableSourceText(config.username) || 'mf_readonly',
-      password: config.password || '',
-      ssl_enabled: config.ssl_enabled ?? false,
-    };
-    setSourceNameInput(editableName);
-    setSourceConnectionDraft(editorDraft);
-    dataSourceForm.setFieldsValue({
-      ...editorDraft,
-      name: editableName,
-      owner: config.owner || asset.owner || '平台管理员',
-      sync_frequency: schedule,
-      sync_mode: config.sync_mode || 'metadata',
-      business_domain: config.business_domain || '生产',
-      sensitivity: config.sensitivity || asset.sensitivity || 'internal',
-      network_zone: config.network_zone || '内网 Connector Agent',
-      ssl_enabled: config.ssl_enabled ?? false,
-      save_secret: true,
-      allow_ai: config.allow_ai ?? true,
-      allow_ontology: config.allow_ontology ?? true,
-      allow_graph: config.allow_graph ?? false,
-      sync_scope: config.sync_scope || ['metadata', 'profile'],
-      tables: (config.selected_tables || asset.tables).map((table: any) => typeof table === 'string' ? table : table.name),
-    });
-    setSourceModalOpen(true);
-  };
-
-  const closeDataSourceWizard = () => {
-    setSourceModalOpen(false);
-    setSourceStep(0);
-    setSourceEditingId(undefined);
-    setConnectionTestResult(undefined);
-    setDiscoveredSourceTables([]);
-    setSourceNameInput('');
-    setSourceConnectionDraft(DEFAULT_SOURCE_CONNECTION_DRAFT);
-  };
-
-  const nextSourceStep = async () => {
-    const normalizedName = cleanSourceText(sourceNameInput || dataSourceForm.getFieldValue('name'));
-    dataSourceForm.setFieldsValue({ name: normalizedName, ...sourceConnectionDraft });
-    if (sourceStep === 0 && hasInvalidSourceName(normalizedName)) {
-      dataSourceForm.setFields([{ name: 'name', errors: ['请输入连接名称'] }]);
-      dataSourceForm.scrollToField('name', { block: 'center' });
-      message.error('请输入连接名称');
-      return;
-    }
-    const stepFields = [
-      ['type', 'host', 'port', 'database', 'schema', 'auth_type', 'username', 'password'],
-      ['sync_scope', 'tables', 'sync_mode', 'sync_frequency'],
-      ['business_domain', 'owner'],
-    ][sourceStep] ?? [];
-    try {
-      await dataSourceForm.validateFields(stepFields);
-      if (sourceStep === 0 && discoveredSourceTables.length === 0) {
-        message.warning('请先测试连接，读取真实数据库表');
-        return;
-      }
-      setSourceStep((prev) => Math.min(prev + 1, 2));
-    } catch (error: any) {
-      const firstField = error?.errorFields?.[0]?.name;
-      if (firstField) {
-        dataSourceForm.scrollToField(firstField, { block: 'center' });
-      }
-      message.warning('请先填写必填项');
-    }
-  };
-
-  const testDataSourceConnection = async () => {
-    hydrateConnectionForm();
-    const values = await dataSourceForm.validateFields(['type', 'host', 'port', 'database', 'schema', 'auth_type', 'username', 'password', 'ssl_enabled']);
-    const draft = { ...sourceConnectionDraft, ...values };
-    const sourceType = normalizeWizardSourceType(draft.type);
-    if (!ENABLED_DATA_SOURCE_TYPES.has(sourceType)) {
-      message.error('数据源类型无效，请选择 PostgreSQL 后再测试连接');
-      return;
-    }
-    setTestingConnection(true);
-    setConnectionTestResult(undefined);
-    try {
-      const res = await testDataSourceConfig({
-        source_type: sourceType,
-        host: cleanSourceText(draft.host),
-        port: draft.port,
-        database: cleanSourceText(draft.database),
-        schema_name: draft.schema || 'public',
-        username: cleanSourceText(draft.username),
-        password: draft.password,
-        ssl_enabled: Boolean(draft.ssl_enabled),
-      });
-      setConnectionTestResult('success');
-      const tables = res.data?.tables ?? [];
-      const realTables = tables.map((table: any) => ({ name: String(table.name), rows: Number(table.rows ?? 0) }));
-      setDiscoveredSourceTables(realTables);
-      if (tables.length) {
-        dataSourceForm.setFieldsValue({ tables: realTables.map((table: DiscoveredSourceTable) => table.name) });
-      }
-      message.success(`连接测试通过：发现 ${tables.length || 0} 张候选表`);
-    } catch (error: any) {
-      setConnectionTestResult('error');
-      message.error(error?.response?.data?.detail ?? '连接测试失败');
-    } finally {
-      setTestingConnection(false);
-    }
-  };
-
-  const saveDataSource = async () => {
-    const normalizedName = cleanSourceText(sourceNameInput || dataSourceForm.getFieldValue('name'));
-    dataSourceForm.setFieldsValue({ name: normalizedName, ...sourceConnectionDraft });
-    const values = await dataSourceForm.validateFields();
-    const draft = { ...sourceConnectionDraft, ...values };
-    const editingAsset = assets.find((asset) => asset.id === sourceEditingId);
-    const sourceName = normalizedName;
-    const sourceType = normalizeWizardSourceType(draft.type);
-    if (!ENABLED_DATA_SOURCE_TYPES.has(sourceType)) {
-      message.error('数据源类型无效，请选择 PostgreSQL 后再保存');
-      setSourceStep(0);
-      return;
-    }
-    if (hasInvalidSourceName(sourceName)) {
-      dataSourceForm.setFields([{ name: 'name', errors: ['请输入连接名称'] }]);
-      dataSourceForm.scrollToField('name', { block: 'center' });
-      message.error('请输入连接名称');
-      setSourceStep(0);
-      return;
-    }
-    const tableNames = Array.isArray(values.tables) ? values.tables : [];
-    const connectionConfig = {
-      type: sourceType,
-      source_type: sourceType,
-      host: cleanSourceText(draft.host),
-      port: draft.port,
-      database: cleanSourceText(draft.database),
-      schema: draft.schema || 'public',
-      schema_name: draft.schema || 'public',
-      auth_type: draft.auth_type,
-      username: cleanSourceText(draft.username),
-      password: draft.password,
-      ssl_enabled: Boolean(draft.ssl_enabled),
-      owner: values.owner ?? '平台管理员',
-      business_domain: values.business_domain,
-      sensitivity: values.sensitivity || 'internal',
-      network_zone: values.network_zone,
-      sync_scope: values.sync_scope ?? ['metadata', 'profile'],
-      sync_mode: values.sync_mode ?? 'metadata',
-      allow_ai: Boolean(values.allow_ai),
-      allow_ontology: Boolean(values.allow_ontology),
-      allow_graph: Boolean(values.allow_graph),
-      selected_tables: tableNames,
-      discovered_tables: discoveredSourceTables,
-    };
-    const payload = {
-      name: sourceName,
-      source_type: sourceType,
-      connection_config: JSON.stringify(connectionConfig),
-      schedule: String(values.sync_frequency ?? '每 5 分钟'),
-      status: 'active',
-    };
-    try {
-      const res = editingAsset
-        ? await updateBackendDataSource(editingAsset.id, payload)
-        : await createBackendDataSource(payload);
-      const nextId = Number(res.data?.id ?? editingAsset?.id);
-      closeDataSourceWizard();
-      dataSourceForm.resetFields();
-      await load();
-      setSelectedAssetId(nextId);
-      message.success(editingAsset ? '数据源配置已保存到后台数据库' : '数据源已保存到后台数据库');
-    } catch (error: any) {
-      message.error(error?.response?.data?.detail ?? '数据源保存失败');
-    }
-  };
-
-  const deleteDataSource = (asset: DataAsset, event?: { stopPropagation: () => void }) => {
-    event?.stopPropagation();
-    Modal.confirm({
-      title: '删除数据源',
-      content: `确定删除「${asset.name}」吗？已发布对象不会被自动删除。`,
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await deleteBackendDataSource(asset.id);
-          const nextAssets = assets.filter((item) => item.id !== asset.id);
-          setAssets(nextAssets);
-          if (selectedAssetId === asset.id) {
-            setSelectedAssetId(nextAssets[0]?.id);
-            setSelectedTableId(nextAssets[0]?.tables[0]?.id);
-          }
-          await load();
-          message.success('数据源已从后台数据库删除');
-        } catch (error: any) {
-          message.error(error?.response?.data?.detail ?? '数据源删除失败');
-        }
-      },
-    });
-  };
 
   const scanMetadata = async () => {
     if (!selectedAsset) return;
@@ -1303,78 +921,11 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
 
   const clearMetadataView = () => {
     if (!selectedAsset) return;
-    const tableIds = selectedAsset.tables.map((table) => table.id);
     setAssets((prev) => prev.map((asset) => asset.id === selectedAsset.id
       ? { ...asset, freshness: '待扫描', tables: [] }
       : asset));
     setSelectedTableId(undefined);
-    setSemanticReadyTables((prev) => prev.filter((tableId) => !tableIds.includes(tableId)));
-    setPublishedTables((prev) => prev.filter((tableId) => !tableIds.includes(tableId)));
-    setCandidateCountByAsset((prev) => ({ ...prev, [selectedAsset.id]: 0 }));
-    setCandidateCountByTable((prev) => {
-      const next = { ...prev };
-      tableIds.forEach((tableId) => {
-        delete next[tableId];
-      });
-      return next;
-    });
     message.success('已清空当前数据源的元数据展示，可点击“扫描元数据”重新生成');
-  };
-
-  const runSemanticRecognition = async () => {
-    if (!selectedAsset) return;
-    if (selectedAsset.allow_ai === false) {
-      message.warning('当前数据源未授权 AI 使用，请在治理使用中开启后再识别');
-      return;
-    }
-    setRecognizing(true);
-    try {
-      const res = await generateSemanticOntologyCandidates({ source_id: selectedAsset.id });
-      const candidates = res.data?.data ?? [];
-      setOntologyCandidates((prev) => {
-        const nextById = new Map(prev.map((candidate) => [candidate.id, candidate]));
-        candidates.forEach((candidate) => nextById.set(candidate.id, candidate));
-        return Array.from(nextById.values());
-      });
-      const tableNames = new Set(selectedAsset.tables.map((table) => table.name));
-      const tableCounts: Record<string, number> = {};
-      candidates.forEach((candidate) => {
-        const payloadSource = candidate.payload?.source as { entity_name?: unknown } | undefined;
-        const entityName = String(payloadSource?.entity_name ?? '');
-        const table = selectedAsset.tables.find((item) => item.name === entityName || item.id === entityName);
-        if (table && tableNames.has(table.name)) {
-          tableCounts[table.id] = (tableCounts[table.id] ?? 0) + 1;
-        }
-      });
-      setCandidateCountByAsset((prev) => ({ ...prev, [selectedAsset.id]: candidates.length }));
-      setCandidateCountByTable((prev) => ({ ...prev, ...tableCounts }));
-      setSemanticReadyTables((prev) => Array.from(new Set([...prev, ...Object.keys(tableCounts)])));
-      message.success(`AI 语义识别完成：生成 ${candidates.length} 条对象、字段、关系和映射候选`);
-    } catch (error: any) {
-      message.error(error?.response?.data?.detail ?? 'AI 语义识别失败，请先扫描元数据');
-    } finally {
-      setRecognizing(false);
-    }
-  };
-
-  const publishToOntology = () => {
-    if (!selectedTable) return;
-    if (selectedAsset?.allow_ontology === false) {
-      message.warning('当前数据源未授权对象建模，请在治理使用中开启后再发布');
-      return;
-    }
-    if (!semanticReadyTables.includes(selectedTable.id)) {
-      message.warning('请先执行 AI 语义识别，生成候选后再送入对象与关系中心');
-      return;
-    }
-    setSemanticReadyTables((prev) => Array.from(new Set([...prev, selectedTable.id])));
-    setPublishedTables((prev) => Array.from(new Set([...prev, selectedTable.id])));
-    const firstCandidate = selectedTableCandidates[0];
-    if (firstCandidate) {
-      setSelectedCandidateId(firstCandidate.id);
-    }
-    setOntologyTab('candidates');
-    message.success(`「${selectedTable.label}」已送入候选审核，批准后才会进入正式对象目录`);
   };
 
   const refreshOntologyGovernance = async () => {
@@ -1415,7 +966,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   };
 
   const runSemanticMappingRecognition = async () => {
-    const sourceId = mappingSourceId ?? selectedAsset?.id;
+    const sourceId = mappingSourceId;
     if (!sourceId) {
       message.warning('请先选择数据源');
       return;
@@ -1434,7 +985,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         candidates.forEach((candidate) => nextById.set(candidate.id, candidate));
         return Array.from(nextById.values());
       });
-      message.success(`AI 已生成 ${candidates.length} 条语义映射候选`);
+      message.success(`AI 已生成 ${candidates.length} 条候选`);
       await loadSemanticMappingWorkbench();
     } catch (error: any) {
       message.error(error?.response?.data?.detail ?? 'AI 语义识别失败，请检查 AI 配置和元数据扫描结果');
@@ -1551,29 +1102,6 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     } catch (error: any) {
       message.error(error?.response?.data?.detail ?? '创建映射候选失败');
       await loadSemanticMappingWorkbench();
-    }
-  };
-
-  const reviewSelectedMappingCandidate = async (action: 'approve' | 'reject') => {
-    const candidate = (selectedMappingElement?.data as any)?.candidate;
-    if (!candidate?.id) {
-      message.info('请选择一条候选连线');
-      return;
-    }
-    setReviewingCandidateId(candidate.id);
-    try {
-      if (action === 'approve') {
-        await approveSemanticMappingCandidate(candidate.id);
-        message.success('映射候选已批准');
-      } else {
-        await rejectSemanticMappingCandidate(candidate.id);
-        message.success('映射候选已驳回');
-      }
-      await Promise.all([loadSemanticMappingWorkbench(), refreshOntologyGovernance()]);
-    } catch (error: any) {
-      message.error(error?.response?.data?.detail ?? '候选审核失败');
-    } finally {
-      setReviewingCandidateId(undefined);
     }
   };
 
@@ -1883,18 +1411,26 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     });
   };
 
+  const unavailable = loadFailed
+    ? <Alert type="error" message="无法读取数据中心" action={<Button size="small" onClick={load}>重试</Button>} />
+    : <div className="data-center-empty"><Spin /></div>;
   const dataAssetView = (
     <>
-    <div className="data-asset-workbench">
+    {!assets.length ? loading ? <div className="data-center-empty"><Spin /></div> : <section className="data-center-empty">
+      <h3>{assetLoadFailed ? '暂时无法读取资产目录' : '还没有数据源'}</h3>
+      <p>{assetLoadFailed ? '可以重试读取，或接入新的数据源。' : '接入数据源后，即可扫描表和字段，建立资产目录。'}</p>
+      <Space>
+        <Button type="primary" icon={<DatabaseOutlined />} onClick={() => navigate('/data-center/sources')}>前往连接管理</Button>
+        {assetLoadFailed && <Button onClick={load}>重试</Button>}
+      </Space>
+    </section> : <div className="data-asset-workbench">
       <aside className="data-asset-directory">
         <Card
           className="semantic-side-card"
           title="数据资产目录"
           extra={(
             <Space size={4}>
-              <Button size="small" icon={<DatabaseOutlined />} onClick={openDataSourceWizard}>接入</Button>
-              <Button size="small" disabled={!selectedAsset?.persisted} onClick={() => selectedAsset && openDataSourceEditor(selectedAsset)}>编辑</Button>
-              <Button size="small" danger disabled={!selectedAsset?.persisted} onClick={() => selectedAsset && deleteDataSource(selectedAsset)}>删除</Button>
+              <Button size="small" onClick={() => navigate('/data-center/sources')}>连接管理</Button>
               <Button size="small" icon={<ReloadOutlined />} onClick={load}>刷新</Button>
             </Space>
           )}
@@ -1980,8 +1516,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
             <Space wrap>
               <Button icon={<ReloadOutlined />} loading={scanning} disabled={!selectedAsset} onClick={scanMetadata}>扫描元数据</Button>
               <Button danger disabled={!selectedAsset || scanning || !selectedAsset.tables.length} onClick={clearMetadataView}>清空元数据</Button>
-              <Button icon={<RobotOutlined />} loading={recognizing} disabled={!selectedAsset || scanning || selectedAsset.allow_ai === false} onClick={runSemanticRecognition}>AI 语义识别</Button>
-              <Button type="primary" icon={<NodeIndexOutlined />} disabled={!selectedTable || selectedAsset?.allow_ontology === false || !semanticReadyTables.includes(selectedTable.id)} onClick={publishToOntology}>发布到对象与关系中心</Button>
+              <Button type="primary" icon={<NodeIndexOutlined />} onClick={openMapping}>前往字段映射</Button>
             </Space>
           }
         >
@@ -1991,7 +1526,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
             <div><span>字段数量</span><strong>{selectedAssetStats.fieldCount}</strong></div>
             <div><span>记录数</span><strong>{selectedAssetStats.totalRows.toLocaleString()}</strong></div>
             <div><span>平均质量分</span><strong>{selectedAssetStats.avgQuality}</strong></div>
-            <div><span>候选项</span><strong>{selectedAsset ? candidateCountByAsset[selectedAsset.id] ?? 0 : 0}</strong></div>
+            <div><span>候选项</span><strong>{assetCandidates.length}</strong></div>
           </div>
 
           <Table
@@ -2034,12 +1569,14 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                 title: '语义状态',
                 width: 130,
                 render: (_, record: any) => {
-                  const mapped = objects.some((object) => object.source === record.id);
-                  const ready = semanticReadyTables.includes(record.id);
-                  const published = publishedTables.includes(record.id);
-                  const candidateCount = candidateCountByTable[record.id] ?? 0;
-                  const text = published ? '已送审' : mapped ? '已映射本体' : candidateCount ? `${candidateCount} 条候选` : ready ? '已识别' : '待识别';
-                  return <Tag color={published ? 'success' : mapped || ready ? 'processing' : 'default'}>{text}</Tag>;
+                  const mapped = ontologyMappings.some(mapping =>
+                    mapping.source_system === String(selectedAsset?.id)
+                    && (mapping.source_entity === record.name || mapping.source_entity === record.id)
+                    && mapping.status === 'approved'
+                  );
+                  const count = candidatesForTable(record).length;
+                  const status = count ? `${count} 条待审核` : mapped ? '已映射本体' : '暂无映射';
+                  return <Tag color={count ? 'processing' : mapped ? 'success' : 'default'}>{status}</Tag>;
                 },
               },
               {
@@ -2139,24 +1676,10 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                   label: '当前表映射',
                   children: (
                     <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                      <Alert showIcon type="info" message="AI 已根据字段名、样例值和业务域生成候选本体映射，确认后可进入对象与关系中心。" />
-                      <div className="data-mapping-card">
-                        <Typography.Text type="secondary">推荐实体</Typography.Text>
-                        <Typography.Title level={5}>{selectedTable.label.replace('主数据', '') || selectedTable.label}</Typography.Title>
-                        <Space wrap style={{ marginBottom: 8 }}>
-                          <Tag color={semanticReadyTables.includes(selectedTable.id) ? 'processing' : 'default'}>{selectedTableCandidates.length ? `已生成 ${selectedTableCandidates.length} 条候选` : candidateCountByTable[selectedTable.id] ? `已生成 ${candidateCountByTable[selectedTable.id]} 条候选` : semanticReadyTables.includes(selectedTable.id) ? '已生成候选映射' : '等待 AI 识别'}</Tag>
-                          <Tag color={publishedTables.includes(selectedTable.id) ? 'success' : 'default'}>{publishedTables.includes(selectedTable.id) ? '已送审' : '未送审'}</Tag>
-                        </Space>
-                        <Space wrap>
-                          {selectedTable.fields.slice(0, 5).map((field) => (
-                            <Tag key={field.name}>{field.name} → {field.label}</Tag>
-                          ))}
-                        </Space>
-                      </div>
                       <div className="data-candidate-list">
                         <div className="data-candidate-list-head">
                           <Typography.Text strong>候选明细</Typography.Text>
-                          <Tag>{selectedTableCandidates.length || candidateCountByTable[selectedTable.id] || 0}</Tag>
+                          <Tag>{selectedTableCandidates.length}</Tag>
                         </div>
                         {selectedTableCandidates.length ? (
                           <List
@@ -2178,10 +1701,16 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                             )}
                           />
                         ) : (
-                          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无候选明细，点击 AI 语义识别后生成" />
+                          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无待审核候选，可前往字段与语义映射生成" />
                         )}
                       </div>
-                      <Button type="primary" block icon={<NodeIndexOutlined />} disabled={selectedAsset?.allow_ontology === false} onClick={publishToOntology}>送入对象与关系中心</Button>
+                      <Button
+                        disabled={!selectedTableCandidates.length}
+                        onClick={() => {
+                          const candidate = selectedTableCandidates[0];
+                          if (candidate) openCandidateReview(candidate.id);
+                        }}
+                      >查看待审核候选</Button>
                     </Space>
                   ),
                 },
@@ -2192,8 +1721,8 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
                       <div className="data-lineage-step"><Tag>来源</Tag><span>{selectedTable.assetName}</span></div>
                       <div className="data-lineage-step"><Tag color="blue">本体</Tag><span>{objects.some((object) => object.source === selectedTable.id) ? '已绑定对象' : '等待建模'}</span></div>
-                      <div className="data-lineage-step"><Tag color="purple">图谱</Tag><span>发布后生成实体与关系实例</span></div>
-                      <div className="data-lineage-step"><Tag color="green">AI</Tag><span>可用于结构化问答与诊断分析</span></div>
+                      <div className="data-lineage-step"><Tag color="purple">图谱</Tag><span>查看实体与关系实例</span></div>
+
                     </Space>
                   ),
                 },
@@ -2204,7 +1733,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
           )}
         </Card>
       </aside>
-    </div>
+    </div>}
     <Modal
       title="评分公式设置"
       open={qualityScoreStandardOpen}
@@ -2386,307 +1915,6 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         </Form.Item>
       </Form>
     </Modal>
-    <Modal
-      title={sourceEditingId ? '编辑数据源' : '接入数据源'}
-      open={sourceModalOpen}
-      onCancel={closeDataSourceWizard}
-      width={980}
-      destroyOnHidden
-      footer={
-        <Space>
-          <Button onClick={closeDataSourceWizard}>取消</Button>
-          {sourceStep > 0 && <Button onClick={() => setSourceStep((prev) => prev - 1)}>上一步</Button>}
-          {sourceStep < 2 ? (
-            <Button type="primary" onClick={nextSourceStep}>下一步</Button>
-          ) : (
-            <Button type="primary" onClick={saveDataSource}>{sourceEditingId ? '保存修改' : '接入并生成资产'}</Button>
-          )}
-        </Space>
-      }
-    >
-      <div className="source-onboarding">
-        <Steps
-          size="small"
-          current={sourceStep}
-          items={[
-            { title: '连接' },
-            { title: '采集范围' },
-            { title: '治理使用' },
-          ]}
-        />
-        <Form
-          form={dataSourceForm}
-          layout="vertical"
-          className="source-onboarding-form"
-          onValuesChange={handleSourceFormValuesChange}
-        >
-          {sourceStep === 0 && <section className="source-form-section source-connection-section">
-            <div className="source-section-title">
-              <Typography.Text strong>连接与凭据</Typography.Text>
-              <Space size={6}>
-                {connectionTestResult === 'success' && <Tag color="success">连接成功</Tag>}
-                {connectionTestResult === 'error' && <Tag color="error">连接失败</Tag>}
-              </Space>
-            </div>
-            <div className="source-connection-visual">
-              <div className="source-connection-node">
-                <DatabaseOutlined />
-                <span>平台</span>
-              </div>
-              <div className="source-connection-line" />
-              <div className="source-connection-node">
-                <DatabaseOutlined />
-                <span>数据库</span>
-              </div>
-            </div>
-            <div className="source-connection-fields">
-              <div className="source-connection-row">
-                <span className="source-connection-label required">类型:</span>
-                <Form.Item name="type" rules={[{ required: true }]}>
-                  <Select
-                    options={[
-                      { value: 'postgresql', label: 'PostgreSQL' },
-                      { value: 'mysql', label: 'MySQL 待开发', disabled: true },
-                      { value: 'sqlserver', label: 'SQL Server 待开发', disabled: true },
-                      { value: 'oracle', label: 'Oracle 待开发', disabled: true },
-                      { value: 'rest_api', label: 'REST API 待开发', disabled: true },
-                      { value: 'excel', label: 'Excel / CSV 待开发', disabled: true },
-                      { value: 'opcua', label: 'OPC UA 待开发', disabled: true },
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label required">连接名称:</span>
-                <Form.Item
-                  name="name"
-                  rules={[{ required: true, message: '请输入连接名称' }]}
-                >
-                  <Input placeholder="MES PostgreSQL 生产执行库" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label required">主机:</span>
-                <Form.Item name="host" rules={[{ required: true, message: '请输入主机或 IP' }]}>
-                  <Input placeholder="localhost" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row short">
-                <span className="source-connection-label required">端口:</span>
-                <Form.Item name="port" rules={[{ required: true, message: '请输入端口' }]}>
-                  <InputNumber min={1} max={65535} />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label required">初始数据库:</span>
-                <Form.Item name="database" rules={[{ required: true, message: '请输入数据库名' }]}>
-                  <Input placeholder="mf_mes_execution" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label">Schema/命名空间:</span>
-                <Form.Item name="schema" extra="可选。PostgreSQL 默认通常是 public；本演示库表在 source。">
-                  <Input placeholder="默认 public；演示库填 source" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label required">认证:</span>
-                <Form.Item name="auth_type" rules={[{ required: true, message: '请选择认证方式' }]}>
-                  <Select
-                    options={[
-                      { value: 'password', label: '用户名 / 密码' },
-                      { value: 'token', label: 'Token / API Key 待开发', disabled: true },
-                      { value: 'oauth', label: 'OAuth 待开发', disabled: true },
-                      { value: 'kerberos', label: 'Kerberos / LDAP 待开发', disabled: true },
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row medium">
-                <span className="source-connection-label required">用户名:</span>
-                <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-                  <Input placeholder="mf_mes_readonly" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row medium">
-                <span className="source-connection-label required">密码:</span>
-                <Form.Item name="password" rules={[{ required: true, message: '请输入密码或 Secret' }]}>
-                  <Input.Password placeholder="readonly_demo_123" />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row">
-                <span className="source-connection-label">网络:</span>
-                <Form.Item name="network_zone">
-                  <Select
-                    options={[
-                      { value: '内网 Connector Agent', label: '内网 Connector Agent' },
-                      { value: '平台直连', label: '平台直连' },
-                      { value: 'VPN 专线', label: 'VPN 专线' },
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-              <div className="source-connection-row controls">
-                <span className="source-connection-label">选项:</span>
-                <div className="source-connection-checks">
-                  <Form.Item name="ssl_enabled" valuePropName="checked">
-                    <Checkbox>SSL / TLS</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="save_secret" valuePropName="checked">
-                    <Checkbox>保存密码</Checkbox>
-                  </Form.Item>
-                </div>
-              </div>
-              <div className="source-connection-row action">
-                <span className="source-connection-label" />
-                <Button icon={<CheckCircleOutlined />} loading={testingConnection} onClick={testDataSourceConnection}>测试连接</Button>
-              </div>
-            </div>
-          </section>}
-
-          {sourceStep === 1 && <section className="source-form-section">
-            <div className="source-section-title">
-              <Typography.Text strong>采集范围</Typography.Text>
-              <Typography.Text type="secondary">采集内容决定抓取粒度，纳入目录的表决定本次资产边界。</Typography.Text>
-            </div>
-            <div className="source-range-grid">
-              <Form.Item name="sync_scope" label="采集内容" rules={[{ required: true, message: '请选择采集内容' }]}>
-                <Checkbox.Group
-                  className="source-scope-picker"
-                  options={[
-                    { label: '表结构', value: 'metadata' },
-                    { label: '字段画像', value: 'profile' },
-                    { label: '样例数据', value: 'sample' },
-                    { label: '全量数据', value: 'full' },
-                    { label: '增量数据', value: 'incremental' },
-                  ]}
-                />
-              </Form.Item>
-              <div className="source-schedule-grid">
-                <Form.Item name="sync_mode" label="采集方式">
-                  <Select
-                    options={[
-                      { value: 'metadata', label: '仅元数据扫描' },
-                      { value: 'batch', label: '定时批量同步' },
-                      { value: 'incremental', label: '增量同步' },
-                      { value: 'cdc', label: 'CDC' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item name="sync_frequency" label="频率">
-                  <Select
-                    options={[
-                      { value: '实时', label: '实时' },
-                      { value: '每 5 分钟', label: '每 5 分钟' },
-                      { value: '每小时', label: '每小时' },
-                      { value: '每日', label: '每日' },
-                    ]}
-                  />
-                </Form.Item>
-              </div>
-            </div>
-            <Form.Item name="tables" label="纳入资产目录的表" rules={[{ required: true, message: '请选择至少一张表' }]}>
-              {discoveredSourceTables.length ? (
-                <Checkbox.Group
-                  className="source-table-picker"
-                  options={discoveredSourceTables.map((table) => ({
-                    label: `${table.name}${typeof table.rows === 'number' ? ` (${table.rows} 行)` : ''}`,
-                    value: table.name,
-                  }))}
-                />
-              ) : (
-                <Alert showIcon type="warning" message="请先返回连接步骤，点击测试连接读取真实数据库表。" />
-              )}
-            </Form.Item>
-          </section>}
-
-          {sourceStep === 2 && <section className="source-form-section">
-            <div className="source-section-title">
-              <Typography.Text strong>归属与使用</Typography.Text>
-              <Typography.Text type="secondary">决定这个数据源归谁管理，以及后续能否被 AI、对象建模和图谱使用。</Typography.Text>
-            </div>
-            <div className="source-governance-panel">
-              <div className="source-governance-block">
-                <div className="source-governance-head">
-                  <Typography.Text strong>资产归属</Typography.Text>
-                  <Typography.Text type="secondary">用于目录筛选、责任追踪和后续影响分析。</Typography.Text>
-                </div>
-                <div className="source-governance-grid">
-                  <Form.Item name="business_domain" label="业务域" rules={[{ required: true, message: '请选择业务域' }]}>
-                    <Select
-                      showSearch
-                      optionFilterProp="label"
-                      options={businessDomainOptions.map((item) => ({ value: item, label: item }))}
-                      placeholder="从数据字典读取"
-                    />
-                  </Form.Item>
-                  <Form.Item name="owner" label="负责人" rules={[{ required: true, message: '请选择负责人' }]}>
-                    <Select
-                      showSearch
-                      optionFilterProp="label"
-                      options={governanceUsers.map((user) => ({ value: user.value, label: user.email ? `${user.label} · ${user.email}` : user.label }))}
-                      placeholder="从系统用户读取"
-                    />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div className="source-governance-block">
-                <div className="source-governance-head">
-                  <Typography.Text strong>数据分级</Typography.Text>
-                  <Typography.Text type="secondary">分级会影响样例采集、AI 使用和图谱实例授权。</Typography.Text>
-                </div>
-                <Form.Item name="sensitivity" rules={[{ required: true, message: '请选择数据分级' }]}>
-                  <Segmented
-                    block
-                    options={DATA_SENSITIVITY_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
-                  />
-                </Form.Item>
-                <div className="source-sensitivity-desc">
-                  {DATA_SENSITIVITY_OPTIONS.find((item) => item.value === watchedSensitivity)?.description ?? DATA_SENSITIVITY_OPTIONS[0].description}
-                </div>
-              </div>
-
-              <div className="source-governance-block">
-                <div className="source-governance-head">
-                  <Typography.Text strong>使用授权</Typography.Text>
-                  <Typography.Text type="secondary">控制扫描后的数据能进入哪些治理能力。</Typography.Text>
-                </div>
-                <div className="source-governance-switches">
-                  <div className="source-permission-toggle">
-                    <div>
-                      <span><RobotOutlined />AI 使用</span>
-                      <em>允许生成语义候选</em>
-                    </div>
-                    <Form.Item name="allow_ai" valuePropName="checked" noStyle>
-                      <Switch disabled={watchedSensitivity === 'restricted'} />
-                    </Form.Item>
-                  </div>
-                  <div className="source-permission-toggle">
-                    <div>
-                      <span><NodeIndexOutlined />对象建模</span>
-                      <em>允许发布对象候选</em>
-                    </div>
-                    <Form.Item name="allow_ontology" valuePropName="checked" noStyle>
-                      <Switch />
-                    </Form.Item>
-                  </div>
-                  <div className="source-permission-toggle">
-                    <div>
-                      <span><BranchesOutlined />图谱实例</span>
-                      <em>允许进入关系图谱</em>
-                    </div>
-                    <Form.Item name="allow_graph" valuePropName="checked" noStyle>
-                      <Switch disabled={watchedSensitivity === 'restricted'} />
-                    </Form.Item>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>}
-        </Form>
-      </div>
-    </Modal>
     </>
   );
 
@@ -2773,7 +2001,8 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                 setMappingNodes(arranged);
                 saveCurrentMappingLayout(arranged);
               }}>重新布局</Button>
-              <Button type="primary" icon={<RobotOutlined />} loading={recognizing} disabled={!assets.length} onClick={runSemanticMappingRecognition}>AI 生成候选</Button>
+              <Button onClick={() => navigate('/data-center/objects?view=ontology&section=candidates')}>候选审核</Button>
+              <Button type="primary" icon={<RobotOutlined />} loading={recognizing} disabled={!mappingSourceId} onClick={runSemanticMappingRecognition}>AI 生成候选</Button>
             </Space>
           )}
         >
@@ -2817,24 +2046,9 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                 <span>来源</span><strong>{selectedMappingCandidate.source_ref ?? '-'}</strong>
               </div>
               <pre className="ontology-payload-preview">{JSON.stringify(selectedMappingCandidate.payload, null, 2)}</pre>
-              <Space>
-                <Button
-                  type="primary"
-                  loading={reviewingCandidateId === selectedMappingCandidate.id}
-                  disabled={selectedMappingCandidate.status !== 'pending_review'}
-                  onClick={() => reviewSelectedMappingCandidate('approve')}
-                >
-                  批准
-                </Button>
-                <Button
-                  danger
-                  loading={reviewingCandidateId === selectedMappingCandidate.id}
-                  disabled={selectedMappingCandidate.status !== 'pending_review'}
-                  onClick={() => reviewSelectedMappingCandidate('reject')}
-                >
-                  驳回
-                </Button>
-              </Space>
+              {selectedMappingCandidate.status === 'pending_review' && (
+                <Button onClick={() => openCandidateReview(selectedMappingCandidate.id)}>前往候选审核</Button>
+              )}
             </Space>
           ) : selectedMappingNodeData ? (
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -2864,7 +2078,13 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
 
   const ontologyView = (
     <>
-      <div className="ontology-workbench">
+      {!objects.length && !relations.length && !ontologyCandidates.length && !ontologyVersions.length
+        ? loading || loadFailed ? unavailable : <section className="data-center-empty">
+          <h3>还没有业务对象</h3>
+          <p>新建第一个对象，定义它的字段，再建立对象之间的关系。</p>
+          <Button type="primary" icon={<ApartmentOutlined />} onClick={() => openObjectModal()}>新增对象</Button>
+        </section>
+        : <div className="ontology-workbench">
         <aside className="ontology-directory">
           <Card
             className="semantic-side-card"
@@ -3034,7 +2254,10 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                           size="small"
                           rowKey="id"
                           dataSource={ontologyCandidates}
-                          pagination={{ pageSize: 10 }}
+                          pagination={{
+                            pageSize: 10,
+                            defaultCurrent: Math.max(1, Math.floor(ontologyCandidates.findIndex(item => item.id === requestedCandidate) / 10) + 1),
+                          }}
                           onRow={(record) => ({ onClick: () => setSelectedCandidateId(record.id) })}
                           rowClassName={(record) => record.id === selectedCandidate?.id ? 'active-row' : ''}
                           columns={[
@@ -3146,7 +2369,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
             ]}
           />
         </main>
-      </div>
+      </div>}
       <Modal title="对象模型" open={objectModalOpen} onCancel={() => setObjectModalOpen(false)} onOk={saveOntologyObject} confirmLoading={savingObject} width={780} okText="保存">
         <Form form={ontologyObjectForm} layout="vertical">
           <Row gutter={12}>

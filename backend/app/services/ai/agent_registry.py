@@ -5,18 +5,22 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, text
 
 from app.core.db import db_session
-from app.models.relational import AIAgentSkillDefinition, AIAgentToolDefinition, SystemSetting
+from app.models.relational import AIAgentSkillDefinition, AIAgentToolDefinition, SystemSetting, User
 
 from .agent_definition import _load_registry_seed, set_runtime_agent_registry
+from .application_menu_registry import REQUESTS as APPLICATION_MENU_REQUESTS, registry_definitions as application_menu_definitions
+from .component_page_controls import TOOL_DETAILS, registry_definitions
+from .component_page_tools import PAGE_REQUESTS, registry_definitions as page_definitions
 from .skills import SkillDefinition
 from .tool_handlers import list_tool_handler_keys
 from .tool_registry import ToolDefinition, _normalize_input_schema
 
 
 AGENT_REGISTRY_SETTINGS_KEY = "ai.agent_registry"
+LEGACY_REGISTRY_TENANT_ID = 1
 
 
 class AgentRegistryError(ValueError):
@@ -37,6 +41,8 @@ def _as_name_map(value: Any, *, kind: str) -> dict[str, dict[str, Any]]:
         item_name = str(payload.get("name") or name).strip()
         if not item_name:
             raise AgentRegistryError(f"{kind} registry contains an item without name")
+        if item_name in result:
+            raise AgentRegistryError(f"{kind} registry contains duplicate name {item_name!r}")
         result[item_name] = {**payload, "name": item_name}
     return result
 
@@ -46,12 +52,37 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
     tool_map = _as_name_map(tools, kind="tool")
     allowed_handlers = set(list_tool_handler_keys())
     baseline_tools = _load_registry_seed("tools.json")
+    management_definitions = application_menu_definitions()
+    page_tools = page_definitions()
+    baseline_tools.update(management_definitions)
+    baseline_tools.update(page_tools)
+    canvas_definitions = registry_definitions() if TOOL_DETAILS.keys() & tool_map.keys() else {}
 
     for name, payload in tool_map.items():
         handler_key = str(payload.get("handler_key") or payload.get("handlerKey") or name)
         payload["handler_key"] = handler_key
         if handler_key not in allowed_handlers:
             raise AgentRegistryError(f"Tool {name} references unregistered handler_key {handler_key!r}")
+        if name in APPLICATION_MENU_REQUESTS or handler_key in APPLICATION_MENU_REQUESTS:
+            if name != handler_key:
+                raise AgentRegistryError("应用与菜单工具必须使用其对应的内置处理器")
+            for key in ("input_schema", "side_effect", "permission_check", "domain", "audit_required", "dry_run_supported"):
+                if payload.get(key) != management_definitions[name].get(key):
+                    raise AgentRegistryError(f"应用与菜单工具 {name} 的 {key} 由平台定义")
+        if name in PAGE_REQUESTS or handler_key in PAGE_REQUESTS:
+            if name != handler_key:
+                raise AgentRegistryError("页面工具必须使用其对应的内置处理器")
+            for key in ("input_schema", "side_effect", "permission_check", "domain", "audit_required", "dry_run_supported"):
+                if payload.get(key) != page_tools[name].get(key):
+                    raise AgentRegistryError(f"页面工具 {name} 的 {key} 由平台定义")
+        if name in TOOL_DETAILS or handler_key in TOOL_DETAILS:
+            if name != handler_key:
+                raise AgentRegistryError("画布工具必须使用其对应的内置处理器")
+            contract = canvas_definitions[name]
+            baseline_tools[name] = contract
+            for key in ("input_schema", "side_effect", "permission_check", "domain"):
+                if payload.get(key) != contract[key]:
+                    raise AgentRegistryError(f"画布工具 {name} 的 {key} 由编辑器定义")
         baseline = baseline_tools.get(handler_key)
         if baseline and handler_key != "not_implemented":
             if payload.get("side_effect", "read") != baseline.get("side_effect", "read"):
@@ -86,40 +117,116 @@ def load_seed_registry() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str,
     tools = _load_registry_seed("tools.json")
     if not skills or not tools:
         raise AgentRegistryError("Agent registry seed is missing. Run the Agent registry seed before starting Runtime.")
+    return validate_registry_payload(skills, {**tools, **registry_definitions(), **application_menu_definitions(), **page_definitions()})
+
+
+async def seed_agent_registry_from_files(*, updated_by: str | None = None, tenant_id: int | None = None) -> dict[str, Any]:
+    skills, tools = load_seed_registry()
+    return await save_agent_registry_payload(
+        {"skills": skills, "tools": tools}, updated_by=updated_by or "seed", seed_import=True, tenant_id=tenant_id,
+    )
+
+
+def _registry_settings_key(tenant_id: int) -> str:
+    if tenant_id == LEGACY_REGISTRY_TENANT_ID:
+        return AGENT_REGISTRY_SETTINGS_KEY
+    return f"{AGENT_REGISTRY_SETTINGS_KEY}:{tenant_id}"
+
+
+def _tenant_definitions(model, tenant_id: int):
+    return select(model).where(model.tenant_id == tenant_id).order_by(model.name)
+
+
+def _bundled_defaults():
+    skills, tools = load_seed_registry()
+    for definition in [*skills.values(), *tools.values()]:
+        definition.setdefault("created_by", "admin")
+        definition.setdefault("enabled", True)
+    return skills, tools
+
+
+def _active_definitions(skills, tools):
+    tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
+    skills = {
+        name: {
+            **definition,
+            "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in tools],
+            "default_tool": definition.get("default_tool") if definition.get("default_tool") in tools else None,
+        }
+        for name, definition in skills.items() if definition.get("enabled", True)
+    }
     return validate_registry_payload(skills, tools)
 
 
-async def seed_agent_registry_from_files(*, updated_by: str | None = None) -> dict[str, Any]:
-    skills, tools = load_seed_registry()
-    return await save_agent_registry_payload({"skills": skills, "tools": tools}, updated_by=updated_by or "seed", seed_import=True)
+def _skill_definition(row: AIAgentSkillDefinition) -> dict[str, Any]:
+    return {**(row.definition or {}), "name": row.name, "enabled": row.enabled}
 
 
-async def load_agent_registry(*, seed_if_empty: bool = False, include_disabled: bool = False) -> dict[str, Any]:
+def _tool_definition(row: AIAgentToolDefinition) -> dict[str, Any]:
+    return {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key, "enabled": row.enabled}
+
+
+def _admin_record(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> dict[str, Any]:
+    definition = _tool_definition(row) if isinstance(row, AIAgentToolDefinition) else _skill_definition(row)
+    return {
+        **definition,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "updated_by": row.updated_by,
+    }
+
+
+async def _add_registry_actor_names(session, records, tenant_id: int | None) -> None:
+    if tenant_id is None:
+        return
+    actors = {record.get(field) for record in records for field in ("created_by", "updated_by")}
+    actors = {actor for actor in actors if isinstance(actor, str) and actor and actor != "admin"}
+    if not actors:
+        return
+    ids = {int(actor) for actor in actors if actor.isascii() and actor.isdecimal() and len(actor) <= 10 and int(actor) <= 2147483647}
+    accounts = (await session.execute(
+        select(User.id, User.username, User.display_name).where(
+            User.tenant_id == tenant_id, or_(User.id.in_(ids), User.username.in_(actors)),
+        )
+    )).all()
+    names = {username: ("超级管理员（admin）" if username == "admin" else display_name or username)
+             for _, username, display_name in accounts}
+    names.update({str(user_id): names[username] for user_id, username, _ in accounts})
+    for record in records:
+        for field in ("created_by", "updated_by"):
+            actor = record.get(field)
+            if actor in names:
+                record[f"{field}_name"] = names[actor]
+
+
+async def load_agent_registry(*, include_disabled: bool = False, tenant_id: int | None = None) -> dict[str, Any]:
+    owner = tenant_id if tenant_id is not None else LEGACY_REGISTRY_TENANT_ID
+    source = "database"
     async with db_session() as session:
-        skill_rows = (await session.execute(select(AIAgentSkillDefinition).order_by(AIAgentSkillDefinition.name))).scalars().all()
-        tool_rows = (await session.execute(select(AIAgentToolDefinition).order_by(AIAgentToolDefinition.name))).scalars().all()
-
-    if not skill_rows and not tool_rows:
-        detail = "Agent registry is empty. Seed it explicitly before starting Runtime."
-        if seed_if_empty:
-            detail = "Automatic Agent registry seed is disabled. Use the explicit registry seed endpoint or seed command."
-        raise AgentRegistryError(detail)
-
-    skills = {
-        row.name: {**(row.definition or {}), "name": row.name, "enabled": row.enabled}
-        for row in skill_rows
-    }
-    tools = {
-        row.name: {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key, "enabled": row.enabled}
-        for row in tool_rows
-    }
-    all_skills, all_tools = skills, tools
-    skills = {name: definition for name, definition in skills.items() if definition.get("enabled", True)}
-    tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
-    skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in tools else None} for name, definition in skills.items()}
-    skills, tools = validate_registry_payload(skills, tools)
-    set_runtime_agent_registry(skills=skills, tools=tools)
-    return {"skills": all_skills if include_disabled else skills, "tools": all_tools if include_disabled else tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock_shared(1095911239, :tenant)"), {"tenant": owner})
+        elif session.get_bind().dialect.name == "sqlite":
+            await session.execute(text("BEGIN"))
+        initialized = await session.scalar(select(SystemSetting.id).where(SystemSetting.key == _registry_settings_key(owner)))
+        skill_rows = (await session.scalars(_tenant_definitions(AIAgentSkillDefinition, owner))).all()
+        tool_rows = (await session.scalars(_tenant_definitions(AIAgentToolDefinition, owner))).all()
+        if not initialized and not skill_rows and not tool_rows:
+            source = "bundled"
+            all_skills, all_tools = _bundled_defaults()
+        else:
+            all_skills = {row.name: _admin_record(row) for row in skill_rows}
+            all_tools = {row.name: _admin_record(row) for row in tool_rows}
+        if include_disabled:
+            await _add_registry_actor_names(session, [*all_skills.values(), *all_tools.values()], tenant_id)
+    if not include_disabled or tenant_id is None:
+        skills = {row.name: _skill_definition(row) for row in skill_rows} if source == "database" else all_skills
+        tools = {row.name: _tool_definition(row) for row in tool_rows} if source == "database" else all_tools
+        skills, tools = _active_definitions(skills, tools)
+        if tenant_id is None:
+            set_runtime_agent_registry(skills=skills, tools=tools)
+        if not include_disabled:
+            all_skills, all_tools = skills, tools
+    return {"skills": all_skills, "tools": all_tools, "source": source, "handlerKeys": list_tool_handler_keys()}
 
 
 def _validate_registry_transition(skills, tools, previous_skills, previous_tools, *, seed_import=False):
@@ -132,8 +239,15 @@ def _validate_registry_transition(skills, tools, previous_skills, previous_tools
             if seed_import or not definition.get("enabled", True):
                 continue
             old = previous.get(name)
-            if old and old.get("enabled", True) and {**definition, "enabled": definition.get("enabled", True)} == old:
-                continue
+            if old and old.get("enabled", True):
+                updated = {**definition, "enabled": True}
+                previous_definition = dict(old)
+                if kind == "技能":
+                    for field in ("instructions", "title", "description"):
+                        updated.pop(field, None)
+                        previous_definition.pop(field, None)
+                if updated == previous_definition:
+                    continue
             if kind == "工具":
                 if definition.get("handler_key") == "not_implemented":
                     raise AgentRegistryError(f"无法启用工具 {name}：尚未绑定已实现的处理器")
@@ -147,32 +261,54 @@ def _validate_registry_transition(skills, tools, previous_skills, previous_tools
                         raise AgentRegistryError(f"无法启用技能 {name}：工具 {dependency} 未启用或处理器未实现")
 
 
-async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: str | None = None, seed_import: bool = False) -> dict[str, Any]:
+async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: str | None = None,
+                                      seed_import: bool = False, tenant_id: int | None = None) -> dict[str, Any]:
     skills, tools = validate_registry_payload(payload.get("skills"), payload.get("tools"))
+    owner = tenant_id if tenant_id is not None else LEGACY_REGISTRY_TENANT_ID
+    settings_key = _registry_settings_key(owner)
     async with db_session() as session:
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(1095911239, :tenant)"), {"tenant": owner})
+        elif session.get_bind().dialect.name == "sqlite":
+            # Begin the write transaction before reading the old snapshot.
+            await session.execute(text("UPDATE system_settings SET key = key WHERE key = :key"), {"key": settings_key})
         skill_rows = {
             row.name: row
-            for row in (await session.execute(select(AIAgentSkillDefinition))).scalars().all()
+            for row in (await session.scalars(_tenant_definitions(AIAgentSkillDefinition, owner))).all()
         }
         tool_rows = {
             row.name: row
-            for row in (await session.execute(select(AIAgentToolDefinition))).scalars().all()
+            for row in (await session.scalars(_tenant_definitions(AIAgentToolDefinition, owner))).all()
         }
+        initialized = await session.scalar(select(SystemSetting.id).where(SystemSetting.key == settings_key))
+        previous_skills = {name: _skill_definition(row) for name, row in skill_rows.items()}
+        previous_tools = {name: _tool_definition(row) for name, row in tool_rows.items()}
+        if not initialized and not skill_rows and not tool_rows and tenant_id is not None:
+            previous_skills, previous_tools = _bundled_defaults()
+        builtin_skills, builtin_tools = load_seed_registry() if seed_import else _bundled_defaults()
 
-        _validate_registry_transition(
-            skills, tools,
-            {name: {**(row.definition or {}), "enabled": row.enabled} for name, row in skill_rows.items()},
-            {name: {**(row.definition or {}), "enabled": row.enabled} for name, row in tool_rows.items()},
-            seed_import=seed_import,
-        )
+        for definitions, rows, builtin in ((skills, skill_rows, builtin_skills), (tools, tool_rows, builtin_tools)):
+            for name, definition in definitions.items():
+                for field in ("created_by", "created_at", "updated_at", "updated_by", "created_by_name", "updated_by_name"):
+                    definition.pop(field, None)
+                previous = rows.get(name)
+                creator = (previous.definition or {}).get("created_by") if previous is not None else updated_by
+                if name in builtin and (previous is None or not creator):
+                    creator = "admin"
+                if creator:
+                    definition["created_by"] = creator
 
-        await session.execute(delete(AIAgentSkillDefinition).where(AIAgentSkillDefinition.name.not_in(list(skills))))
-        await session.execute(delete(AIAgentToolDefinition).where(AIAgentToolDefinition.name.not_in(list(tools))))
+        _validate_registry_transition(skills, tools, previous_skills, previous_tools, seed_import=seed_import)
+
+        for model, definitions in ((AIAgentSkillDefinition, skills), (AIAgentToolDefinition, tools)):
+            await session.execute(delete(model).where(model.tenant_id == owner, model.name.not_in(definitions)))
 
         for name, definition in skills.items():
             row = skill_rows.get(name)
+            if row is not None and _skill_definition(row) == {**definition, "enabled": definition.get("enabled", True)}:
+                continue
             if row is None:
-                row = AIAgentSkillDefinition(name=name)
+                row = AIAgentSkillDefinition(name=name, tenant_id=owner)
                 session.add(row)
             row.title = str(definition.get("title") or name)
             row.description = str(definition.get("description") or "")
@@ -184,8 +320,10 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
 
         for name, definition in tools.items():
             row = tool_rows.get(name)
+            if row is not None and _tool_definition(row) == {**definition, "enabled": definition.get("enabled", True)}:
+                continue
             if row is None:
-                row = AIAgentToolDefinition(name=name)
+                row = AIAgentToolDefinition(name=name, tenant_id=owner)
                 session.add(row)
             row.title = str(definition.get("title") or name)
             row.description = str(definition.get("description") or "")
@@ -196,18 +334,27 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
             row.source = "database"
             row.updated_by = updated_by
 
-        await _save_registry_settings(session, updated_by=updated_by, source="database")
+        await _save_registry_settings(session, key=settings_key, updated_by=updated_by, source="database")
+        await session.flush()
+        saved_skill_rows = (await session.scalars(
+            _tenant_definitions(AIAgentSkillDefinition, owner).execution_options(populate_existing=True)
+        )).all()
+        saved_tool_rows = (await session.scalars(
+            _tenant_definitions(AIAgentToolDefinition, owner).execution_options(populate_existing=True)
+        )).all()
+        saved_skills = {row.name: _admin_record(row) for row in saved_skill_rows}
+        saved_tools = {row.name: _admin_record(row) for row in saved_tool_rows}
+        await _add_registry_actor_names(session, [*saved_skills.values(), *saved_tools.values()], tenant_id)
         await session.commit()
 
-    active_skills = {name: definition for name, definition in skills.items() if definition.get("enabled", True)}
-    active_tools = {name: definition for name, definition in tools.items() if definition.get("enabled", True)}
-    active_skills = {name: {**definition, "allowed_tools": [tool for tool in definition.get("allowed_tools", []) if tool in active_tools], "default_tool": definition.get("default_tool") if definition.get("default_tool") in active_tools else None} for name, definition in active_skills.items()}
-    set_runtime_agent_registry(skills=active_skills, tools=active_tools)
-    return {"skills": skills, "tools": tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
+    if tenant_id is None:
+        active_skills, active_tools = _active_definitions(skills, tools)
+        set_runtime_agent_registry(skills=active_skills, tools=active_tools)
+    return {"skills": saved_skills, "tools": saved_tools, "source": "database", "handlerKeys": list_tool_handler_keys()}
 
 
-async def _save_registry_settings(session, *, updated_by: str | None, source: str) -> None:
-    record = await session.scalar(select(SystemSetting).where(SystemSetting.key == AGENT_REGISTRY_SETTINGS_KEY))
+async def _save_registry_settings(session, *, key: str, updated_by: str | None, source: str) -> None:
+    record = await session.scalar(select(SystemSetting).where(SystemSetting.key == key))
     value = {
         "source": source,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -215,7 +362,7 @@ async def _save_registry_settings(session, *, updated_by: str | None, source: st
     }
     if record is None:
         record = SystemSetting(
-            key=AGENT_REGISTRY_SETTINGS_KEY,
+            key=key,
             value=value,
             description="AI Agent registry activation metadata",
             updated_by=updated_by,

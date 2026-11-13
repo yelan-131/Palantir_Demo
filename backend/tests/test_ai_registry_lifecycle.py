@@ -39,7 +39,26 @@ async def test_failed_delete_and_activation_preserve_saved_state():
     skills, tools = load_seed_registry()
     original = {'skills': deepcopy(skills), 'tools': deepcopy(tools)}
     try:
-        await save_agent_registry_payload(original, seed_import=True)
+        initial = await save_agent_registry_payload(original, seed_import=True, updated_by='creator')
+        candidate = deepcopy(original)
+        name = 'workflow.submit_after_confirmation'
+        candidate['skills'][name]['instructions'] = '1. 核对待提交记录。'
+        candidate['skills'][name]['title'] = '提交业务审批'
+        candidate['skills'][name]['description'] = '复核业务记录后提交审批。'
+        candidate['skills'][name]['created_by'] = 'spoofed'
+        candidate['skills'][name]['created_at'] = '2000-01-01T00:00:00'
+        saved = await save_agent_registry_payload(candidate, updated_by='editor')
+        stored = await load_agent_registry(include_disabled=True)
+        assert saved['skills'][name] == stored['skills'][name]
+        assert stored['skills'][name]['created_by'] == 'admin'
+        assert stored['skills'][name]['created_at'] == initial['skills'][name]['created_at']
+        assert stored['skills'][name]['updated_by'] == 'editor'
+        untouched = 'analysis.analyze_form_records'
+        assert stored['skills'][untouched] == initial['skills'][untouched]
+        assert stored['skills'][name]['instructions'] == '1. 核对待提交记录。'
+        assert stored['skills'][name]['title'] == '提交业务审批'
+        assert stored['skills'][name]['description'] == '复核业务记录后提交审批。'
+
         candidate = deepcopy(original)
         candidate['skills'].pop('analysis.analyze_form_records')
         with pytest.raises(AgentRegistryError, match='先成功停用'):
@@ -47,9 +66,16 @@ async def test_failed_delete_and_activation_preserve_saved_state():
         assert 'analysis.analyze_form_records' in (await load_agent_registry(include_disabled=True))['skills']
 
         candidate = deepcopy(original)
-        candidate['tools']['forms.get_record']['enabled'] = False
-        await save_agent_registry_payload(candidate)
-        assert 'forms.get_record' not in (await load_agent_registry())['tools']
+        tool_name = 'forms.get_record'
+        candidate['tools'][tool_name].update(enabled=False, created_by='spoofed', updated_by='spoofed')
+        saved = await save_agent_registry_payload(candidate, updated_by='operator')
+        stored = await load_agent_registry(include_disabled=True)
+        assert stored['tools'][tool_name] == saved['tools'][tool_name]
+        assert stored['tools'][tool_name]['created_by'] == 'admin'
+        assert stored['tools'][tool_name]['created_at'] == initial['tools'][tool_name]['created_at']
+        assert stored['tools'][tool_name]['updated_by'] == 'operator'
+        assert stored['tools']['forms.query_records'] == initial['tools']['forms.query_records']
+        assert tool_name not in (await load_agent_registry())['tools']
         candidate['tools']['forms.get_record']['enabled'] = True
         await save_agent_registry_payload(candidate)
         assert 'forms.get_record' in (await load_agent_registry())['tools']

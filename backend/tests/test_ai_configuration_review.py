@@ -99,7 +99,7 @@ async def test_harness_receives_complete_proposal_on_adjustment(monkeypatch):
     from app.services.ai.settings import merge_ai_settings
     settings = merge_ai_settings({'apiKey': 'test-only-key', 'agentMode': 'confirm', 'chatModel': 'test', 'reasoningModel': 'test', 'contextPolicy': {'maxContextTokens': 24000}})
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     runner = AsyncMock(return_value=SimpleNamespace(finish_reason='completed', final_response='OK', session_id='test'))
     monkeypatch.setattr(mod, 'run_sdk', runner)
     pending = {'skill': 'forms.create_form_definition', 'collected_slots': action()['payload']}

@@ -216,7 +216,7 @@
   "platform.application_settings.query": {
     "name": "platform.application_settings.query",
     "title": "Query application settings",
-    "description": "Read tenant application configuration through admin permissions.",
+    "description": "查询租户应用。subject=menus 时传 application_id 查询菜单树节点及入口。",
     "handler_key": "platform.query",
     "side_effect": "read",
     "risk_level": "low",
@@ -2176,6 +2176,42 @@
     "permission_check": "config",
     "domain": "analysis",
     "dry_run_supported": false,
+    "audit_required": true
+  },
+  "forms.publish_to_menu": {
+    "name": "forms.publish_to_menu",
+    "title": "发布表单并挂载应用菜单",
+    "description": "对已保存的标准表单准备发布与菜单挂载确认。先查询目标应用和分组，传真实 ID；应用根菜单省略 parent_id。已有发布版本时沿用。",
+    "handler_key": "forms.publish_to_menu",
+    "side_effect": "configuration_write",
+    "risk_level": "high",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "form_id",
+        "application_id"
+      ],
+      "properties": {
+        "form_id": {
+          "type": "integer"
+        },
+        "application_id": {
+          "type": "integer"
+        },
+        "parent_id": {
+          "type": "integer"
+        },
+        "menu_title": {
+          "type": "string"
+        }
+      }
+    },
+    "output_schema": {
+      "form_id": "integer",
+      "menu_id": "integer",
+      "route_path": "string"
+    },
+    "permission_check": "config",
     "audit_required": true
   }
 }

@@ -215,7 +215,7 @@ async def test_agent_execution_uses_the_selected_purpose(monkeypatch, tmp_path, 
     settings = merge_ai_settings(catalog())
     monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
     monkeypatch.setattr(runtime, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     monkeypatch.setattr(runtime.PlatformBridge, 'available_tools', lambda _: [])
     selected = []
     async def capture(effective, user, *_args, **kwargs):

@@ -863,51 +863,16 @@ export default function QualityImpactWorkbench() {
       }));
   }, [nodes, partFilter]);
 
-  const contextualTimeline = useMemo(() => {
-    const sourceLabel = graphSource || '后端子图';
-    return [
-      {
-        time: '供应',
-        offset: 8,
-        width: 18,
-        title: '供应与批次',
-        actor: graphContext.title,
-        status: graphContext.objectType === 'MaterialBatch' ? '当前' : '已关联',
-        desc: '从供应商、物料批次和到货批次开始查看料号来源。',
-        color: 'blue',
-      },
-      {
-        time: '检验',
-        offset: 30,
-        width: 24,
-        title: '检验与库存',
-        actor: sourceLabel,
-        status: loading ? '进行中' : '已返回',
-        desc: `后端按 ${graphContext.objectType}:${graphContext.objectId} 查询关系子图，回填检验批次、库存批次和证据。`,
-        color: loading ? 'gray' : 'blue',
-      },
-      {
-        time: '生产',
-        offset: 58,
-        width: 22,
-        title: '生产流转',
-        actor: `${nodes.length} 对象 / ${edges.length} 关系`,
-        status: '已同步',
-        desc: '中间画布已按当前料号刷新工单、工序、设备和产品批次关系。',
-        color: 'blue',
-      },
-      {
-        time: '交付',
-        offset: 83,
-        width: 12,
-        title: '交付与异常',
-        actor: selectedNode?.name || graphContext.title,
-        status: '待确认',
-        desc: '继续查看客户订单、质量异常、CAPA 或知识证据，并按对象执行动作。',
-        color: 'gray',
-      },
-    ];
-  }, [edges.length, graphContext, graphSource, loading, nodes.length, selectedNode?.name]);
+  const timelineStages = [
+    { time: '供应', title: '供应与批次', offset: 8, width: 18 },
+    { time: '检验', title: '检验与库存', offset: 30, width: 24 },
+    { time: '生产', title: '生产流转', offset: 58, width: 22 },
+    { time: '交付', title: '交付与异常', offset: 83, width: 12 },
+  ];
+  const graphEmptyMessage = loading ? '正在读取关系'
+    : graphSource === 'backend-unavailable' ? '暂时无法读取关系'
+    : graphSource === 'backend-empty' ? '暂无质量事件可追溯'
+    : nodes.length ? '当前时间截面暂无对象' : '当前对象暂无可展示的关系';
 
   const loadObjectGraph = async (
     context: GraphContext,
@@ -1207,9 +1172,9 @@ export default function QualityImpactWorkbench() {
           {event && <Typography.Text type="secondary">事件日期：{event.occurred_at?.slice(0, 10)}</Typography.Text>}
         </div>
         <Space wrap>
-          <Select aria-label="选择质量事件" value={event?.id} loading={loading} style={{ width: 290 }} options={events.map(item => ({ value: item.id, label: `${item.title} · ${item.status === 'closed' ? '已关闭' : '处理中'}` }))} onChange={value => { setPartFilter('全部'); loadEvent(value); }} />
-          <Button icon={<ReloadOutlined />} onClick={() => loadObjectGraph(graphContext, graphView)} loading={loading}>刷新</Button>
-          <Button icon={<NodeIndexOutlined />} onClick={expandSelectedNode} loading={loading}>以此为中心展开</Button>
+          {!!events.length && <Select aria-label="选择质量事件" value={event?.id} loading={loading} style={{ width: 290 }} options={events.map(item => ({ value: item.id, label: `${item.title} · ${item.status === 'closed' ? '已关闭' : '处理中'}` }))} onChange={value => { setPartFilter('全部'); loadEvent(value); }} />}
+          <Button icon={<ReloadOutlined />} onClick={() => event ? loadObjectGraph(graphContext, graphView) : loadEvent()} loading={loading}>刷新</Button>
+          {selectedNode && <Button icon={<NodeIndexOutlined />} onClick={expandSelectedNode} loading={loading}>以此为中心展开</Button>}
           {isQualityActionNode(selectedNode) && (
             <>
               <Button icon={<RobotOutlined />} onClick={runAiAnalysis} loading={loading}>AI 分析影响</Button>
@@ -1219,8 +1184,8 @@ export default function QualityImpactWorkbench() {
         </Space>
       </section>
 
-      <div className="quality-command-grid">
-        <aside className="quality-left-rail">
+      <div className={nodes.length ? 'quality-command-grid' : 'quality-command-empty'}>
+        {!!nodes.length && <aside className="quality-left-rail">
           <Card className="quality-side-panel quality-task-panel">
             <div className="quality-task-filter">
               {partFilters.map((filter) => (
@@ -1250,51 +1215,46 @@ export default function QualityImpactWorkbench() {
               )}
             </Space>
           </Card>
-        </aside>
+        </aside>}
 
         <main className="quality-center-stage">
           <Card className="quality-impact-graph-card">
-            <div className="quality-event-summary">
+            {!!nodes.length && <div className="quality-event-summary">
               <Tag color={normalizeRisk(selectedNode?.risk || 'medium')}>{selectedNode?.type || graphContext.objectType}</Tag>
               <strong>{graphContext.title}</strong>
               <span>围绕当前料号查看供应、检验、库存、生产、交付、异常与知识证据。</span>
-            </div>
+            </div>}
 
-            <div className="quality-graph-canvas object-relationship-canvas" ref={canvasRef}>
+            <div className={`quality-graph-canvas object-relationship-canvas${nodes.length ? '' : ' quality-graph-empty'}`} ref={canvasRef} aria-busy={loading}>
               <div className="object-canvas-topbar">
                 <div className="object-canvas-heading">
                   <div>
                     <Typography.Text strong>关系网络</Typography.Text>
                     <Typography.Text type="secondary">{activeGraphView.desc}</Typography.Text>
                   </div>
-                  <Space size={6} wrap>
-                    <Tag color={graphStats ? 'cyan' : 'default'}>
-                      Neo4j {graphStats ? `${graphStats.total_nodes} 节点 / ${graphStats.total_relationships} 关系` : '连接中'}
-                    </Tag>
-                    <Tag color="blue">当前子图 {nodes.length} 对象 / {edges.length} 关系</Tag>
-                    <Tag>{graphSource || '后端子图'}</Tag>
-                    <Tag color="processing">邻接 {visibleEdges.length} 条</Tag>
-                  </Space>
+                  {!!nodes.length && <Typography.Text type="secondary">{canvasNodes.length} 个对象 · {canvasEdges.length} 条关系</Typography.Text>}
                 </div>
-                <div className="object-canvas-view-switch" aria-label="关系视图切换">
+                {!!nodes.length && <div className="object-canvas-view-switch" aria-label="关系视图切换">
                   {graphViewOptions.map((item) => (
                     <button
                       key={item.key}
                       className={graphView === item.key ? 'active' : ''}
+                      aria-pressed={graphView === item.key}
                       onClick={() => changeGraphView(item.key)}
                     >
                       {item.label}
                     </button>
                   ))}
-                </div>
+                </div>}
               </div>
-              <div className="object-canvas-lanes" aria-hidden="true">
+              {!layoutNodes.length && <p className="quality-graph-empty-message" role="status">{graphEmptyMessage}</p>}
+              {!!layoutNodes.length && <div className="object-canvas-lanes" aria-hidden="true">
                 <span>供应侧</span>
                 <span>来料检验</span>
                 <span>质量处置</span>
                 <span>生产执行</span>
                 <span>交付影响</span>
-              </div>
+              </div>}
               <svg className="object-canvas-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 {layoutEdges.map((edge) => {
                   const bend = Math.max(8, Math.abs(edge.targetX - edge.sourceX) / 2);
@@ -1345,18 +1305,23 @@ export default function QualityImpactWorkbench() {
                   {edge.label}
                 </span>
               ))}
-              <div className="object-canvas-legend">
+              {!!layoutNodes.length && <div className="object-canvas-legend">
                 <span><i className="legend-selected" /> 当前对象</span>
                 <span><i className="legend-connected" /> 业务关系</span>
                 <span><i className="legend-evidence" /> 知识证据</span>
                 <span><i className="legend-timeseries" /> 时序证据</span>
-              </div>
+              </div>}
             </div>
+            <details className="quality-graph-diagnostics">
+              <summary>图谱诊断</summary>
+              <p>查询来源 {graphSource} · 邻接关系 {visibleEdges.length} 条</p>
+              {graphStats && <p>Neo4j 全库 {graphStats.total_nodes} 个节点 · {graphStats.total_relationships} 条关系</p>}
+            </details>
 
           </Card>
         </main>
 
-        <aside className="quality-right-rail">
+        {!!nodes.length && <aside className="quality-right-rail">
           <Card className="quality-detail-panel">
             {selectedNode ? (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1440,10 +1405,10 @@ export default function QualityImpactWorkbench() {
               <Empty description="请选择图谱对象" />
             )}
           </Card>
-        </aside>
+        </aside>}
       </div>
 
-      <div className="quality-progress-row">
+      {!!nodes.length && <div className="quality-progress-row">
         <Card className="quality-progress-card">
           <div className="quality-timeline-board">
             <div className="quality-time-ruler">
@@ -1473,22 +1438,17 @@ export default function QualityImpactWorkbench() {
             >
               <span className="quality-now-line" style={{ left: `${timelinePercent}%` }} />
               <span className="quality-timeline-fill" style={{ width: `${timelinePercent}%` }} />
-              {contextualTimeline.map((item) => (
+              {timelineStages.map((item) => (
                 <button
                   key={item.title}
                   type="button"
-                  className={`quality-timeline-segment segment-${item.color} ${timelinePercent >= item.offset ? 'active' : ''}`}
+                  className={`quality-timeline-segment segment-gray ${timelinePercent >= item.offset ? 'active' : ''}`}
                   style={{ left: `${item.offset}%`, width: `${item.width}%` }}
-                  title={item.desc}
                   onPointerDown={(pointerEvent) => pointerEvent.stopPropagation()}
                   onClick={() => setTimelinePercent(clampPosition(item.offset + item.width, 0, 100))}
                 >
                   <span>{item.time}</span>
                   <strong>{item.title}</strong>
-                  <em>{item.actor}</em>
-                  <Tag color={item.status === '进行中' ? 'processing' : item.status.includes('已') ? 'success' : 'default'}>
-                    {item.status}
-                  </Tag>
                 </button>
               ))}
             </div>
@@ -1506,7 +1466,7 @@ export default function QualityImpactWorkbench() {
             </div>
           </div>
         </Card>
-      </div>
+      </div>}
 
       <Drawer title="AI 影响分析草稿" open={aiOpen} width={520} onClose={() => setAiOpen(false)}>
         {aiSuggestion ? (

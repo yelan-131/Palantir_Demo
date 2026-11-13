@@ -9,33 +9,35 @@
 #root { width: 100%; height: 100vh; min-height: 100vh; min-width: 1024px; transform: none; }
 body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 .tech-white-shell.app-shell { height: 100vh; background: var(--mf-bg); flex-direction: row; }
-.shell-app-rail { flex: 0 0 52px; width: 52px; height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 0 10px; background: var(--mf-rail); border-right: 1px solid var(--mf-border); z-index: 11; }
-.shell-rail-scroll { flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; gap: 8px; scrollbar-width: none; padding: 0; }
-.shell-rail-button { position: relative; width: 36px; min-height: 36px; flex: 0 0 36px; border: 0; border-radius: 11px; color: var(--mf-icon); background: transparent; font-size: 18px; cursor: pointer; display: grid; place-items: center; transition: color .15s, background .15s; }
-.shell-rail-button:hover { color: var(--mf-muted); background: var(--mf-hover); }
-.shell-rail-button.is-active { color: var(--mf-text); background: var(--mf-selected); }
+.shell-app-rail { flex: 0 0 52px; width: 52px; height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 0 8px; background: var(--mf-rail); border-right: 1px solid var(--mf-border); z-index: 11; }
+.shell-rail-scroll { flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; gap: 4px; scrollbar-width: none; padding: 0; }
+/* Keep the rail and menu on the same neutral palette and row rhythm. */
+body:has(.tech-white-shell) {
+  --shell-nav-hover: #eceef0;
+  --shell-nav-selected: #e6e9ed;
+}
+.shell-rail-button { position: relative; width: 36px; min-height: 36px; flex: 0 0 36px; border: 0; border-radius: 4px; color: var(--mf-muted); background: transparent; font-size: 16px; cursor: pointer; display: grid; place-items: center; transition: color 150ms ease-out, background-color 150ms ease-out; }
+.shell-rail-button:hover { color: var(--mf-text); background: var(--shell-nav-hover); }
+.shell-rail-button.is-active { color: var(--mf-text); background: var(--shell-nav-selected); }
 .shell-rail-button:focus-visible, .shell-account-button:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
 .shell-rail-user { flex: 0 0 auto; margin-top: 12px; }
-.shell-account-button { display: grid; place-items: center; width: 38px; height: 38px; }
-.shell-account-button .ant-avatar { width: 26px; height: 26px; background: #e4e8e6 !important; color: #6c7d74; border: 1px solid #d4ddd7; font-size: 15px; }
+.shell-account-button { position: relative; display: grid; place-items: center; width: 36px; height: 36px; }
+.shell-account-button .ant-avatar { width: 24px; height: 24px; background: var(--shell-nav-selected) !important; color: var(--mf-muted); font-size: 16px; }
 .tech-white-shell .shell-context-menu { background: var(--mf-sidebar) !important; box-shadow: none; height: 100%; border-right: 1px solid var(--mf-border); }
 .shell-context-menu .ant-layout-sider-children { display: flex; flex-direction: column; min-height: 0; }
-.shell-menu-heading { height: 64px; min-height: 64px; padding: 0 15px 0 22px; display: flex; align-items: center; justify-content: space-between; gap: 6px; border-bottom: 0; }
-.shell-menu-heading .ant-typography { font-size: 15px; font-weight: 600; min-width: 0; }
+.shell-menu-heading { height: 64px; min-height: 64px; padding: 0 16px 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 0; }
+.shell-menu-heading .ant-typography { font-size: 14px; font-weight: 500; min-width: 0; }
 .shell-menu-heading .ant-btn { flex-shrink: 0; color: var(--mf-muted); }
 .ant-layout-sider-collapsed .shell-menu-heading { padding: 0; justify-content: center; }
-.tech-white-shell .app-menu { padding: 12px 8px; flex: 1; }
-.tech-white-shell .app-menu .ant-menu-item, .tech-white-shell .app-menu .ant-menu-submenu-title { color: var(--mf-muted) !important; font-size: 13px; font-weight: 400; border-radius: 10px; }
-.tech-white-shell .app-menu .ant-menu-item-selected { color: var(--mf-text) !important; background: var(--mf-selected) !important; font-weight: 500; }
-.tech-white-shell .app-menu .ant-menu-item:not(.ant-menu-item-selected):hover, .tech-white-shell .app-menu .ant-menu-submenu-title:hover { background: var(--mf-hover) !important; color: var(--mf-text) !important; }
-.shell-rail-button.is-active .anticon, .shell-rail-button.is-active svg { color: var(--mf-text); }
-.tech-white-shell .app-menu .ant-menu-item-group-title { font-size: 11px; color: var(--mf-muted); padding-top: 18px; }
-.tech-white-shell .app-menu .ant-menu-item-group-list .ant-menu-item { padding-left: 16px !important; }
-.tech-white-shell .app-menu .ant-menu-item-group-list { margin: 0; }
 .shell-workspace-layout { min-width: 0; height: 100%; background: var(--mf-bg); padding-right: 0 !important; }
 .tech-white-shell .app-header { height: 64px; min-height: 64px; background: #fff; box-shadow: none; backdrop-filter: none; padding: 0 25px; gap: 18px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 480px) minmax(0, 1fr); }
 .tech-white-shell .app-header > .shell-page-title { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; line-height: 1.5; font-weight: 600; color: var(--mf-text); }
 .shell-header-actions { justify-self: end; }
+.shell-release-notice { display: flex; align-items: center; min-width: 0; }
+.shell-release-notice .ant-btn-link { padding-inline: 0 4px; font-size: 12px; }
+@media (max-width: 760px) {
+  .tech-white-shell .app-header .shell-release-notice { grid-column: 1 / 3; grid-row: 1; }
+}
 @media (min-width: 761px) {
   .tech-white-shell .app-header > .shell-inline-search { grid-column: 2; grid-row: 1; }
   .tech-white-shell .app-header > .shell-header-actions { grid-column: 3; grid-row: 1; }
@@ -76,8 +78,23 @@ body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 
 /* A floating assistant preserves all session, history, tool and approval controls. */
 .ai-workbench-open .tech-white-shell > .ant-layout { padding-right: 0; }
-.tech-white-shell .ai-edge-toggle, .ai-workbench-open .tech-white-shell .ai-edge-toggle { top: auto; right: 24px; bottom: 24px; width: 48px; height: 48px; padding: 0; border-radius: 50% !important; background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); box-shadow: 0 5px 18px rgba(38,52,67,.16); }
-.tech-white-shell .ai-edge-toggle .anticon { font-size: 22px; }
+.tech-white-shell .ai-edge-toggle {
+  top: auto;
+  right: 24px;
+  bottom: 24px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50% !important;
+  background: var(--mf-surface, #fff);
+  border-color: var(--mf-border-strong);
+  color: var(--mf-muted);
+  box-shadow: none;
+  transition: background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out;
+}
+.tech-white-shell .ai-edge-toggle:is(:hover, [aria-expanded="true"]) { background: var(--mf-hover); color: var(--mf-text); border-color: var(--mf-border-strong); }
+.tech-white-shell .ai-edge-toggle:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
+.tech-white-shell .ai-edge-toggle .anticon { font-size: 20px; }
 .tech-white-shell .ai-workbench-panel.ai-chat-panel { top: auto; right: 24px; bottom: 84px; width: 460px; max-width: calc(100vw - 48px); height: min(680px, calc(100vh - 110px)); border: 1px solid var(--mf-border); border-radius: 12px; box-shadow: 0 12px 40px rgba(38,52,67,.15); animation: none; }
 .tech-white-shell .ai-chat-header { background: var(--mf-panel-soft); }
 .tech-white-shell .ai-chat-body { min-height: 0; }
@@ -86,27 +103,69 @@ body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 @media (max-width: 1280px) { .shell-page-heading { align-items: flex-start; } .tech-white-shell .todo-center-content { grid-template-columns: 1fr; } .tech-white-shell .todo-center-illustration { display: none; } }
 @media (prefers-reduced-motion: reduce) { .tech-white-shell *, .technology-login * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 
-.shell-account-button.is-active { background: var(--mf-selected) !important; box-shadow: inset 0 0 0 1px var(--mf-border); }
-
-/* Shared hierarchy for every shell menu, including dynamic application menus. */
-.tech-white-shell .shell-hierarchy-menu .app-menu { padding: 8px 12px 24px; overflow-y: auto; min-height: 0; }
-.tech-white-shell .shell-hierarchy-menu .app-menu > .ant-menu-item { margin: 2px 0; width: 100%; }
-.tech-white-shell .shell-hierarchy-menu .app-menu > .ant-menu-submenu { margin-bottom: 8px; }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-title { margin: 0; width: 100%; height: 42px; line-height: 42px; font-size: 13px; font-weight: 600; color: var(--mf-text) !important; }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-title > .anticon { color: var(--mf-primary); font-size: 16px; }
-.tech-white-shell .shell-hierarchy-menu .ant-menu-sub.ant-menu-inline { position: relative; background: transparent; padding: 4px 0 4px 14px; }
-.tech-white-shell .shell-hierarchy-menu .ant-menu-sub.ant-menu-inline::before { content: ''; display: block; position: absolute; left: 35px; top: 8px; bottom: 8px; width: 1px; height: auto; background: var(--mf-border-strong); }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-sub .ant-menu-item { width: calc(100% - 30px); margin: 2px 0 2px 30px; height: 36px; line-height: 36px; padding-left: 16px !important; border-radius: 7px; font-size: 12px; }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-selected > .ant-menu-submenu-title { color: var(--mf-primary-strong) !important; background: var(--mf-hover); }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-sub .ant-menu-item-selected { box-shadow: none; font-weight: 600; background: var(--mf-selected) !important; }
-.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-sub .ant-menu-item-selected::before { content: ''; position: absolute; left: 5px; top: 15px; width: 5px; height: 5px; border-radius: 50%; background: var(--mf-focus); }
+/* Shared hierarchy for settings and dynamic application menus. */
+.tech-white-shell .shell-hierarchy-menu .app-menu { flex: 1; padding: 8px 12px 24px; overflow-y: auto; min-height: 0; }
+.tech-white-shell .shell-hierarchy-menu .app-menu :is(.ant-menu-item, .ant-menu-submenu-title) {
+  width: 100%;
+  height: 36px;
+  line-height: 36px;
+  margin: 2px 0;
+  border-radius: 4px;
+  color: var(--mf-muted) !important;
+  font-size: 13px;
+  font-weight: 400;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu :is(.ant-menu-item, .ant-menu-submenu-title) .ant-menu-item-icon {
+  min-width: 16px;
+  font-size: 16px;
+  color: inherit;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-item-icon + .ant-menu-title-content { margin-inline-start: 8px; }
+.tech-white-shell .shell-hierarchy-menu .app-menu :is(.ant-menu-item:not(.ant-menu-item-selected), .ant-menu-submenu-title):hover {
+  background: var(--shell-nav-hover) !important;
+  color: var(--mf-text) !important;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-item-selected {
+  color: var(--mf-text) !important;
+  background: var(--shell-nav-selected) !important;
+  font-weight: 500;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-selected > .ant-menu-submenu-title { background: transparent; }
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-sub.ant-menu-inline { padding-inline-start: 24px; }
 .tech-white-shell .shell-hierarchy-menu.ant-layout-sider-collapsed .app-menu { padding-inline: 4px; }
-.tech-white-shell .shell-hierarchy-menu.ant-layout-sider-collapsed .app-menu > .ant-menu-item,
-.tech-white-shell .shell-hierarchy-menu.ant-layout-sider-collapsed .app-menu .ant-menu-submenu-title { padding-inline: 20px; }
+.tech-white-shell .shell-hierarchy-menu .app-menu > .ant-menu-item-divider { margin: 8px; border-color: var(--mf-border); }
+.shell-account-button.is-active { background: var(--shell-nav-selected) !important; }
 
-/* Separate the persistent home link from the current application pages. */
-.tech-white-shell .shell-hierarchy-menu .shell-workspace-menu > .ant-menu-item { height: 42px; line-height: 42px; }
-.tech-white-shell .shell-hierarchy-menu .shell-workspace-menu > .ant-menu-item-divider { margin: 10px 8px; border-color: var(--mf-border); }
+.tech-white-shell :is(.shell-rail-button.is-active, .shell-account-button.is-active, .app-menu .ant-menu-item-selected)::before,
+body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--mf-primary);
+  pointer-events: none;
+}
+
+.tech-white-shell:has(.shell-context-menu:not([aria-hidden="true"]) .ant-menu-item-selected) :is(.shell-rail-button, .shell-account-button).is-active::before {
+  content: none;
+}
+
+body:has(.tech-white-shell) .ant-menu-submenu-popup :is(.ant-menu-item, .ant-menu-submenu-title) {
+  height: 36px;
+  line-height: 36px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-icon { font-size: 16px; }
+body:has(.tech-white-shell) .ant-menu-submenu-popup .ant-menu-item-selected {
+  color: var(--mf-text);
+  background: var(--shell-nav-selected);
+  font-weight: 500;
+}
 
 /* Account shortcuts; detailed settings live in the shared sidebar. */
 .shell-settings-popup { width: 232px; max-width: calc(100vw - 32px); }
@@ -119,5 +178,3 @@ body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 
 /* Compact, neutral navigation chrome. */
 .tech-white-shell .shell-search-input { border-radius: 4px; background: var(--mf-sidebar); }
-.tech-white-shell .shell-rail-button { border-radius: 5px; }
-.tech-white-shell .app-menu :is(.ant-menu-item, .ant-menu-submenu-title) { border-radius: 4px; }

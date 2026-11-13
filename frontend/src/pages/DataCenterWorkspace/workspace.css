@@ -19,3 +19,15 @@
   justify-content: center;
   padding: 60px 0;
 }
+
+.data-center-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: var(--mf-panel);
+}
+.data-center-empty h3 { margin: 0; color: var(--mf-text); font-size: 16px; font-weight: 600; }
+.data-center-empty p { margin: 0 0 4px; color: var(--mf-muted); }

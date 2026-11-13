@@ -31,7 +31,7 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
 .tech-white-shell .app-content :is(.form-designer-left, .analytics-board-left) .designer-component::after { display: none; }
 
 @media (max-width: 1440px) {
-  .tech-white-shell .app-header { padding-inline: 16px; gap: 12px; grid-template-columns: minmax(110px, 1fr) minmax(220px, 360px) 36px; }
+  .tech-white-shell .app-header { padding-inline: 16px; gap: 12px; grid-template-columns: minmax(110px, 1fr) minmax(220px, 360px) max-content; }
   .tech-white-shell .app-content { padding: 16px; }
   .tech-white-shell .shell-page-heading { flex-wrap: wrap; gap: 12px; }
   .tech-white-shell .app-content .content-surface:has(.form-designer-page) { overflow: auto; min-height: 0; }
@@ -61,7 +61,7 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell.shell-menu-overlay-open .shell-context-menu { position: fixed; left: 52px; top: 0; bottom: 0; z-index: 30; box-shadow: 8px 0 24px rgba(32,35,38,.12); visibility: visible; pointer-events: auto; }
   .shell-menu-backdrop { position: fixed; inset: 0 0 0 52px; z-index: 29; border: 0; background: rgba(32,35,38,.18); cursor: pointer; }
   .tech-white-shell .shell-mobile-menu-toggle { display: inline-flex; grid-column: 1; grid-row: 1; }
-  .tech-white-shell .app-header { height: 100px; min-height: 100px; padding: 8px 12px; gap: 4px 8px; grid-template-columns: 32px minmax(0,1fr) 32px; grid-template-rows: 36px 40px; }
+  .tech-white-shell .app-header { height: 100px; min-height: 100px; padding: 8px 12px; gap: 4px 8px; grid-template-columns: 32px minmax(0,1fr) max-content; grid-template-rows: 36px 40px; }
   .tech-white-shell .app-header > .shell-page-title { grid-column: 2; grid-row: 1; }
   .tech-white-shell .shell-header-actions { grid-column: 3; grid-row: 1; }
   .tech-white-shell .shell-inline-search { grid-column: 1 / -1; grid-row: 2; }

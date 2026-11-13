@@ -44,3 +44,46 @@
   .navigation-area-page .quality-center-stage { order: -1; }
   .navigation-area-page .quality-graph-canvas { min-height: 480px; }
 }
+
+.quality-impact-page .object-relationship-canvas.quality-graph-canvas {
+  background: var(--mf-bg);
+  border-color: var(--mf-border);
+  box-shadow: none;
+}
+.quality-impact-page .object-relationship-canvas.quality-graph-empty { min-height: 240px; }
+.quality-impact-page .object-canvas-heading,
+.quality-impact-page .object-canvas-view-switch,
+.quality-impact-page .object-canvas-legend {
+  border-color: var(--mf-border);
+  background: var(--mf-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.quality-impact-page .object-canvas-heading {
+  max-width: min(100%, 420px);
+  padding: 8px 12px;
+}
+.quality-impact-page .object-canvas-heading .ant-typography { color: var(--mf-text); }
+.quality-impact-page .object-canvas-heading .ant-typography-secondary { color: var(--mf-muted) !important; }
+.quality-impact-page .object-canvas-view-switch button {
+  background: transparent;
+  color: var(--mf-muted);
+  border-color: transparent;
+}
+.quality-impact-page .object-canvas-view-switch button:hover,
+.quality-impact-page .object-canvas-view-switch button.active {
+  background: var(--mf-selected);
+  color: var(--mf-primary-strong);
+  border-color: var(--mf-border);
+}
+.quality-impact-page .object-relationship-canvas .quality-graph-node {
+  background: var(--mf-panel);
+  box-shadow: none;
+  transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+.quality-impact-page .object-relationship-canvas .quality-graph-node:is(.selected, .role-root) { border-color: var(--mf-primary); }
+.quality-impact-page .object-canvas-lanes span { border-left-color: var(--mf-border); color: var(--mf-muted); }
+.quality-graph-empty-message { position: absolute; inset: 42% 12px auto; text-align: center; color: var(--mf-muted); }
+.quality-graph-diagnostics { margin-top: 8px; font-size: 12px; color: var(--mf-muted); }
+.quality-graph-diagnostics summary { width: fit-content; cursor: pointer; }
+.quality-graph-diagnostics p { margin: 4px 0; overflow-wrap: anywhere; }

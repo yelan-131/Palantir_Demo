@@ -14,6 +14,7 @@ import os
 import secrets
 import time
 import threading
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,7 +23,9 @@ from typing import Any
 from weakref import WeakValueDictionary
 from zoneinfo import ZoneInfo
 
-from .agent_definition import load_agent_system_prompt
+from .application_menu_registry import REQUESTS as APPLICATION_MENU_REQUESTS, execute_application_menu_tool
+from .component_page_tools import PAGE_WRITE_REQUESTS, execute_page_tool
+from .agent_definition import load_agent_system_prompt, use_agent_registry
 from .agent_items import build_agent_item, from_legacy_step
 from .policies import decide_ai_permission, decide_tool_permission
 from .schemas import AgentRequest, AgentResponse, SkillAction
@@ -32,12 +35,19 @@ from .settings import load_persisted_ai_settings, maybe_mask_sensitive_payload, 
 from .tenant_context import require_tenant_id
 from .context_builder import estimate_tokens, fit_context_to_budget
 from .tool_registry import tool_registry, to_openai_function
-from .skill_loader import SKILL_TOOL, READER_SCHEMA, available_skill_catalog, read_business_skill
-from .configuration_completion import (REPORT_TOOL, REPORT_SCHEMA, REPORT_DESCRIPTION,
-    COMPLETION_CONTRACT, REPAIR_INSTRUCTION, expects_configuration, expects_native_designer)
+from .skill_loader import FORM_SKILL, SKILL_TOOL, available_skill_catalog, read_business_skill
+from .harness_skills import stage_native_skills
+from .configuration_completion import REPORT_TOOL, REPORT_SCHEMA, REPORT_DESCRIPTION
+from .page_controls import designer_permission_error
+from . import component_page_controls
 
 SDK_VERSION = "0.2.1rc2"
 PATCH = Path(__file__).with_name("harness-platform.patch.yml")
+DESCRIBE_TOOL = 'platform.tools.describe'
+INVOKE_TOOL = 'platform.tools.invoke'
+DIRECT_TOOLS = {'platform.application_settings.query', 'platform.form_settings.query', 'knowledge.search'}
+
+SKILLS_PATCH = Path(__file__).with_name("harness-skills.patch.yml")
 BRIDGES: dict[str, "PlatformBridge"] = {}
 SESSION_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
@@ -59,8 +69,8 @@ class PlatformBridge:
     items: list[dict[str, Any]] = field(default_factory=list)
     page_actions: dict[str, asyncio.Future] = field(default_factory=dict)
     calls: int = 0
-    configuration_expected: bool = False
-    native_designer_task: bool = False
+    discovery_calls: int = 0
+    described_tools: set[str] = field(default_factory=set)
     loaded_skills: dict[str, dict[str, str]] = field(default_factory=dict)
     configuration_outcome: dict[str, Any] | None = None
     configuration_failure: dict[str, Any] | None = None
@@ -68,120 +78,203 @@ class PlatformBridge:
     stop_reason: str = ""
     call_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    def available_tools(self) -> list[dict[str, Any]]:
-        tools = []
-        if available_skill_catalog(self.user, self.settings, self.context):
-            tools.append({'name': tool_alias(SKILL_TOOL), 'description': '按名称读取业务 Skill 操作步骤。处理技能目录中匹配的任务前先读取；读取不会授权写入。', 'inputSchema': READER_SCHEMA})
+    native_skills: bool = field(default_factory=lambda: os.getenv("AI_HARNESS_NATIVE_SKILLS", "true").lower() != "false")
+
+    def tool_definitions(self) -> dict[str, dict[str, Any]]:
+        definitions = {}
+        knowledge = self.context.get('surface') == 'knowledge'
+        page = not knowledge and self.event_sink and self.context.get('pageControlsSupported')
         for tool in tool_registry().values():
-            if self.native_designer_task and tool.name != 'platform.form_settings.query':
+            if tool.handler_key == 'not_implemented' or (knowledge and not tool.name.startswith('knowledge.')):
                 continue
-            if self.context.get("surface") == "knowledge" and not tool.name.startswith("knowledge."):
-                continue
-            if tool.handler_key == "not_implemented":
+            if tool.name in component_page_controls.TOOL_DETAILS and not (
+                page and self.user.get('is_admin') and component_page_controls.component_context(self.context)
+            ):
                 continue
             if not decide_tool_permission(self.user, self.settings, tool.name).allowed:
                 continue
-            function = to_openai_function(tool)["function"]
-            if tool.side_effect != 'read':
-                function['description'] += ' 在 Agent 对话中调用此工具只准备待确认操作，生成平台确认卡片，不直接写入。需求齐全时应立即调用；实际写入由用户点击平台确认按钮后执行。'
-            if tool.name == 'forms.create_form_definition' and self.context.get('pageControlsSupported'):
-                function['description'] += ' 网页已连接时，新建表单优先调用 ui.form_designer 的 draft_new，在现有设计器搭建本地草稿，最后由用户保存；不要先要求创建卡片确认才能查看设计器。'
-            tools.append({"name": tool_alias(tool.name), "description": function["description"], "inputSchema": function["parameters"]})
-        if self.event_sink and self.context.get('pageControlsSupported'):
+            function = to_openai_function(tool)['function']
+            description = function['description']
+            if tool.name in component_page_controls.TOOL_DETAILS:
+                description += ' 在当前画布中操作，由用户保存草稿。'
+            elif tool.side_effect != 'read':
+                description += ' 调用仅生成平台确认卡片，等待用户确认后执行。'
+            definitions[tool.name] = {'name': tool_alias(tool.name), 'description': description,
+                                      'inputSchema': function['parameters']}
+        if page and not designer_permission_error(self.user, self.settings):
             from .page_controls import TOOL, PageControlRequest
-            schema = PageControlRequest.model_json_schema()
-            def compact_schema(value):
-                if isinstance(value, dict):
-                    return {key: compact_schema(item) for key, item in value.items() if key != 'title'}
-                if isinstance(value, list):
-                    return [compact_schema(item) for item in value]
-                return value
-            schema = compact_schema(schema)
-            if not self.native_designer_task:
-                for key in ('draft', 'draft_id', 'new_field', 'changes'):
-                    schema['properties'].pop(key, None)
-                schema['properties']['action']['enum'] = [action for action in schema['properties']['action']['enum'] if action not in {'draft_new', 'configure_fields', 'add_field'}]
-                for key in ('NewFormDraft', 'DraftField', 'FieldChange'):
-                    schema.get('$defs', {}).pop(key, None)
-            tools.append({'name': tool_alias(TOOL), 'description': '操作现有表单设计器和本地草稿。新建及调整草稿前读取 low_code.create_form_definition Skill；按 schema 传参，等待真实页面回执，不自动保存发布。',
-                'inputSchema': schema})
-        if self.configuration_expected:
-            tools.append({'name': tool_alias(REPORT_TOOL), 'description': REPORT_DESCRIPTION,
-                          'inputSchema': REPORT_SCHEMA})
+            definitions[TOOL] = {
+                'name': tool_alias(TOOL),
+                'description': '在网页设计器搭建或调整本地表单草稿。先读取表单搭建 Skill，等待页面回执。',
+                'inputSchema': PageControlRequest.model_json_schema(),
+            }
+        if not knowledge:
+            definitions[REPORT_TOOL] = {'name': tool_alias(REPORT_TOOL), 'description': REPORT_DESCRIPTION,
+                                        'inputSchema': REPORT_SCHEMA}
+        return definitions
+
+    def available_tools(self) -> list[dict[str, Any]]:
+        definitions = self.tool_definitions()
+        tools = [definition for name, definition in definitions.items() if name in DIRECT_TOOLS]
+        if not self.native_skills and available_skill_catalog(self.user, self.settings, self.context):
+            tools.append({
+                'name': tool_alias(SKILL_TOOL), 'description': '按名称读取匹配的业务 Skill。',
+                'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}},
+                                'required': ['name'], 'additionalProperties': False},
+            })
+        if definitions.keys() - DIRECT_TOOLS:
+            tools.extend([
+                {'name': tool_alias(DESCRIBE_TOOL), 'description': '加载工具参数。省略 name 查看可用工具的名称和用途。',
+                 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}},
+                                 'additionalProperties': False}},
+                {'name': tool_alias(INVOKE_TOOL), 'description': '按已加载的定义执行，传逻辑工具名和参数。',
+                 'inputSchema': {'type': 'object', 'properties': {
+                     'name': {'type': 'string'}, 'arguments': {'type': 'object', 'additionalProperties': True},
+                 }, 'required': ['name', 'arguments'], 'additionalProperties': False}},
+            ])
         return tools
 
     async def call_tool(self, alias: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        from .agent_registry import load_agent_registry
+
         # Serialize across parallel MCP calls, including deduplication and budget.
         async with self.call_lock:
-            if alias == tool_alias(SKILL_TOOL):
-                await load_persisted_ai_settings(strict=True)
-                self.settings = settings_snapshot()
-                from .agent_registry import load_agent_registry
-                await load_agent_registry(seed_if_empty=False)
-                if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
-                    self.stop_reason = '已达到本次最大工具调用次数，执行已停止'
-                    self.stop_event.set()
-                    return {'status': 'blocked', 'message': self.stop_reason}
-                self.calls += 1
-                if set(arguments) != {'name'}:
-                    return {'status': 'validation_failed', 'message': '读取技能仅接受 name'}
-                result = read_business_skill(arguments['name'], user=self.user, settings=self.settings, context=self.context)
-                if result['status'] == 'completed':
-                    identity = {key: result['skill'][key] for key in ('name', 'version', 'digest')}
-                    self.loaded_skills[identity['name']] = identity
-                    item = build_agent_item(type='context', status='completed', summary='已读取业务技能', payload=identity)
-                    self.items.append(item)
-                    if self.event_sink:
-                        await self.event_sink('item.updated', item)
-                return result
-            from .page_controls import TOOL, call_page_control
-            if alias == tool_alias(TOOL):
-                if not self.event_sink or not self.context.get('pageControlsSupported'):
-                    return {'status': 'blocked', 'message': '当前会话未连接可操控的网页'}
-                await load_persisted_ai_settings(strict=True)
-                self.settings = settings_snapshot()
-                if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
-                    return {'status': 'blocked', 'message': '已达到本轮工具次数上限'}
-                self.calls += 1
-                item = build_agent_item(type='tool_call', tool=TOOL, status='running', summary='正在调用现有表单设计器', payload={'action': arguments.get('action')})
+            registry = await load_agent_registry(tenant_id=require_tenant_id(self.user))
+            with use_agent_registry(registry):
+                if alias in {tool_alias(DESCRIBE_TOOL), tool_alias(INVOKE_TOOL)}:
+                    return await self._dispatch_discovered_tool(alias, arguments)
+                if alias == tool_alias(SKILL_TOOL) or alias in {tool_alias(name) for name in DIRECT_TOOLS}:
+                    if alias != tool_alias(SKILL_TOOL) and alias not in {tool['name'] for tool in self.available_tools()}:
+                        return {'status': 'blocked', 'message': '当前对话未开放该工具'}
+                    return await self._call_tool(alias, arguments)
+                return {'status': 'blocked', 'message': '请先加载工具定义，再通过 platform.tools.invoke 调用'}
+
+    async def _dispatch_discovered_tool(self, alias, arguments):
+        await load_persisted_ai_settings(strict=True)
+        self.settings = settings_snapshot()
+        definitions = self.tool_definitions()
+        name = arguments.get('name')
+        if alias == tool_alias(DESCRIBE_TOOL):
+            if set(arguments) - {'name'} or ('name' in arguments and not isinstance(name, str)):
+                return {'status': 'validation_failed', 'message': 'name 必须是工具名'}
+            if self.discovery_calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
+                return {'status': 'blocked', 'message': '已达到本轮工具次数上限'}
+            self.discovery_calls += 1
+            if name is None:
+                return {'status': 'completed', 'tools': [
+                    {'name': key, 'description': definition['description'][:120]}
+                    for key, definition in definitions.items()
+                ]}
+            if name in definitions:
+                self.described_tools.add(name)
+                definition = definitions[name]
+                return {'status': 'completed', 'tool': {**definition, 'name': name}}
+        elif (isinstance(name, str) and name in definitions and name in self.described_tools
+              and set(arguments) == {'name', 'arguments'} and isinstance(arguments['arguments'], dict)):
+            return await self._call_tool(definitions[name]['name'], arguments['arguments'])
+        if isinstance(name, str) and name in tool_registry() and name not in definitions:
+            decision = decide_tool_permission(self.user, self.settings, name)
+            if not decision.allowed and self.context.get('surface') != 'knowledge':
+                return {'status': 'blocked', 'message': decision.reason}
+        return {'status': 'blocked', 'message': '工具不可用或尚未加载定义'}
+
+    async def _call_tool(self, alias: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if alias == tool_alias(SKILL_TOOL):
+            if self.native_skills or self.context.get('surface') == 'knowledge':
+                return {'status': 'blocked', 'message': '当前会话未开放平台技能读取工具'}
+            await load_persisted_ai_settings(strict=True)
+            self.settings = settings_snapshot()
+            if arguments.get('name') == FORM_SKILL and (error := designer_permission_error(self.user, self.settings)):
+                return {'status': 'blocked', 'message': error}
+            if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
+                self.stop_reason = '已达到本次最大工具调用次数，执行已停止'
+                self.stop_event.set()
+                return {'status': 'blocked', 'message': self.stop_reason}
+            self.calls += 1
+            if set(arguments) != {'name'}:
+                return {'status': 'validation_failed', 'message': '读取技能仅接受 name'}
+            result = read_business_skill(arguments['name'], user=self.user, settings=self.settings, context=self.context)
+            if result['status'] == 'completed':
+                identity = {key: result['skill'][key] for key in ('name', 'version', 'digest')}
+                self.loaded_skills[identity['name']] = identity
+                item = build_agent_item(type='context', status='completed', summary='已读取业务技能', payload=identity)
                 self.items.append(item)
+                if self.event_sink:
+                    await self.event_sink('item.updated', item)
+            return result
+        canvas_tool = next((name for name in component_page_controls.TOOL_DETAILS if alias == tool_alias(name)), None)
+        if canvas_tool:
+            await load_persisted_ai_settings(strict=True)
+            self.settings = settings_snapshot()
+            decision = decide_tool_permission(self.user, self.settings, canvas_tool)
+            if not decision.allowed:
+                return {'status': 'blocked', 'message': decision.reason}
+            if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
+                return {'status': 'blocked', 'message': '已达到本轮工具次数上限'}
+            self.calls += 1
+            try:
+                command = component_page_controls.tool_arguments(canvas_tool, arguments)
+            except ValueError as exc:
+                result = {'status': 'validation_failed', 'message': str(exc)}
+            else:
+                result = await component_page_controls.call_component_page(self, command, tool=canvas_tool)
+            item = build_agent_item(type='tool_result', tool=canvas_tool,
+                                   status=result['status'], summary=result['message'])
+            self.items.append(item)
+            if self.event_sink:
                 await self.event_sink('item.updated', item)
-                result = await call_page_control(self, arguments)
-                item = build_agent_item(type='tool_result', tool=TOOL, status=result.get('status', 'failed'),
-                    summary=str(result.get('message') or ''), payload=result.get('result') or {})
-                self.items.append(item)
-                await self.event_sink('item.updated', item)
-                if result.get('status') in {'blocked', 'validation_failed'}:
-                    self.configuration_failure = result
-                from .page_controls import page_control_model_result
-                return page_control_model_result(result)
-            if self.configuration_expected and alias == tool_alias(REPORT_TOOL):
-                maximum = int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5))
-                if self.calls >= maximum:
-                    self.stop_reason = '已达到本次最大工具调用次数，执行已停止'
-                    self.stop_event.set()
-                    self.configuration_failure = {'status': 'blocked', 'message': self.stop_reason}
-                    return self.configuration_failure
-                self.calls += 1
-                status, reason = arguments.get('status'), arguments.get('reason')
-                missing = arguments.get('missing_fields', [])
-                if (status not in {'needs_clarification', 'blocked'} or not isinstance(reason, str)
-                    or not reason.strip() or len(reason) > 600 or not isinstance(missing, list)
-                    or len(missing) > 12 or any(not isinstance(v, str) or not v.strip() or len(v) > 100 for v in missing)
-                    or (status == 'needs_clarification' and not missing)):
-                    return {'status': 'validation_failed', 'message': '请提供具体原因；缺少参数时还需列出 missing_fields'}
-                self.configuration_outcome = {'status': status, 'reason': reason.strip(), 'missing_fields': missing}
-                return {'status': 'completed', 'result': self.configuration_outcome}
-            result = await self._call_platform_tool(alias, arguments)
-            if result.get('status') in {'blocked', 'validation_failed', 'failed', 'error'}:
+            if not canvas_tool.endswith('.inspect') and result['status'] == 'completed':
+                self.configuration_outcome = {'status': 'ui_draft', 'reason': result['message']}
+                self.configuration_failure = None
+            elif result['status'] != 'completed':
                 self.configuration_failure = result
             return result
+        from .page_controls import TOOL, call_page_control
+        if alias == tool_alias(TOOL):
+            if not self.event_sink or not self.context.get('pageControlsSupported'):
+                return {'status': 'blocked', 'message': '当前会话未连接可操控的网页'}
+            await load_persisted_ai_settings(strict=True)
+            self.settings = settings_snapshot()
+            if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
+                return {'status': 'blocked', 'message': '已达到本轮工具次数上限'}
+            self.calls += 1
+            item = build_agent_item(type='tool_call', tool=TOOL, status='running', summary='正在调用现有表单设计器', payload={'action': arguments.get('action')})
+            self.items.append(item)
+            await self.event_sink('item.updated', item)
+            result = await call_page_control(self, arguments)
+            item = build_agent_item(type='tool_result', tool=TOOL, status=result.get('status', 'failed'),
+                summary=str(result.get('message') or ''), payload=result.get('result') or {})
+            self.items.append(item)
+            await self.event_sink('item.updated', item)
+            if result.get('status') in {'blocked', 'validation_failed'}:
+                self.configuration_failure = result
+            from .page_controls import page_control_model_result
+            return page_control_model_result(result)
+        if alias == tool_alias(REPORT_TOOL):
+            maximum = int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5))
+            if self.calls >= maximum:
+                self.stop_reason = '已达到本次最大工具调用次数，执行已停止'
+                self.stop_event.set()
+                self.configuration_failure = {'status': 'blocked', 'message': self.stop_reason}
+                return self.configuration_failure
+            self.calls += 1
+            status, reason = arguments.get('status'), arguments.get('reason')
+            missing = arguments.get('missing_fields', [])
+            if (status not in {'needs_clarification', 'blocked'} or not isinstance(reason, str)
+                or not reason.strip() or len(reason) > 600 or not isinstance(missing, list)
+                or len(missing) > 12 or any(not isinstance(v, str) or not v.strip() or len(v) > 100 for v in missing)
+                or (status == 'needs_clarification' and not missing)):
+                return {'status': 'validation_failed', 'message': '请提供具体原因；缺少参数时还需列出 missing_fields'}
+            self.configuration_outcome = {'status': status, 'reason': reason.strip(), 'missing_fields': missing}
+            return {'status': 'completed', 'result': self.configuration_outcome}
+        result = await self._call_platform_tool(alias, arguments)
+        if result.get('status') in {'blocked', 'validation_failed', 'failed', 'error'}:
+            self.configuration_failure = result
+        return result
 
     async def _call_platform_tool(self, alias: str, arguments: dict[str, Any]) -> dict[str, Any]:
         await load_persisted_ai_settings(strict=True)
         self.settings = settings_snapshot()
-        from .agent_registry import load_agent_registry
-        await load_agent_registry(seed_if_empty=False)
         tools = tool_registry()
         tool = next((t for t in tools.values() if tool_alias(t.name) == alias), None)
         if tool is None or tool.handler_key == "not_implemented":
@@ -218,6 +311,29 @@ class PlatformBridge:
             if not validation.valid:
                 return {"status": "validation_failed", "message": validation.summary(),
                         "issues": [issue.as_dict() for issue in validation.errors]}
+            if tool.name in APPLICATION_MENU_REQUESTS or tool.name in PAGE_WRITE_REQUESTS:
+                from fastapi import HTTPException
+                from pydantic import ValidationError
+                from app.core.db import db_session
+
+                try:
+                    async with db_session() as session:
+                        execute = execute_page_tool if tool.name in PAGE_WRITE_REQUESTS else execute_application_menu_tool
+                        arguments = await execute(
+                            tool.name, session, user=self.user, payload=arguments, prepare=True,
+                        )
+                except (HTTPException, ValidationError) as error:
+                    return {"status": "validation_failed", "message": str(getattr(error, "detail", error))}
+            if tool.name == 'forms.publish_to_menu':
+                from fastapi import HTTPException
+                from pydantic import ValidationError
+                from app.core.db import db_session
+                from .form_menu_tools import publish_form_to_menu
+                try:
+                    async with db_session() as session:
+                        arguments = await publish_form_to_menu(session, self.user, arguments, prepare=True)
+                except (HTTPException, ValidationError) as error:
+                    return {'status': 'validation_failed', 'message': str(getattr(error, 'detail', error))}
             payload = {**arguments, "_contract": {"tool": tool.name}, "_harness_tool": tool.name}
             if not any(action.payload == payload for action in self.pending):
                 self.pending.append(SkillAction(skill=tool.name, title=tool.title, mode="confirmed_write", risk_level=tool.risk_level, payload=payload, requires_confirmation=True))
@@ -225,7 +341,7 @@ class PlatformBridge:
             self.items.append(item)
             if self.event_sink:
                 await self.event_sink("item.updated", item)
-            return {"status": "waiting_confirmation", "message": "操作尚未执行。请向用户说明操作内容，并结束本轮等待平台确认。", "tool": tool.name, "payload": arguments}
+            return {"status": "waiting_confirmation", "message": "操作尚未执行。请向用户说明操作内容，并结束本轮等待平台确认。", "tool": tool.name, "payload": {key: value for key, value in arguments.items() if not key.endswith("_snapshot")}}
         from .tool_envelope import tool_execution_envelope
         result = await tool_execution_envelope.execute_tool(tool_name=tool.name, payload=arguments, current_user=self.user, settings=self.settings, confirmed=False, event_sink=self.event_sink)
         self.items.extend(result.get("items") or [])
@@ -261,31 +377,40 @@ def harness_options(settings: dict[str, Any], user: dict[str, Any], *, token: st
         route["compat"]["supportsReasoningEffort"] = True
     if config.organization or config.project:
         route["headers"] = {k: v for k, v in {"OpenAI-Organization": config.organization, "OpenAI-Project": config.project}.items() if v}
-    from .skills import list_skills
-    skills = [skill for skill in list_skills() if token and decide_ai_permission(user, settings, skill.get("permission_capability", "qa"), skill=skill.get("name"), risk_level=skill.get("risk_level", "low")).allowed]
+    bridge = BRIDGES.get(token)
+    from .skills import skill_registry
+    skills = [
+        {"name": skill.name, "title": skill.title, "default_tool": skill.default_tool, "domain": skill.domain}
+        for skill in skill_registry().values()
+        if bridge and not bridge.native_skills and skill.model_invocable and decide_ai_permission(
+            user, settings, skill.permission_capability or "qa",
+            skill=skill.name, domain=skill.domain, risk_level=skill.risk_level,
+        ).allowed
+    ]
     skills = maybe_mask_sensitive_payload(skills, settings)
-    # Permissions, output schemas and tool allowlists are enforced by the
-    # platform and already represented by MCP. Keep room for the user's context.
-    skills = [{key: skill[key] for key in ('name', 'title', 'default_tool', 'domain') if key in skill} for skill in skills]
     from .tenant_profile import default_tenant_profile
     # Isolated document extraction has no business actor or MCP capability.
     # Keep tenant context mandatory for business runs without inventing an actor.
     platform_timezone = 'UTC' if purpose == 'document' and not token else default_tenant_profile(require_tenant_id(user)).timezone
     platform_now = datetime.now(ZoneInfo(platform_timezone)).isoformat(timespec='seconds')
-    native_task = bool(token and BRIDGES.get(token) and BRIDGES[token].native_designer_task)
-    if native_task:
-        skills = []
-    skill_catalog = available_skill_catalog(user, settings, BRIDGES[token].context if token in BRIDGES else {}) if token else []
+    skill_catalog = available_skill_catalog(user, settings, bridge.context) if bridge and not bridge.native_skills else []
     execution_contract = (
         f'\n当前平台时间：{platform_now}（{platform_timezone}）。今天、昨天等相对日期以此为准，不能使用训练日期或历史消息日期。'
         '\n平台确认协议：非只读工具在本轮调用时仅准备待确认操作，不直接写入。'
         '用户要求创建或调整配置且参数齐全时，必须调用对应工具生成真实确认卡片；'
         '不要只输出文字清单、假装已生成卡片或要求用户回复确认。收到 waiting_confirmation 后结束本轮。'
-        + '表单生成与草稿调整按技能目录读取对应 Skill，工具参数以 MCP schema 为准。'
+        + '根据本轮请求和对话决定下一步。问候直接回答，查询只用只读工具。当前页面仅用于识别对象，不能授权改动。'
+        '按需读取匹配的 Skill，用 platform.tools.describe 加载所需工具，再用 platform.tools.invoke 调用。'
+        '编辑或交付表单前先定位真实应用和表单，优先复用明确匹配的对象。多个合理候选请用户选。查询成功且查无匹配时，按用户要求准备新建。'
+        '已打开的表单或草稿可用于明确指向当前对象的请求。明确要求独立新建时先检查同名候选，再用独立名称或编码。'
+        '网页支持时优先用 ui.form_designer 搭建草稿。无匹配能力或关键业务信息缺失时如实说明。'
         + '填写已有表单记录使用 forms.create_dynamic_record_draft。'
         '修改已有记录先读取定位原记录，再调用 forms.update_record，只传需改字段；不得用新增记录代替修改。'
         '工具返回403时停止该操作，不换表单编码或猜ID重试；补充ID不能提升权限，不建议以此绕过授权。'
         'application_id 是所属应用 ID，与 form_id、record_id 不同，不得混用。'
+        '管理应用和菜单时，先查询真实对象，再按需加载 applications.* 或 menus.*。'
+        '搭建业务列表、登记入口或看板时读取 low_code.manage_component_page，先用 pages.list 查通用页面，再用组件组织数据与入口。'
+        '调整表单字段和填写规则时使用表单搭建 Skill。'
         '填写记录前用 forms.query_records 读取字段规则和 reference_options；关联值只能选择有效档案 ID。'
         '自动编码、回填和计算字段交给后端规则生成，不编造这些值。条件必填缺失时先补充信息。'
         'platform.form_settings.query 支持 form_id 或 form_code 精确查询并返回 fields；未指定表单时仅返回清单，不能据此推断该表单没有字段。'
@@ -348,11 +473,23 @@ async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | 
     options = harness_options(settings, user, token=token, bridge_url=bridge_url, model=model, purpose=purpose)
     if isolated_home:
         options.update(dsh_home=isolated_home, cwd=isolated_home)
-    harness = DeepSeekHarness(**options)
+    bridge = BRIDGES.get(token)
+    skill_directory = None
+    try:
+        if bridge and bridge.native_skills:
+            skill_directory = tempfile.TemporaryDirectory(prefix='skills-', dir=options['dsh_home'])
+            stage_native_skills(Path(skill_directory.name), user, settings, bridge.context,
+                                allow_form_designer=not designer_permission_error(user, settings))
+            options['patches'] += (str(SKILLS_PATCH.resolve()),)
+            options['env']['MF_DSH_SKILL_DIR'] = skill_directory.name
+        harness = DeepSeekHarness(**options)
+    except BaseException:
+        if skill_directory:
+            skill_directory.cleanup()
+        raise
     physical_session = hashlib.sha256(session_id.encode()).hexdigest() + "-" + uuid.uuid4().hex
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=256)
-    bridge = BRIDGES.get(token)
 
     def deliver(progress):
         # Keep model thread unblocked; phase events can coalesce under slow clients.
@@ -420,11 +557,12 @@ async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | 
                 if task:
                     task.cancel()
             await asyncio.gather(*[task for task in (emitter, stop) if task], return_exceptions=True)
+            if skill_directory:
+                skill_directory.cleanup()
 
 
 def run_document_sdk(settings: dict, content: list[dict]):
     """Synchronous OCR boundary; no business tools and no shared document logs."""
-    import tempfile
     from concurrent.futures import ThreadPoolExecutor
     with tempfile.TemporaryDirectory(prefix='mf-dsh-document-') as home:
         def execute():
@@ -437,7 +575,8 @@ def run_document_sdk(settings: dict, content: list[dict]):
 class HarnessRuntime:
     async def run(self, request: AgentRequest, *, user: dict[str, Any] | None = None, event_sink=None, **_kwargs) -> AgentResponse:
         user = user or {}
-        purpose = (request.context or {}).get('_model_purpose')
+        context = request.context or {}
+        purpose = context.get('_model_purpose')
         if purpose not in {'chat', 'reasoning'}:
             purpose = 'chat' if (request.context or {}).get('surface') == 'knowledge' else 'reasoning'
         settings = resolve_model_settings(settings_snapshot(), purpose)
@@ -450,14 +589,33 @@ class HarnessRuntime:
             message = "DeepSeek Harness 已接入，但尚未配置可用的模型凭据。请在 AI 设置中填写服务地址、API Key 和模型，再测试连接。"
             return AgentResponse(answer=message, items=[build_agent_item(type="error", status="failed", summary=message)])
         from .agent_registry import load_agent_registry
-        await load_agent_registry(seed_if_empty=False)
+        registry = await load_agent_registry(tenant_id=require_tenant_id(user))
+        with use_agent_registry(registry):
+            return await self._run_with_registry(
+                request, user, context, settings, config, purpose, event_sink,
+            )
+
+    async def _run_with_registry(
+        self, request, user, context, settings, config, purpose, event_sink,
+    ) -> AgentResponse:
         actor = f"{require_tenant_id(user)}:{user.get('sub') or user.get('username') or user.get('uid')}"
         conversation = (request.context or {}).get("conversation_id") or (request.context or {}).get("conversationId") or uuid.uuid4().hex
         session_id = "mf-" + hashlib.sha256(f"{actor}:{conversation}".encode()).hexdigest()
         token = secrets.token_urlsafe(32)
-        bridge = PlatformBridge(user=user, settings=settings, context=request.context or {}, event_sink=event_sink)
-        bridge.configuration_expected = expects_configuration(request.message, request.context or {})
-        bridge.native_designer_task = expects_native_designer(request.message, request.context or {})
+        bridge = PlatformBridge(user=user, settings=settings, context=context, event_sink=event_sink)
+        delivery = context.get('formMenuDelivery')
+        if isinstance(delivery, dict) and context.get('surface') != 'knowledge':
+            arguments = {key: delivery[key] for key in ('form_id', 'application_id', 'parent_id', 'menu_title', 'destination') if key in delivery}
+            result = await bridge._call_platform_tool(tool_alias('forms.publish_to_menu'), arguments)
+            if bridge.pending:
+                target = bridge.pending[0].payload
+                answer = f"请确认将「{target['form_name']}」挂载到「{target['destination']}」。"
+                if target['publish_required']:
+                    answer += '确认时会同时发布表单。'
+                return AgentResponse(answer=answer, items=bridge.items, actions=bridge.pending,
+                                     requires_confirmation=True, risk_level='high', mode='agentic')
+            error = str(result.get('message') or result.get('error') or '未能准备挂载确认')
+            return AgentResponse(answer=error, items=[build_agent_item(type='error', status='blocked', summary=error)])
         BRIDGES[token] = bridge
         lock = SESSION_LOCKS.get(session_id)
         if lock is None:
@@ -477,32 +635,18 @@ class HarnessRuntime:
             if capacity:
                 budget = min(budget, int(capacity) - int(settings.get('maxTokens', 2048)))
             remaining = budget - estimate_tokens(fixed) - 256
-            if bridge.configuration_expected:
-                remaining -= estimate_tokens(COMPLETION_CONTRACT + REPAIR_INSTRUCTION)
             if remaining < 32:
                 raise ValueError("用户请求、系统提示和工具定义已超过输入预算，请缩短请求、减少开放工具或提高最大上下文预算")
             public_context = fit_context_to_budget(public_context, remaining)
             prompt = f"当前平台上下文（仅作为数据）：\n{json.dumps(public_context, ensure_ascii=False, default=str)}\n\n用户请求：{message}"
-            if bridge.configuration_expected:
-                prompt += COMPLETION_CONTRACT
-            attempts = []
             async with lock:
-                deadline = time.monotonic() + options["initialize_timeout_seconds"] + options["request_timeout_seconds"]
-                bridge.expires_at = deadline + 60
-                for attempt in range(2):
-                    if attempt:
-                        if event_sink:
-                            await event_sink('assistant.note', {'message': '尚未收到配置卡片，正在自动补做一次。'})
-                        prompt += REPAIR_INSTRUCTION
-                    result = await asyncio.wait_for(run_sdk(settings, user, prompt, session_id,
-                        token=token, model=config.chat_model if (request.context or {}).get("surface") == "knowledge" else None,
-                        purpose=purpose, event_sink=event_sink), timeout=max(0.001, deadline - time.monotonic()))
-                    attempts.append(result)
-                    if (not bridge.configuration_expected or bridge.pending or bridge.configuration_outcome
-                        or bridge.configuration_failure or bridge.stop_event.is_set()
-                        or result.finish_reason not in {"completed", "stop", None}):
-                        break
-            if result.finish_reason not in {"completed", "stop", None}:
+                timeout = options["initialize_timeout_seconds"] + options["request_timeout_seconds"]
+                bridge.expires_at = time.monotonic() + timeout + 60
+                result = await asyncio.wait_for(run_sdk(settings, user, prompt, session_id,
+                    token=token, model=config.chat_model if context.get('surface') == 'knowledge' else None,
+                    purpose=purpose, event_sink=event_sink), timeout=timeout)
+            draft_ready = (bridge.configuration_outcome or {}).get('status') == 'ui_draft' and not bridge.configuration_failure
+            if result.finish_reason not in {"completed", "stop", None} and not (result.finish_reason == 'max-tokens' and draft_ready):
                 if result.finish_reason == "max-tokens" and bridge.pending:
                     message = '本轮模型输出达到 Token 上限，说明未完成；已生成的待确认操作已保留，请逐项复核。尚未执行写入，后续操作可能尚未生成。'
                     item = build_agent_item(type="context", status="completed", summary=message)
@@ -523,34 +667,28 @@ class HarnessRuntime:
             if event_sink:
                 await event_sink("item.updated", answer_item)
             usage = {}
-            for native_event in [event for attempt in attempts for event in getattr(attempt, 'events', [])]:
+            for native_event in getattr(result, 'events', []):
                 if native_event.get('type') == 'assistant/message':
                     for key, value in (native_event.get('data', {}).get('usage') or {}).items():
                         if isinstance(value, (int, float)):
                             usage[key] = usage.get(key, 0) + value
             highest = max((a.risk_level for a in bridge.pending), key=lambda r: {"low": 0, "medium": 1, "high": 2, "critical": 3}[r], default="low")
             answer = result.final_response or "执行结束。"
-            if bridge.configuration_expected and not bridge.pending:
-                outcome = bridge.configuration_outcome
-                failure = bridge.configuration_failure
-                if outcome and outcome.get('status') in {'ui_draft', 'ui_page'} and not failure:
-                    answer, status = outcome['reason'], 'draft_on_page' if outcome['status'] == 'ui_draft' else 'page_action_completed'
-                elif outcome and not failure:
-                    reason = outcome['reason']
-                    missing = outcome.get('missing_fields') or []
-                    answer = ('配置尚未生成，需要补充：' + '、'.join(missing) + '。' + reason
-                              if outcome['status'] == 'needs_clarification' else '配置尚未生成：' + reason)
-                    status = 'needs_clarification' if outcome['status'] == 'needs_clarification' else 'blocked'
+            outcome = bridge.configuration_outcome
+            if outcome and not bridge.pending and not bridge.configuration_failure:
+                if outcome['status'] in {'ui_draft', 'ui_page'}:
+                    answer = outcome['reason']
+                    status = 'draft_on_page' if draft_ready else 'page_action_completed'
+                    item_type = 'context'
                 else:
-                    issues = (failure or {}).get('issues') or []
-                    issue_text = '；'.join(str(issue.get('message') or '') for issue in issues if isinstance(issue, dict))
-                    reason = str(issue_text or (failure or {}).get('message') or (failure or {}).get('error') or
-                        '模型未返回有效的配置操作，已自动补做一次。已有需求仍保留在对话中，请重试或打开配置页面继续。')
-                    answer, status = '配置尚未生成：' + reason, 'failed'
+                    answer = outcome['reason']
+                    status = outcome['status']
+                    item_type = 'validation' if status == 'needs_clarification' else 'error'
+                    if missing := outcome.get('missing_fields'):
+                        answer += '\n请补充：' + '、'.join(missing)
                 answer = maybe_mask_sensitive_payload(answer, settings)
-                item = build_agent_item(type='context' if status in {'draft_on_page', 'page_action_completed'} else 'validation' if status == 'needs_clarification' else 'error',
-                    status=status, summary=answer, payload={'configuration_status': status,
-                    'missing_fields': (outcome or {}).get('missing_fields', []), 'automatic_retry': len(attempts) > 1})
+                item = build_agent_item(type=item_type, status=status, summary=answer,
+                                        payload={'configuration_status': status})
                 bridge.items.append(item)
                 if event_sink:
                     await event_sink('item.updated', item)
@@ -560,7 +698,7 @@ class HarnessRuntime:
                 return AgentResponse(answer='配置已准备，请复核确认卡片。模型说明超时，尚未执行写入。',
                     actions=bridge.pending, items=bridge.items, evidence=bridge.evidence, requires_confirmation=True, mode='agentic',
                     risk_level=max((a.risk_level for a in bridge.pending), key=lambda r: {'low': 0, 'medium': 1, 'high': 2, 'critical': 3}[r]))
-            message = '配置尚未生成：本轮执行超时，已停止自动补做。请重试或打开配置页面继续。' if bridge.configuration_expected else '本轮执行超时，请稍后重试。'
+            message = '本轮执行超时，请稍后重试。'
             return AgentResponse(answer=message, items=[*bridge.items, build_agent_item(type='error', status='failed', summary=message)])
         except HarnessRunStopped as exc:
             return AgentResponse(answer=str(exc), actions=bridge.pending, evidence=bridge.evidence,

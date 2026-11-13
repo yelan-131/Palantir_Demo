@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
+  Alert,
   Table,
   Button,
   Modal,
@@ -163,7 +164,7 @@ export default function PipelinePage() {
   const handleRun = async (id: number) => {
     try {
       await runPipeline(id);
-      message.success('管线已触发运行');
+      message.success('已记录模拟运行');
       fetchPipelines();
     } catch {
       message.error('运行管线失败');
@@ -322,6 +323,7 @@ export default function PipelinePage() {
 
   return (
     <div className="pipeline-page">
+      <Alert type="info" showIcon message="当前为模拟运行，运行记录不代表源数据已同步。" style={{ marginBottom: 16 }} />
       {/* Stats */}
       <Row className="page-summary-metrics" gutter={[16,16]} style={{ marginBottom: 16, marginInline: 0 }}>
         <Col xs={12} md={6}>

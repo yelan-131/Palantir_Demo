@@ -31,9 +31,11 @@ def fit_context_to_budget(payload: dict[str, Any], budget: int) -> dict[str, Any
     # these objects whole, trimming replaceable history and evidence first.
     protected = {"configurationDraft", "pendingActionState", "pending_action_state",
                  "resumeDraft", "resume_draft", "form_id", "formId", "application_id",
-                 "designerContext", "pageControlsSupported"}
+                 "designerContext", "componentPageContext", "pageControlsSupported", "chatAttachments"}
     required = {key: value for key, value in trimmed.items() if key in protected}
     if required and estimate_tokens(required) > budget:
+        if "chatAttachments" in required:
+            raise ValueError("附件摘录与当前上下文超过输入预算，请减少附件或提高最大上下文预算")
         raise ValueError("当前配置草稿超过上下文预算，请提高上下文预算或缩小配置范围；原草稿未修改")
     while trimmed and estimate_tokens(trimmed) > budget:
         candidates = [key for key in trimmed if key not in protected]

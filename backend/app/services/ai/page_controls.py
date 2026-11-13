@@ -11,6 +11,7 @@ from app.models.relational import Form, FormField
 from .policies import decide_ai_permission
 from .policies import action_is_forbidden
 from .permission_resolver import PermissionResolver, PermissionDecision, build_default_rules, load_permission_rules
+from .form_menu_tools import FormMenuTarget, resolve_menu_target
 
 TOOL = 'ui.form_designer'
 
@@ -123,6 +124,7 @@ class NewFormDraft(BaseModel):
     code: str = Field(pattern=r'^[a-z][a-z0-9_]{0,62}$')
     description: str = Field(default='', max_length=1000)
     fields: list[DraftField] = Field(min_length=1, max_length=60)
+    menu_target: FormMenuTarget | None = None
 
     @model_validator(mode='after')
     def unique_fields(self):
@@ -172,25 +174,57 @@ class PageControlRequest(BaseModel):
         return self
 
 
+def designer_permission_error(user, settings):
+    decision = decide_ai_permission(user, settings, 'config', domain='low-code', skill=TOOL)
+    if not user.get('is_admin') or not decision.allowed:
+        reason = decision.reason if not decision.allowed else '需要管理员权限'
+        if reason == '业务域未开放':
+            return '低代码业务域未开放。请在「AI 与平台设置 → 执行与安全 → 开放业务范围」启用「低代码」后重试。'
+        return '当前用户无权操作表单设计器：' + reason
+    resolved, reason = PermissionResolver(build_default_rules() + load_permission_rules(settings)).resolve(TOOL, user, 'low', 'low-code')
+    if resolved == PermissionDecision.DENY or action_is_forbidden(settings, TOOL, side_effect='read'):
+        return reason or '页面调用已被策略禁用'
+    return None
+
+
+async def dispatch_page_action(bridge, command):
+    future = asyncio.get_running_loop().create_future()
+    bridge.page_actions[command['id']] = future
+    try:
+        await bridge.event_sink('ui.action', command)
+        return await asyncio.wait_for(future, timeout=20)
+    except asyncio.TimeoutError:
+        await bridge.event_sink('ui.action.cancel', {'id': command['id']})
+        raise
+    finally:
+        bridge.page_actions.pop(command['id'], None)
+
+
 async def call_page_control(bridge, arguments):
     try:
         request = PageControlRequest.model_validate(arguments)
     except ValueError as exc:
         return {'status': 'validation_failed', 'message': str(exc)}
-    # The designer uses the same admin/config boundary as native configuration.
-    decision = decide_ai_permission(bridge.user, bridge.settings, 'config', domain='low-code', skill=TOOL)
-    if not bridge.user.get('is_admin') or not decision.allowed:
-        return {'status': 'blocked', 'message': '当前用户无权操作表单设计器：' + decision.reason}
-    resolved, reason = PermissionResolver(build_default_rules() + load_permission_rules(bridge.settings)).resolve(TOOL, bridge.user, 'low', 'low-code')
-    if resolved == PermissionDecision.DENY or action_is_forbidden(bridge.settings, TOOL, side_effect='read'):
-        return {'status': 'blocked', 'message': reason or '页面调用已被策略禁用'}
+    if error := designer_permission_error(bridge.user, bridge.settings):
+        return {'status': 'blocked', 'message': error}
     if request.action == 'draft_new':
         async with db_session() as db:
             existing = await db.scalar(select(Form).where(Form.tenant_id == bridge.user['tenant_id'], Form.code == request.draft.code))
             if existing:
                 return {'status': 'validation_failed', 'message': '表单编码已存在，请为新表单选择另一个编码；不得打开或覆盖同名已有表单。'}
+            menu_target = None
+            if request.draft.menu_target:
+                from fastapi import HTTPException
+                try:
+                    app, parent = await resolve_menu_target(db, bridge.user['tenant_id'], request.draft.menu_target)
+                except HTTPException as error:
+                    return {'status': 'validation_failed', 'message': str(error.detail)}
+                menu_target = {**request.draft.menu_target.model_dump(exclude_none=True),
+                    'destination': ' / '.join([app.name, *([parent.title] if parent else []), request.draft.menu_target.menu_title or request.draft.name])}
         action = {'id': uuid.uuid4().hex, 'type': 'form_designer', 'form_id': 0,
                   'draft_id': uuid.uuid4().hex, 'action': request.action, 'draft': request.draft.model_dump(exclude_none=True)}
+        if menu_target:
+            action['draft']['menu_target'] = menu_target
     elif request.draft_id:
         context = bridge.context.get('designerContext') or {}
         if context.get('draft_id') != request.draft_id or context.get('form_id'):
@@ -234,16 +268,7 @@ async def call_page_control(bridge, arguments):
                       'action': request.action, 'field_name': request.field_name,
                       'properties': request.properties.model_dump(exclude_none=True) if request.properties else {}}
     async def dispatch(command):
-        future = asyncio.get_running_loop().create_future()
-        bridge.page_actions[command['id']] = future
-        try:
-            await bridge.event_sink('ui.action', command)
-            return await asyncio.wait_for(future, timeout=20)
-        except asyncio.TimeoutError:
-            await bridge.event_sink('ui.action.cancel', {'id': command['id']})
-            raise
-        finally:
-            bridge.page_actions.pop(command['id'], None)
+        return await dispatch_page_action(bridge, command)
 
     try:
         if request.action == 'draft_new':

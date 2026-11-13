@@ -97,7 +97,7 @@ async def test_harness_bounds_final_prompt_and_rejects_oversized_fixed_input(mon
     # large client context rather than rejection of the fixed tool schema.
     settings = merge_ai_settings({'apiKey': 'test-only-key', 'agentMode': 'confirm', 'chatModel': 'test', 'reasoningModel': 'test', 'contextPolicy': {'maxContextTokens': 24000}})
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     run = AsyncMock(return_value=SimpleNamespace(finish_reason='completed', final_response='OK', session_id='test'))
     monkeypatch.setattr(mod, 'run_sdk', run)
     request = AgentRequest(message='test', context={'semanticContext': {'records': ['中文' * 50000]}, 'clientExtra': 'x' * 50000})

@@ -166,8 +166,8 @@ class AgentValidationService:
         tool_def = get_tool(tool_name)
         if not tool_def:
             return []
-        from .tool_registry import _normalize_input_schema
-        schema = _normalize_input_schema(tool_def.input_schema or {})
+        from .tool_registry import to_openai_function
+        schema = to_openai_function(tool_def)["function"]["parameters"]
         issues = []
         def check(value, spec, path):
             expected = spec.get("type")
@@ -179,7 +179,11 @@ class AgentValidationService:
                 issues.append(ValidationIssue("error", "invalid_parameter_enum", f"{path} has an unsupported value", tool=tool_name))
             if isinstance(value, dict):
                 for key in spec.get("required", []):
-                    if key not in value or value[key] in (None, ""):
+                    field = spec.get("properties", {}).get(key, {})
+                    nullable = field.get("type") == "null" or any(
+                        option.get("type") == "null" for option in field.get("anyOf", []) if isinstance(option, dict)
+                    )
+                    if key not in value or value[key] == "" or (value[key] is None and not nullable):
                         issues.append(ValidationIssue("error", "required_field_missing", f"{path + '.' if path else ''}{key} is required", tool=tool_name))
                 for key, child in spec.get("properties", {}).items():
                     if key in value:
@@ -285,6 +289,8 @@ class AgentValidationService:
 
     @staticmethod
     def _expected_result_keys(tool_name: str) -> set[str]:
+        if tool_name == 'forms.publish_to_menu':
+            return {'menu_id'}
         if tool_name == "forms.create_form_definition":
             return {"form", "route_path"}
         if tool_name == "forms.add_form_field":

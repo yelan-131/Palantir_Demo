@@ -7,7 +7,9 @@ import json
 import time
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from app.services.ai.agent_definition import use_agent_registry
 from app.services.ai.harness_runtime import BRIDGES
+from app.services.ai.tenant_context import require_tenant_id
 
 router = APIRouter()
 
@@ -25,7 +27,11 @@ async def harness_mcp(request: Request):
     if method == 'initialize':
         result = {'protocolVersion': (body.get('params') or {}).get('protocolVersion', '2025-03-26'), 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'manufoundry-business-tools', 'version': '1.0'}}
     elif method == 'tools/list':
-        result = {'tools': bridge.available_tools()}
+        from app.services.ai.agent_registry import load_agent_registry
+
+        registry = await load_agent_registry(tenant_id=require_tenant_id(bridge.user))
+        with use_agent_registry(registry):
+            result = {'tools': bridge.available_tools()}
     elif method == 'tools/call':
         params = body.get('params') or {}
         output = await bridge.call_tool(str(params.get('name') or ''), params.get('arguments') or {})

@@ -19,7 +19,7 @@ def test_new_business_window_leaves_room_for_context_and_tool_results(monkeypatc
     monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
     settings = merge_ai_settings({'apiKey': 'test-key', 'contextPolicy': {'maxContextTokens': 12000}})
     bridge = PlatformBridge(USER, settings, {'pageControlsSupported': True}, event_sink=AsyncMock())
-    bridge.native_designer_task = native
+    bridge.native_skills = native
     monkeypatch.setitem(BRIDGES, 'test', bridge)
     prompt = harness_options(settings, USER, token='test')['env']['DSH_SYSTEM_PROMPT']
     fixed = estimate_tokens(prompt + json.dumps(bridge.available_tools(), ensure_ascii=False))

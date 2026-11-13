@@ -67,8 +67,20 @@ def to_openai_function(tool: ToolDefinition) -> dict[str, Any]:
         description += f" (副作用类型: {tool.side_effect}, 风险等级: {tool.risk_level})"
 
     parameters = _normalize_input_schema(tool.input_schema)
+    if tool.name == 'platform.application_settings.query':
+        description += ' 使用 subject=menus 查询应用菜单；使用 subject=pages 查询已发布组件页面及其 page_code。'
+        properties = parameters.setdefault('properties', {})
+        subject = properties.get('subject')
+        if isinstance(subject, dict) and isinstance(subject.get('enum'), list) and 'pages' not in subject['enum']:
+            subject['enum'] = [*subject['enum'], 'pages']
+        properties.update({
+            'application_id': {'type': 'integer', 'description': '查询指定应用或其菜单时使用'},
+            'application_name': {'type': 'string', 'description': '按应用名称精确查询'},
+        })
     if tool.name == 'platform.form_settings.query':
         parameters.setdefault('properties', {}).update({
+            'application_id': {'type': 'integer', 'description': '限定到指定应用下已关联的表单'},
+            'form_name': {'type': 'string', 'description': '按表单名称搜索'},
             'form_id': {'type': 'integer', 'description': '精确查询表单及其已发布字段'},
             'form_code': {'type': 'string', 'description': '精确查询表单及其已发布字段'},
         })

@@ -11,11 +11,16 @@ from cryptography.fernet import Fernet, InvalidToken
 PREFIX = "enc:fernet:v1:"
 
 
+class CredentialStoreError(RuntimeError):
+    pass
+
+
 def _cipher() -> Fernet:
     from app.config import settings
-    secret = os.getenv("AI_SETTINGS_ENCRYPTION_KEY") or settings.SECRET_KEY
+
+    secret = os.getenv("AI_SETTINGS_ENCRYPTION_KEY") or settings.AI_SETTINGS_ENCRYPTION_KEY or settings.SECRET_KEY
     if secret == "manufoundry-secret-key-change-in-production" or len(secret) < 32:
-        raise RuntimeError("保存 AI 密钥需要配置至少 32 字符的 AI_SETTINGS_ENCRYPTION_KEY 或 SECRET_KEY")
+        raise CredentialStoreError("保存 AI 密钥需要配置至少 32 字符的 AI_SETTINGS_ENCRYPTION_KEY 或 SECRET_KEY")
     key = hashlib.sha256(("ai-provider-credentials:v1:" + secret).encode()).digest()
     return Fernet(base64.urlsafe_b64encode(key))
 
@@ -28,7 +33,7 @@ def reveal_credentials(value: dict) -> dict:
             try:
                 result[name] = _cipher().decrypt(secret[len(PREFIX):].encode()).decode()
             except InvalidToken:
-                raise RuntimeError("AI 密钥解密失败，请恢复原加密密钥或重新配置凭据") from None
+                raise CredentialStoreError("AI 密钥解密失败，请恢复原加密密钥或重新配置凭据") from None
     for service in result.get('modelServices', []):
         service.update(reveal_credentials(service))
     return result

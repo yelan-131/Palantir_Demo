@@ -614,6 +614,20 @@ export const streamAgentChat = async (
   signal?: AbortSignal,
 ) => postAgentEventStream('/ai/agent/stream', data, onEvent, signal);
 
+export const previewAgentAttachment = async (file: File, signal: AbortSignal) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const { data } = await api.post<{ name: string; excerpt: string; sampled: boolean }>(
+      '/ai/agent/attachment-preview', formData, { signal },
+    );
+    return data;
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? error.response?.data?.detail : undefined;
+    throw new Error(typeof detail === 'string' ? detail : '附件读取失败，请重试');
+  }
+};
+
 export const acknowledgePageAction = (actionId: string, data: Record<string, unknown>) =>
   api.post(`/ai/page-actions/${actionId}/result`, data);
 export const reviseAgentConfiguration = (runId: string, data: Record<string, unknown>) =>
@@ -657,8 +671,20 @@ export const getAISettings = () => api.get('/ai/settings');
 export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
 export const testSavedAISettings = (settings?: Record<string, unknown>) => api.post('/ai/settings/test', settings ? { settings } : undefined);
 export const getAIAgentRegistry = () => api.get('/ai/agent-registry');
+export const getAIRegistrySkillInstructions = (name: string, signal: AbortSignal) =>
+  api.get<{ data: { instructions: string | null } }>(`/ai/agent-registry/skill-instructions/${encodeURIComponent(name)}`, { signal });
 export const seedAIAgentRegistry = () => api.post('/ai/agent-registry/seed');
 export const updateAIAgentRegistry = (payload: Record<string, unknown>) => api.put('/ai/agent-registry', payload);
+export type SkillMarkdown = {
+  name: string;
+  description: string;
+  instructions: string;
+  source_markdown: string;
+  model_invocable?: boolean;
+  user_invocable?: boolean;
+};
+export const parseAIRegistrySkill = (markdown: string) =>
+  api.post<{ data: SkillMarkdown }>('/ai/agent-registry/parse-skill', { markdown });
 
 // Reports
 export const listReports = (params?: Record<string, unknown>) => api.get('/reports/', { params });

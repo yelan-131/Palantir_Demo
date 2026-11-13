@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { acknowledgePageAction } from '@/services/api';
 import { useAiWorkbench } from './context';
+import type { ComponentOperation } from '@/pages/ComponentPages/componentOperations';
 
 export interface FieldProperties {
   label?: string; required?: boolean; readonly?: boolean; placeholder?: string; min?: number; max?: number;
@@ -19,6 +20,7 @@ export interface DraftField extends FieldProperties {
 }
 export interface NewFormDraft {
   name: string; code: string; description: string; fields: DraftField[];
+  menu_target?: { application_id: number; parent_id?: number; menu_title?: string; destination: string };
 }
 
 export interface PageAction {
@@ -33,9 +35,14 @@ export interface PageAction {
   properties?: FieldProperties;
 }
 export type PageController = (action: PageAction) => Promise<Record<string, unknown>>;
+export type ComponentPageAction = { id: string; type: 'component_page'; page_code: string } & (
+  { action: 'inspect'; widget_id?: string } | { action: 'apply'; operations: ComponentOperation[] }
+);
+export type BrowserPageAction = PageAction | ComponentPageAction;
+export type ComponentPageController = (action: ComponentPageAction) => Promise<Record<string, unknown>>;
 
 export function AiPageActionRouter() {
-  const { pageActions, finishPageAction, getPageController, controllerVersion } = useAiWorkbench();
+  const { pageActions, finishPageAction, getPageController, getComponentPageController, controllerVersion } = useAiWorkbench();
   const navigate = useNavigate(), location = useLocation();
   const running = useRef(new Set<string>());
   const navigating = useRef(new Set<string>());
@@ -49,7 +56,7 @@ export function AiPageActionRouter() {
     const timer = window.setTimeout(() => {
       if (activeAction.current === action.id) {
         activeAction.current = undefined;
-        const atDesigner = currentLocation.current.pathname === (action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`);
+        const atDesigner = action.type === 'form_designer' && currentLocation.current.pathname === (action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`);
         const error = running.current.has(action.id) ? '设计器操作未及时完成，已停止等待；页面可能保留部分修改，请检查当前草稿。' : atDesigner ? '设计器尚未加载完成，请稍后重试。' : '未能进入设计器，请检查当前页面状态后重试。';
         void acknowledgePageAction(action.id, { ok: false, error }).catch(() => undefined);
         running.current.delete(action.id);
@@ -61,6 +68,28 @@ export function AiPageActionRouter() {
   }, [action?.id, finishPageAction]);
   useEffect(() => {
     if (!action || running.current.has(action.id)) return;
+    const execute = async (controller: () => Promise<Record<string, unknown>>) => {
+      try {
+        const state = await controller();
+        if (activeAction.current !== action.id) return;
+        await acknowledgePageAction(action.id, { ok: true, state });
+      } catch (error) {
+        if (activeAction.current === action.id) await acknowledgePageAction(action.id, { ok: false, error: error instanceof Error ? error.message : '页面操作失败' }).catch(() => undefined);
+      } finally {
+        running.current.delete(action.id);
+        navigating.current.delete(action.id);
+        finishPageAction(action.id);
+      }
+    };
+    if (action.type === 'component_page') {
+      const controller = getComponentPageController(action.page_code);
+      running.current.add(action.id);
+      void execute(async () => {
+        if (!controller) throw new Error('目标业务页面已关闭或已切换，请打开目标页面后重试');
+        return controller(action);
+      });
+      return;
+    }
     const targetPath = action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`;
     if (action.action === 'draft_new' && (location.pathname !== targetPath || new URLSearchParams(location.search).get('draft') !== action.draft_id)) {
       // Navigation may suspend while the native designer chunk loads. Repeating
@@ -77,19 +106,7 @@ export function AiPageActionRouter() {
       return;
     }
     running.current.add(action.id);
-    void (async () => {
-      try {
-        const state = await controller(action);
-        if (activeAction.current !== action.id) return;
-        await acknowledgePageAction(action.id, { ok: true, state });
-      } catch (error) {
-        if (activeAction.current === action.id) await acknowledgePageAction(action.id, { ok: false, error: error instanceof Error ? error.message : '页面操作失败' }).catch(() => undefined);
-      } finally {
-        running.current.delete(action.id);
-        navigating.current.delete(action.id);
-        finishPageAction(action.id);
-      }
-    })();
-  }, [action, location.pathname, location.search, controllerVersion, getPageController, finishPageAction, navigate]);
+    void execute(() => controller(action));
+  }, [action, location.pathname, location.search, controllerVersion, getPageController, getComponentPageController, finishPageAction, navigate]);
   return null;
 }

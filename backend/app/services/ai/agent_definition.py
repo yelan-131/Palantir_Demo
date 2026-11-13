@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,16 @@ AGENT_DIR = Path(__file__).resolve().parents[4] / ".agent"
 REGISTRY_SEED_DIR = Path(__file__).resolve().parents[4] / "data" / "agent_registry"
 _RUNTIME_SKILL_REGISTRY: dict[str, dict[str, Any]] | None = None
 _RUNTIME_TOOL_REGISTRY: dict[str, dict[str, Any]] | None = None
+_REQUEST_REGISTRY: ContextVar[dict[str, Any] | None] = ContextVar("request_agent_registry", default=None)
+
+
+@contextmanager
+def use_agent_registry(registry: dict[str, Any]):
+    token = _REQUEST_REGISTRY.set(registry)
+    try:
+        yield
+    finally:
+        _REQUEST_REGISTRY.reset(token)
 
 
 def _read_agent_file(name: str) -> str:
@@ -46,18 +58,36 @@ def load_action_contracts() -> dict[str, dict[str, Any]]:
     return contracts
 
 
-@lru_cache(maxsize=8)
 def load_skill_registry() -> dict[str, dict[str, Any]]:
+    registry = _REQUEST_REGISTRY.get()
+    if registry is not None:
+        return registry["skills"]
+    return _legacy_skill_registry()
+
+
+@lru_cache(maxsize=8)
+def _legacy_skill_registry() -> dict[str, dict[str, Any]]:
     if _RUNTIME_SKILL_REGISTRY is not None:
         return dict(_RUNTIME_SKILL_REGISTRY)
     return _load_registry_seed("skills.json")
 
 
-@lru_cache(maxsize=8)
 def load_tool_registry() -> dict[str, dict[str, Any]]:
+    registry = _REQUEST_REGISTRY.get()
+    if registry is not None:
+        return registry["tools"]
+    return _legacy_tool_registry()
+
+
+@lru_cache(maxsize=8)
+def _legacy_tool_registry() -> dict[str, dict[str, Any]]:
     if _RUNTIME_TOOL_REGISTRY is not None:
         return dict(_RUNTIME_TOOL_REGISTRY)
     return _load_registry_seed("tools.json")
+
+
+load_skill_registry.cache_clear = _legacy_skill_registry.cache_clear
+load_tool_registry.cache_clear = _legacy_tool_registry.cache_clear
 
 
 def set_runtime_agent_registry(*, skills: dict[str, dict[str, Any]], tools: dict[str, dict[str, Any]]) -> None:

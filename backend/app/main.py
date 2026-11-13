@@ -40,11 +40,6 @@ async def lifespan(app: FastAPI):
     try:
         from app.database import init_db
         await init_db()
-        from app.services.ai.agent_registry import AgentRegistryError, load_agent_registry
-        try:
-            await load_agent_registry(seed_if_empty=False)
-        except AgentRegistryError as exc:
-            logger.warning("Agent registry not loaded: %s", exc)
     except Exception as exc:
         logger.warning("DB init skipped: %s", exc)
     memory_cleanup = asyncio.create_task(cleanup_ai_memories())

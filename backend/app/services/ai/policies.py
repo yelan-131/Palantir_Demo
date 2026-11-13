@@ -154,12 +154,15 @@ def decide_skill_permission(user: dict[str, Any], settings: dict[str, Any], acti
 
 def decide_tool_permission(user: dict[str, Any], settings: dict[str, Any], tool_name: str, *, skill_name: str | None = None) -> AIPermissionDecision:
     """Mandatory gate shared by planning, both loops and confirmed execution."""
+    from .application_menu_registry import REQUESTS as APPLICATION_MENU_REQUESTS
     from .tool_registry import get_tool
     from .permission_resolver import PermissionDecision, PermissionResolver, build_default_rules, load_permission_rules
 
     tool = get_tool(tool_name)
     if not tool:
         return AIPermissionDecision(allowed=False, reason="Tool is not registered", capability="qa")
+    if tool.handler_key in APPLICATION_MENU_REQUESTS and not user.get("is_admin"):
+        return AIPermissionDecision(allowed=False, reason="需要管理员权限", capability="config")
     skill = get_skill(skill_name) if skill_name else None
     domain = tool.domain or (skill.domain if skill else None)
     if not domain and tool.permission_check == "config":

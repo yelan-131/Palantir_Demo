@@ -1,0 +1,11 @@
+- insert:
+  - id: platform-skill-registry
+    name: '@deepseek-ai/dsh-skill'
+  - id: platform-skill-files
+    name: '@deepseek-ai/dsh-skill-filesystem'
+    config:
+      includeDefaultRoots: false
+      customSkillDirs: !!js '[process.env.MF_DSH_SKILL_DIR]'
+      watch: false
+  - id: platform-skill-tool
+    name: '@deepseek-ai/dsh-tool-skill'

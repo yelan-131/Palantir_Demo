@@ -1,9 +1,11 @@
 import EffectiveHarnessPreview from './EffectiveHarnessPreview';
+import RegistryField, { RegistryReadOnly } from './RegistryFacts';
+import SkillInstructions from './SkillInstructions';
 import useAISettingsNotification from './useAISettingsNotification';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useSearchParams } from 'react-router-dom';
 import { ServiceCatalogPanel, PurposeModelsPanel, NativeCompactionPanel, AIStatusSummary, type TestTarget } from './AIConfigurationPanels';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
   AppstoreOutlined,
@@ -54,6 +56,8 @@ import {
   closeAgentConversation,
   deleteAIMemory,
   getAIAgentRegistry,
+  parseAIRegistrySkill,
+  type SkillMarkdown,
   getClosedLoopConfig,
   getAISettings,
   previewAISettings,
@@ -67,7 +71,8 @@ import {
 } from '../../services/api';
 import { formatServerDateTime } from '../../utils/dateTime';
 import './ai-settings.css';
-import AISettingsWorkspace from './AISettingsWorkspace';
+import AISettingsWorkspace, { AISettingsSaveActions } from './AISettingsWorkspace';
+import { getSkillDisplayDescription, getSkillDisplayTitle, getToolHelp, toolAvailability, toolEffects } from './aiRegistryHelp';
 
 cytoscape.use(dagre);
 
@@ -126,6 +131,7 @@ function normalizeLocalAISettings(settings: Record<string, any>) {
   delete localSettings.api_key;
   delete localSettings.modelServices;
   delete localSettings.modelAssignments;
+  delete localSettings.agentRegistry;
   return localSettings;
 }
 
@@ -139,7 +145,7 @@ function readLocalAISettings() {
       ? parsedSettings
       : {};
     const localSettings = normalizeLocalAISettings(settings);
-    if (Object.prototype.hasOwnProperty.call(settings, 'apiKey')) {
+    if ('apiKey' in settings || 'agentRegistry' in settings) {
       localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(localSettings));
     }
     return localSettings;
@@ -447,9 +453,12 @@ export function AIPlatformPanelV2() {
   const [toolForm] = Form.useForm();
   const [permissionRuleEditor, setPermissionRuleEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
   const [validationRuleEditor, setValidationRuleEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
-  const [skillEditor, setSkillEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
-  const [toolEditor, setToolEditor] = useState<{ open: boolean; index: number | null }>({ open: false, index: null });
+  const [skillEditor, setSkillEditor] = useState<{ open: boolean; index: number | null; readOnly?: boolean; imported?: SkillMarkdown }>({ open: false, index: null });
+  const [importingSkill, setImportingSkill] = useState(false);
+  const skillFileInput = useRef<HTMLInputElement>(null);
+  const [toolEditor, setToolEditor] = useState<{ open: boolean; index: number | null; readOnly?: boolean }>({ open: false, index: null });
   const [registrySaving, setRegistrySaving] = useState(false);
+  const [registrySelection, setRegistrySelection] = useState<Partial<Record<'skills' | 'tools', string>>>({});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -652,8 +661,11 @@ export function AIPlatformPanelV2() {
   const agentRegistry = watchedSettings.agentRegistry || defaultSettings.agentRegistry;
   const registrySkills = Array.isArray(agentRegistry.skills) ? agentRegistry.skills : [];
   const registryTools = Array.isArray(agentRegistry.tools) ? agentRegistry.tools : [];
-  const registryHandlerKeys = Array.isArray(agentRegistry.handlerKeys) ? agentRegistry.handlerKeys : [];
-  const registryToolOptions = registryTools.map((tool: any) => ({ label: tool.name, value: tool.name }));
+  const registryHandlerKeys: string[] = Array.isArray(agentRegistry.handlerKeys) ? agentRegistry.handlerKeys : [];
+  const toolsByName = new Map<string, any>(registryTools.map((tool: any) => [tool.name, tool]));
+  const registryToolOptions: { label: string; value: string }[] = registryTools.map((tool: any) => ({
+    label: `${getToolHelp(tool.name)?.title || tool.title || tool.name} · ${tool.name}`, value: tool.name,
+  }));
   const registryHandlerOptions = (registryHandlerKeys.length ? registryHandlerKeys : ['not_implemented'])
     .map((handler: string) => ({ label: handler, value: handler }));
 
@@ -683,7 +695,6 @@ export function AIPlatformPanelV2() {
         source: data?.source || 'database',
       };
       form.setFieldsValue({ agentRegistry: activated });
-      saveLocalSettings({ ...form.getFieldsValue(true), agentRegistry: activated });
       notify('success', successTitle);
       return true;
     } catch (error: any) {
@@ -704,7 +715,10 @@ export function AIPlatformPanelV2() {
       return;
     }
     const next = action === 'delete' ? rows.filter((row: any) => row.name !== name) : rows.map((row: any) => row.name === name ? { ...row, enabled: row.enabled === false } : row);
-    await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: registryTools, [kind]: next }, `${action === 'delete' ? '已删除' : item.enabled === false ? '已启用' : '已停用'} ${name}`);
+    const saved = await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: registryTools, [kind]: next }, `${action === 'delete' ? '已删除' : item.enabled === false ? '已启用' : '已停用'} ${name}`);
+    if (saved && action === 'delete') {
+      setRegistrySelection(previous => previous[kind] === name ? { ...previous, [kind]: undefined } : previous);
+    }
   };
 
   const seedAgentRegistry = async () => {
@@ -719,7 +733,6 @@ export function AIPlatformPanelV2() {
         source: data?.source || 'database',
       };
       form.setFieldsValue({ agentRegistry: activated });
-      saveLocalSettings({ ...form.getFieldsValue(true), agentRegistry: activated });
       notify('success', '默认技能与工具已导入');
     } catch (error: any) {
       notify('error', '导入失败', errorText(error));
@@ -728,34 +741,67 @@ export function AIPlatformPanelV2() {
     }
   };
 
-  const openSkillEditor = (index: number | null) => {
-    const source = index === null
-      ? { enabled: false, capability_level: 'assisted', risk_level: 'medium', confirmation_policy: 'confirm_token', allowed_tools: [], required_permissions: [] }
-      : registrySkills[index];
-    skillForm.setFieldsValue(source);
-    setSkillEditor({ open: true, index });
+  const openSkillEditor = (index: number | null, readOnly = false) => setSkillEditor({ open: true, index, readOnly });
+  const importSkill = async (file: File) => {
+    if (file.size > 400_000) {
+      notify('error', '导入失败', 'SKILL.md 文件过大');
+      return;
+    }
+    setImportingSkill(true);
+    try {
+      const markdown = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      const { data: { data: imported } } = await parseAIRegistrySkill(markdown);
+      setSkillEditor({ open: true, index: null, imported });
+    } catch (error) {
+      notify('error', '导入失败', error instanceof TypeError ? '请使用 UTF-8 编码的 SKILL.md 文件' : errorText(error));
+    } finally {
+      setImportingSkill(false);
+    }
   };
+  const selectedSkill = skillEditor.index === null ? undefined : registrySkills[skillEditor.index];
+  const associatedSkillTools = [...new Set<string>(
+    [selectedSkill?.default_tool, ...(selectedSkill?.allowed_tools ?? [])].filter(Boolean),
+  )];
+  const initializeSkillForm = useCallback((instance: typeof skillForm | null) => {
+    if (instance && skillEditor.imported) {
+      instance.setFieldsValue({
+        ...skillEditor.imported, enabled: false, risk_level: 'medium', allowed_tools: [], default_tool: null,
+      });
+    } else if (instance && selectedSkill) {
+      instance.setFieldsValue({
+        ...selectedSkill,
+        title: getSkillDisplayTitle(selectedSkill.name, selectedSkill.title),
+        description: getSkillDisplayDescription(selectedSkill.name, selectedSkill.description),
+      });
+    }
+  }, [selectedSkill, skillEditor.imported]);
 
   const saveSkill = async () => {
-    const values = await skillForm.validateFields();
+    const { instructions, ...values } = await skillForm.validateFields();
     const next = [...registrySkills];
-    const item = { ...values, enabled: values.enabled !== false };
+    const item = {
+      ...(selectedSkill ? {} : { capability_level: 'assisted', confirmation_policy: 'confirm_token' }),
+      ...skillEditor.imported,
+      ...selectedSkill, ...values, enabled: values.enabled !== false,
+      title: values.title?.trim() || values.name,
+      ...(typeof instructions === 'string' ? { instructions } : {}),
+    };
     if (skillEditor.index === null) next.push(item);
     else next[skillEditor.index] = item;
     if (await persistAgentRegistry({ ...agentRegistry, skills: next, tools: registryTools })) setSkillEditor({ open: false, index: null });
   };
 
-  const openToolEditor = (index: number | null) => {
-    const source = index === null
-      ? { enabled: false, handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low', permission_check: 'qa', dry_run_supported: true, audit_required: false, input_schema_json: '{}', output_schema_json: '{}' }
-      : {
-          ...registryTools[index],
-          input_schema_json: JSON.stringify(registryTools[index]?.input_schema || {}, null, 2),
-          output_schema_json: JSON.stringify(registryTools[index]?.output_schema || {}, null, 2),
-        };
-    toolForm.setFieldsValue(source);
-    setToolEditor({ open: true, index });
-  };
+  const openToolEditor = (index: number | null, readOnly = false) => setToolEditor({ open: true, index, readOnly });
+  const selectedTool = toolEditor.index === null ? undefined : registryTools[toolEditor.index];
+  const isCanvasTool = Boolean(selectedTool?.handler_key?.startsWith('ui.component_page.'));
+  const initializeToolForm = useCallback((instance: typeof toolForm | null) => {
+    if (instance && selectedTool) instance.setFieldsValue({
+      ...selectedTool,
+      enabled: selectedTool.enabled !== false,
+      input_schema_json: JSON.stringify(selectedTool.input_schema ?? {}, null, 2),
+      output_schema_json: JSON.stringify(selectedTool.output_schema ?? {}, null, 2),
+    });
+  }, [selectedTool]);
 
   const saveTool = async () => {
     const values = await toolForm.validateFields();
@@ -772,7 +818,7 @@ export function AIPlatformPanelV2() {
     void input_schema_json;
     void output_schema_json;
     const next = [...registryTools];
-    const item = { ...rest, enabled: rest.enabled !== false, input_schema: inputSchema, output_schema: outputSchema };
+    const item = { ...selectedTool, ...rest, enabled: rest.enabled !== false, input_schema: inputSchema, output_schema: outputSchema };
     if (toolEditor.index === null) next.push(item);
     else next[toolEditor.index] = item;
     if (await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: next })) setToolEditor({ open: false, index: null });
@@ -879,87 +925,156 @@ export function AIPlatformPanelV2() {
     } finally { setTesting(false); }
   };
 
+  const resetDraft = () => {
+    if (!persistedSettings) return;
+    form.setFieldsValue({ ...persistedSettings, agentRegistry: form.getFieldValue('agentRegistry') });
+    saveLocalSettings(persistedSettings);
+    setDirty(false);
+    setConnectionResult(null);
+  };
+  const saveActions = <AISettingsSaveActions loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} onSave={handleSaveToBackend} onReset={resetDraft} />;
+  const selectRegistryItem = (kind: 'skills' | 'tools', name: string) => {
+    setRegistrySelection(previous => ({ ...previous, [kind]: name }));
+  };
+  const registryRow = (kind: 'skills' | 'tools', name: string) => ({
+    tabIndex: 0,
+    'aria-selected': registrySelection[kind] === name,
+    onClick: () => selectRegistryItem(kind, name),
+    onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+      if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      selectRegistryItem(kind, name);
+    },
+  });
+  const registryActions = (kind: 'skills' | 'tools') => {
+    const rows = kind === 'skills' ? registrySkills : registryTools;
+    const openEditor = kind === 'skills' ? openSkillEditor : openToolEditor;
+    const label = kind === 'skills' ? '技能' : '工具';
+    const index = rows.findIndex((row: any) => row.name === registrySelection[kind]);
+    const item = rows[index];
+    const disabled = registrySaving || !item;
+    const selectionHint = item ? undefined : `请先选择${label}`;
+
+    return (
+      <Space size={6} wrap>
+        {kind === 'skills' && <>
+          <Button size="small" loading={registrySaving} disabled={importingSkill} onClick={seedAgentRegistry}>导入默认注册表</Button>
+          <Button size="small" loading={importingSkill} disabled={registrySaving} onClick={() => skillFileInput.current?.click()}>
+            导入 SKILL.md
+          </Button>
+          <input ref={skillFileInput} type="file" accept=".md,.markdown" hidden onChange={event => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void importSkill(file);
+          }} />
+        </>}
+        <Button size="small" disabled={disabled} title={selectionHint} onClick={() => openEditor(index)}>编辑</Button>
+        <Button size="small" disabled={disabled} title={selectionHint} onClick={() => changeRegistryItem(kind, item.name, 'toggle')}>
+          {item?.enabled === false ? '启用' : '停用'}
+        </Button>
+        <Button
+          size="small"
+          danger
+          disabled={disabled || item?.enabled !== false}
+          title={selectionHint ?? (item?.enabled !== false ? '请先成功停用后再删除' : undefined)}
+          onClick={() => changeRegistryItem(kind, item.name, 'delete')}
+        >
+          删除
+        </Button>
+        <Button size="small" type="primary" loading={registrySaving} disabled={kind === 'skills' && importingSkill} onClick={() => openEditor(null)}>添加{label}</Button>
+      </Space>
+    );
+  };
+
+  type RegistryRecordInfo = {
+    created_by?: string; created_by_name?: string; created_at?: string;
+    updated_by?: string; updated_by_name?: string; updated_at?: string;
+  };
+  type RegistryTableRecord = RegistryRecordInfo & { name: string; title?: string; enabled?: boolean; handler_key?: string };
+  const registryActor = (value?: string, name?: string) => {
+    if (value === 'admin') return '超级管理员（admin）';
+    return name || (value && (/^\d+$/.test(value) ? `未知用户（ID ${value}）` : value)) || '未记录';
+  };
+  const registryAuditColumns = [
+    { title: '创建人', dataIndex: 'created_by', width: 148, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.created_by_name) },
+    { title: '创建时间', dataIndex: 'created_at', width: 172, render: (value?: string) => formatServerDateTime(value, '—') },
+    { title: '更新人', dataIndex: 'updated_by', width: 148, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.updated_by_name) },
+    { title: '更新时间', dataIndex: 'updated_at', width: 172, render: (value?: string) => formatServerDateTime(value, '—') },
+  ];
+  const registryRecordInfo = (record: RegistryRecordInfo) => (
+    <section className="ai-registry-dialog-section">
+      <h4>记录信息</h4>
+      <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
+        { key: 'creator', label: '创建人', children: registryActor(record.created_by, record.created_by_name) },
+        { key: 'created', label: '创建时间', children: formatServerDateTime(record.created_at, '—') },
+        { key: 'updater', label: '更新人', children: registryActor(record.updated_by, record.updated_by_name) },
+        { key: 'updated', label: '更新时间', children: formatServerDateTime(record.updated_at, '—') },
+      ]} />
+    </section>
+  );
   const advancedSections = [
     {
       key: 'agent-registry',
       label: '技能与工具注册表',
       children: (
-        <div className="ai-registry-workspace"><SettingsTabs className="ai-registry-tabs" defaultActiveKey="skills" items={[{ key: 'skills', label: `技能 (${registrySkills.length})`, children: <Card title="技能注册表" extra={<Space size={6}>
-              <Button size="small" loading={registrySaving} onClick={seedAgentRegistry}>导入默认注册表</Button>
-              <Button size="small" type="primary" loading={registrySaving} onClick={() => openSkillEditor(null)}>添加技能</Button>
-            </Space>}>
+        <div className="ai-registry-workspace"><SettingsTabs className="ai-registry-tabs" defaultActiveKey="skills" items={[{ key: 'skills', label: `技能 (${registrySkills.length})`, children: <Card className="ai-registry-card" title="技能注册表" extra={registryActions('skills')}>
           <Table
             size="small"
             pagination={false}
-            scroll={{ x: 760, y: 440 }}
+            scroll={{ x: 1084, y: '100%' }}
             rowKey={(record: any) => record.name || record.title}
             dataSource={registrySkills}
+            rowClassName="ai-registry-row"
+            onRow={record => registryRow('skills', record.name)}
             columns={[
+              { title: '序号', key: 'row-number', width: 56, align: 'center', render: (_, __, index) => index + 1 },
               { title: '状态', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? '已停用' : '已启用'}</Tag> },
-              { title: '名称', dataIndex: 'name', ellipsis: true },
-              { title: '默认工具', dataIndex: 'default_tool', ellipsis: true },
-              { title: '风险', dataIndex: 'risk_level', width: 90 },
               {
-                title: '',
-                width: 200,
-                render: (_, record, index) => (
-                  <Space size={4}>
-                    <Button size="small" disabled={registrySaving} onClick={() => openSkillEditor(index)}>编辑</Button>
-                    <Button size="small" disabled={registrySaving} onClick={() => changeRegistryItem('skills', record.name, 'toggle')}>{record.enabled === false ? '启用' : '停用'}</Button>
-                    <Button
-                      size="small"
-                      danger
-                      loading={registrySaving}
-                      disabled={registrySaving || record.enabled !== false}
-                      title={record.enabled !== false ? '请先成功停用后再删除' : undefined}
-                      onClick={() => changeRegistryItem('skills', record.name, 'delete')}
-                    >
-                      删除
-                    </Button>
-                  </Space>
+                title: '名称', dataIndex: 'name', ellipsis: true,
+                render: (name, record, index) => (
+                  <button type="button" className="ai-registry-link" title={name} onClick={event => {
+                    event.stopPropagation();
+                    selectRegistryItem('skills', name);
+                    openSkillEditor(index, true);
+                  }}>{getSkillDisplayTitle(name, record.title)}</button>
                 ),
               },
+              { title: '默认工具', dataIndex: 'default_tool', ellipsis: true, render: name => getToolHelp(name)?.title || name || '—' },
+              { title: '风险', dataIndex: 'risk_level', width: 72 },
+              ...registryAuditColumns,
             ]}
             locale={{ emptyText: '尚未注册技能' }}
           />
-          </Card> }, { key: 'tools', label: `工具 (${registryTools.length})`, children: <Card title="工具注册表" extra={<Button size="small" type="primary" loading={registrySaving} onClick={() => openToolEditor(null)}>添加工具</Button>}>
+          </Card> }, { key: 'tools', label: `工具 (${registryTools.length})`, children: <Card className="ai-registry-card" title="工具注册表" extra={registryActions('tools')}>
           <Table
             size="small"
             pagination={false}
-            scroll={{ x: 760, y: 440 }}
+            scroll={{ x: 1214, y: '100%' }}
             rowKey={(record: any) => record.name || record.title}
             dataSource={registryTools}
+            rowClassName="ai-registry-row"
+            onRow={record => registryRow('tools', record.name)}
             columns={[
-              { title: '状态', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? '已停用' : '已启用'}</Tag> },
-              { title: '名称', dataIndex: 'name', ellipsis: true },
-              { title: '处理器', dataIndex: 'handler_key', ellipsis: true },
-              { title: '操作类型', dataIndex: 'side_effect', width: 130 },
-              { title: '风险', dataIndex: 'risk_level', width: 90 },
+              { title: '序号', key: 'row-number', width: 56, align: 'center', render: (_, __, index) => index + 1 },
+              { title: '状态', width: 88, render: (_, tool) => <Tag color={toolAvailability(tool) === '已接入' ? 'green' : 'default'}>{toolAvailability(tool)}</Tag> },
               {
-                title: '',
-                width: 200,
-                render: (_, record, index) => (
-                  <Space size={4}>
-                    <Button size="small" disabled={registrySaving} onClick={() => openToolEditor(index)}>编辑</Button>
-                    <Button size="small" disabled={registrySaving} onClick={() => changeRegistryItem('tools', record.name, 'toggle')}>{record.enabled === false ? '启用' : '停用'}</Button>
-                    <Button
-                      size="small"
-                      danger
-                      loading={registrySaving}
-                      disabled={registrySaving || record.enabled !== false}
-                      title={record.enabled !== false ? '请先成功停用后再删除' : undefined}
-                      onClick={() => changeRegistryItem('tools', record.name, 'delete')}
-                    >
-                      删除
-                    </Button>
-                  </Space>
+                title: '名称', dataIndex: 'name', ellipsis: true,
+                render: (name, record, index) => (
+                  <button type="button" className="ai-registry-link" title={name} onClick={event => {
+                    event.stopPropagation();
+                    selectRegistryItem('tools', name);
+                    openToolEditor(index, true);
+                  }}>{getToolHelp(name)?.title || record.title || name}</button>
                 ),
               },
+              { title: '处理器', dataIndex: 'handler_key', ellipsis: true },
+              { title: '操作类型', dataIndex: 'side_effect', width: 130, render: value => toolEffects[value] || value || '—' },
+              { title: '风险', dataIndex: 'risk_level', width: 72 },
+              ...registryAuditColumns,
             ]}
             locale={{ emptyText: '尚未注册工具' }}
           />
           </Card> }]} />
-          <p className="ai-settings-quiet-note">注册表修改后立即生效 · 可用处理器 {registryHandlerKeys.length} 个</p>
         </div>
       ),
     },
@@ -1074,13 +1189,6 @@ export function AIPlatformPanelV2() {
 
 </div> },
   ];
-  const resetDraft = () => {
-    if (!persistedSettings) return;
-    form.setFieldsValue({ ...persistedSettings, agentRegistry: form.getFieldValue('agentRegistry') });
-    saveLocalSettings(persistedSettings);
-    setDirty(false);
-    setConnectionResult(null);
-  };
   const onDraftChange = (changed: Record<string, any>, values: Record<string, any>) => {
     if (changed.modelServices && persistedSettings?.modelServices) {
       const services = values.modelServices || [];
@@ -1097,10 +1205,10 @@ export function AIPlatformPanelV2() {
   };
 
   return (
-    <div className="account-admin-section ai-settings-page">
+    <div className={`account-admin-section ai-settings-page${activeSettingsSection === 'agent-registry' ? ' ai-settings-registry-active' : ''}`}>
       {aiNoticeHolder}
       <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={onDraftChange}>
-        <AISettingsWorkspace effectivePreview={<EffectiveHarnessPreview onError={description => notify('error', '参数预览失败', description)} values={watchedSettings} onPreview={async () => (await previewAISettings(await collectSettings())).data} />} sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} onSave={handleSaveToBackend} onTest={handleTestConnection} onReset={resetDraft} onDismissTest={() => setConnectionResult(null)} />
+        <AISettingsWorkspace effectivePreview={<EffectiveHarnessPreview onError={description => notify('error', '参数预览失败', description)} values={watchedSettings} onPreview={async () => (await previewAISettings(await collectSettings())).data} />} sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} saveActions={activeSettingsSection !== 'agent-registry' || dirty ? saveActions : null} />
       </Form>
       <Modal
         title={permissionRuleEditor.index === null ? '添加工具权限规则' : '编辑工具权限规则'}
@@ -1159,156 +1267,286 @@ export function AIPlatformPanelV2() {
         </Form>
       </Modal>
       <Modal
-        title={skillEditor.index === null ? '添加技能' : '编辑技能'}
+        title={skillEditor.readOnly && selectedSkill ? (
+          <div className="ai-skill-title">
+            <span>{getSkillDisplayTitle(selectedSkill.name, selectedSkill.title)}</span>
+            <span className="ai-registry-status" data-active={selectedSkill.enabled !== false}>
+              {selectedSkill.enabled === false ? '已停用' : '已启用'}
+            </span>
+          </div>
+        ) : skillEditor.imported ? '导入技能' : skillEditor.index === null ? '添加技能' : '编辑技能'}
         open={skillEditor.open}
         onOk={saveSkill}
         confirmLoading={registrySaving}
         onCancel={() => setSkillEditor({ open: false, index: null })}
         destroyOnHidden
+        width={800}
+        centered
+        className="ai-registry-dialog ai-skill-dialog"
+        okText="保存技能"
+        footer={skillEditor.readOnly ? (
+          <Space>
+            <Button onClick={() => setSkillEditor({ open: false, index: null })}>关闭</Button>
+            <Button type="primary" disabled={registrySaving || saving || testing || !loaded} onClick={() => setSkillEditor(previous => ({ ...previous, readOnly: false }))}>编辑技能</Button>
+          </Space>
+        ) : undefined}
       >
-        <Form form={skillForm} layout="vertical">
-          <Form.Item name="enabled" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="name" label="技能标识" rules={[{ required: true }]}>
-            <Input placeholder="low_code_form_builder" />
-          </Form.Item>
-          <Form.Item name="title" label="显示名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="capability_level" label="能力级别">
-                <Select options={[
-                  { label: '只读', value: 'readonly' },
-                  { label: '辅助', value: 'assisted' },
-                  { label: '自主', value: 'autonomous' },
-                ]} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="risk_level" label="风险等级">
-                <Select options={[
-                  { label: '低', value: 'low' },
-                  { label: '中', value: 'medium' },
-                  { label: '高', value: 'high' },
-                  { label: '严重', value: 'critical' },
-                ]} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="default_tool" label="默认工具">
-            <Select allowClear showSearch options={registryToolOptions} />
-          </Form.Item>
-          <Form.Item name="allowed_tools" label="允许使用的工具">
-            <Select mode="multiple" showSearch options={registryToolOptions} />
-          </Form.Item>
-          <Form.Item name="required_permissions" label="所需权限">
-            <Select mode="tags" />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="confirmation_policy" label="确认策略">
-                <Select options={[
-                  { label: 'None', value: 'none' },
-                  { label: 'Confirm token', value: 'confirm_token' },
-                  { label: 'Always confirm', value: 'always_confirm' },
-                  { label: 'Blocked', value: 'blocked' },
-                ]} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="permission_capability" label="所需能力">
-                <Select allowClear options={aiCapabilityOptions} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="domain" label="Domain">
-            <Select allowClear options={aiDomainOptions} />
-          </Form.Item>
-        </Form>
+        {skillEditor.open && <RegistryReadOnly.Provider value={Boolean(skillEditor.readOnly)}>
+          <Form ref={initializeSkillForm} form={skillForm} layout="vertical" clearOnDestroy
+            initialValues={selectedSkill ?? {
+              enabled: false, description: '', risk_level: 'medium', allowed_tools: [], default_tool: null,
+              ...skillEditor.imported,
+            }}
+            onValuesChange={({ allowed_tools }, values) => {
+              if (allowed_tools && values.default_tool && !allowed_tools.includes(values.default_tool)) {
+                skillForm.setFieldValue('default_tool', null);
+              }
+            }}
+          >
+            <div className={`ai-skill-document${skillEditor.readOnly ? ' is-readonly' : ''}`}>
+              <section className="ai-skill-frontmatter" aria-labelledby="ai-skill-metadata">
+                <div className="ai-skill-steps-heading">
+                  <h3 id="ai-skill-metadata">技能元数据</h3>
+                </div>
+                <RegistryField name="name" format="code" label={<code>name</code>} rules={[
+                  { required: true, whitespace: true, message: '请输入技能名称' },
+                  {
+                    validator: (_, value) => !value || value === selectedSkill?.name || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('使用 1–64 个小写字母、数字或单连字符')),
+                  },
+                  {
+                    validator: (_, value) => value === selectedSkill?.name || !registrySkills.some((skill: any) => skill.name === value)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('已有同名技能，请使用其他名称')),
+                  },
+                ]}>
+                  <Input placeholder="analyze-form-records" disabled={Boolean(selectedSkill)} />
+                </RegistryField>
+                <RegistryField name="description" label={<code>description</code>} rules={[
+                  { required: true, whitespace: true, message: '请说明技能的用途和适用场景' },
+                  { max: 1024, message: '技能描述最多 1024 个字符' },
+                ]}>
+                  <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="说明技能能做什么，以及何时使用" />
+                </RegistryField>
+              </section>
+              <section className="ai-skill-steps" aria-labelledby="ai-skill-steps">
+                <div className="ai-skill-steps-heading">
+                  <h3 id="ai-skill-steps">技能正文</h3>
+                  {!skillEditor.readOnly && <span>Markdown</span>}
+                </div>
+                <Form.Item name="instructions" noStyle>
+                  <SkillInstructions key={selectedSkill?.name ?? ''} name={selectedSkill?.name} readOnly={skillEditor.readOnly} />
+                </Form.Item>
+              </section>
+              <details className="ai-skill-advanced" key={String(skillEditor.readOnly)}>
+                <summary>平台配置</summary>
+                <section className="ai-registry-dialog-section">
+                  <RegistryField name="title" label="显示名称" extra="用于技能列表和详情标题，可填写中文。">
+                    <Input placeholder="留空时使用技能名称" />
+                  </RegistryField>
+                </section>
+                {skillEditor.readOnly ? (
+                  <section className="ai-registry-dialog-section ai-skill-tools" aria-labelledby="ai-skill-tools">
+                    <h3 id="ai-skill-tools">平台工具映射</h3>
+                    {associatedSkillTools.length === 0 ? <p>未配置</p> : (
+                      <ul>{associatedSkillTools.map(name => {
+                        const tool = toolsByName.get(name);
+                        const help = getToolHelp(name);
+                        return (
+                          <li key={name}>
+                            <div className="ai-registry-related-title">
+                              <strong>{help?.title || tool?.title || name}</strong>
+                              <Space size={8}>
+                                {name === selectedSkill.default_tool && <Tag color="blue" title="动作未指定工具时使用">默认</Tag>}
+                                <span>{toolAvailability(tool)}</span>
+                              </Space>
+                            </div>
+                            <code>{name}</code>
+                            <div>{help?.purpose || tool?.description}</div>
+                          </li>
+                        );
+                      })}</ul>
+                    )}
+                  </section>
+                ) : (
+                <section className="ai-registry-dialog-section" aria-labelledby="ai-skill-tools">
+                  <h3 id="ai-skill-tools">平台工具映射（可选）</h3>
+                  <RegistryField name="allowed_tools" label="依赖工具" extra="用于技能启用校验。实际调用仍按平台权限和执行策略检查。">
+                    <Select mode="multiple" showSearch options={registryToolOptions} />
+                  </RegistryField>
+                  <Form.Item noStyle dependencies={['allowed_tools']}>
+                    {({ getFieldValue }) => {
+                      const allowed: string[] = getFieldValue('allowed_tools') ?? [];
+                      const current = getFieldValue('default_tool');
+                      const options = registryToolOptions.filter(option => allowed.includes(option.value) || option.value === current);
+                      return (
+                        <RegistryField name="default_tool" label="默认工具" extra="动作未指定工具时使用。">
+                          <Select allowClear showSearch options={options} />
+                        </RegistryField>
+                      );
+                    }}
+                  </Form.Item>
+                </section>
+                )}
+                <section className="ai-registry-dialog-section">
+                  <h4>平台执行策略</h4>
+                  <Row gutter={12}>
+                    <Col xs={24} sm={12}>
+                      <RegistryField name="risk_level" label="风险等级">
+                        <Select options={[
+                          { label: '低', value: 'low' },
+                          { label: '中', value: 'medium' },
+                          { label: '高', value: 'high' },
+                          { label: '严重', value: 'critical' },
+                        ]} />
+                      </RegistryField>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <RegistryField name="permission_capability" label="所需能力">
+                        <Select allowClear options={aiCapabilityOptions} />
+                      </RegistryField>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col xs={24} sm={12}>
+                      <RegistryField name="domain" label="业务域">
+                        <Select allowClear options={aiDomainOptions} />
+                      </RegistryField>
+                    </Col>
+                    {!skillEditor.readOnly && <Col xs={24} sm={12}>
+                      <RegistryField name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
+                        <Switch />
+                      </RegistryField>
+                    </Col>}
+                  </Row>
+                  <p>工具调用按平台权限和执行规则检查，写入操作需确认。</p>
+                </section>
+                {selectedSkill && registryRecordInfo(selectedSkill)}
+              </details>
+            </div>
+          </Form>
+        </RegistryReadOnly.Provider>}
       </Modal>
       <Modal
-        title={toolEditor.index === null ? '添加工具' : '编辑工具'}
+        title={toolEditor.readOnly ? '工具详情' : toolEditor.index === null ? '添加工具' : '编辑工具'}
         open={toolEditor.open}
         onOk={saveTool}
         confirmLoading={registrySaving}
         onCancel={() => setToolEditor({ open: false, index: null })}
         destroyOnHidden
-        width={720}
+        width={760}
+        centered
+        className="ai-registry-dialog"
+        okText="保存工具"
+        footer={toolEditor.readOnly ? (
+          <Space>
+            <Button onClick={() => setToolEditor({ open: false, index: null })}>关闭</Button>
+            <Button type="primary" disabled={registrySaving || saving || testing || !loaded} onClick={() => setToolEditor(previous => ({ ...previous, readOnly: false }))}>编辑工具</Button>
+          </Space>
+        ) : undefined}
       >
-        <Form form={toolForm} layout="vertical">
-          <Form.Item name="enabled" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="name" label="工具标识" rules={[{ required: true }]}>
-            <Input placeholder="forms.query_records" />
-          </Form.Item>
-          <Form.Item name="title" label="显示名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="handler_key" label="业务处理器" rules={[{ required: true }]}>
-                <Select showSearch options={registryHandlerOptions} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="side_effect" label="操作类型">
-                <Select options={[
-                  { label: '读取', value: 'read' },
-                  { label: '分析', value: 'analyze' },
-                  { label: '草稿写入', value: 'draft_write' },
-                  { label: '记录修改', value: 'record_write' },
-                  { label: '配置写入', value: 'configuration_write' },
-                  { label: '流程操作', value: 'workflow_action' },
-                  { label: '外部写入', value: 'external_write' },
-                ]} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="risk_level" label="风险等级">
-                <Select options={[
-                  { label: '低', value: 'low' },
-                  { label: '中', value: 'medium' },
-                  { label: '高', value: 'high' },
-                  { label: '严重', value: 'critical' },
-                ]} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="permission_check" label="所需能力">
-                <Select allowClear options={aiCapabilityOptions} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="dry_run_supported" label="支持预演" valuePropName="checked">
+        {toolEditor.open && <RegistryReadOnly.Provider value={Boolean(toolEditor.readOnly)}>
+          <Form ref={initializeToolForm} form={toolForm} layout="vertical" clearOnDestroy initialValues={{
+            handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low',
+            permission_check: 'qa', dry_run_supported: true, audit_required: false,
+            ...selectedTool,
+            enabled: selectedTool ? selectedTool.enabled !== false : false,
+            input_schema_json: JSON.stringify(selectedTool?.input_schema ?? {}, null, 2),
+            output_schema_json: JSON.stringify(selectedTool?.output_schema ?? {}, null, 2),
+          }}>
+            <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-metadata">
+              <h3 id="ai-tool-metadata">工具定义</h3>
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="name" format="code" label="工具标识" rules={[{ required: true }]}>
+                    <Input readOnly={isCanvasTool} placeholder="forms.query_records" />
+                  </RegistryField>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="title" label="显示名称" rules={[{ required: true }]}>
+                    <Input />
+                  </RegistryField>
+                </Col>
+              </Row>
+              <RegistryField name="description" format="description" label="描述">
+                <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} />
+              </RegistryField>
+            </section>
+            <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-policy">
+              <h3 id="ai-tool-policy">平台执行策略</h3>
+              <Row gutter={12}>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="handler_key" label="业务处理器" rules={[{ required: true }]}>
+                    <Select disabled={isCanvasTool} showSearch options={registryHandlerOptions.filter(option => isCanvasTool || !option.value.startsWith('ui.component_page.'))} />
+                  </RegistryField>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="side_effect" label="操作类型">
+                    <Select disabled={isCanvasTool} options={[
+                      { label: '读取', value: 'read' },
+                      { label: '草稿写入', value: 'draft_write' },
+                      { label: '记录修改', value: 'record_write' },
+                      { label: '配置写入', value: 'configuration_write' },
+                      { label: '流程操作', value: 'workflow_action' },
+                      { label: '外部写入', value: 'external_write' },
+                    ]} />
+                  </RegistryField>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="risk_level" label="风险等级">
+                    <Select options={[
+                      { label: '低', value: 'low' },
+                      { label: '中', value: 'medium' },
+                      { label: '高', value: 'high' },
+                      { label: '严重', value: 'critical' },
+                    ]} />
+                  </RegistryField>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="permission_check" label="所需能力">
+                    <Select disabled={isCanvasTool} allowClear options={aiCapabilityOptions} />
+                  </RegistryField>
+                </Col>
+              </Row>
+              <Row gutter={12}>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="dry_run_supported" label="支持预演" valuePropName="checked">
+                    <Switch />
+                  </RegistryField>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <RegistryField name="audit_required" label="必须审计" valuePropName="checked">
+                    <Switch />
+                  </RegistryField>
+                </Col>
+              </Row>
+              <RegistryField name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
                 <Switch />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="audit_required" label="必须审计" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="input_schema_json" label="输入结构 JSON">
-            <Input.TextArea rows={6} />
-          </Form.Item>
-          <Form.Item name="output_schema_json" label="输出结构 JSON">
-            <Input.TextArea rows={6} />
-          </Form.Item>
-        </Form>
+              </RegistryField>
+            </section>
+            <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-schema">
+              <h3 id="ai-tool-schema">输入与输出</h3>
+              <RegistryField name="input_schema_json" format="json" label={<span>输入结构 <code>inputSchema</code></span>}>
+                <Input.TextArea readOnly={isCanvasTool} rows={6} />
+              </RegistryField>
+              <RegistryField name="output_schema_json" format="json" label={<span>输出结构 <code>outputSchema</code></span>}>
+                <Input.TextArea rows={6} />
+              </RegistryField>
+            </section>
+            {selectedTool && registryRecordInfo(selectedTool)}
+          </Form>
+        </RegistryReadOnly.Provider>}
+        {toolEditor.open && selectedTool && (() => {
+          const availability = toolAvailability(selectedTool);
+          return <section className="ai-registry-help" aria-label="工具使用说明">
+            <span className="ai-registry-status" data-active={availability === '已接入'}>{availability}</span>
+            {isCanvasTool && <p>在业务页面的 AI 助手中使用。改动显示在画布草稿，确认后可手动保存。</p>}
+            {availability === '待接入' && <p>当前 AI 无法调用此工具</p>}
+          </section>;
+        })()}
       </Modal>
     </div>
   );

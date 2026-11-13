@@ -76,7 +76,7 @@ async def test_stopping_runtime_closes_sdk_process(monkeypatch, mode):
             return SimpleNamespace(final_response='stopped', finish_reason='completed', events=[])
     monkeypatch.setattr(deepseek_harness, 'DeepSeekHarness', Harness)
     monkeypatch.setattr(mod, 'harness_options', lambda *args, **kwargs: {'initialize_timeout_seconds': .01, 'request_timeout_seconds': .05})
-    bridge = mod.PlatformBridge(USER, {}, {})
+    bridge = mod.PlatformBridge(USER, {}, {}, native_skills=False)
     monkeypatch.setitem(mod.BRIDGES, 'test-stop-token', bridge)
     task = asyncio.create_task(mod.run_sdk({}, USER, 'test', 'test', token='test-stop-token'))
     assert await asyncio.to_thread(started.wait, 1)
@@ -95,7 +95,7 @@ async def test_tool_budget_signals_process_stop(monkeypatch):
     from app.services.ai import harness_runtime as mod, agent_registry
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: {'safetyPolicy': {'maxToolSteps': 1}})
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     tool = SimpleNamespace(name='test.query', handler_key='forms.query_records')
     monkeypatch.setattr(mod, 'tool_registry', lambda: {'test.query': tool})
     monkeypatch.setattr(mod, 'decide_tool_permission', lambda *args: SimpleNamespace(allowed=True))

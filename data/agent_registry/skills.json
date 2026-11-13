@@ -1,8 +1,8 @@
 {
   "knowledge.answer_question": {
     "name": "knowledge.answer_question",
-    "title": "Knowledge Q&A",
-    "description": "Search approved knowledge and answer with evidence references.",
+    "title": "根据知识库回答问题",
+    "description": "从有权访问的知识库中检索资料，结合来源证据回答问题。适用于查询制度、操作规程、设备手册等已有文档中的信息。",
     "capability_level": "qa",
     "risk_level": "low",
     "default_tool": "knowledge.search",
@@ -15,8 +15,8 @@
   },
   "knowledge.ingest_for_rag": {
     "name": "knowledge.ingest_for_rag",
-    "title": "Knowledge ingestion",
-    "description": "Convert uploaded assets into Markdown and searchable chunks.",
+    "title": "导入文档供知识检索",
+    "description": "用于把上传的文档导入知识库，供后续检索和问答。适用于添加设备手册、制度文件等资料。目前请从知识库页面发起导入。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "knowledge.ingest_document",
@@ -29,8 +29,8 @@
   },
   "knowledge.intake_document_ontology": {
     "name": "knowledge.intake_document_ontology",
-    "title": "Document ontology intake",
-    "description": "Guide an uploaded document through ontology extraction, review, and graph publication.",
+    "title": "从文档提取图谱对象",
+    "description": "从文档中梳理业务对象及其关系，供人工复核。适用于整理设备、部件等对象之间的关联。目前可检索知识库片段，候选提取和图谱写入工具尚未接通。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "knowledge.extract_ontology_candidates",
@@ -43,8 +43,8 @@
   },
   "quality.create_capa_draft": {
     "name": "quality.create_capa_draft",
-    "title": "CAPA draft",
-    "description": "Prepare a corrective action draft from page context and evidence.",
+    "title": "起草质量纠正与预防措施",
+    "description": "根据质量问题和已有证据，整理纠正与预防措施并保存为待复核的草稿。适用于处理质量异常、偏差或不合格项。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -57,8 +57,8 @@
   },
   "maintenance.create_work_order_draft": {
     "name": "maintenance.create_work_order_draft",
-    "title": "Maintenance work order draft",
-    "description": "Prepare a work order draft with supporting evidence.",
+    "title": "起草维修工单",
+    "description": "根据设备信息和故障现象，在现有工单表单中起草维修记录。适用于巡检发现异常或设备报修后，需要先整理工单的场景。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -71,8 +71,8 @@
   },
   "supply.create_purchase_request_draft": {
     "name": "supply.create_purchase_request_draft",
-    "title": "Purchase request draft",
-    "description": "Prepare a purchase request draft without creating an external order.",
+    "title": "起草采购申请",
+    "description": "根据物料、数量、用途和需求时间起草采购申请。适用于补货或新增采购需求，草稿供复核后提交。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -85,8 +85,8 @@
   },
   "material.create_material_application_draft": {
     "name": "material.create_material_application_draft",
-    "title": "Material application draft",
-    "description": "Prepare a material application draft for human review.",
+    "title": "起草物料申请",
+    "description": "根据物料标识、数量和用途起草物料申请。适用于领用或申领物料前，先整理一份待复核的记录。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -99,8 +99,8 @@
   },
   "analysis.analyze_form_records": {
     "name": "analysis.analyze_form_records",
-    "title": "Analyze form records",
-    "description": "Query permitted dynamic form records and summarize patterns.",
+    "title": "分析业务记录",
+    "description": "查询有权查看的业务表单记录，归纳趋势、类别分布和异常。适用于按时间、班组或问题类别分析巡检等业务数据。",
     "capability_level": "assisted",
     "risk_level": "low",
     "default_tool": "forms.query_records",
@@ -113,8 +113,8 @@
   },
   "forms.create_record_draft": {
     "name": "forms.create_record_draft",
-    "title": "Create form record draft",
-    "description": "Prepare a new dynamic form record draft without submitting it.",
+    "title": "填写一条业务记录草稿",
+    "description": "按现有业务表单的字段整理用户提供的信息，经确认后保存一条记录草稿。适用于需要先填写、再复核或提交的登记和申请。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -127,8 +127,8 @@
   },
   "low_code.suggest_model_or_page": {
     "name": "low_code.suggest_model_or_page",
-    "title": "Low-code design suggestion",
-    "description": "Suggest data model, page, or workflow configuration changes as a draft.",
+    "title": "提出表单、页面或流程设计建议",
+    "description": "根据业务需求提出数据模型、页面或流程的设计建议。适用于尚在讨论方案，需要明确字段、页面结构或流程节点时。",
     "capability_level": "assisted",
     "risk_level": "high",
     "default_tool": "ai.semantic_plan_low_code_form",
@@ -141,22 +141,31 @@
   },
   "low_code.create_form_definition": {
     "name": "low_code.create_form_definition",
-    "title": "Create low-code form",
-    "description": "Create a low-code form only after semantic planning and approval.",
+    "title": "配置业务数据表单",
+    "description": "配置数据表单的字段、填写规则及草稿。业务列表、登记入口和看板按通用页面技能交付。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "forms.create_form_definition",
-    "allowed_tools": ["ai.semantic_plan_low_code_form", "forms.create_form_definition"],
-    "required_permissions": ["config"],
+    "allowed_tools": [
+      "ai.semantic_plan_low_code_form",
+      "forms.create_form_definition"
+    ],
+    "required_permissions": [
+      "config"
+    ],
     "confirmation_policy": "confirm_token",
     "permission_capability": "config",
     "domain": "low-code",
-    "output_schema": {"type": "configuration_write", "resource": "form", "confirmation_checklist": true}
+    "output_schema": {
+      "type": "configuration_write",
+      "resource": "form",
+      "confirmation_checklist": true
+    }
   },
   "low_code.add_form_field": {
     "name": "low_code.add_form_field",
-    "title": "Add low-code form field",
-    "description": "Add fields to an existing low-code form after planning and confirmation.",
+    "title": "给现有表单添加字段",
+    "description": "为现有业务表单准备新增字段，经确认后写入字段配置并同步相关布局。适用于补充字段、控件或字段规则。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "forms.add_form_field",
@@ -169,8 +178,8 @@
   },
   "workflow.submit_after_confirmation": {
     "name": "workflow.submit_after_confirmation",
-    "title": "Workflow submission",
-    "description": "Submit a prepared draft to workflow only after confirmation.",
+    "title": "确认后发起审批",
+    "description": "用于在用户复核草稿后发起审批。适用于业务记录已准备好、需要进入审批流程时。目前请从对应业务表单提交，审批和通知工具尚未接通。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "workflow.start",
@@ -183,8 +192,8 @@
   },
   "low_code.inspect_form": {
     "name": "low_code.inspect_form",
-    "title": "Inspect form configuration",
-    "description": "Inspect form versions, layouts, rule results and publication impact using shared platform services.",
+    "title": "检查表单配置和发布影响",
+    "description": "查看表单布局、历史版本，预演字段规则并检查发布影响。适用于排查表单配置问题，或在发布前确认阻塞项。",
     "capability_level": "qa",
     "risk_level": "low",
     "default_tool": "forms.preview_publish",
@@ -207,12 +216,20 @@
   },
   "analysis.manage_dashboard": {
     "name": "analysis.manage_dashboard",
-    "title": "管理业务看板",
-    "description": "复用平台看板来源、指标、权限、草稿与发布能力。",
+    "title": "搭建分析页面和维护已有看板",
+    "description": "搭建指标和图表时使用通用页面技能。支持读取及维护仍在运行的旧版看板配置。",
     "capability_level": "agentic",
     "risk_level": "high",
-    "default_tool": "dashboards.preview_source",
+    "default_tool": "pages.list",
     "allowed_tools": [
+      "pages.list",
+      "pages.get",
+      "pages.create",
+      "pages.save_draft",
+      "pages.publish",
+      "pages.query",
+      "platform.form_settings.query",
+      "platform.application_settings.query",
       "dashboards.preview_source",
       "dashboards.create",
       "dashboards.get",
@@ -231,12 +248,14 @@
   },
   "analysis.query_dashboard": {
     "name": "analysis.query_dashboard",
-    "title": "查询看板指标",
-    "description": "复用平台看板来源、指标、权限、草稿与发布能力。",
+    "title": "查询已发布分析页面或看板",
+    "description": "按已发布页面的组件口径、数据权限和筛选条件查询结果，兼容已发布的旧版看板。",
     "capability_level": "qa",
     "risk_level": "low",
-    "default_tool": "dashboards.query",
+    "default_tool": "pages.query",
     "allowed_tools": [
+      "pages.list",
+      "pages.query",
       "dashboards.query"
     ],
     "required_permissions": [
@@ -248,5 +267,57 @@
     "output_schema": {
       "type": "answer"
     }
+  },
+  "low_code.publish_form_to_menu": {
+    "name": "low_code.publish_form_to_menu",
+    "title": "发布兼容的旧表单入口",
+    "description": "在用户明确需要旧表单入口时发布标准表单并挂载。通用页面使用页面发布和菜单工具。",
+    "capability_level": "agentic",
+    "risk_level": "high",
+    "default_tool": "forms.publish_to_menu",
+    "allowed_tools": [
+      "platform.application_settings.query",
+      "platform.form_settings.query",
+      "forms.publish_to_menu"
+    ],
+    "required_permissions": [
+      "config"
+    ],
+    "confirmation_policy": "confirm_token",
+    "permission_capability": "config",
+    "domain": "low-code"
+  },
+  "low_code.manage_component_page": {
+    "name": "low_code.manage_component_page",
+    "title": "搭建和发布通用页面",
+    "description": "搭建或修改业务列表、登记入口、台账、看板和混合页面，配置组件、保存草稿、发布页面并挂载到应用菜单。",
+    "capability_level": "agentic",
+    "risk_level": "high",
+    "default_tool": "pages.list",
+    "allowed_tools": [
+      "pages.list",
+      "pages.get",
+      "pages.create",
+      "pages.save_draft",
+      "pages.publish",
+      "pages.query",
+      "platform.form_settings.query",
+      "platform.application_settings.query",
+      "forms.preview_publish",
+      "forms.publish",
+      "menus.create_entry",
+      "menus.update_entry",
+      "ui.component_page.inspect",
+      "ui.component_page.add",
+      "ui.component_page.update_properties",
+      "ui.component_page.update_appearance",
+      "ui.component_page.set_interaction"
+    ],
+    "required_permissions": [
+      "config"
+    ],
+    "confirmation_policy": "confirm_token",
+    "permission_capability": "config",
+    "domain": "low-code"
   }
 }

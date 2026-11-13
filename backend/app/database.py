@@ -114,6 +114,9 @@ async def init_db():
         logger.info("init_db skipped: DB_TYPE=%s (use Alembic for non-SQLite)", DB_TYPE)
         return
 
+    from app.core.agent_registry_schema import ensure_sqlite_tenant_registry_schema
+    from app.core.application_menu_registry_schema import install_application_menu_tools
+    from app.core.component_page_registry_schema import install_component_page_tools
     from app.models.relational import Base
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -124,6 +127,9 @@ async def init_db():
         await _ensure_sqlite_tenant_onboarding(conn)
         await _ensure_sqlite_business_tenant_columns(conn)
         await _ensure_sqlite_saas_hardening_columns(conn)
+        await conn.run_sync(ensure_sqlite_tenant_registry_schema)
+        await conn.run_sync(install_application_menu_tools)
+        await conn.run_sync(install_component_page_tools)
     logger.info("SQLite schema ensured")
 
     if os.getenv("ENABLE_MANUFACTURING_DEMO_SEED") == "1":

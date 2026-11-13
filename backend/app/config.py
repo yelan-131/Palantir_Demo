@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.20"
+    APP_VERSION: str = "0.3.21"
     APP_MODE: str = "demo"
     DEBUG: bool = True
     SQL_ECHO: bool = False  # opt-in SQL tracing, independent of web debug mode
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     AI_PROVIDER: str = "glm"
     AI_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     AI_API_KEY: str = ""
+    AI_SETTINGS_ENCRYPTION_KEY: str = ""
     AI_CHAT_MODEL: str = "glm-5.1"
     AI_REASONING_MODEL: str = "glm-5.1"
     AI_EMBEDDING_MODEL: str = "embedding-3"

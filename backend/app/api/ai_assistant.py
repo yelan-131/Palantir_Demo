@@ -7,9 +7,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import desc, select, update
 
@@ -18,6 +18,8 @@ from app.core.db import db_session
 from app.core.production_errors import database_unavailable, seed_data_required
 from app.models.relational import AIAgentRun, AIConversation, AIDraft, AIMessage, AIToolCall
 from app.services.ai.agent_runs import cancel_agent_run, confirm_agent_run, create_agent_run, get_agent_run
+from app.services.ai.agent_definition import use_agent_registry
+from app.services.ai.chat_attachments import MAX_FILE_BYTES, extract_chat_attachment
 from app.services.ai.agent_registry import AgentRegistryError, load_agent_registry, save_agent_registry_payload, seed_agent_registry_from_files
 from app.services.ai.agent_items import (
     agent_response_status,
@@ -54,6 +56,8 @@ from app.services.ai.settings import (
     settings_to_provider_config as _settings_to_provider_config,
 )
 from app.services.ai.skills import list_skills
+from app.services.ai.skill_import import parse_skill_markdown
+from app.services.ai.skill_loader import read_registered_skill_instructions
 from app.services.ai.tenant_context import require_tenant_id
 from app.services.ai.tool_executor import agent_tool_executor
 from app.services.ai.tool_registry import list_tools
@@ -84,6 +88,10 @@ class AISettingsRequest(BaseModel):
 class AIAgentRegistryRequest(BaseModel):
     skills: dict[str, Any] | list[dict[str, Any]]
     tools: dict[str, Any] | list[dict[str, Any]]
+
+
+class SkillMarkdownRequest(BaseModel):
+    markdown: str = Field(max_length=100_000)
 
 
 class AgentRunConfirmRequest(BaseModel):
@@ -811,6 +819,25 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
         from_legacy_step(ai_permission_step, run_id=result.run_id),
         *result.items,
     ]
+    if result.actions:
+        registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+        with use_agent_registry(registry):
+            await _apply_agent_action_policies(result, current_user, event_sink)
+    for internal_key in ("_current_user", "_tenant_id", "_user_key"):
+        body.context.pop(internal_key, None)
+    run = create_agent_run(body, result, current_user)
+    if result.actions:
+        _audit_ai_event(
+            current_user,
+            "agent_actions_prepared",
+            {"run_id": run["run_id"], "actions": [action.model_dump() for action in result.actions]},
+        )
+    else:
+        _audit_ai_event(current_user, "agent_qa_completed", {"run_id": run["run_id"], "evidence_count": len(result.evidence)})
+    return result
+
+
+async def _apply_agent_action_policies(result, current_user, event_sink):
     for action in result.actions:
         from app.services.ai.policies import decide_tool_permission
         decision = decide_tool_permission(current_user, AI_SYSTEM_SETTINGS, str(action.payload.get("_harness_tool")), skill_name=action.skill) if action.payload.get("_harness_tool") else decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, action)
@@ -828,18 +855,6 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
         }
         result.items.append(from_legacy_step(skill_policy_step, run_id=result.run_id))
         await _emit_agent_step(event_sink, skill_policy_step)
-    for internal_key in ("_current_user", "_tenant_id", "_user_key"):
-        body.context.pop(internal_key, None)
-    run = create_agent_run(body, result, current_user)
-    if result.actions:
-        _audit_ai_event(
-            current_user,
-            "agent_actions_prepared",
-            {"run_id": run["run_id"], "actions": [action.model_dump() for action in result.actions]},
-        )
-    else:
-        _audit_ai_event(current_user, "agent_qa_completed", {"run_id": run["run_id"], "evidence_count": len(result.evidence)})
-    return result
 
 
 async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current_user: dict) -> dict[str, Any] | None:
@@ -971,7 +986,9 @@ async def get_ai_skills(user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
-    return {"data": list_skills()}
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        return {"data": list_skills()}
 
 
 @router.get("/tools")
@@ -979,7 +996,9 @@ async def get_ai_tools(user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
     base_decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low")
     _raise_for_ai_decision(base_decision)
-    return {"data": list_tools()}
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        return {"data": list_tools()}
 
 
 @router.post("/agent/conversations")
@@ -1210,6 +1229,18 @@ async def agent_chat(body: AgentRequest, user: dict = Depends(get_current_user))
     return payload
 
 
+@router.post("/agent/attachment-preview")
+async def preview_agent_attachment(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    await _load_effective_ai_settings()
+    _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa", risk_level="low"))
+    try:
+        content = await file.read(MAX_FILE_BYTES + 1)
+        return await asyncio.to_thread(extract_chat_attachment, file.filename or "", content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/agent/stream")
 async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current_user)):
     """Observable Agent run stream.
@@ -1311,9 +1342,14 @@ async def _confirm_agent_run_for_user(
             await event_sink("run.cancelled", {"run_id": run_id, "status": "cancelled", "run": run})
         return _public_agent_run(run)
 
-    await load_agent_registry(seed_if_empty=False)
     if not body.confirmation_token:
         raise HTTPException(status_code=400, detail="Confirmation token is required")
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        return await _confirm_registered_agent_run(run_id, body, current_user, event_sink=event_sink)
+
+
+async def _confirm_registered_agent_run(run_id, body, current_user, *, event_sink=None):
     if event_sink:
         await event_sink("pre.confirmation", {"run_id": run_id, "confirmed": True})
     from app.services.ai.run_recovery import claim_confirmation
@@ -1369,7 +1405,9 @@ async def receive_page_action_result(action_id: str, body: PageControlResult, us
 async def edit_ai_configuration_review(run_id: str, body: ConfigurationReviewEdit, user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
     await _load_effective_ai_settings()
-    result = await revise_configuration(run_id, body, current_user, AI_SYSTEM_SETTINGS)
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        result = await revise_configuration(run_id, body, current_user, AI_SYSTEM_SETTINGS)
     _audit_ai_event(current_user, "agent_configuration_revised", {"run_id": run_id, "action_index": body.action_index})
     return result
 
@@ -1458,7 +1496,9 @@ async def save_ai_draft(body: DraftSaveRequest, user: dict = Depends(get_current
     }
     from app.services.ai.schemas import SkillAction
 
-    decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, SkillAction(**action_stub), capability="save_draft")
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        decision = decide_skill_permission(current_user, AI_SYSTEM_SETTINGS, SkillAction(**action_stub), capability="save_draft")
     _raise_for_ai_decision(decision)
     confirmation_token = body.confirmation.get("confirmation_token")
     if confirmation_token:
@@ -1563,9 +1603,13 @@ async def preview_effective_ai_settings(body: AISettingsRequest, user: dict = De
 @router.put("/settings")
 async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(require_admin)):
     """Update backend-owned AI system settings for the demo runtime."""
+    from app.services.ai.credential_store import CredentialStoreError
+
     current_tenant_id(user)
     try:
         await save_persisted_ai_settings(body.settings, updated_by=str(current_user_id(user) or user.get("sub") or "admin"))
+    except CredentialStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -1659,20 +1703,37 @@ async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: di
 @router.get("/agent-registry")
 async def get_agent_registry(user: dict = Depends(require_admin)):
     """Return the active database-backed Agent skill/tool registry."""
-    current_tenant_id(user)
+    tenant_id = current_tenant_id(user)
     try:
-        registry = await load_agent_registry(seed_if_empty=False, include_disabled=True)
+        registry = await load_agent_registry(include_disabled=True, tenant_id=tenant_id)
     except AgentRegistryError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "data": registry}
 
 
+@router.get("/agent-registry/skill-instructions/{name}")
+async def get_registry_skill_instructions(name: str, user: dict = Depends(require_admin)):
+    current_tenant_id(user)
+    return {"data": {"instructions": read_registered_skill_instructions(name)}}
+
+
+@router.post("/agent-registry/parse-skill")
+async def parse_registry_skill(body: SkillMarkdownRequest, user: dict = Depends(require_admin)):
+    current_tenant_id(user)
+    try:
+        return {"data": parse_skill_markdown(body.markdown)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/agent-registry/seed")
 async def seed_agent_registry(user: dict = Depends(require_admin)):
     """Explicitly import the bundled Agent registry seed into the database."""
-    current_tenant_id(user)
+    tenant_id = current_tenant_id(user)
     try:
-        registry = await seed_agent_registry_from_files(updated_by=str(current_user_id(user) or user.get("sub") or "admin"))
+        registry = await seed_agent_registry_from_files(
+            updated_by=str(current_user_id(user) or user["sub"]), tenant_id=tenant_id,
+        )
     except AgentRegistryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"ok": True, "data": registry}
@@ -1681,11 +1742,12 @@ async def seed_agent_registry(user: dict = Depends(require_admin)):
 @router.put("/agent-registry")
 async def update_agent_registry(body: AIAgentRegistryRequest, user: dict = Depends(require_admin)):
     """Validate and immediately activate Agent skill/tool registry changes."""
-    current_tenant_id(user)
+    tenant_id = current_tenant_id(user)
     try:
         registry = await save_agent_registry_payload(
             body.model_dump(),
-            updated_by=str(current_user_id(user) or user.get("sub") or "admin"),
+            updated_by=str(current_user_id(user) or user["sub"]),
+            tenant_id=tenant_id,
         )
     except AgentRegistryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

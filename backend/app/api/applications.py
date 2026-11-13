@@ -18,6 +18,7 @@ from app.core.audit import write_audit_log
 from app.core.db import safe_db_call
 from app.core.permissions import has_permission
 from app.core.production_errors import database_unavailable, seed_data_required
+from app.services.field_uniqueness import lock as lock_tenant_writes
 from app.services.tenant_onboarding import assert_tenant_quota
 
 router = APIRouter()
@@ -600,86 +601,116 @@ async def admin_list_applications(user: dict = Depends(require_admin), db: Async
     return result
 
 
+async def ensure_application_code_available(db, tenant_id, code, *, application_id=None):
+    from app.models.relational import Application
+
+    query = select(Application.id).where(Application.tenant_id == tenant_id, Application.code == code)
+    if application_id is not None:
+        query = query.where(Application.id != application_id)
+    if await db.scalar(query) is not None:
+        raise HTTPException(409, "Application code already exists")
+
+
+async def get_tenant_application(db, tenant_id, application_id):
+    from app.models.relational import Application
+
+    app = await db.get(Application, application_id)
+    if not app or app.tenant_id != tenant_id:
+        raise HTTPException(404, "Application not found")
+    return app
+
+
+async def create_application(db, body: ApplicationCreate, user: dict):
+    from app.models.relational import Application
+
+    tenant_id = current_tenant_id(user)
+    await assert_tenant_quota(db, tenant_id, "applications")
+    await ensure_application_code_available(db, tenant_id, body.code)
+    values = body.model_dump()
+    app = Application(tenant_id=tenant_id, **values)
+    db.add(app)
+    await db.commit()
+    await db.refresh(app)
+    await write_audit_log(
+        tenant_id=tenant_id, user_id=current_user_id(user), action="create",
+        resource_type="application", resource_id=app.id, new_values=values,
+    )
+    return {"data": await _application_to_dict(db, app, include_bindings=True)}
+
+
+async def update_application(db, app, body: ApplicationUpdate, user: dict):
+    old_values = await _application_to_dict(db, app)
+    values = body.model_dump(exclude_unset=True)
+    if "code" in values:
+        await ensure_application_code_available(db, app.tenant_id, body.code, application_id=app.id)
+    for key, value in values.items():
+        setattr(app, key, value)
+    await db.commit()
+    await db.refresh(app)
+    await write_audit_log(
+        tenant_id=app.tenant_id, user_id=current_user_id(user), action="update",
+        resource_type="application", resource_id=app.id, old_values=old_values, new_values=values,
+    )
+    return {"data": await _application_to_dict(db, app, include_bindings=True)}
+
+
+async def delete_application(db, app, user: dict):
+    from app.api.forms import _delete_menu_node_entry_permissions
+    from app.models.relational import ApplicationForm, ApplicationMenuNode
+
+    tenant_id, app_id = app.tenant_id, app.id
+    nodes = await db.scalars(select(ApplicationMenuNode).where(
+        ApplicationMenuNode.tenant_id == tenant_id, ApplicationMenuNode.application_id == app_id,
+    ))
+    for node in nodes:
+        await _delete_menu_node_entry_permissions(db, node)
+    # A single DELETE removes both parents and children before FK validation.
+    await db.execute(delete(ApplicationMenuNode).where(
+        ApplicationMenuNode.tenant_id == tenant_id, ApplicationMenuNode.application_id == app_id,
+    ))
+    await db.execute(delete(ApplicationForm).where(
+        ApplicationForm.tenant_id == tenant_id, ApplicationForm.application_id == app_id,
+    ))
+    await db.delete(app)
+    await db.commit()
+    await write_audit_log(
+        tenant_id=tenant_id, user_id=current_user_id(user), action="delete",
+        resource_type="application", resource_id=app_id,
+    )
+    return {"ok": True}
+
+
 @admin_router.post("/applications")
 async def admin_create_application(body: ApplicationCreate, user: dict = Depends(require_admin)):
     async def _query(db):
-        from app.models.relational import Application
-
-        tenant_id = current_tenant_id(user)
-        await assert_tenant_quota(db, tenant_id, "applications")
-        existing = await db.scalar(select(Application.id).where(Application.tenant_id == tenant_id, Application.code == body.code))
-        if existing:
-            raise HTTPException(409, "Application code already exists")
-        app = Application(tenant_id=tenant_id, **body.dict())
-        db.add(app)
-        await db.commit()
-        await db.refresh(app)
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=current_user_id(user),
-            action="create",
-            resource_type="application",
-            resource_id=app.id,
-            new_values=body.dict(),
-        )
-        return {"data": await _application_to_dict(db, app, include_bindings=True)}
+        await lock_tenant_writes(db, current_tenant_id(user))
+        return await create_application(db, body, user)
 
     result = await safe_db_call(_query)
-    if result is not None:
-        return result
-    raise database_unavailable("Application database unavailable")
+    if result is None:
+        raise database_unavailable("Application database unavailable")
+    return result
 
 
 @admin_router.put("/applications/{app_id}")
 async def admin_update_application(app_id: int, body: ApplicationUpdate, user: dict = Depends(require_admin)):
     async def _query(db):
-        from app.models.relational import Application
-
         tenant_id = current_tenant_id(user)
-        app = await db.get(Application, app_id)
-        if not app or app.tenant_id != tenant_id:
-            raise HTTPException(404, "Application not found")
-        old_values = await _application_to_dict(db, app, include_bindings=False)
-        for key, value in body.dict(exclude_unset=True).items():
-            setattr(app, key, value)
-        await db.commit()
-        await db.refresh(app)
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=current_user_id(user),
-            action="update",
-            resource_type="application",
-            resource_id=app.id,
-            old_values=old_values,
-            new_values=body.dict(exclude_unset=True),
-        )
-        return {"data": await _application_to_dict(db, app, include_bindings=True)}
+        await lock_tenant_writes(db, tenant_id)
+        return await update_application(db, await get_tenant_application(db, tenant_id, app_id), body, user)
 
     result = await safe_db_call(_query)
-    if result is not None:
-        return result
-    raise database_unavailable("Application database unavailable")
+    if result is None:
+        raise database_unavailable("Application database unavailable")
+    return result
 
 
 @admin_router.delete("/applications/{app_id}")
 async def admin_delete_application(app_id: int, user: dict = Depends(require_admin)):
     async def _query(db):
-        from app.models.relational import Application
-
         tenant_id = current_tenant_id(user)
-        app = await db.get(Application, app_id)
-        if not app or app.tenant_id != tenant_id:
-            raise HTTPException(404, "Application not found")
-        await db.delete(app)
-        await db.commit()
-        await write_audit_log(
-            tenant_id=tenant_id,
-            user_id=current_user_id(user),
-            action="delete",
-            resource_type="application",
-            resource_id=app_id,
-        )
-        return {"ok": True}
+        await lock_tenant_writes(db, tenant_id)
+        return await delete_application(db, await get_tenant_application(db, tenant_id, app_id), user)
 
     result = await safe_db_call(_query)
     if result is None:

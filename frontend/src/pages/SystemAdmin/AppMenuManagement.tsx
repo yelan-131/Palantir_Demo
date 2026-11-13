@@ -18,7 +18,6 @@ import {
   FolderOutlined,
   FormOutlined,
   PlusOutlined,
-  MenuOutlined,
   MoreOutlined,
   NodeIndexOutlined,
   SafetyCertificateOutlined,
@@ -1135,12 +1134,12 @@ function AssemblyWorkspace({
   const currentFormName = activeForm ? watchedFormName || activeForm.name : '表单设置';
   const currentMenuName = Form.useWatch('title', menuForm);
   const currentAppName = Form.useWatch('name', appForm);
-  const menuPropertyTitle = selectedMenu ? `${currentMenuName || getMenuLabel(selectedMenu)} 属性设置` : '菜单属性';
-  const formPropertyTitle = activeForm ? `${currentFormName} 属性设置` : currentFormName;
+  const menuPropertyTitle = selectedMenu ? `${currentMenuName || getMenuLabel(selectedMenu)}` : '菜单属性';
+  const formPropertyTitle = currentFormName;
   const selectedApp = apps.find((item) => item.id === selectedAppId) ?? apps[0];
   const [appEditing, setAppEditing] = useState(false);
   useEffect(() => setAppEditing(selectedAppId < 0), [selectedAppId, selectedApp?.status]);
-  const appPropertyTitle = `${currentAppName || selectedApp?.name || '应用'} 属性设置`;
+  const appPropertyTitle = `${currentAppName || selectedApp?.name || '应用'}`;
   const propertyTitle = propertyTarget === 'app' ? appPropertyTitle
     : propertyTarget === 'form' ? formPropertyTitle : menuPropertyTitle;
   const [resourceQuery, setResourceQuery] = useState('');
@@ -1179,10 +1178,8 @@ function AssemblyWorkspace({
     <div className={`app-assembly-workspace${businessData ? ' assembly-business-data' : ''}`}>
       <header className="assembly-page-heading">
         {businessData ? <>
-          <div><h2>业务数据</h2><p>管理业务来源、字段与录入配置。同一业务来源可供多个列表使用。</p></div>
           <Button icon={<PlusOutlined />} disabled={propertySaving} onClick={onCreateForm}>新增表单</Button>
         </> : <>
-          <div><h2>应用管理</h2><p>管理应用与菜单入口，并将已发布页面加入导航。</p></div>
           <Button icon={<PlusOutlined />} disabled={propertySaving} onClick={() => { onCreateApp(); setPropertyTarget('app'); }}>新增应用</Button>
         </>}
       </header>
@@ -1227,21 +1224,20 @@ function AssemblyWorkspace({
               {!(businessData ? visibleForms.length : visiblePages.length) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={query ? '没有匹配的结果' : businessData ? '暂无表单' : '暂无已发布页面'} />}
             </div>
-            {!businessData && <p className="assembly-resource-hint">点 ＋ 添加页面。选中分组时添加到该分组。</p>}
           </Card>
         </Col>
 
         {!businessData && <Col>
               <Card
-                title={<Space><MenuOutlined />菜单结构</Space>}
+                title="菜单结构"
                 className="assembly-menu-card"
-                extra={<Space size={4}>
+              >
+                <div className="assembly-menu-toolbar">
                   <Button size="small" type="primary" icon={<PlusOutlined />} disabled={menuBusy}
                     onClick={() => { setPageToAdd(undefined); setPagePickerOpen(true); }}>添加页面</Button>
-                  <Button size="small" icon={<AppstoreAddOutlined />} onClick={() => { onAddMenuGroup(); setPropertyTarget('menu'); }}>添加分组</Button>
-                </Space>}
-              >
-                <p className="assembly-menu-hint">拖动调整顺序与层级，点击设置入口属性。</p>
+                  <Button size="small" icon={<AppstoreAddOutlined />} disabled={menuBusy}
+                    onClick={() => { onAddMenuGroup(); setPropertyTarget('menu'); }}>添加分组</Button>
+                </div>
                 {menus.length ? (
                   <div className="assembly-menu-dropzone">
                     <Tree
@@ -1339,9 +1335,12 @@ function AssemblyWorkspace({
                   </fieldset>
                 ) : propertyTarget === 'form' && activeForm ? <fieldset disabled={propertySaving} className="assembly-property-editor">
                   <div className="assembly-property-scroll assembly-inspector-content">
+                    <FieldStructurePanel fields={activeForm.fieldRows || []} formName={currentFormName} onCreate={onCreateField} onUpdate={onUpdateField} onDelete={onDeleteField} disabled={propertySaving} />
+                    <details className="assembly-form-details" open={!/^\d+$/.test(activeForm.id)}>
+                      <summary>表单属性与数据来源</summary>
                     <FormConfigForm form={formForm} creatorName={creatorName || activeForm.creator}
                       isPersisted={/^\d+$/.test(activeForm.id)} isAnalytics={activeForm.category === 'analytics'} />
-                    <FieldStructurePanel fields={activeForm.fieldRows || []} formName={currentFormName} onCreate={onCreateField} onUpdate={onUpdateField} onDelete={onDeleteField} disabled={propertySaving} />
+                    </details>
                   </div>
                 </fieldset> : propertyTarget === 'form' ? (
                   <Empty className="assembly-property-empty" image={Empty.PRESENTED_IMAGE_SIMPLE}

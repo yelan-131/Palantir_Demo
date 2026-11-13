@@ -113,7 +113,7 @@ async def test_harness_prepares_dashboard_confirmation_without_executing(monkeyp
     settings = merge_ai_settings({'aiEnabled': True, 'agentMode': 'confirm'})
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock())
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
     bridge = mod.PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings=settings, context={})
     from app.services.ai.tool_handlers import TOOL_HANDLERS
     execute = AsyncMock()

@@ -8,7 +8,10 @@ from app.core.db import db_session
 from app.models.relational import AIAgentToolDefinition
 async def main():
     async with db_session() as session:
-        row = await session.scalar(select(AIAgentToolDefinition).where(AIAgentToolDefinition.name == "forms.create_dynamic_record_draft"))
+        row = await session.scalar(select(AIAgentToolDefinition).where(
+            AIAgentToolDefinition.tenant_id == 1,
+            AIAgentToolDefinition.name == "forms.create_dynamic_record_draft",
+        ))
         if row and row.handler_key == "not_implemented" and row.definition.get("permission_check") == "save_draft" and row.definition.get("side_effect") == "draft_write":
             row.handler_key = "forms.create_dynamic_record_draft"
             row.definition = {**row.definition, "handler_key": row.handler_key}

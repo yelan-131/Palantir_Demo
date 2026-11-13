@@ -43,11 +43,12 @@ class SystemSetting(TimestampMixin, Base):
 class AIAgentSkillDefinition(TimestampMixin, Base):
     __tablename__ = "ai_agent_skill_definitions"
     __table_args__ = (
-        UniqueConstraint("name", name="uq_ai_agent_skill_definitions_name"),
+        UniqueConstraint("tenant_id", "name", name="uq_ai_agent_skill_definitions_tenant_name"),
         Index("ix_ai_agent_skill_definitions_enabled", "enabled"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     title: Mapped[str] = mapped_column(String(240), default="")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -61,11 +62,12 @@ class AIAgentSkillDefinition(TimestampMixin, Base):
 class AIAgentToolDefinition(TimestampMixin, Base):
     __tablename__ = "ai_agent_tool_definitions"
     __table_args__ = (
-        UniqueConstraint("name", name="uq_ai_agent_tool_definitions_name"),
+        UniqueConstraint("tenant_id", "name", name="uq_ai_agent_tool_definitions_tenant_name"),
         Index("ix_ai_agent_tool_definitions_enabled", "enabled"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     title: Mapped[str] = mapped_column(String(240), default="")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

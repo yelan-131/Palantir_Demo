@@ -566,6 +566,8 @@ def runtime_status(settings_data: dict[str, Any]) -> dict[str, Any]:
 
 
 async def load_persisted_ai_settings(*, strict: bool = False) -> dict[str, Any] | None:
+    from .credential_store import CredentialStoreError, protect_credentials, reveal_credentials
+
     try:
         from app.core.db import db_session
         from app.models.relational import SystemSetting
@@ -576,7 +578,6 @@ async def load_persisted_ai_settings(*, strict: bool = False) -> dict[str, Any] 
             record = result.scalar_one_or_none()
             if not record or not isinstance(record.value, dict):
                 return None
-            from .credential_store import protect_credentials, reveal_credentials
             merged = merge_ai_settings(reveal_credentials(record.value))
             protected = protect_credentials(merged, previous=record.value)
             if record.value != protected:
@@ -588,6 +589,8 @@ async def load_persisted_ai_settings(*, strict: bool = False) -> dict[str, Any] 
     except Exception as exc:  # noqa: BLE001 - settings should fall back to env/in-memory
         logger.warning("AI settings DB load failed; using runtime defaults: %s", exc)
         if strict:
+            if isinstance(exc, CredentialStoreError):
+                raise
             raise RuntimeError("AI 设置读取失败，数据库暂不可用") from exc
         return None
 

@@ -17,21 +17,20 @@ import type { MenuProps } from 'antd';
 import {
   AppstoreOutlined,
   CheckOutlined,
-  DashboardOutlined,
   DatabaseOutlined,
   DownOutlined,
   HomeOutlined,
+  HistoryOutlined,
   LeftOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   RightOutlined,
   SafetyCertificateOutlined,
-  ShopOutlined,
   ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, useApplicationLibrary, type LibraryApp } from './components/ShellNavigation';
-import { normalizeShellMenu, shellMenuAncestors, applicationNavigation } from './utils/shellMenu';
+import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, shellIcon, useApplicationLibrary, type LibraryApp } from './components/ShellNavigation';
+import { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage } from './utils/shellMenu';
 import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
 import { AiPageActionRouter } from './components/AiChatWidget/pageControls';
@@ -224,16 +223,6 @@ function getRuntimePageTitle(pathname: string): string {
     return programTitleMap[programId] || 'Business Page';
   }
   return pageTitleMap[pathname] || 'Business Page';
-}function iconFor(name?: string) {
-  const icons: Record<string, React.ReactNode> = {
-    DashboardOutlined: <DashboardOutlined />,
-    ToolOutlined: <ToolOutlined />,
-    SafetyCertificateOutlined: <SafetyCertificateOutlined />,
-    ShopOutlined: <ShopOutlined />,
-    AppstoreOutlined: <AppstoreOutlined />,
-    HomeOutlined: <HomeOutlined />,
-  };
-  return icons[name || ''] || <AppstoreOutlined />;
 }
 
 function PageLoader() {
@@ -275,7 +264,7 @@ function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
   if (items.some((item) => item.children?.length)) {
     return items.map((item) => ({
       key: normalizeRuntimeRoute(item.route_path) || `dynamic-${item.id}`,
-      icon: iconFor(item.icon),
+      icon: shellIcon(item.icon),
       label: item.title,
       children: item.children?.length ? buildDynamicMenuTree(item.children) : undefined,
     }));
@@ -286,7 +275,7 @@ function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
     const routePath = normalizeRuntimeRoute(item.route_path);
     map.set(item.id, {
       key: routePath || `dynamic-${item.id}`,
-      icon: iconFor(item.icon),
+      icon: shellIcon(item.icon),
       label: item.title,
       children: [],
     });
@@ -388,24 +377,6 @@ function AppContent() {
     else updatePreferences({ sidebar: value ? 'collapsed' : 'expanded' });
   };
   useEffect(() => { setTemporaryMenuExpanded(false); }, [location.pathname]);
-  const mobileMenuWasOpen = React.useRef(false);
-  useEffect(() => {
-    const isOpen = smallViewport && !collapsed;
-    const restoreFocus = mobileMenuWasOpen.current && smallViewport;
-    if (isOpen) document.getElementById('shell-context-menu')?.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus();
-    else if (restoreFocus) document.querySelector<HTMLButtonElement>('.shell-mobile-menu-toggle')?.focus();
-    mobileMenuWasOpen.current = isOpen;
-  }, [smallViewport, collapsed]);
-  useEffect(() => {
-    if (!smallViewport || collapsed) return;
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setTemporaryMenuExpanded(false);
-      }
-    };
-    window.addEventListener('keydown', onEscape);
-    return () => window.removeEventListener('keydown', onEscape);
-  }, [smallViewport, collapsed]);
   const [dynamicMenus, setDynamicMenus] = useState<MenuProps['items']>([]);
   const [menusLoadedFor, setMenusLoadedFor] = useState<number | null>(null);
   const [firstApplicationRoute, setFirstApplicationRoute] = useState<string>();
@@ -413,6 +384,9 @@ function AppContent() {
   const [currentApplication, setCurrentApplication] = useState<ApplicationInfo | null>(null);
   const [rootApplicationId, setRootApplicationId] = useState<number | null>(null);
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
+  const [acknowledgedRelease, setAcknowledgedRelease] = useState(() => {
+    try { return localStorage.getItem('mf_acknowledged_release'); } catch { return null; }
+  });
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseRecordIndex, setReleaseRecordIndex] = useState(0);
   const library = useApplicationLibrary(applications);
@@ -443,9 +417,8 @@ function AppContent() {
     : location.pathname === '/scheduler' ? 'scheduler'
     : isApplicationWorkspace && currentApplication ? `app:${currentApplication.id}` : 'home';
   const isSettingsWorkspace = isAccountPage || activeArea !== 'business';
-  const sidebarTitle = isSettingsWorkspace ? '设置中心' : location.pathname === '/more' ? '应用中心'
+  const sidebarTitle = isSettingsWorkspace ? '设置中心'
     : isApplicationWorkspace && currentApplication ? library.find(app => app.id === `app:${currentApplication.id}`)?.name || currentApplication.name : '工作台';
-  const showContextMenu = !isKnowledgeWorkspace && !['/more', '/workflow', '/scheduler'].includes(location.pathname);
 
 
 
@@ -538,19 +511,48 @@ function AppContent() {
     getCurrentRelease()
       .then((res) => {
         const release = res.data;
-        if (!release?.version || release.show_popup === false) return;
+        if (!release?.version) return;
         setReleaseInfo(release);
-        setReleaseModalOpen(true);
       })
       .catch(() => {});
   }, []);
 
   const acknowledgeRelease = () => {
-    setReleaseModalOpen(false);
+    if (!releaseInfo?.version) return;
+    setAcknowledgedRelease(releaseInfo.version);
+    try { localStorage.setItem('mf_acknowledged_release', releaseInfo.version); } catch { /* Acknowledge for this session. */ }
   };
+  const openReleaseHistory = () => {
+    acknowledgeRelease();
+    setReleaseRecordIndex(0);
+    setReleaseModalOpen(true);
+  };
+  const showReleaseNotice = location.pathname === '/' && !isApplicationWorkspace
+    && releaseInfo && releaseInfo.show_popup !== false && releaseInfo.version !== acknowledgedRelease;
+
+  const applicationMenuItems = useMemo(() => isApplicationWorkspace && menusLoadedFor === currentApplication?.id
+    ? unwrapApplicationMenuRoot(dynamicMenus) : [], [isApplicationWorkspace, menusLoadedFor, currentApplication?.id, dynamicMenus]);
+  const showContextMenu = !isKnowledgeWorkspace && (isSettingsWorkspace || hasApplicationPage(applicationMenuItems));
+  const mobileMenuWasOpen = React.useRef(false);
+  useEffect(() => {
+    const isOpen = showContextMenu && smallViewport && !collapsed;
+    const restoreFocus = mobileMenuWasOpen.current && smallViewport;
+    if (isOpen) document.getElementById('shell-context-menu')?.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus();
+    else if (restoreFocus) document.querySelector<HTMLButtonElement>('.shell-mobile-menu-toggle')?.focus();
+    mobileMenuWasOpen.current = isOpen;
+  }, [showContextMenu, smallViewport, collapsed]);
+  useEffect(() => {
+    if (!showContextMenu || !smallViewport || collapsed) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setTemporaryMenuExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [showContextMenu, smallViewport, collapsed]);
 
   const rawMenuItems = useMemo<MenuProps['items']>(() => {
-    if (location.pathname === '/more') return [{ key: '/more', icon: <AppstoreOutlined />, label: '应用中心' }];
     if (isSettingsWorkspace) {
       const icons: Record<string, React.ReactNode> = { personal: <UserOutlined />, applications: <AppstoreOutlined />, data: <DatabaseOutlined />, platform: <SafetyCertificateOutlined />, advanced: <ToolOutlined /> };
       return [
@@ -558,10 +560,8 @@ function AppContent() {
       ];
     }
     if (!isApplicationWorkspace) return [workspaceMenuItem];
-    const appItems = menusLoadedFor === currentApplication?.id
-      ? unwrapApplicationMenuRoot(dynamicMenus || []) : [];
-    return applicationNavigation(workspaceMenuItem, appItems);
-  }, [activeArea, dynamicMenus, menusLoadedFor, currentApplication?.id, isAdmin, isApplicationWorkspace, location.pathname, isAccountPage, isSettingsWorkspace]);
+    return applicationNavigation(workspaceMenuItem, applicationMenuItems);
+  }, [applicationMenuItems, isAdmin, isApplicationWorkspace, isSettingsWorkspace]);
 
   const allMenuItems = useMemo(() => normalizeShellMenu(rawMenuItems, <AppstoreOutlined />), [rawMenuItems]);
   const selectedKey = isSettingsWorkspace ? settingsDestinationKey(location.pathname, location.search) : normalizeRuntimeRoute(location.pathname) || location.pathname;
@@ -585,6 +585,7 @@ function AppContent() {
   const activeReleaseIndex = releaseRecords.length
     ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
     : 0;
+  const activeRelease = releaseRecords[activeReleaseIndex];
 
   useEffect(() => {
     if (!releaseModalOpen) return;
@@ -593,7 +594,7 @@ function AppContent() {
 
   const moveReleaseRecord = (direction: -1 | 1) => {
     if (!releaseRecords.length) return;
-    setReleaseRecordIndex((current) => (current + direction + releaseRecords.length) % releaseRecords.length);
+    setReleaseRecordIndex((current) => Math.max(0, Math.min(current + direction, releaseRecords.length - 1)));
   };
 
 
@@ -624,15 +625,20 @@ function AppContent() {
           {!collapsed && <Typography.Text strong ellipsis>{sidebarTitle}</Typography.Text>}
           <Tooltip title={collapsed ? '展开菜单栏' : '折叠菜单栏'}><Button type="text" aria-label={collapsed ? '展开菜单栏' : '折叠菜单栏'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /></Tooltip>
         </div>
-        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={20} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); } else navigate(String(key)); } }} />
+        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={12} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); } else navigate(String(key)); } }} />
       </Sider>}
       <Layout className={`shell-workspace-layout${showContextMenu ? '' : ' shell-without-context-menu'}`} {...(showContextMenu && smallViewport && !collapsed ? { inert: '' } : {})}>
         {!isKnowledgeWorkspace && <Header className="app-header">
           {showContextMenu && <Button className="shell-mobile-menu-toggle" type="text" aria-label="打开菜单栏" aria-controls="shell-context-menu" aria-expanded={!collapsed} icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} />}
           {location.pathname !== '/' && <ShellPageTitle />}
+          {showReleaseNotice && <div className="shell-release-notice">
+            <Button type="link" onClick={openReleaseHistory}>版本更新 v{releaseInfo.version}</Button>
+            <Button type="text" size="small" onClick={acknowledgeRelease} aria-label="关闭版本提示">×</Button>
+          </div>}
 
           <GlobalSearch />
-          <Space className="shell-header-actions" size={12} align="center">
+          <Space className="shell-header-actions" size={4} align="center">
+            {releaseInfo && <Tooltip title="版本记录"><Button type="text" icon={<HistoryOutlined />} aria-label="打开版本记录" onClick={openReleaseHistory} /></Tooltip>}
             <NotificationCenter />
 
           </Space>
@@ -685,23 +691,19 @@ function AppContent() {
         className="release-update-modal"
         title="版本记录"
         open={releaseModalOpen}
-        onCancel={acknowledgeRelease}
+        onCancel={() => setReleaseModalOpen(false)}
         width={760}
-        footer={[
-          <Button key="ok" type="primary" onClick={acknowledgeRelease}>
-            我知道了
-          </Button>,
-        ]}
+        footer={null}
       >
         <Space direction="vertical" size={14} className="release-update-content">
-          {!!releaseRecords.length && (
+          {activeRelease && (
             <div className="release-record-carousel">
               <div className="release-carousel-header">
                 <div className="release-carousel-version-meta">
-                  <span className="release-record-version">v{releaseRecords[activeReleaseIndex]?.version}</span>
-                  {(releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date || releaseRecords[activeReleaseIndex]?.updated_at) && (
+                  <span className="release-record-version">v{activeRelease.version}</span>
+                  {(activeRelease.released_at || activeRelease.date || activeRelease.updated_at) && (
                     <span className="release-record-date">
-                      {releaseRecords[activeReleaseIndex]?.released_at || releaseRecords[activeReleaseIndex]?.date || `更新于 ${releaseRecords[activeReleaseIndex]?.updated_at}`}
+                      {activeRelease.released_at || activeRelease.date || `更新于 ${activeRelease.updated_at}`}
                     </span>
                   )}
                 </div>
@@ -709,52 +711,37 @@ function AppContent() {
                   <Button
                     aria-label="上一版本"
                     className="release-carousel-inline-button"
-                    disabled={releaseRecords.length < 2}
+                    disabled={activeReleaseIndex >= releaseRecords.length - 1}
                     icon={<LeftOutlined />}
                     size="small"
-                    onClick={() => moveReleaseRecord(-1)}
+                    onClick={() => moveReleaseRecord(1)}
                   >
                     上一版本
                   </Button>
                   <Button
                     aria-label="下一版本"
                     className="release-carousel-inline-button"
-                    disabled={releaseRecords.length < 2}
+                    disabled={activeReleaseIndex === 0}
                     icon={<RightOutlined />}
                     iconPosition="end"
                     size="small"
-                    onClick={() => moveReleaseRecord(1)}
+                    onClick={() => moveReleaseRecord(-1)}
                   >
                     下一版本
                   </Button>
                 </div>
               </div>
-              <div className="release-carousel-shell">
-                <div className="release-carousel-viewport">
-                  <div className="release-carousel-track" style={{ transform: `translateX(-${activeReleaseIndex * 100}%)` }}>
-                    {releaseRecords.map((record) => {
-                      const sections = releaseRecordCategories(record);
-                      return (
-                        <section className="release-record-entry" key={`${record.version}-${record.released_at || record.date || ''}`}>
-                          {record.title && <div className="release-record-title">{record.title}</div>}
-                          {record.summary && <Typography.Paragraph className="release-record-summary">{record.summary}</Typography.Paragraph>}
-                          <div className="release-category-list">
-                            {sections.map((section) => (
-                              <div className="release-category-block" key={`${record.version}-${section.key}`}>
-                                <div className={`release-category-title release-category-${section.key}`}>{section.label}</div>
-                                <ul>
-                                  {section.items.map((item) => (
-                                    <li key={item}>{item}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-                      );
-                    })}
-                  </div>
-                </div>
+              <div className="release-record-scroll" key={activeReleaseIndex} tabIndex={0} aria-label="版本变更详情">
+                  <section className="release-record-entry">
+                    {activeRelease.title && <div className="release-record-title">{activeRelease.title}</div>}
+                    {activeRelease.summary && <Typography.Paragraph className="release-record-summary">{activeRelease.summary}</Typography.Paragraph>}
+                    {releaseRecordCategories(activeRelease).map(section => (
+                      <div className="release-category-block" key={section.key}>
+                        <h3 className="release-category-title">{section.label}</h3>
+                        <ul>{section.items.map(item => <li key={item}>{item}</li>)}</ul>
+                      </div>
+                    ))}
+                  </section>
               </div>
             </div>
           )}
