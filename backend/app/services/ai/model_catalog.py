@@ -3,6 +3,8 @@ from copy import deepcopy
 import re
 from urllib.parse import urlparse
 
+from .settings import DEFAULT_CONTEXT_POLICY
+
 
 def catalog_from_legacy(data):
     models = []
@@ -124,7 +126,8 @@ def resolve_model_settings(data, purpose='chat'):
         result['maxTokens'] = model['maxTokens']
     native = result.setdefault('harnessPolicy', {})
     native['reasoning_effort'] = None
-    native['contextWindow'] = int(model.get('contextWindow') or native.get('contextWindow') or (int((data.get('contextPolicy') or {}).get('maxContextTokens', 12000)) + int(result.get('maxTokens', 2048))))
+    configured_input = (data.get('contextPolicy') or {}).get('maxContextTokens', DEFAULT_CONTEXT_POLICY['maxContextTokens'])
+    native['contextWindow'] = int(model.get('contextWindow') or native.get('contextWindow') or (int(configured_input) + int(result.get('maxTokens', 2048))))
     for source, target in (('contextWindow', 'contextWindow'), ('reasoningEffort', 'reasoning_effort')):
         if model.get(source) not in (None, ''):
             native[target] = model[source]

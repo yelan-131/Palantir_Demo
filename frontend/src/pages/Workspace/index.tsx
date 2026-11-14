@@ -1,3 +1,7 @@
+import type { ReactNode } from 'react';
+import ComponentPages from '../ComponentPages';
+import api from '@/services/api';
+import type { PageWidget } from '../ComponentPages/model';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRightOutlined, BellOutlined, CheckOutlined, ClockCircleOutlined, FormOutlined, AppstoreOutlined,
@@ -32,7 +36,7 @@ const itemLabel = (item: WorkspaceItem) => item.form?.name || item.application?.
 const displayNode = (item: WorkspaceItem) => item.current_node && !/^[\s?？—-]+$/.test(item.current_node) && !['表单记录', '流程中'].includes(item.current_node) ? item.current_node : '';
 const itemDate = (item: WorkspaceItem) => formatServerShortDateTime(item.updated_at || item.created_at, '更新时间未知');
 
-export default function WorkspacePage() {
+function WorkspaceContent({pageCode}: {pageCode?: string}) {
   const navigate = useNavigate();
   const user = useAuthStore(state => state.user);
   const scope = `${user?.tenant_id ?? 'default'}:${user?.id ?? 'anonymous'}`;
@@ -135,13 +139,8 @@ export default function WorkspacePage() {
       icon={favorites.includes(formKey(form)) ? <StarFilled /> : <StarOutlined />} aria-label={`${favorites.includes(formKey(form)) ? '取消常用' : '设为常用'}：${form.name}`} aria-pressed={favorites.includes(formKey(form))} onClick={() => toggleFavorite(form)} /></Tooltip>
   </div>)}</div>;
 
-  return <div className="workspace-home wh-page">
-    <header className="wh-intro"><h1>工作台</h1><div className="wh-intro-actions">
-      <Tooltip title="刷新首页数据"><Button type="text" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadWorkbench()} aria-label="刷新首页数据" /></Tooltip>
-    </div></header>
-    {loadError && <Alert type="warning" showIcon message={hasData ? '刷新失败，当前显示上次成功加载的数据' : '首页数据加载失败，请重试'} action={<Button size="small" loading={refreshing} onClick={() => void loadWorkbench()}>重试</Button>} />}
-    {!hasData && refreshing ? <Skeleton active paragraph={{ rows: 9 }} /> : hasData && <>
-      <nav className="wh-entry-overview" aria-label="工作空间快捷入口">
+  const modules: Record<string, ReactNode> = {
+overview: (<nav className="wh-entry-overview" aria-label="工作空间快捷入口">
         <button type="button" className="wh-entry-metric wh-entry-activity" onClick={() => setActivityOpen(true)}>
           <span className="wh-entry-metric-label">近 7 日更新</span>
           <span className="wh-entry-metric-value">{overview.recentUpdates.length}<small>条记录</small></span>
@@ -161,9 +160,8 @@ export default function WorkspacePage() {
         </button> : <div className="wh-entry-metric wh-entry-empty">
           <span>最近一次工作</span><span>暂无记录</span>
         </div>}
-      </nav>
-      <div className="wh-dashboard-grid"><div className="wh-dashboard-column">
-        <div className="wh-feature-group">
+      </nav>),
+continuation: (<div className="wh-feature-group">
           <article className="wh-feature" aria-labelledby="wh-current-title">
             <div className="wh-feature-head"><span className="wh-icon"><FormOutlined /></span><strong>{isUnfinished ? '继续工作' : current ? '继续跟进' : '我的工作'}</strong>
               {groups.unfinished.length > 0 && <small>{groups.unfinished.length} 项未完成</small>}{current && <span className={`wh-status ${current.status}`}>{statusLabel(current)}</span>}
@@ -184,13 +182,12 @@ export default function WorkspacePage() {
             <div className="wh-queue-list">{(unfinishedExpanded ? others : others.slice(0, 4)).map(item => <button type="button" key={item.id} onClick={() => selectCurrent(item)} aria-label={`切换到${item.title}`}><span className="wh-icon"><FormOutlined /></span><span><strong>{item.title}</strong><small>{itemLabel(item)} · {workspaceStatus[item.status]}</small></span><ArrowRightOutlined /></button>)}</div>
             {others.length > 4 && <Button type="link" size="small" onClick={() => setUnfinishedExpanded(value => !value)}>{unfinishedExpanded ? '收起列表' : '展开全部未完成工作'}</Button>}
           </section>}
-        </div>
-        <section className="wh-panel wh-recent-panel" aria-labelledby="wh-recent-title"><div className="wh-section-head"><h2 id="wh-recent-title"><ClockCircleOutlined /> 最近工作 <small>按更新时间</small></h2><Segmented size="small" aria-label="筛选最近工作" value={recentFilter} onChange={value => setRecentFilter(String(value))} options={[{ label: '全部', value: 'all' }, { label: '我发起的', value: 'initiated' }, { label: '我已处理的', value: 'processed' }]} /></div>
+        </div>),
+recent: (<section className="wh-panel wh-recent-panel" aria-labelledby="wh-recent-title"><div className="wh-section-head"><h2 id="wh-recent-title"><ClockCircleOutlined /> 最近工作 <small>按更新时间</small></h2><Segmented size="small" aria-label="筛选最近工作" value={recentFilter} onChange={value => setRecentFilter(String(value))} options={[{ label: '全部', value: 'all' }, { label: '我发起的', value: 'initiated' }, { label: '我已处理的', value: 'processed' }]} /></div>
         {recent.length ? <div className="wh-recent-list">{recent.slice(0, 5).map(item => <button type="button" key={item.id} className="wh-recent-item" onClick={() => openItem(item, item.views?.includes('pending') ? 'pending' : 'initiated')}><span className="wh-icon"><FormOutlined /></span><span className="wh-recent-info"><strong>{item.title}</strong><small>{itemLabel(item)}</small></span><span className="wh-recent-end"><span className={`wh-status ${item.status}`}>{statusLabel(item)}</span><time>{itemDate(item)}</time></span><ArrowRightOutlined /></button>)}</div> : <div className="wh-recent-empty"><ClockCircleOutlined /><span>暂无其他工作记录</span></div>}
         <footer className="wh-panel-footer"><Button type="link" size="small" onClick={() => navigate(`/workflow?tab=${recentFilter === 'processed' ? 'processed' : 'initiated'}`)}>查看全部记录 <ArrowRightOutlined /></Button></footer>
-      </section>
-      </div><div className="wh-dashboard-column">
-        <aside className="wh-support">
+      </section>),
+support: (<aside className="wh-support">
           <section><div className="wh-section-head"><h2>需要我处理 <span className="wh-count">{counts.pending ?? 0}</span></h2><Button type="link" size="small" onClick={() => navigate('/workflow?tab=pending')}>全部 <ArrowRightOutlined /></Button></div>
             {groups.pending.length ? groups.pending.slice(0, 2).map(item => <button type="button" key={item.id} className="wh-side-item" onClick={() => openItem(item, 'pending')}><span className="wh-icon"><BellOutlined /></span><span><strong>{item.title}</strong><small>{itemLabel(item)} · {statusLabel(item)}</small></span><ArrowRightOutlined /></button>) : <div className="wh-quiet"><CheckOutlined /><span>暂时没有需要处理的审批</span></div>}
           </section>
@@ -198,18 +195,43 @@ export default function WorkspacePage() {
             {waiting.length ? waiting.map(item => <button className="wh-side-item" type="button" key={item.id} onClick={() => openItem(item)}><span className="wh-dot" /><span><strong>{item.title}</strong><small>{displayNode(item) || statusLabel(item)}</small></span><ArrowRightOutlined /></button>) : <div className="wh-side-empty">暂无审核中的申请</div>}
           </section>
           <button className="wh-processed" type="button" onClick={() => navigate('/workflow?tab=processed')}><span><CheckOutlined /> 我已处理的</span><strong>{counts.processed ?? 0}</strong><ArrowRightOutlined /></button>
-        </aside>
-      <section className="wh-panel wh-forms-panel" aria-labelledby="wh-forms-title" ><div className="wh-section-head"><h2 id="wh-forms-title"><AppstoreOutlined /> 业务表单</h2><Button type="link" size="small" onClick={showCatalog}>查看全部 <ArrowRightOutlined /></Button></div>
+        </aside>),
+forms: (<section className="wh-panel wh-forms-panel" aria-labelledby="wh-forms-title" ><div className="wh-section-head"><h2 id="wh-forms-title"><AppstoreOutlined /> 业务表单</h2><Button type="link" size="small" onClick={showCatalog}>查看全部 <ArrowRightOutlined /></Button></div>
         <div className="wh-form-toolbar"><Segmented size="small" aria-label="按提交方式筛选表单" value={filter} options={filterOptions} onChange={value => setFilter(value as FormFilter)} /><Input prefix={<SearchOutlined />} allowClear placeholder="搜索表单名称或编码" aria-label="搜索业务表单" value={keyword} maxLength={100} onChange={event => setKeyword(event.target.value)} /></div>
         {filteredForms.length ? formCards(filteredForms.slice(0, 6)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={filter === 'favorites' && !keyword ? '还没有常用表单，点击星标即可收藏' : '没有匹配的业务表单'}><Button size="small" onClick={() => { setKeyword(''); setFilter('all'); }}>查看全部表单</Button></Empty>}
         <footer className="wh-panel-footer"><small>星标固定常用入口 · {filteredForms.length > 6 ? `显示前 6 个，共 ${filteredForms.length} 个` : `${filteredForms.length} 个表单`}</small>{filteredForms.length > 6 && <Button type="link" size="small" onClick={showCatalog}>展开全部表单 <ArrowRightOutlined /></Button>}</footer>
-      </section>
-      </div></div>
-    </>}
+      </section>),
+  };
+  const renderWorkspaceWidget = (widget: PageWidget) => <div className="workspace-home wh-canvas-module">{loadError && <Alert type="warning" message="工作台数据加载失败" action={<Button onClick={() => void loadWorkbench()}>重试</Button>} />}{!hasData && refreshing ? <Skeleton active /> : modules[widget.workspaceModule || 'overview']}</div>;
+  return <div className="workspace-canvas-home">
+    <header className="wh-canvas-intro"><div><h1>工作台</h1></div><Tooltip title="刷新工作台数据"><Button type="text" icon={<ReloadOutlined />} loading={refreshing} onClick={() => void loadWorkbench()} aria-label="刷新工作台数据" /></Tooltip></header>
+    {pageCode ? <ComponentPages pageCode={pageCode} workspace renderWorkspaceWidget={renderWorkspaceWidget} /> : <div className="workspace-home wh-page"><header className="wh-intro"><div><h1>我的工作台</h1><p>处理待办，查看工作进展。</p></div></header><div className="wh-custom-grid wh-custom-two">{Object.entries(modules).map(([key,node]) => <div key={key}>{node}</div>)}</div></div>}
     <Drawer title="近 7 日工作动态" open={activityOpen} onClose={() => setActivityOpen(false)} width={680} rootClassName="wh-activity-drawer">
       <p className="wh-catalog-copy">近 7 天有更新的记录 · 按最近更新时间排序，同一记录仅计一次。</p>
       {overview.recentUpdates.length ? <div className="wh-recent-list">{overview.recentUpdates.map(item => <button type="button" key={item.id} className="wh-recent-item" onClick={() => openItem(item, item.views?.includes('pending') ? 'pending' : 'initiated')}><span className="wh-icon"><FormOutlined /></span><span className="wh-recent-info"><strong title={item.title}>{item.title}</strong><small>{itemLabel(item)}</small></span><span className="wh-recent-end"><span className={`wh-status ${item.status}`}>{statusLabel(item)}</span><time>{itemDate(item)}</time></span><ArrowRightOutlined /></button>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="近 7 天暂无更新记录" />}
     </Drawer>
     <Drawer title={filter === 'favorites' ? '常用业务表单' : '业务表单'} open={catalogOpen} onClose={() => setCatalogOpen(false)} width={680} rootClassName="wh-catalog-drawer"><p className="wh-catalog-copy">选择业务表单，进入对应页面填写或查看。星标可固定常用入口。</p><div className="wh-form-toolbar"><Segmented aria-label="筛选业务入口" value={filter} options={filterOptions} onChange={value => setFilter(value as FormFilter)} /><Input prefix={<SearchOutlined />} allowClear placeholder="搜索表单名称或编码" aria-label="搜索全部业务表单" value={keyword} onChange={event => setKeyword(event.target.value)} maxLength={100} /></div>{filteredForms.length ? formCards(filteredForms) : <Empty description={filter === 'favorites' && !keyword ? '还没有常用表单，点击星标即可收藏' : '没有匹配的业务表单'} />}</Drawer>
   </div>;
+}
+
+export default function WorkspacePage() {
+  const user = useAuthStore(state => state.user);
+  const identity = user ? user.tenant_id + ':' + user.id + ':' + user.is_admin : '';
+  const [binding, setBinding] = useState<{identity: string; code?: string}>();
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!identity) return;
+    let current = true; setError('');
+    (async () => {
+      try {
+        const response = user?.is_admin ? await api.post('/pages/workspace/home') : await api.get('/pages/workspace/home');
+        if (current) setBinding({identity, code: response.data.code || undefined});
+      } catch { if(current) setError('工作台画布加载失败，请重试'); }
+    })();
+    return () => { current = false; };
+  }, [identity, attempt]);
+  if (error) return <Alert type="error" showIcon message={error} action={<Button onClick={() => setAttempt(value => value + 1)}>重试</Button>} />;
+  if (!binding || binding.identity !== identity) return <Skeleton active />;
+  return <WorkspaceContent key={identity} pageCode={binding.code} />;
 }

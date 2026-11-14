@@ -1,7 +1,7 @@
 import { widgetSourceId, type PageDefinition, type PageWidget, type WidgetType } from './model';
 
 export const componentNames: Record<WidgetType, string> = {
-  'record-list': '业务列表', 'record-filter': '业务筛选', metric: '指标卡', chart: '分组图表',
+  'record-list': '业务列表', 'record-filter': '业务筛选', metric: '指标卡', chart: '分组图表', workspace: '工作台模块',
 };
 
 type ComponentProperties = Partial<Pick<PageWidget, 'title' | 'width' | 'dataBinding' | 'dimension' |

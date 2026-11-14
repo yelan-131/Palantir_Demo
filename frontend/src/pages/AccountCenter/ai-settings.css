@@ -443,3 +443,8 @@ body:has(.tech-white-shell) .ant-modal.ai-skill-dialog .ant-modal-footer {
 .ai-effective-preview .ant-descriptions-item-label { font-size: 12px; }
 .ai-effective-preview .ant-alert { margin-bottom: 12px; }
 @media(max-width:760px) { .ai-catalog-connection .ant-card-head { flex-wrap: wrap; gap: 8px; padding-block: 10px; } .ai-catalog-connection .ant-card-extra .ant-space { flex-wrap: wrap; justify-content: flex-end; } }
+
+.ai-runtime-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.ai-runtime-toolbar .ai-settings-tab-actions { flex-wrap: wrap; gap: 12px; padding-left: 0; }
+.ai-runtime-toolbar .ai-runtime-status { display: inline; }
+.ai-runtime-toolbar + .ant-alert { margin-bottom: 12px; }

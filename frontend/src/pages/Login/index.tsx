@@ -222,13 +222,13 @@ export default function LoginPage() {
                   introductionTabs.current[nextIndex]?.focus();
                 }}
               >
-                <span aria-hidden="true">0{index + 1}</span>{item.label}
+                {item.label}
               </button>
             ))}
           </div>
           </div>
           <div key={introductionIndex} className={`technology-login-introduction-panel${pendingIntroduction !== null ? ' is-leaving' : ''}`} id="login-introduction-panel" role="tabpanel" aria-labelledby={`login-introduction-tab-${introductionIndex}`} aria-live={introductionFocused ? 'polite' : 'off'} tabIndex={0}>
-            <Typography.Title level={3}>{introduction.title}</Typography.Title>
+            <Typography.Title level={2}>{introduction.title}</Typography.Title>
             <p>{introduction.description}</p>
             <ul>{introduction.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
           </div>
@@ -238,7 +238,6 @@ export default function LoginPage() {
       <section className="technology-login-access" aria-label="账号登录">
         <div className="technology-login-form">
           <div className="technology-login-form-head">
-            <span className="technology-login-form-kicker">欢迎回来</span>
             <Typography.Title level={2}>登录你的工作空间</Typography.Title>
             <Typography.Text type="secondary">使用组织账号登录，继续你的工作</Typography.Text>
           </div>

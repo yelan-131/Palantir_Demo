@@ -13497,3 +13497,18 @@ html[data-login-transition="active"]::view-transition-new(root) { animation: log
 .assembly-grid > .ant-col:nth-child(2) .ant-card-head { padding-inline: 12px; }
 .assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-tag { margin-inline-end: 0; font-size: 11px; padding-inline: 4px; }
 .assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-btn { width: 24px; padding: 0; }
+
+/* User directory: full-height list and on-demand account details. */
+.user-management-console { height: calc(100dvh / var(--app-ui-scale) - 170px); min-height: 320px; }
+.user-management-workbench { display: flex; overflow: hidden; }
+.user-management-workbench > .user-list-panel { flex: 1; min-height: 0; }
+.user-directory-search { width: min(360px, 100%); }
+.user-management-toolbar { align-items: center; flex-wrap: wrap; }
+.user-directory-person { display: flex; align-items: center; gap: 10px; padding: 4px 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; font: inherit; width: 100%; }
+.user-directory-person > span:last-child { min-width: 0; }
+.user-directory-person strong { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-directory-person small { display: block; color: var(--mf-text-secondary, #74808b); margin-top: 3px; font-size: 12px; }
+.user-management-table .ant-table-tbody > tr { cursor: pointer; }
+.user-detail-drawer .ant-drawer-body { display: flex; padding: 0; overflow: hidden; }
+.user-detail-drawer .user-preview-panel { flex: 1; height: 100%; min-height: 0; border: 0; border-radius: 0; padding: 20px 24px; }
+.user-management-pagination .ant-pagination { flex-wrap: wrap; }

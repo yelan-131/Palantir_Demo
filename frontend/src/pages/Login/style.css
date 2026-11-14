@@ -18,7 +18,6 @@
 .technology-login-access { padding: calc(80px + var(--login-gap)) clamp(28px,4vw,64px) 64px; display: flex; align-items: flex-start; justify-content: center; background: var(--mf-bg); }
 .technology-login-form { width: 100%; max-width: 500px; padding: 44px; border: 1px solid var(--mf-border); border-radius: 20px; background: #fff; box-shadow: 0 12px 40px rgba(32,54,87,.05); }
 .technology-login-form-head { margin-bottom: 32px; }
-.technology-login-form-kicker { display: block; color: var(--mf-primary); font-size: 12px; margin-bottom: 12px; }
 .technology-login-form-head h2.ant-typography { color: var(--mf-text); font-size: 30px; line-height: 1.4; margin: 0 0 10px; font-weight: 600; letter-spacing: -.7px; }
 .technology-login-form-head .ant-typography-secondary { font-size: 14px; color: var(--mf-muted); }
 .technology-login-form .ant-form-item { margin-bottom: 22px; }
@@ -71,13 +70,12 @@
 
 .technology-login-introduction-tabs { display: flex; gap: 22px; margin-top: 44px; border-bottom: 1px solid #cbd9e7; }
 .technology-login-introduction-tabs button { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 10px 0 15px; position: relative; border: 0; background: transparent; color: #647990; font: inherit; font-size: 15px; cursor: pointer; white-space: nowrap; }
-.technology-login-introduction-tabs button span { font-size: 11px; color: #8193a6; }
 .technology-login-introduction-tabs button[aria-selected='true'] { color: #315f79; font-weight: 600; }
 .technology-login-introduction-tabs button[aria-selected='true']::after { content: ''; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: #4e839a; border-radius: 2px; }
 .technology-login-introduction-tabs button:hover { color: #315f79; }
 .technology-login-introduction-tabs button:focus-visible, .technology-login-introduction-panel:focus-visible { outline: 2px solid var(--mf-focus); outline-offset: 4px; border-radius: 3px; }
 .technology-login-introduction-panel { min-height: 270px; padding-top: 28px; max-width: 560px; }
-.technology-login-introduction-panel h3.ant-typography { margin: 0 0 16px; font-size: 23px; line-height: 1.5; font-weight: 600; color: #36546f; letter-spacing: -.4px; }
+.technology-login-introduction-panel h2.ant-typography { margin: 0 0 16px; font-size: 23px; line-height: 1.5; font-weight: 600; color: #36546f; letter-spacing: -.4px; }
 .technology-login-introduction-panel p { font-size: 15px; line-height: 1.9; color: #5c7289; }
 .technology-login-introduction-panel ul { display: grid; gap: 12px; padding: 0; margin: 24px 0 0; list-style: none; }
 .technology-login-introduction-panel li { display: flex; align-items: center; gap: 10px; color: #536d85; font-size: 14px; line-height: 1.6; }
@@ -88,7 +86,7 @@
  .technology-login-introduction-tabs { gap: 18px; margin-top: 26px; }
  .technology-login-introduction-tabs button { font-size: 14px; gap: 6px; min-height: 44px; padding-bottom: 12px; }
  .technology-login-introduction-panel { min-height: 0; padding-top: 20px; }
- .technology-login-introduction-panel h3.ant-typography { font-size: 20px; margin-bottom: 10px; }
+ .technology-login-introduction-panel h2.ant-typography { font-size: 20px; margin-bottom: 10px; }
  .technology-login-introduction-panel p { font-size: 14px; line-height: 1.8; }
  .technology-login-introduction-panel ul { margin-top: 16px; gap: 8px; }
  .technology-login-introduction-panel li { font-size: 13px; }
@@ -99,7 +97,7 @@
 .technology-login-introduction-controls .technology-login-introduction-tabs { margin-top: 0; border-bottom: 0; }
 .technology-login-introduction-panel { opacity: 1; transition: opacity 180ms ease; }
 .technology-login-introduction-panel.is-leaving { opacity: 0; }
-.technology-login-introduction-panel h3.ant-typography { animation: login-text-lift 550ms both; }
+.technology-login-introduction-panel h2.ant-typography { animation: login-text-lift 550ms both; }
 .technology-login-introduction-panel p { animation: login-text-soft 450ms 40ms both; }
 .technology-login-introduction-panel li { animation: login-text-soft 450ms 80ms both; }
 .technology-login-introduction-panel li:nth-child(2) { animation-delay: 120ms; }
@@ -119,7 +117,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
  .technology-login-introduction-panel { transition: none; }
- .technology-login-introduction-panel h3.ant-typography, .technology-login-introduction-panel p, .technology-login-introduction-panel li { animation: none; }
+ .technology-login-introduction-panel h2.ant-typography, .technology-login-introduction-panel p, .technology-login-introduction-panel li { animation: none; }
 }
 
 /* Gentle, one-time arrivals and small responses keep the login form steady. */

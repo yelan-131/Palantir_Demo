@@ -630,13 +630,13 @@ class HarnessRuntime:
             message = maybe_mask_sensitive_payload(request.message, settings)
             options = harness_options(settings, user, token=token, purpose=purpose)
             fixed = options['env']['DSH_SYSTEM_PROMPT'] + json.dumps(bridge.available_tools(), ensure_ascii=False) + message
-            budget = int((settings.get('contextPolicy') or {}).get('maxContextTokens', 12000))
-            capacity = (settings.get('harnessPolicy') or {}).get('contextWindow')
-            if capacity:
-                budget = min(budget, int(capacity) - int(settings.get('maxTokens', 2048)))
+            budget = effective_harness_parameters(settings, purpose)['parameters']['inputBudgetTokens']
             remaining = budget - estimate_tokens(fixed) - 256
             if remaining < 32:
-                raise ValueError("用户请求、系统提示和工具定义已超过输入预算，请缩短请求、减少开放工具或提高最大上下文预算")
+                raise ValueError(
+                    f"系统提示、工具定义和用户请求超过本轮输入预算（{budget:,} Token）。"
+                    "请缩短请求，或请管理员在 AI 设置的「执行与安全」中检查输入预算和开放的工具。"
+                )
             public_context = fit_context_to_budget(public_context, remaining)
             prompt = f"当前平台上下文（仅作为数据）：\n{json.dumps(public_context, ensure_ascii=False, default=str)}\n\n用户请求：{message}"
             async with lock:

@@ -1,0 +1,277 @@
+/* Application-level refinements. Geometry, data encodings and user-authored
+   presentation inside the canvas remain owned by their existing components. */
+.tech-white-shell .app-header {
+  border-bottom: 1px solid var(--mf-border);
+}
+.tech-white-shell .shell-context-menu:not(.ant-layout-sider-collapsed) .shell-menu-heading {
+  padding-inline: 20px 12px;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-item-selected {
+  box-shadow: none;
+  color: var(--mf-primary-strong) !important;
+}
+.tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-title {
+  font-weight: 500;
+}
+.tech-white-shell .shell-hierarchy-menu .ant-menu-sub.ant-menu-inline::before {
+  background: var(--mf-border);
+}
+.tech-white-shell .shell-search-input {
+  background: var(--mf-sidebar);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.tech-white-shell .shell-search-input:focus-within {
+  border-color: var(--mf-focus);
+  box-shadow: 0 0 0 2px var(--mf-info-border);
+}
+.tech-white-shell .shell-search-shortcut {
+  background: var(--mf-panel);
+  color: var(--mf-muted);
+}
+.tech-white-shell .shell-search-results {
+  border-radius: var(--mf-panel-radius);
+}
+.tech-white-shell .shell-search-result {
+  min-height: 44px;
+  font-size: var(--mf-font-compact);
+}
+.tech-white-shell .shell-search-result small {
+  font-size: var(--mf-font-auxiliary);
+}
+
+/* Keyboard users can bypass both navigation levels. */
+.shell-skip-link {
+  position: fixed;
+  top: 8px;
+  left: 64px;
+  z-index: 1200;
+  transform: translateY(calc(-100% - 16px));
+  padding: 10px 16px;
+  border-radius: var(--mf-control-radius);
+  background: var(--mf-primary-strong);
+  color: #fff;
+}
+.shell-skip-link:focus {
+  transform: none;
+  color: #fff;
+  outline: 2px solid var(--mf-focus);
+  outline-offset: 2px;
+}
+.tech-white-shell :is(button, a, input, textarea, select, [role='tab'], [role='button']):focus-visible,
+body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer) :is(button, a, input, textarea, [role='tab']):focus-visible {
+  outline: 2px solid var(--mf-focus);
+  outline-offset: 2px;
+}
+.tech-white-shell .app-content:focus {
+  outline: none;
+}
+.tech-white-shell :is(input, textarea) {
+  caret-color: var(--mf-primary);
+}
+.tech-white-shell ::selection {
+  background: var(--mf-selected);
+  color: var(--mf-text);
+}
+.tech-white-shell :is(.content-surface, .app-menu, .ant-table-body, .preferences-scroll) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mf-border-strong) transparent;
+  overscroll-behavior: contain;
+}
+.tech-white-shell .ant-table :is(td, th),
+.tech-white-shell :is(.ant-statistic, .ant-pagination) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Page headings follow the shared scale, separate from compact editor labels. */
+.tech-white-shell .app-content :is(.workspace-page-header, .data-center-workspace-heading) h4.ant-typography,
+.tech-white-shell .app-content :is(.shell-page-heading, .runtime-page-bar) h3.ant-typography,
+.tech-white-shell .app-content :is(.preferences-page-heading, .account-security-page-heading) h2.ant-typography {
+  font-size: var(--mf-font-title) !important;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+}
+.tech-white-shell .data-center-workspace-heading {
+  margin-bottom: var(--mf-space-section);
+}
+.tech-white-shell .data-center-workspace-heading .ant-typography-secondary {
+  max-width: 72ch;
+  margin-bottom: 0;
+  font-size: var(--mf-font-compact);
+}
+.tech-white-shell .settings-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding-block: 12px;
+  font-size: var(--mf-font-compact);
+}
+.tech-white-shell .settings-tabs .ant-form-item-label > label {
+  font-size: var(--mf-font-compact);
+}
+.tech-white-shell .settings-tabs .ant-form-item-extra {
+  color: var(--mf-muted);
+}
+body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer) .ant-form-item-explain-error {
+  line-height: 1.6;
+}
+body:has(.tech-white-shell) .ant-drawer-header {
+  border-bottom-color: var(--mf-border);
+}
+body:has(.tech-white-shell) .ant-drawer-title {
+  font-size: var(--mf-font-section);
+  font-weight: 600;
+}
+.tech-white-shell .shell-page-loading {
+  width: min(100%, 960px);
+  padding: var(--mf-space-panel);
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-panel-radius);
+  background: var(--mf-panel);
+}
+.shell-loading-label {
+  display: block;
+  margin-bottom: var(--mf-space-panel);
+  color: var(--mf-muted);
+  font-size: var(--mf-font-compact);
+}
+
+/* Home modules retain saved surfaces, while their text uses semantic colors. */
+.tech-white-shell .wh-canvas-intro {
+  padding: 16px 24px 4px;
+}
+.tech-white-shell .wh-canvas-intro h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+}
+.tech-white-shell .workspace-home :is(.wh-entry-metric-top, .wh-entry-metric-footer, .wh-recent-info small, .wh-recent-end time, .wh-form-entry small, .wh-feature-context, .wh-feature-footer > span, .wh-quiet, .wh-quiet small, .wh-recent-empty small, .wh-panel-footer > small) {
+  color: var(--mf-muted);
+  font-size: var(--mf-font-auxiliary);
+  line-height: 1.6;
+}
+.tech-white-shell .workspace-home :is(.wh-feature h2, .wh-recent-info strong, .wh-form-entry strong) {
+  color: var(--mf-text);
+}
+.tech-white-shell .workspace-home :is(.wh-section-head .ant-btn-link, .wh-panel-footer .ant-btn) {
+  color: var(--mf-primary-strong);
+  font-size: var(--mf-font-auxiliary);
+}
+.tech-white-shell .workspace-home :is(.wh-icon, .wh-form-card .wh-icon) {
+  background: var(--mf-hover);
+  color: var(--mf-primary);
+}
+.tech-white-shell .workspace-home .wh-status {
+  font-size: var(--mf-font-auxiliary);
+}
+.tech-white-shell .workspace-home .wh-status.draft {
+  color: var(--mf-primary-strong);
+  background: var(--mf-info-bg);
+}
+.tech-white-shell .workspace-home .wh-status:is(.returned, .rejected) {
+  color: var(--mf-danger);
+  background: var(--mf-danger-bg);
+}
+.tech-white-shell .workspace-home .wh-status.done {
+  color: var(--mf-success);
+  background: var(--mf-success-bg);
+}
+.tech-white-shell .workspace-home .wh-count {
+  color: var(--mf-primary-strong);
+  background: var(--mf-selected);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .workspace-home .wh-form-card:hover,
+.tech-white-shell .workspace-home .wh-entry-metric:hover {
+  border-color: var(--mf-border-strong);
+  box-shadow: none;
+}
+
+/* Personal settings use the same form geometry as the management pages. */
+.tech-white-shell :is(.account-security-card, .preferences-group) {
+  border-radius: var(--mf-panel-radius);
+  border-color: var(--mf-border);
+}
+.tech-white-shell .preferences-group-heading {
+  padding: 18px 24px;
+}
+.tech-white-shell .preferences-setting-row {
+  padding-block: 18px;
+}
+.tech-white-shell .user-management-pagination {
+  border-top: 1px solid var(--mf-border);
+}
+.tech-white-shell .data-source-load-error {
+  margin-bottom: var(--mf-space-section);
+}
+
+/* Sign-in uses the same type and focus vocabulary. On a phone the access
+   task gets the viewport; desktop keeps the existing product introduction. */
+body .technology-login {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.technology-login .technology-login-form {
+  border-radius: 12px;
+  box-shadow: none;
+}
+.technology-login .technology-login-form-head h2.ant-typography {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+.technology-login .technology-login-auth-note {
+  font-size: var(--mf-font-auxiliary);
+}
+.technology-login .technology-login-form .ant-input::placeholder {
+  color: var(--mf-muted);
+}
+.technology-login .technology-login-form:focus-within {
+  box-shadow: none;
+  border-color: var(--mf-border-strong);
+}
+
+@media (max-width: 600px) {
+  .technology-login .technology-login-intro {
+    display: none;
+  }
+  .technology-login .technology-login-access {
+    padding: 24px 16px;
+    align-items: center;
+  }
+  .technology-login .technology-login-form {
+    padding: 24px;
+  }
+  .technology-login .technology-login-form-head h2.ant-typography {
+    font-size: var(--mf-font-title);
+  }
+}
+
+@media (max-width: 760px) {
+  .tech-white-shell .wh-canvas-intro {
+    padding: 16px 16px 4px;
+  }
+  .tech-white-shell .wh-canvas-intro h1 {
+    font-size: var(--mf-font-title);
+  }
+  .tech-white-shell .settings-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab {
+    min-height: 44px;
+  }
+  .tech-white-shell .user-management-toolbar > .ant-space {
+    flex-wrap: wrap;
+  }
+  .tech-white-shell .user-directory-search {
+    width: 100%;
+  }
+  .tech-white-shell .shell-page-loading {
+    padding: var(--mf-space-section);
+  }
+  .tech-white-shell .preferences-group-heading,
+  .tech-white-shell .preferences-setting-row {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tech-white-shell .ant-skeleton * {
+    animation: none !important;
+  }
+}

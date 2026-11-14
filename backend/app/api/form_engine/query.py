@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
@@ -52,6 +54,23 @@ def _parse_record_filters(filters_json: Optional[str]) -> list[dict]:
     return [item for item in parsed if isinstance(item, dict)]
 
 
+def _range_bounds(fields, field_name, expected):
+    if not isinstance(expected, list) or len(expected) != 2:
+        raise HTTPException(400, f"Invalid between filter for field: {field_name}")
+    start, end = expected
+    field = next((item for item in fields if item.field_name == field_name), None)
+    ui = getattr(field, "ui_config", None) or {}
+    temporal = getattr(field, "field_type", "") in {"date", "datetime", "timestamp"} or ui.get("controlType") in {"date", "datetime"}
+    exclusive = False
+    if temporal and isinstance(end, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+        try:
+            end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+        except (ValueError, OverflowError) as exc:
+            raise HTTPException(400, "Invalid date range end") from exc
+        exclusive = True
+    return start, end, exclusive
+
+
 def _record_matches_filters(record, fields: list, filters: list[dict]) -> bool:
     if not filters:
         return True
@@ -79,13 +98,11 @@ def _record_matches_filters(record, fields: list, filters: list[dict]) -> bool:
             if not any(str(value) == str(choice) for value in actual_values for choice in expected):
                 return False
         elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
+            start, end, exclusive = _range_bounds(fields, field, expected)
             actual_text = str(actual or "")
             if start and actual_text < str(start):
                 return False
-            if end and actual_text > str(end):
+            if end and (actual_text >= str(end) if exclusive else actual_text > str(end)):
                 return False
         elif op == "gte":
             if str(actual or "") < str(expected):
@@ -196,13 +213,11 @@ def _apply_record_filters_query(query, record_model, fields: list, filters: list
         elif op == "equals":
             query = query.where(expr.in_(['true','1'] if expected else ['false','0']) if isinstance(expected,bool) else expr == str(expected))
         elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
+            start, end, exclusive = _range_bounds(fields, field, expected)
             if start not in (None, ""):
                 query = query.where(expr >= str(start))
             if end not in (None, ""):
-                query = query.where(expr <= str(end))
+                query = query.where(expr < str(end) if exclusive else expr <= str(end))
         elif op == "gte":
             query = query.where(expr >= str(expected))
         elif op == "lte":

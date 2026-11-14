@@ -14,6 +14,7 @@ import {
   Avatar,
   Button,
   Descriptions,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -130,6 +131,9 @@ export default function UserManagement() {
   const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
   const [editingUser, setEditingUser] = useState<UserItem | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailEditing, setDetailEditing] = useState(false);
+  const [query, setQuery] = useState('');
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(100);
   const [form] = Form.useForm();
@@ -259,19 +263,25 @@ export default function UserManagement() {
     [users, selectedUserId],
   );
 
+  const filteredUsers = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return users.filter(user => [user.username, user.display_name, user.email, ...(user.roles || []).map(role => role.label), ...(user.org_units || []).map(org => org.name)].some(value => value?.toLowerCase().includes(term)));
+  }, [users, query]);
+  const closeDetail = () => {
+    if (detailEditing) Modal.confirm({ title: '放弃未保存的修改？', content: '关闭后，本次编辑的内容将不会保存。', okText: '放弃修改', cancelText: '继续编辑', onOk: () => { setDetailOpen(false); setDetailEditing(false); } });
+    else setDetailOpen(false);
+  };
   const pagedUsers = useMemo(() => {
     const start = (userPage - 1) * userPageSize;
-    return users.slice(start, start + userPageSize);
-  }, [users, userPage, userPageSize]);
+    return filteredUsers.slice(start, start + userPageSize);
+  }, [filteredUsers, userPage, userPageSize]);
 
   return (
     <div className="user-management-console">
       <div className="user-management-toolbar">
-        <div>
-          <Typography.Text type="secondary">账号、角色、组织、SSO 绑定、MFA 状态和会话治理。</Typography.Text>
-        </div>
+        <Input.Search className="user-directory-search" aria-label="搜索用户" placeholder="搜索姓名、账号、邮箱、角色或组织" allowClear value={query} onChange={event => { setQuery(event.target.value); setUserPage(1); }} />
         <Space>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchData} />
+          <Button aria-label="刷新用户列表" title="刷新用户列表" icon={<ReloadOutlined />} loading={loading} onClick={fetchData} />
           <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>导入</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建用户</Button>
         </Space>
@@ -285,34 +295,30 @@ export default function UserManagement() {
             loading={loading}
             size="small"
             className="user-management-table"
-            scroll={{ x: 1110, y: '100%' }}
+            scroll={{ x: 760, y: '100%' }}
             pagination={false}
-            rowClassName={(record) => (record.id === selectedUserId ? 'user-row-selected' : '')}
-            onRow={(record) => ({ onClick: () => setSelectedUserId(record.id) })}
+            rowClassName={(record) => (detailOpen && record.id === selectedUserId ? 'user-row-selected' : '')}
+            onRow={(record) => ({ onClick: () => { setSelectedUserId(record.id); setDetailOpen(true); } })}
             columns={[
               {
-                title: '头像',
-                width: 64,
-                align: 'center',
-                render: (_value, record) => (
-                  <Avatar className="user-table-avatar" size={28} src={record.avatar_url || undefined}>
-                    {getUserAvatarText(record)}
-                  </Avatar>
-                ),
+                title: '用户',
+                width: 240,
+                render: (_value, record) => <button className="user-directory-person" onClick={() => { setSelectedUserId(record.id); setDetailOpen(true); }}>
+                  <Avatar className="user-table-avatar" size={32} src={record.avatar_url || undefined}>{getUserAvatarText(record)}</Avatar>
+                  <span><strong>{record.display_name || record.username}</strong><small>{record.username}</small></span>
+                </button>,
               },
-              { title: '账号', dataIndex: 'username', width: 130 },
-              { title: '姓名', dataIndex: 'display_name', width: 150 },
-              { title: '邮箱', dataIndex: 'email', width: 210, ellipsis: true },
+              { title: '邮箱', dataIndex: 'email', width: 210, ellipsis: true, responsive: ['xl'] },
               {
                 title: '角色',
                 dataIndex: 'roles',
-                width: 210,
+                width: 180,
                 render: (items: RoleItem[]) => renderCompactTags(items, (role) => role.id, (role) => role.label, () => 'blue'),
               },
               {
                 title: '组织',
                 dataIndex: 'org_units',
-                width: 200,
+                width: 180,
                 render: (items: UserItem['org_units']) => renderCompactTags(
                   items,
                   (org) => org.id,
@@ -322,7 +328,7 @@ export default function UserManagement() {
               },
               {
                 title: '安全状态',
-                width: 190,
+                width: 150,
                 render: (_value, record) => (
                   <Space size={4} wrap>
                     {record.is_active ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>}
@@ -336,6 +342,7 @@ export default function UserManagement() {
               },
               {
                 title: '最近登录',
+                responsive: ['xl'],
                 width: 160,
                 render: (_value, record) => formatServerDateTime(record.last_login_at),
               },
@@ -345,7 +352,7 @@ export default function UserManagement() {
             <Pagination
               current={userPage}
               pageSize={userPageSize}
-              total={users.length}
+              total={filteredUsers.length}
               showSizeChanger
               pageSizeOptions={[20, 50, 100, 200]}
               showTotal={(total) => `共 ${total} 个用户`}
@@ -357,14 +364,17 @@ export default function UserManagement() {
           </div>
         </div>
 
+      </div>
+      <Drawer title="用户详情" open={detailOpen} onClose={closeDetail} width={600} rootClassName="user-detail-drawer" destroyOnClose>
         <UserPreviewPanel
+          onEditingChange={setDetailEditing}
           user={selectedUser}
           roles={roles}
           orgOptions={orgOptions}
           onSave={saveUserInline}
           onDelete={deleteUser}
         />
-      </div>
+      </Drawer>
 
       <Modal title="新建用户" open={createOpen} onOk={submitCreateUser} onCancel={() => setCreateOpen(false)} destroyOnClose>
         <Form form={form} layout="vertical">
@@ -411,7 +421,9 @@ function UserPreviewPanel({
   orgOptions,
   onSave,
   onDelete,
+  onEditingChange,
 }: {
+  onEditingChange: (editing: boolean) => void;
   user: UserItem | null;
   roles: RoleItem[];
   orgOptions: Array<{ label: string; value: number }>;
@@ -421,6 +433,7 @@ function UserPreviewPanel({
   const [activeTab, setActiveTab] = useState('overview');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  useEffect(() => { onEditingChange(editing || saving); }, [editing, saving, onEditingChange]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [inlineForm] = Form.useForm();

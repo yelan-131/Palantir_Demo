@@ -2353,6 +2353,7 @@ export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLEl
 
 export interface FormSettingsPageProps {
   workspaceTargets?: SourceEditorTargets;
+  sourceImpact?:React.ReactNode;
   requestExitRef?:React.MutableRefObject<(()=>void)|null>;
   formId?: string;
   embedded?: boolean;
@@ -2425,7 +2426,7 @@ function applyNativeFieldProperties(control: LayoutControl, field: DesignerField
   };
 }
 
-export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps = {}) {
+export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef, sourceImpact }: FormSettingsPageProps = {}) {
   const { formId: routeFormId } = useParams();
   const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
@@ -7105,6 +7106,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         confirmLoading={isPersistingFlow}
         title="发布确认"
       >
+        {sourceImpact}
         <div className="designer-publish-note">
           发布时会执行当前业务表单配置的必要校验；不同业务可拥有不同规则，日常编辑不单独打扰。
         </div>

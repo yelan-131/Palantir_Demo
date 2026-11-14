@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .model_catalog import resolve_model_settings
-from .settings import settings_to_provider_config
+from .settings import DEFAULT_CONTEXT_POLICY, settings_to_provider_config
 
 
 def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict:
@@ -17,7 +17,8 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
     service = next((s for s in data.get('modelServices', []) if s['id'] == (ref or {}).get('serviceId')), {})
     model = next((m for m in service.get('models', []) if m['id'] == (ref or {}).get('modelId')), {})
     output = int(effective.get('maxTokens') or 2048)
-    window = int(native.get('contextWindow') or (int((effective.get('contextPolicy') or {}).get('maxContextTokens', 12000)) + output))
+    configured_input = int((effective.get('contextPolicy') or {}).get('maxContextTokens', DEFAULT_CONTEXT_POLICY['maxContextTokens']))
+    window = int(native.get('contextWindow') or configured_input + output)
     idle = int(native.get('streamIdleTimeoutMs') or config.timeout_seconds * 1000)
     tool = int(safety.get('toolTimeoutSeconds') or 30)
     # The MCP transport must outlive the handler's own cancellation and serialization.
@@ -46,7 +47,7 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
             'initializeTimeoutSeconds': int(native.get('initialize_timeout_seconds') or 30),
             'executionTimeoutSeconds': execution, 'toolTimeoutSeconds': tool,
             'mcpTimeoutMs': transport * 1000, 'maxToolSteps': steps,
-            'inputBudgetTokens': min(int((effective.get('contextPolicy') or {}).get('maxContextTokens', 12000)), window - output),
+            'inputBudgetTokens': min(configured_input, window - output),
             'compactionEnabled': bool(compaction.get('enabled', True)),
             'thresholdRatio': float(compaction.get('thresholdRatio', .8)),
             'retainRatio': float(compaction.get('retainRatio', .16)),

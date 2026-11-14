@@ -14,7 +14,7 @@ from app.models.relational import AIMessage, AIConversation
 
 from .memory import memory_service
 from .schemas import AgentRequest
-from .settings import maybe_mask_sensitive_payload, safety_policy_snapshot
+from .settings import DEFAULT_CONTEXT_POLICY, maybe_mask_sensitive_payload, safety_policy_snapshot
 from .tenant_context import require_tenant_id
 
 
@@ -81,7 +81,7 @@ class ContextBuilder:
         memory_policy = settings.get("memoryPolicy") or {}
         rag_policy = settings.get("ragPolicy") or {}
         recent_limit = int(context_policy.get("recentMessageLimit") or 10)
-        max_context_tokens = int(context_policy.get("maxContextTokens") or 12000)
+        max_context_tokens = int(context_policy.get("maxContextTokens") or DEFAULT_CONTEXT_POLICY["maxContextTokens"])
         memory_limit = int(memory_policy.get("recallLimit", 5))
         max_evidence_chars = int(rag_policy.get("maxEvidenceChars") or 1200)
 

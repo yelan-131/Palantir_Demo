@@ -1578,6 +1578,15 @@ async def test_provider(body: ProviderTestRequest, user: dict = Depends(require_
     return await _test_provider_config(body.provider_config)
 
 
+@router.get("/settings/harness-update")
+async def check_harness_updates(user: dict = Depends(require_admin)):
+    from app.services.ai.harness_updates import check_harness_update
+    try:
+        return await check_harness_update()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="DSH 更新检查失败，请稍后重试或检查服务器到 PyPI 的网络连接") from exc
+
+
 @router.get("/settings")
 async def get_ai_settings(user: dict = Depends(require_admin)):
     """Return backend-owned AI system settings with secret values masked."""

@@ -1,8 +1,9 @@
+import useSettingsDraft from './useSettingsDraft';
 import InspectorTabs from '@/components/PropertyInspector/InspectorTabs';
 import { PropertyGroup } from '@/components/PropertyInspector';
 import './assembly.css';
 import { MenuAccessPanel, FieldStructurePanel, RoleChecklist, type AssemblyRole, type NewAssemblyField } from './AssemblyPropertyPanels';
-import { useNavigate } from 'react-router-dom';
+import { useBlocker, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -28,6 +29,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -66,6 +68,7 @@ import api, {
   updatePlatformFormField,
   archivePlatformFormField,
   adminUpdateApplication,
+  savePlatformMenuOrder,
   createPlatformMenuNode,
   deletePlatformMenuNode,
   deletePlatformForm,
@@ -86,6 +89,7 @@ const persistenceApi = { adminCreateApplication, adminUpdateApplication, getPlat
 const notifyApplicationsChanged = () => window.dispatchEvent(new Event('applications-changed'));
 
 type AppRecord = {
+  edit_token?: string;
   id: number;
   name: string;
   code: string;
@@ -113,6 +117,7 @@ type PermissionRule = {
 };
 
 type FormRecord = {
+  edit_token?: string;
   id: string;
   name: string;
   code: string;
@@ -148,6 +153,7 @@ type FieldRecord = {
 };
 
 type MenuNode = DataNode & {
+  editToken?: string;
   key: string;
   title: ReactNode;
   dbId?: number;
@@ -366,6 +372,7 @@ function mapPlatformFormToRecord(form: PlatformForm): FormRecord {
 
   return {
     id: String(form.id),
+    edit_token: form.edit_token,
     name: form.name,
     code: form.code,
     category: isAnalytics ? 'analytics' : 'interaction',
@@ -445,6 +452,7 @@ function mapPlatformMenuNodesToTree(nodes: PlatformMenuNode[]): MenuNode[] {
           node.page_code ?? undefined,
         ),
         dbId: node.id,
+        editToken: node.edit_token,
         parentDbId: node.parent_id ?? null,
         routePath: node.route_path ?? undefined,
         visible: node.visible,
@@ -469,6 +477,17 @@ function getParentDbId(nodes: MenuNode[], key: string, parentDbId: number | null
     if (found !== null) return found;
   }
   return null;
+}
+
+function serializeMenuOrder(nodes: MenuNode[], normalize: boolean, parentId: number | null = null):
+  Array<{id: number; parent_id: number | null; sort_order: number}> {
+  return nodes.flatMap((node, index) => {
+    if (!node.dbId) return [];
+    return [
+      {id: node.dbId, parent_id: parentId, sort_order: normalize ? index : node.sortOrder ?? index},
+      ...serializeMenuOrder(node.children ?? [], normalize, node.dbId),
+    ];
+  });
 }
 
 function getSiblingOrder(nodes: MenuNode[], parentDbId: number | null): MenuNode[] {
@@ -500,6 +519,8 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
   const [propertySaving, setPropertySaving] = useState(false);
   const propertyOperation = useRef(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   const selectedApp = applications.find((item) => item.id === selectedAppId) ?? applications[0];
   const selectedForm = forms.find((item) => item.id === selectedFormId) ?? forms[0];
@@ -526,6 +547,8 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoadError('');
     Promise.all([
       businessData ? undefined : adminListApplications(),
       businessData ? undefined : adminListRoles(),
@@ -549,10 +572,10 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
         }
       })
       .catch(() => {
-        if (!cancelled) message.error(businessData ? '业务来源加载失败' : '应用与菜单加载失败');
+        if (!cancelled) setLoadError(businessData ? '业务来源加载失败，请重试。' : '应用与菜单加载失败，请重试。');
       }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [businessData, initialFormId]);
+  }, [businessData, initialFormId, loadAttempt]);
 
   useEffect(() => {
     if (selectedAppId <= 0) { setSelectedMenuKey(''); return; }
@@ -568,28 +591,64 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
     return () => { cancelled = true; };
   }, [selectedAppId]);
 
-  useEffect(() => {
-    if (!selectedApp) return;
-    appForm.setFieldsValue(appPropertyValues(selectedApp));
-  }, [appForm, selectedApp]);
-
-  useEffect(() => {
-    if (!selectedForm) return;
-    formForm.setFieldsValue({
-      category: 'interaction',
-      mode: undefined,
-      structureLocked: selectedForm?.status !== 'draft',
-      ...selectedForm,
+  const appDraft = useSettingsDraft(appForm, String(selectedApp?.id ?? ''), selectedApp ? appPropertyValues(selectedApp) : {}, selectedApp?.edit_token, Boolean(selectedApp && selectedApp.id < 0));
+  const formValues = selectedForm ? { category: 'interaction', mode: undefined, structureLocked: selectedForm.status !== 'draft', ...selectedForm } : {};
+  const formDraft = useSettingsDraft(formForm, selectedForm?.id ?? '', formValues, selectedForm?.edit_token, Boolean(selectedForm && !/^\d+$/.test(selectedForm.id)));
+  const menuDraft = useSettingsDraft(menuForm, selectedMenu?.key ?? '', menuPropertyValues(selectedMenu), selectedMenu?.editToken);
+  const dirty = appDraft.dirty || formDraft.dirty || menuDraft.dirty;
+  const busy = propertySaving || menuSyncing;
+  const savedNavigation = useRef(false);
+  const discardSettings = () => {
+    appDraft.discard();
+    formDraft.discard();
+    menuDraft.discard();
+    if (selectedApp?.id < 0) {
+      setApplications(previous => previous.filter(app => app.id !== selectedApp.id));
+      setSelectedAppId(applications.find(app => app.id > 0)?.id ?? 0);
+    }
+    if (selectedForm && !/^\d+$/.test(selectedForm.id)) {
+      setForms(previous => previous.filter(form => form.id !== selectedForm.id));
+      setSelectedFormId(forms.find(form => /^\d+$/.test(form.id))?.id ?? '');
+    }
+  };
+  const confirmSwitch = (action: () => void) => {
+    if (busy) { message.info('正在保存，请稍候'); return; }
+    if (!dirty) { action(); return; }
+    Modal.confirm({
+      title: '有尚未保存的修改',
+      content: '继续切换将放弃当前修改。',
+      okText: '放弃修改并继续', cancelText: '继续编辑',
+      onOk: () => { discardSettings(); action(); },
     });
-  }, [formForm, selectedForm]);
-
+  };
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (savedNavigation.current) { savedNavigation.current = false; return false; }
+    const changed = appDraft.isDirty() || formDraft.isDirty() || menuDraft.isDirty();
+    return (changed || busy) && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search);
+  });
   useEffect(() => {
-    menuForm.setFieldsValue(menuPropertyValues(selectedMenu));
-  }, [menuForm, selectedMenu]);
-
+    if (blocker.state !== 'blocked') return;
+    if (busy) { message.info('正在保存，请稍候'); blocker.reset(); return; }
+    const modal = Modal.confirm({
+      title: '有尚未保存的修改',
+      content: '离开页面将放弃当前修改。',
+      okText: '放弃修改并离开', cancelText: '继续编辑',
+      onOk: () => { discardSettings(); blocker.proceed(); },
+      onCancel: blocker.reset,
+    });
+    return () => modal.destroy();
+  }, [blocker.state]);
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirty || busy) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [dirty, busy]);
 
   const commitForm = (raw: PlatformForm, previousId: string) => {
     const saved = mapPlatformFormToRecord(raw);
+    formDraft.accept(saved.id, {category: 'interaction', mode: undefined, structureLocked: saved.status !== 'draft', ...saved}, saved.edit_token);
     setForms(previous => previous.map(item => item.id === previousId ? saved : item));
     setSelectedFormId(saved.id);
     return saved;
@@ -606,15 +665,22 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
 
   const persistAppDraft = async (status = selectedApp.status) => {
     const values = await appForm.validateFields();
-    const saved = await persistApplication(persistenceApi, selectedApp, values, status) as AppRecord;
+    const saved = await persistApplication(persistenceApi, {...selectedApp, edit_token: appDraft.token()}, values, status) as AppRecord;
+    appDraft.accept(String(saved.id), appPropertyValues(saved), saved.edit_token);
     setApplications(previous => previous.map(item => item.id === selectedApp.id ? saved : item));
     setSelectedAppId(saved.id);
+    try {
+      const response = await listPlatformMenuNodes(saved.id);
+      setMenusByApp(previous => ({...previous, [saved.id]: mapPlatformMenuNodesToTree(unwrapApiList<PlatformMenuNode>(response))}));
+    } catch {
+      message.warning('应用已保存，菜单状态请稍后刷新');
+    }
     notifyApplicationsChanged();
     return saved;
   };
   const persistFormDraft = async () => {
     const values = await formForm.validateFields();
-    const raw = await persistForm(persistenceApi, selectedForm, values);
+    const raw = await persistForm(persistenceApi, {...selectedForm, edit_token: formDraft.token()}, values);
     return commitForm(raw, selectedForm.id);
   };
   const createAssemblyField = async (values: NewAssemblyField) => {
@@ -648,6 +714,7 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
   const saveForm = () => runPropertyOperation(async () => { await persistFormDraft(); message.success('表单/看板属性已保存'); });
   const enterFormDesigner = () => runPropertyOperation(async () => {
     const saved = await persistFormDraft();
+    savedNavigation.current = true;
     navigate(selectedForm.category === 'analytics'
       ? `/program/${encodeURIComponent(saved.code)}`
       : `/form-settings/${saved.id}?source=business-data`);
@@ -837,41 +904,27 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
   };
 
   const deleteSelectedMenuNode = async () => {
-    if (!selectedMenu) return;
+    if (!selectedMenu?.dbId || menuSyncing || propertySaving) return;
     const target = selectedMenu;
-    if (target.dbId) {
-      setMenuSyncing(true);
-      try {
-        await Promise.all(
-          ((target.children ?? []) as MenuNode[])
-            .filter((child) => child.dbId)
-            .map((child, index) => updatePlatformMenuNode(selectedApp.id, child.dbId!, {
-              parent_id: target.parentDbId ?? null,
-              sort_order: index,
-            })),
-        );
-        await deletePlatformMenuNode(selectedApp.id, target.dbId);
-      } catch {
-        message.error('Failed to delete menu node from database.');
-        setMenuSyncing(false);
-        return;
+    const applicationId = selectedApp.id;
+    setMenuSyncing(true);
+    try {
+      const response = await deletePlatformMenuNode(applicationId, target.dbId!);
+      const tree = mapPlatformMenuNodesToTree(unwrapApiList<PlatformMenuNode>(response));
+      setMenusByApp(previous => ({...previous, [applicationId]: tree}));
+      setSelectedMenuKey(collectMenuKeys(tree)[0] ?? '');
+      if (target.defaultEntry) {
+        setApplications(previous => previous.map(app =>
+          app.id === applicationId ? {...app, default_route: '/'} : app));
       }
+      notifyApplicationsChanged();
+      message.success(isMenuGroup(target) && target.children?.length
+        ? '已删除分组，子节点已提升到同级' : '菜单节点已删除');
+    } catch (error) {
+      message.error(propertyError(error, '删除菜单失败'));
+    } finally {
       setMenuSyncing(false);
     }
-    const nextTree = removeMenuNodePromoteChildren(currentMenus, selectedMenuKey);
-    const nextKeys = collectMenuKeys(nextTree);
-    setMenusByApp((prev) => ({
-      ...prev,
-      [selectedApp.id]: nextTree,
-    }));
-    setSelectedMenuKey(nextKeys[0] ?? '');
-
-    if (isMenuGroup(target) && (target.children?.length ?? 0) > 0) {
-      message.success('已删除分组，分组下的节点已提升到同级');
-      return;
-    }
-
-    message.success('菜单节点已删除');
   };
 
   const saveMenuNode = async () => {
@@ -881,6 +934,7 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
     try {
       const response = await updatePlatformMenuNode(selectedApp.id, selectedMenu.dbId, {
         title: values.title,
+        expected_token: menuDraft.token(),
         ...(values.pageCode && values.pageCode !== selectedMenu.pageCode ? { page_code: values.pageCode } : {}),
         visible: values.visible,
         default_entry: values.defaultEntry,
@@ -897,10 +951,28 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
         ...mapPlatformMenuNodesToTree([{ ...updated, parent_id: null }])[0],
         parentDbId: updated.parent_id ?? null,
       };
-      setMenusByApp(previous => ({
-        ...previous,
-        [selectedApp.id]: replaceMenuNode(previous[selectedApp.id] ?? [], entry),
-      }));
+      menuDraft.accept(entry.key, menuPropertyValues(entry), updated.edit_token);
+      let defaultRoute = selectedApp.default_route;
+      if (updated.default_entry) defaultRoute = updated.route_path || '/';
+      else if (selectedMenu.defaultEntry) defaultRoute = '/';
+      setApplications(previous => previous.map(app =>
+        app.id === selectedApp.id ? {...app, default_route: defaultRoute} : app));
+      setMenusByApp(previous => {
+        const tree = replaceMenuNode(previous[selectedApp.id] ?? [], entry);
+        const syncDefaults = (items: MenuNode[]): MenuNode[] => items.map(item => {
+          let defaultEntry = item.defaultEntry;
+          if (updated.default_entry) defaultEntry = item.key === entry.key;
+          else if (selectedMenu.defaultEntry) defaultEntry = false;
+          return {
+            ...item,
+            defaultEntry,
+            title: <MenuTitle label={getMenuLabel(item)} formId={item.formId}
+              pageCode={item.pageCode} defaultEntry={defaultEntry} />,
+            children: syncDefaults(item.children ?? []),
+          };
+        });
+        return {...previous, [selectedApp.id]: syncDefaults(tree)};
+      });
       message.success('菜单节点已更新');
       notifyApplicationsChanged();
       return true;
@@ -912,32 +984,31 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
   };
 
   const onDropMenu = async (info: any) => {
-    if (!info?.dragNode?.key || !info?.node?.key) return;
-    const dragKey = info.dragNode.key;
-    const dropKey = info.node.key;
-    const dropPosition = info.dropPosition;
-    const dropToGap = info.dropToGap;
-    const nextTree = moveNode(currentMenus, dragKey, dropKey, dropPosition, dropToGap);
-    setMenusByApp((prev) => ({ ...prev, [selectedApp.id]: nextTree }));
-    const dragged = findMenuNode(nextTree, dragKey);
-    if (!dragged?.dbId) return;
-    const parentDbId = getParentDbId(nextTree, dragKey);
-    const siblings = getSiblingOrder(nextTree, parentDbId);
+    if (menuSyncing || propertySaving || !info?.dragNode?.key || !info?.node?.key) return;
+    const applicationId = selectedApp.id;
+    const nextTree = moveNode(currentMenus, info.dragNode.key, info.node.key, info.dropPosition, info.dropToGap);
     setMenuSyncing(true);
     try {
-      await Promise.all(
-        siblings
-          .filter((node) => node.dbId)
-          .map((node, index) => updatePlatformMenuNode(selectedApp.id, node.dbId!, { sort_order: index, parent_id: parentDbId })),
-      );
-    } catch {
-      message.error('Failed to persist menu order.');
+      const response = await savePlatformMenuOrder(applicationId, serializeMenuOrder(currentMenus, false), serializeMenuOrder(nextTree, true));
+      const tree = mapPlatformMenuNodesToTree(unwrapApiList<PlatformMenuNode>(response));
+      setMenusByApp(previous => ({...previous, [applicationId]: tree}));
+      notifyApplicationsChanged();
+    } catch (error) {
+      message.error(propertyError(error, '菜单移动未保存，请重试'));
+      try {
+        const response = await listPlatformMenuNodes(applicationId);
+        setMenusByApp(previous => ({...previous, [applicationId]: mapPlatformMenuNodesToTree(unwrapApiList<PlatformMenuNode>(response))}));
+      } catch {
+        message.warning('暂时无法刷新菜单，请稍后重新加载页面');
+      }
     } finally {
       setMenuSyncing(false);
     }
   };
 
   if (loading) return <Spin tip="正在读取配置"><div style={{ minHeight: 240 }} /></Spin>;
+
+  if (loadError) return <Alert type="error" showIcon message={loadError} action={<Button onClick={() => setLoadAttempt(value => value + 1)}>重试</Button>} />;
 
   if (!businessData && !selectedApp) {
     return <Empty description="暂无可管理应用"><Button icon={<PlusOutlined />} onClick={createDraftApp}>新增应用</Button></Empty>;
@@ -947,6 +1018,7 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
     <div className="app-admin-workspace" aria-busy={menuSyncing}>
       <AssemblyWorkspace
         businessData={businessData}
+        onSwitch={confirmSwitch}
         apps={applications}
         appForm={appForm}
         formForm={formForm}
@@ -979,7 +1051,7 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
         menuSyncing={menuSyncing}
         onAddMenuGroup={addMenuGroup}
         onSelectMenu={setSelectedMenuKey}
-        onDropMenu={onDropMenu}
+        onDropMenu={info => confirmSwitch(() => { void onDropMenu(info); })}
         menuForm={menuForm}
         onSaveMenu={onSaved => runPropertyOperation(async () => {
           if (await saveMenuNode()) onSaved();
@@ -1060,7 +1132,7 @@ type PropertyLifecycleActions = {
 function AssemblyWorkspace({
   businessData,
   apps,
-  appForm, formForm, selectedForm, propertySaving, onCreateApp, onCreateForm, onSaveApp, onSaveForm, onEnterDesign,
+  onSwitch, appForm, formForm, selectedForm, propertySaving, onCreateApp, onCreateForm, onSaveApp, onSaveForm, onEnterDesign,
   appActions, formActions, creatorName, onCreateField, onUpdateField, onDeleteField, onRoleCreated,
   roles,
   forms,
@@ -1082,6 +1154,7 @@ function AssemblyWorkspace({
   onSaveMenu,
   onDeleteMenu,
 }: {
+  onSwitch: (action: () => void) => void;
   businessData: boolean;
   apps: AppRecord[];
   appForm: ReturnType<typeof Form.useForm>[0];
@@ -1157,13 +1230,13 @@ function AssemblyWorkspace({
       <div
         className={`assembly-form-card${selectedForm?.id === form.id ? ' is-selected' : ''}`}
         key={form.id}
-        onClick={() => { if (!propertySaving) onOpenFormConfig(form.id); }}
+        onClick={() => onSwitch(() => onOpenFormConfig(form.id))}
         role="button" tabIndex={0}
         aria-label={`${businessData ? '查看属性' : '前往业务数据'}：${form.name}`}
         onKeyDown={event => {
           if (!propertySaving && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault();
-            onOpenFormConfig(form.id);
+            onSwitch(() => onOpenFormConfig(form.id));
           }
         }}
       >
@@ -1195,12 +1268,14 @@ function AssemblyWorkspace({
           }))}
           onTabClick={key => {
             if (propertySaving) return;
-            onSelectApp(Number(key));
-            setPropertyTarget('app');
-            setResourceQuery('');
+            onSwitch(() => {
+              onSelectApp(Number(key));
+              setPropertyTarget('app');
+              setResourceQuery('');
+            });
           }}
         />
-        <Button type="text" disabled={propertySaving} icon={<ToolOutlined />} onClick={() => setPropertyTarget('app')}>应用设置</Button>
+        <Button type="text" disabled={propertySaving} icon={<ToolOutlined />} onClick={() => onSwitch(() => setPropertyTarget('app'))}>应用设置</Button>
       </section>}
       <Row className="assembly-grid">
         <Col>
@@ -1218,7 +1293,7 @@ function AssemblyWorkspace({
                   <div className="assembly-resource-copy"><Typography.Text strong ellipsis>{page.title}</Typography.Text></div>
                   <Button type="text" size="small" icon={<PlusOutlined />} disabled={menuBusy}
                     aria-label={`添加${page.title}到菜单`} title="添加到菜单"
-                    onClick={() => void onAddPageToMenu(page).then(added => { if (added) setPropertyTarget('menu'); })} />
+                    onClick={() => onSwitch(() => { void onAddPageToMenu(page).then(added => { if (added) setPropertyTarget('menu'); }); })} />
                 </div>
               ))}
               {!(businessData ? visibleForms.length : visiblePages.length) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1248,7 +1323,7 @@ function AssemblyWorkspace({
                       selectedKeys={[selectedMenuKey]}
                       defaultExpandAll
                       defaultExpandedKeys={expandedMenuKeys}
-                      onSelect={(keys) => { if (!propertySaving) { onSelectMenu(String(keys[0] ?? selectedMenuKey)); setPropertyTarget('menu'); } }}
+                      onSelect={(keys) => { if (!propertySaving) { onSwitch(() => { onSelectMenu(String(keys[0] ?? selectedMenuKey)); setPropertyTarget('menu'); }); } }}
                       onDrop={onDropMenu}
                     />
                   </div>
@@ -1325,7 +1400,7 @@ function AssemblyWorkspace({
                     { label: '应用设置', key: 'app', disabled: propertySaving },
                     { label: '菜单设置', key: 'menu', disabled: propertySaving },
                   ]}
-                  onChange={key => setPropertyTarget(key === 'app' ? 'app' : 'menu')}
+                  onChange={key => onSwitch(() => setPropertyTarget(key === 'app' ? 'app' : 'menu'))}
                 />}
                 {propertyTarget === 'app' && selectedApp ? (
                   <fieldset disabled={propertySaving || !appEditing} className="assembly-property-editor">
@@ -1373,7 +1448,7 @@ function AssemblyWorkspace({
                         </Form.Item>
                         <Form.Item name="defaultEntry" label="设为应用默认入口" tooltip={`进入「${selectedApp.name}」时优先打开此页面。`}
                           valuePropName="checked" className="assembly-switch-field">
-                          <Switch />
+                          <Switch disabled={menuReadOnly || !selectedMenu.routePath} />
                         </Form.Item>
                       </PropertyGroup>
                       <MenuAccessPanel key={selectedMenu.key} form={menuForm} roles={roles} inheritedIds={(selectedApp.roles || []).map(role => role.id)}
@@ -1558,12 +1633,6 @@ function appendMenuNode(nodes: MenuNode[], entry: MenuNode, parentId: number | n
     : { ...node, children: appendMenuNode(node.children ?? [], entry, parentId) });
 }
 
-function removeMenuNodePromoteChildren(nodes: MenuNode[], key: string): MenuNode[] {
-  return nodes.flatMap((node): MenuNode[] => {
-    if (node.key === key) return ((node.children ?? []) as MenuNode[]).map((child) => ({ ...child, parentDbId: node.parentDbId ?? null }));
-    return [{ ...node, children: removeMenuNodePromoteChildren(node.children ?? [], key) }];
-  });
-}
 
 function replaceMenuNode(nodes: MenuNode[], entry: MenuNode): MenuNode[] {
   return nodes.map(node => node.key === entry.key

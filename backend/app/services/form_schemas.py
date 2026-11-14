@@ -37,6 +37,7 @@ class FormCreate(BaseModel):
 
 
 class FormUpdate(BaseModel):
+    expected_token: Optional[str] = Field(default=None, max_length=64)
     name: Optional[str] = None
     description: Optional[str] = None
     model_id: Optional[int] = None
@@ -130,6 +131,7 @@ class MenuNodeCreate(BaseModel):
 
 
 class MenuNodeUpdate(BaseModel):
+    expected_token: Optional[str] = Field(default=None, max_length=64)
     parent_id: Optional[int] = None
     node_type: Optional[str] = None
     title: Optional[str] = None

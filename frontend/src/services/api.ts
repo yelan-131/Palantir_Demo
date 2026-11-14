@@ -1041,6 +1041,7 @@ export interface PlatformFormField {
 }
 
 export interface PlatformForm {
+  edit_token?: string;
   id: number;
   name: string;
   code: string;
@@ -1094,6 +1095,7 @@ export interface PlatformFormVersion {
 }
 
 export interface PlatformMenuNode {
+  edit_token?: string;
   id: number;
   application_id: number;
   parent_id?: number | null;
@@ -1241,6 +1243,9 @@ export const deletePlatformDynamicRecord = (formId: number | string, recordId: n
 
 export const listPlatformMenuNodes = (applicationId: number | string) =>
   api.get(`/forms/applications/${applicationId}/menu-nodes`);
+export interface MenuOrderItem { id: number; parent_id: number | null; sort_order: number; }
+export const savePlatformMenuOrder = (applicationId: number, expected: MenuOrderItem[], nodes: MenuOrderItem[]) =>
+  api.put(`/forms/applications/${applicationId}/menu-order`, { expected, nodes });
 export const createPlatformMenuNode = (applicationId: number | string, data: Record<string, unknown>) =>
   api.post(`/forms/applications/${applicationId}/menu-nodes`, data);
 export const updatePlatformMenuNode = (

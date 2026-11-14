@@ -66,7 +66,7 @@ DEFAULT_ROLE_POLICIES: list[dict[str, Any]] = [
 
 DEFAULT_CONTEXT_POLICY: dict[str, Any] = {
     "recentMessageLimit": 10,
-    "maxContextTokens": 12000,
+    "maxContextTokens": 32768,
     "showContextSources": True,
 }
 

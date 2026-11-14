@@ -22,6 +22,7 @@ pydantic-settings==2.7.1
 # Auth
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 python-multipart==0.0.20
 
 # HTTP
@@ -57,3 +58,5 @@ pytest-asyncio==0.25.0
 # Official Agent kernel, pin SDK and bundled runtime to the same release.
 deepseek-harness-sdk==0.2.1rc2
 deepseek-harness-runtime-bin==0.2.1rc2
+
+packaging==24.2

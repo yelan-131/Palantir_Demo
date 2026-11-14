@@ -1,0 +1,54 @@
+/* Reading surfaces are quiet; editor affordances remain independent of decoration. */
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="plain"],
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="soft"] {
+  border:1px solid transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="plain"] {background:transparent;}
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="soft"] {background:rgba(255,255,255,.8);}
+.tech-white-shell .app-content .component-page .component-page-widget[data-heading-style="inline"]>.ant-card-head {
+  min-height:36px;border-bottom:0;background:transparent;padding:12px 20px 0;
+}
+.tech-white-shell .app-content .component-page .component-page-widget[data-heading-style="inline"]>.ant-card-head .ant-card-head-title {padding:0;font-size:14px;line-height:24px;}
+.tech-white-shell .app-content .component-page .component-page-widget[data-heading-style="inline"]>.ant-card-body {padding:12px 20px 20px;}
+.tech-white-shell .app-content .component-page:not(.analytics-workspace-configuring) {background-image:none;}
+.tech-white-shell .app-content:has(.component-page:not(.analytics-workspace-configuring)):not(:has(.analytics-workspace-configuring)) {background-image:none;}
+.component-floating-handle {position:absolute;top:0;left:12px;z-index:5;opacity:0;transform:translateY(-3px);transition:opacity .15s,transform .15s;}
+.component-floating-handle .analytics-widget-select {font-size:11px!important;line-height:24px;padding:0 8px!important;border-radius:0 0 6px 6px;background:#eaf0f6;color:#425f7b;}
+.component-page-widget:hover>.ant-card-body>.component-floating-handle,
+.component-page-widget:focus-within>.ant-card-body>.component-floating-handle,
+.analytics-selected-widget>.ant-card-body>.component-floating-handle {opacity:1;transform:none;}
+.tech-white-shell .app-content .component-page.analytics-workspace-configuring .component-page-widget[data-widget-surface] {outline:1px dashed rgba(94,119,147,.22);outline-offset:-1px;}
+.tech-white-shell .app-content .component-page.analytics-workspace-configuring .analytics-selected-widget[data-widget-surface] {outline:2px solid #718da8;outline-offset:-2px;box-shadow:0 0 0 3px #718da80d;}
+@media(prefers-reduced-motion:reduce){.component-floating-handle{transition:none;}}
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="plain"],
+.tech-white-shell .app-content .component-page .component-page-widget[data-widget-surface="soft"] {border-color:transparent!important;}
+/* Shared component frame. These declarations own decoration; child widgets own business content. */
+.tech-white-shell .app-content .component-page .component-page-widget[data-presentation="configured"] {
+  position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;
+  background:var(--widget-background)!important;border:1px solid var(--widget-border)!important;
+  border-radius:var(--widget-radius)!important;box-shadow:var(--widget-shadow)!important;backdrop-filter:none;
+}
+.component-frame-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:var(--widget-header-padding);flex:none;}
+.component-frame-header[data-divider="true"]{border-bottom:1px solid var(--mf-border,#e2e7ec);}
+.component-frame-heading{min-width:0;flex:1;}.component-frame-title{font-size:14px;font-weight:600;line-height:1.5;overflow-wrap:anywhere;}
+.component-frame-description{font-size:12px;color:var(--mf-muted);margin-top:4px;white-space:pre-wrap;}
+.frame-header-stack{align-items:stretch;flex-direction:column;}.component-frame-actions{flex:none;min-width:0;}.component-frame-actions .ant-space{flex-wrap:wrap;}
+.tech-white-shell .app-content .component-page [data-presentation="configured"]>.component-frame-content{padding:var(--widget-padding)!important;display:flex;flex-direction:column;gap:var(--widget-gap);min-height:0;flex:1;}
+.component-frame-header[hidden],.component-frame-heading[hidden],.component-frame-actions[hidden]{display:none!important;}
+[data-presentation]>.component-floating-handle{top:0;z-index:6;}
+[data-presentation]:hover>.component-floating-handle,[data-presentation]:focus-within>.component-floating-handle,[data-presentation].analytics-selected-widget>.component-floating-handle{opacity:1;transform:none;}
+/* Inner surfaces apply equally to workspace modules and business/statistical widgets. */
+.tech-white-shell .app-content .component-page [data-inner-surface="plain"] :is(.wh-feature,.wh-support,.wh-panel,.wh-entry-metric,.wh-form-card,.wh-queue,.wh-queue-list>button,.wh-processed,.runtime-analytics-widget,.runtime-analytics-metrics>div){border:0!important;box-shadow:none!important;background:transparent!important;backdrop-filter:none;}
+.tech-white-shell .app-content .component-page [data-inner-surface="soft"] :is(.wh-feature,.wh-entry-metric,.wh-form-card,.runtime-analytics-metrics>div){border:0!important;box-shadow:none!important;background:var(--mf-panel-soft,#f4f6f8)!important;}
+[data-presentation] :is(.wh-feature-group,.wh-form-grid,.wh-entry-overview,.runtime-analytics-metrics){gap:var(--widget-gap)!important;}
+[data-presentation] .wh-support>section{padding:var(--widget-gap) 0;}
+[data-presentation][data-separators="false"] :is(.wh-feature-footer,.wh-panel-footer,.wh-snapshot,.wh-recent-item,.wh-side-item,.wh-support>section,.ant-table-tbody>tr>td){border-color:transparent!important;}
+[data-presentation][data-density="compact"]{--widget-row-padding:6px;--widget-font-size:12px;}
+[data-presentation][data-density="standard"]{--widget-row-padding:10px;--widget-font-size:13px;}
+[data-presentation][data-density="comfortable"]{--widget-row-padding:16px;--widget-font-size:14px;}
+[data-presentation] :is(.wh-recent-item,.wh-side-item,.wh-form-entry,.analytics-rank-table td){padding-block:var(--widget-row-padding)!important;font-size:var(--widget-font-size);}
+[data-presentation][data-inner-titles="false"] :is(.wh-section-head h2,.wh-feature-header,.wh-feature h2,.wh-entry-metric-top,.ant-statistic-title){display:none!important;}
+.tech-white-shell .app-content .component-page [data-inner-surface="plain"] :is(.wh-support>section,.wh-snapshot,.analytics-metric-group){background:transparent!important;border-color:transparent!important;box-shadow:none!important;}
+[data-presentation] .wh-form-grid{gap:var(--widget-gap)!important;}
+.tech-white-shell .app-content .component-page [data-inner-surface="card"] :is(.wh-feature,.wh-support,.wh-panel,.wh-entry-metric,.wh-form-card,.wh-queue){border:1px solid var(--mf-border,#e2e7ec);background:var(--mf-surface,#fff);border-radius:var(--widget-radius);}
+[data-presentation][data-inner-titles="false"] .wh-entry-metric-top + .wh-entry-metric-value{margin-top:0;}

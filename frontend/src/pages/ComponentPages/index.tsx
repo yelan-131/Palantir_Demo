@@ -16,11 +16,15 @@ import DynamicPage from '../DynamicPage';
 import type {RuntimeAnalyticsData} from '../AppPrograms/analyticsTypes';
 import {ensureListFilter, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget, type WidgetType} from './model';
 import {pagePresentation} from './model';
+import SourceImpactNotice from './SourceImpactNotice';
 import Inspector, {sections, type BusinessTab, type Panel, type WidgetTab} from './Inspector';
 import {buildAnalyticsContextMenu} from '../AppPrograms/AnalyticsContextMenu';
 import '../AppPrograms/analytics-workspace.css';
 import './style.css';
 import '../AppPrograms/analytics-paper.css';
+import './surfaces.css';
+import WidgetFrame from './WidgetFrame';
+import {resolvePresentation} from './presentation';
 
 const FormSettings = lazy(() => import('../FormSettings'));
 const errorText = (error: unknown) => {
@@ -44,7 +48,7 @@ function NavigationGuard({enabled,onBlocked}: {enabled: boolean;onBlocked:(value
   return null;
 }
 
-export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
+export default function ComponentPages({pageCode, workspace = false, renderWorkspaceWidget}: {pageCode?: string; workspace?: boolean; renderWorkspaceWidget?: (widget: PageWidget) => React.ReactNode} = {}) {
   const navigate = useNavigate();
   const {code: routeCode} = useParams<{code: string}>();
   const code = pageCode || routeCode;
@@ -395,6 +399,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     catch(failure){setPublishCheck({errors:[errorText(failure)]});}finally{setSaving(false);}
   };
   const renderWidget = (item: PageWidget) => {
+    if (item.type === 'workspace') return renderWorkspaceWidget ? renderWorkspaceWidget(item) : <Alert type="info" message="此组件用于我的工作台" />;
     const boundId = widgetSourceId(active,item);
     const source = boundId ? sources[boundId] : undefined;
     const labels = Object.fromEntries((source?.fields || []).filter(field=>!field.archived).map(field=>[field.field_name,field.label]));
@@ -405,13 +410,13 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
     if (item.type === 'record-filter') return source?.status === 'published' ? <FilterWidget key={`${source.id}:${item.id}`} widget={item} sourceId={source.id} onChange={value=>setWidgetFilters(previous=>({...previous,[item.id]:value}))}/> : <Alert type="info" message="请先发布来源业务表单" />;
     const query = componentQuery(active!, widgetFilters, chartFilters, item.id);
     if(!query.ready)return <Alert type="info" showIcon message="请先填写必填筛选条件并查询" description="关联的筛选组件校验通过后，将显示列表数据。" />;
-    if (item.type === 'record-list') return source?.status==='published' ? <DynamicPage key={`${item.id}:${source.id}`} formSlug={String(source.id)} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} display={item.showFilters === false ? 'list' : 'all'} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={active?.style?.tableDensity} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
+    if (item.type === 'record-list') return source?.status==='published' ? <DynamicPage key={`${item.id}:${source.id}`} formSlug={String(source.id)} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} display={item.showFilters === false ? 'list' : 'all'} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
     if (loadingData) return <div className="component-widget-preview"><Spin /></div>;
     const widgetErrors = data?.widgetErrors?.[item.id] ?? data?.errors;
     if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用" description={dataError || widgetErrors?.join('；')} />;
     const result = data?.widgets?.[item.id];
     if (!result) return <Alert type="info" message="暂无统计结果" />;
-    return <StatisticalWidget widget={item} result={result} style={active?.style} labels={labels} onInteract={value=>{
+    return <StatisticalWidget widget={item} result={result} style={{...active?.style,tableDensity:resolvePresentation(active || {}, item).content.density}} labels={labels} onInteract={value=>{
       if(editing){setSelected(item.id);setPanel('widget');return;}
       if(!item.dimension||item.interaction==='none')return;
       if(item.interaction==='navigate'){if(source?.code)navigate('/dynamic/'+source.id+'?view=records');return;}
@@ -444,6 +449,7 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
       <div className="component-page-grid" onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event)}>
         <Row gutter={[active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
           const appearance = item.appearance;
+          const presentation = resolvePresentation(active, item);
           const titleAlign = appearance?.titleAlign ?? 'left';
           const titleStyle: React.CSSProperties = {
             textAlign: titleAlign,
@@ -456,24 +462,28 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
             lineHeight: appearance?.titleFontSize ? Math.max(20, Math.ceil(appearance.titleFontSize * 1.25)) + 'px' : undefined,
           };
           return <Col key={item.id} xs={24} lg={item.width} style={item.customWidth?{flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'}:undefined}>
-          <Card data-component-widget-id={item.id} style={{height:item.customHeight??undefined,borderRadius:item.appearance?.radius??active.style?.cardRadius??12, '--analytics-card-opacity':item.appearance?.cardOpacity??active.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${item.appearance?.cardBlur??active.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties}
-            onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event,item.id)}
+          <WidgetFrame data-component-widget-id={item.id} presentation={presentation}
+            style={{height:item.customHeight??undefined} as React.CSSProperties}
             className={'component-page-widget component-page-widget-'+item.type+(editing?' analytics-editable-widget':'')+(editing&&panel==='widget'&&selected===item.id?' analytics-selected-widget':'')}
+            onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event,item.id)}
             onClick={event=>{if(editing&&!(event.target instanceof Element&&event.target.closest('input,textarea,button,a,[role="combobox"]')))selectWidget(item.id);}}
-            styles={{title:titleStyle}}
-            title={appearance?.showTitle===false?undefined:editing?<button className="analytics-widget-select"
+            heading={<div style={titleStyle}>{editing?<button className="analytics-widget-select"
               style={{justifyContent:titleAlign==='center'?'center':titleAlign==='right'?'flex-end':'flex-start',textAlign:'inherit'}} type="button" draggable disabled={saving||sourceActive} aria-label={'配置'+item.title}
               onClick={()=>selectWidget(item.id)}
               onKeyDown={event=>{if(event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();move(item.id,event.key==='ArrowUp'?-1:1);}}}
               onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
-              onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:item.title} extra={<Space size={6}>{(item.type==='record-list'||item.type==='record-filter')&&<span className="component-list-header-actions" id={`component-toolbar-${item.id}`} />}{chartFilters[item.id]!==undefined&&<Button type="text" size="small" onClick={()=>setChartFilters(previous=>{const next={...previous};delete next[item.id];return next;})}>清除联动</Button>}</Space>}>
-            {appearance?.showSubtitle!==false&&appearance?.subtitle?.trim()&&
-              <p className="component-widget-subtitle" style={{fontSize:appearance.subtitleFontSize,color:appearance.subtitleColor,textAlign:appearance.subtitleAlign}}>
-                {appearance.subtitle}
-              </p>}
+              onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:item.title}</div>}
+            description={appearance?.subtitle?.trim()?<span style={{fontSize:appearance.subtitleFontSize,color:appearance.subtitleColor,textAlign:appearance.subtitleAlign}}>{appearance.subtitle}</span>:undefined}
+            actions={(item.type==='record-list'||item.type==='record-filter'||chartFilters[item.id]!==undefined)?<Space size={6}>{(item.type==='record-list'||item.type==='record-filter')&&<span className="component-list-header-actions" id={`component-toolbar-${item.id}`} />}{chartFilters[item.id]!==undefined&&<Button type="text" size="small" onClick={()=>setChartFilters(previous=>{const next={...previous};delete next[item.id];return next;})}>清除联动</Button>}</Space>:undefined}
+            editorHandle={editing&&(!presentation.header.visible||!presentation.header.titleVisible)?<button className="analytics-widget-select"
+              style={{justifyContent:titleAlign==='center'?'center':titleAlign==='right'?'flex-end':'flex-start',textAlign:'inherit'}} type="button" draggable disabled={saving||sourceActive} aria-label={'配置'+item.title}
+              onClick={()=>selectWidget(item.id)}
+              onKeyDown={event=>{if(event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();move(item.id,event.key==='ArrowUp'?-1:1);}}}
+              onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
+              onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:undefined}>
             {renderWidget(item)}
             {editing&&!saving&&!sourceActive&&<ResizeHandle title={item.title} onCommit={size=>{if(draft)changeDraft({...draft,widgets:draft.widgets.map(widget=>widget.id===item.id?{...widget,...size}:widget)});}}/>}
-          </Card>
+          </WidgetFrame>
         </Col>;})}</Row>
       </div>
     </>}
@@ -516,24 +526,25 @@ export default function ComponentPages({pageCode}: {pageCode?: string} = {}) {
       <Button type="primary" disabled={!publishable||saving||sourceActive} onClick={()=>void checkPublish()}>{state?.publishedVersion?'发布新版本':'创建首个版本'}</Button>
     </div></div>
   </>;
-  return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')}>
+  const sourceImpact=sourceActive&&draft&&sourceId?<SourceImpactNotice definition={draft} sourceId={sourceId} sourceName={source?.name||`数据源 #${sourceId}`} mode={sourceEditor==='flow'?'flow':'form'}/>:undefined;
+  return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')}>
     {!sourceActive&&<NavigationGuard enabled={dirty||saving} onBlocked={reportBlocked} />}
     <div className="analytics-workspace-body">
       <div className="component-page-preview">
         <div hidden={sourceActive}>{admin?<Dropdown trigger={['contextMenu']} disabled={saving||sourceActive} open={contextOpen} onOpenChange={setContextOpen} overlayClassName="analytics-context-menu" menu={{
-          'aria-label':contextWidget?contextWidget.title+'配置菜单':'表单页面配置菜单',
+          'aria-label':contextWidget?contextWidget.title+'配置菜单':workspace?'工作台配置菜单':'表单页面配置菜单',
           items:[
-            ...buildAnalyticsContextMenu({widgetTitle:contextWidget?.title,pageLabel:'页面',sections}),
+            ...buildAnalyticsContextMenu({widgetTitle:contextWidget?.title,pageLabel:workspace?'工作台':'页面',sections}),
             {key:'business',popupClassName:'analytics-context-submenu',icon:<DatabaseOutlined />,label:'业务配置',disabled:!(contextWidget ? sources[widgetSourceId(active,contextWidget)||0] : globalSource),children:[
               {key:'source:form',label:'字段与录入'},{key:'source:flow',label:'流程与审批'},
             ]},
           ],onClick:({key})=>void openContextAction(key),
         }}>{canvas}</Dropdown>:canvas}</div>
-        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings formId={String(sourceId)} embedded requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,footer:sourceFooterTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
+        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings sourceImpact={sourceImpact} formId={String(sourceId)} embedded requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,footer:sourceFooterTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
       </div>
       {editing&&draft&&<div className="analytics-settings-page">
-        <Inspector panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
-          sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,footer:setSourceFooterTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} onListFilter={configureListFilter} sourceIsBusiness={Boolean(sourceIsBusiness)}
+        <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
+          sourceImpact={sourceImpact} sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,footer:setSourceFooterTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} onListFilter={configureListFilter} sourceIsBusiness={Boolean(sourceIsBusiness)}
           onPanel={setPanel} onTab={changeWidgetTab} onChange={changeDraft} onAdd={add} onSelect={selectWidget}
           onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} footer={footer} />
       </div>}

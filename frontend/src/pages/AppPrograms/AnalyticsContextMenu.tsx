@@ -4,7 +4,7 @@ import { EditOutlined, FilterOutlined, SettingOutlined, SkinOutlined } from '@an
 
 interface ContextMenuOptions {
   widgetTitle?: string;
-  pageLabel: '看板' | '页面';
+  pageLabel: '看板' | '页面' | '工作台';
   sections: NonNullable<MenuProps['items']>;
 }
 

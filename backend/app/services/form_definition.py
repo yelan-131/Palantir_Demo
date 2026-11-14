@@ -159,6 +159,8 @@ def _form_payload(form, *, fields: Optional[list] = None, applications: Optional
         "created_at": form.created_at.isoformat() if form.created_at else None,
         "updated_at": form.updated_at.isoformat() if form.updated_at else None,
     }
+    from app.services.application_menus import form_edit_token
+    payload["edit_token"] = form_edit_token(form)
     if fields is not None:
         payload["fields"] = [_field_payload(field) for field in fields]
     if applications is not None:

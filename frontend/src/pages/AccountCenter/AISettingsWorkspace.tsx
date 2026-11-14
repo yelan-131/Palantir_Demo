@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useAISettingsNotification from './useAISettingsNotification';
+import api from '@/services/api';
 import SettingsTabs from '@/components/SettingsTabs';
 import type { ReactNode } from 'react';
 import { ApiOutlined, CheckCircleOutlined, KeyOutlined, RobotOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
-import { Button, Form, Space, Switch } from 'antd';
+import { Alert, Button, Form, Space, Switch } from 'antd';
 
 export interface AISettingsSection { key: string; children: ReactNode }
 export const AI_SETTINGS_SECTIONS = [
@@ -58,11 +59,24 @@ export default function AISettingsWorkspace(props: Props) {
   useEffect(() => {
     if (props.loadError) notify('error', '配置读取失败', props.loadError);
   }, [props.loadError, notify]);
+  const [checking, setChecking] = useState(false);
+  const [update, setUpdate] = useState<{ currentVersion: string | null; runtimeVersion: string | null; latestVersion: string; updateAvailable: boolean; releaseUrl: string } | null>(null);
+  const checkUpdate = async () => {
+    setChecking(true);
+    setUpdate(null);
+    try {
+      const response = await api.get('/ai/settings/harness-update');
+      setUpdate(response.data);
+    } catch { notify('error', 'DSH 更新检查失败', '请稍后重试，或检查服务器到 PyPI 的网络连接。'); }
+    finally { setChecking(false); }
+  };
   const active = AI_SETTINGS_SECTIONS.some(section => section.key === props.active) ? props.active : 'connection';
   return <div className="ai-settings-workspace ai-settings-tabs-workspace">
 
     {contextHolder}
-    <SettingsTabs className="ai-primary-tabs" tabBarExtraContent={{ right: <div className="ai-settings-tab-actions"><span className="ai-runtime-status">DeepSeek Harness <small>{props.sdkVersion ? `SDK ${props.sdkVersion}` : '运行依赖未就绪'}</small></span><div className="ai-settings-master-switch"><span>启用平台 AI</span><Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch aria-label="启用平台 AI" disabled={!props.loaded || props.saving || props.testing} /></Form.Item></div></div> }} activeKey={active} onChange={props.onSelect} items={AI_SETTINGS_SECTIONS.map(item => ({key: item.key, label: <span>{item.icon}{item.title}</span>, disabled: props.saving || props.testing, forceRender: true, children: <fieldset disabled={!props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">{props.sections.find(section => section.key === item.key)?.children}</fieldset>}))} />
+    <div className="ai-runtime-toolbar"><div className="ai-settings-tab-actions"><span className="ai-runtime-status">DeepSeek Harness <small>{props.sdkVersion ? `SDK ${props.sdkVersion}` : '运行依赖未就绪'}</small></span><Button size="small" loading={checking} onClick={checkUpdate}>检查 DSH 更新</Button><div className="ai-settings-master-switch"><span>启用平台 AI</span><Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch aria-label="启用平台 AI" disabled={!props.loaded || props.saving || props.testing} /></Form.Item></div></div></div>
+    {update && <Alert showIcon closable onClose={() => setUpdate(null)} type={update.updateAvailable ? "info" : "success"} message={update.updateAvailable ? `发现 DSH 新版本 ${update.latestVersion}` : update.currentVersion ? "当前 DSH 已是最新可用版本" : "DSH 尚未安装"} description={<span>SDK：{update.currentVersion || "未安装"} · Runtime：{update.runtimeVersion || "未安装"} · 最新可用：{update.latestVersion}。<a href={update.releaseUrl} target="_blank" rel="noreferrer">查看版本说明</a>（检查不会自动升级）</span>} />}
+    <SettingsTabs className="ai-primary-tabs" activeKey={active} onChange={props.onSelect} items={AI_SETTINGS_SECTIONS.map(item => ({key: item.key, label: <span>{item.icon}{item.title}</span>, disabled: props.saving || props.testing, forceRender: true, children: <fieldset disabled={!props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">{props.sections.find(section => section.key === item.key)?.children}</fieldset>}))} />
     {active !== 'agent-registry' && props.effectivePreview}
     {props.saveActions && <footer className="ai-settings-save-footer">{props.saveActions}</footer>}
   </div>;

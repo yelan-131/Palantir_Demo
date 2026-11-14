@@ -17,6 +17,7 @@ from app.api.form_engine.query import (
     _ensure_filter_fields_visible,
     _ensure_sort_field_allowed,
     _parse_record_filters,
+    _range_bounds,
     _queryable_field_names,
     _visible_field_subset,
 )
@@ -257,14 +258,13 @@ def _physical_filter_clause(fields: list, visible_fields: set[str], filters: lis
                 clauses.append(f"CAST({column_name} AS TEXT) = :{key}")
                 params[key] = str(expected)
         elif op == "between":
-            if not isinstance(expected, list) or len(expected) != 2:
-                raise HTTPException(400, f"Invalid between filter for field: {field}")
-            start, end = expected
+            start, end, exclusive = _range_bounds(fields, field, expected)
             if start not in (None, ""):
                 clauses.append(f"CAST({column_name} AS TEXT) >= :{key}_start")
                 params[f"{key}_start"] = str(start)
             if end not in (None, ""):
-                clauses.append(f"CAST({column_name} AS TEXT) <= :{key}_end")
+                operator = "<" if exclusive else "<="
+                clauses.append(f"CAST({column_name} AS TEXT) {operator} :{key}_end")
                 params[f"{key}_end"] = str(end)
         elif op == "gte":
             clauses.append(f"CAST({column_name} AS TEXT) >= :{key}")

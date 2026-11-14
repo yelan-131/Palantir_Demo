@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._model_driven_shared import assert_safe_identifier
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
+from app.services.application_menus import (lock_application, menu_nodes, validate_parent, validate_tree, sync_menu_default, set_application_default)
 from app.config import settings
 from app.database import DB_TYPE
 from app.core.audit import write_audit_log
@@ -749,7 +750,7 @@ async def _menu_node_payload(db: AsyncSession, node) -> dict:
     elif synced_role_ids:
         config["role_ids"] = synced_role_ids
         config["permission_mode"] = "custom"
-    return {
+    payload = {
         "id": node.id,
         "application_id": node.application_id,
         "parent_id": node.parent_id,
@@ -764,6 +765,10 @@ async def _menu_node_payload(db: AsyncSession, node) -> dict:
         "sort_order": node.sort_order,
         "config": config,
     }
+    from app.services.application_menus import edit_token
+    payload["edit_token"] = edit_token(payload)
+    return payload
+
 
 
 def _default_view_config(fields: list[dict]) -> dict:
@@ -1209,15 +1214,11 @@ async def _create_application_menu_node(application_id, body, db, user, *, defer
     from app.models.relational import Application, ApplicationMenuNode, Form
 
     tenant_id = current_tenant_id(user)
-    app = await db.get(Application, application_id)
-    if not app or app.tenant_id != tenant_id:
-        raise HTTPException(404, "Application not found")
+    app = await lock_application(db, tenant_id, application_id)
     form = await db.get(Form, body.form_id) if body.form_id is not None else None
     if body.form_id is not None and (not form or form.tenant_id != tenant_id):
         raise HTTPException(404, "Form not found")
-    parent = await db.get(ApplicationMenuNode, body.parent_id) if body.parent_id is not None else None
-    if body.parent_id is not None and (not parent or parent.tenant_id != tenant_id):
-        raise HTTPException(404, "Parent menu node not found")
+    await validate_parent(db, app, body.parent_id)
 
     values = body.model_dump()
     await _set_menu_page_target(db, user, values)
@@ -1233,6 +1234,7 @@ async def _create_application_menu_node(application_id, body, db, user, *, defer
     node = ApplicationMenuNode(tenant_id=tenant_id, application_id=application_id, **values)
     db.add(node)
     await db.flush()
+    await sync_menu_default(db, app, node)
     await _sync_menu_node_entry_permissions(db, node)
     if node.form_id is not None:
         await _ensure_application_form_binding(db, application_id, node.form_id)
@@ -1240,6 +1242,41 @@ async def _create_application_menu_node(application_id, body, db, user, *, defer
         await db.commit()
     await db.refresh(node)
     return {"data": await _menu_node_payload(db, node)}
+
+
+class MenuOrderItem(BaseModel):
+    id: int = Field(gt=0)
+    parent_id: int | None = Field(default=None, gt=0)
+    sort_order: int = Field(ge=0)
+
+
+class MenuOrderWrite(BaseModel):
+    expected: list[MenuOrderItem] = Field(max_length=2000)
+    nodes: list[MenuOrderItem] = Field(max_length=2000)
+
+
+@router.put("/applications/{application_id}/menu-order")
+async def save_application_menu_order(application_id: int, body: MenuOrderWrite,
+                                      db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    app = await lock_application(db, current_tenant_id(user), application_id)
+    nodes = await menu_nodes(db, app)
+    current = {node.id: (node.parent_id, node.sort_order) for node in nodes}
+    expected = {item.id: (item.parent_id, item.sort_order) for item in body.expected}
+    if len(expected) != len(body.expected) or current != expected:
+        raise HTTPException(409, "菜单结构已变化，请刷新后重试")
+    proposed = {item.id: item.parent_id for item in body.nodes}
+    if len(proposed) != len(body.nodes) or set(proposed) != set(current):
+        raise HTTPException(422, "必须提交当前应用的完整菜单结构")
+    validate_tree(proposed)
+    orders = {(item.parent_id, item.sort_order) for item in body.nodes}
+    if len(orders) != len(body.nodes):
+        raise HTTPException(422, "同级菜单顺序不能重复")
+    patches = {item.id: item for item in body.nodes}
+    for node in nodes:
+        node.parent_id = patches[node.id].parent_id
+        node.sort_order = patches[node.id].sort_order
+    await db.commit()
+    return {"data": [await _menu_node_payload(db, node) for node in nodes]}
 
 
 @router.put("/applications/{application_id}/menu-nodes/{node_id}")
@@ -1260,17 +1297,21 @@ async def _update_application_menu_node(application_id, node_id, body, db, user)
     from app.models.relational import ApplicationMenuNode, Form
 
     tenant_id = current_tenant_id(user)
+    app = await lock_application(db, tenant_id, application_id)
     node = await db.get(ApplicationMenuNode, node_id)
     if not node or node.application_id != application_id or node.tenant_id != tenant_id:
         raise HTTPException(404, "Menu node not found")
-    updates = body.model_dump(exclude_unset=True)
+    from app.services.application_menus import check_edit_token
+    current = await _menu_node_payload(db, node)
+    check_edit_token(body.expected_token, current["edit_token"])
+    updates = body.model_dump(exclude_unset=True, exclude={"expected_token"})
     await _set_menu_page_target(db, user, updates, node)
     form = await db.get(Form, updates["form_id"]) if "form_id" in updates and updates["form_id"] is not None else None
     if "form_id" in updates and updates["form_id"] is not None and (not form or form.tenant_id != tenant_id):
         raise HTTPException(404, "Form not found")
-    parent = await db.get(ApplicationMenuNode, updates["parent_id"]) if "parent_id" in updates and updates["parent_id"] is not None else None
-    if "parent_id" in updates and updates["parent_id"] is not None and (not parent or parent.tenant_id != tenant_id):
-        raise HTTPException(404, "Parent menu node not found")
+    if "parent_id" in updates:
+        await validate_parent(db, app, updates["parent_id"], node.id)
+    was_default = node.default_entry
     if updates.get("form_id") and not updates.get("route_path"):
         form_config = form.config or {}
         form_kind = str(form_config.get("assemblyKind") or form_config.get("kind") or form_config.get("type") or "").lower()
@@ -1283,6 +1324,7 @@ async def _update_application_menu_node(application_id, node_id, body, db, user)
         updates["config"] = _normalized_menu_node_config(updates.get("config"))
     for key, value in updates.items():
         setattr(node, key, value)
+    await sync_menu_default(db, app, node, was_default)
     await _sync_menu_node_entry_permissions(db, node)
     if node.form_id is not None:
         await _ensure_application_form_binding(db, application_id, node.form_id)
@@ -1308,9 +1350,19 @@ async def _delete_application_menu_node(application_id, node_id, db, user, *, de
     from app.models.relational import ApplicationMenuNode
 
     tenant_id = current_tenant_id(user)
+    app = await lock_application(db, tenant_id, application_id)
     node = await db.get(ApplicationMenuNode, node_id)
     if not node or node.application_id != application_id or node.tenant_id != tenant_id:
         raise HTTPException(404, "Menu node not found")
+    nodes = await menu_nodes(db, app)
+    siblings = [item for item in nodes if item.parent_id == node.parent_id and item.id != node.id]
+    sort_order = max((item.sort_order for item in siblings), default=-1) + 1
+    for child in sorted((item for item in nodes if item.parent_id == node.id), key=lambda item: (item.sort_order, item.id)):
+        child.parent_id = node.parent_id
+        child.sort_order = sort_order
+        sort_order += 1
+    if node.default_entry:
+        await set_application_default(db, app, "/")
     await _delete_menu_node_entry_permissions(db, node)
     await db.delete(node)
     if not defer_commit:
@@ -1452,15 +1504,16 @@ async def update_form(
     from app.models.relational import Form
 
     tenant_id = current_tenant_id(user)
-    updates = body.dict(exclude_unset=True)
-    if 'config' in updates:
-        # Serialize legacy full-config saves with the dashboard editor and
-        # publication, then compare against the state after acquiring the lock.
-        from app.services.field_uniqueness import lock
-        await lock(db, tenant_id)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
+    updates = body.model_dump(exclude_unset=True, exclude={"expected_token"})
+    from app.services.field_uniqueness import lock
+    from app.services.application_menus import form_edit_token, check_edit_token
+    await lock(db, tenant_id)
+    form = await db.scalar(select(Form).where(
+        Form.id == form_id, Form.tenant_id == tenant_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if not form:
         raise HTTPException(404, "Form not found")
+    check_edit_token(body.expected_token, form_edit_token(form))
     if 'config' in updates:
         await db.refresh(form)
         current_config = form.config or {}

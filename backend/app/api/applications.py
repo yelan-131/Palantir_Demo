@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,7 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    expected_token: Optional[str] = Field(default=None, max_length=64)
     name: Optional[str] = None
     code: Optional[str] = None
     description: Optional[str] = None
@@ -402,6 +403,7 @@ async def _ensure_default_seed(db: AsyncSession, tenant_id: int = 1) -> None:
 async def _application_to_dict(db: AsyncSession, app, include_bindings: bool = False) -> dict:
     from app.models.relational import ApplicationMenu, ApplicationRole, MenuItem, Role
 
+    from app.services.application_menus import application_edit_token
     payload = {
         "id": app.id,
         "name": app.name,
@@ -413,6 +415,7 @@ async def _application_to_dict(db: AsyncSession, app, include_bindings: bool = F
         "status": app.status,
         "is_pinned": app.is_pinned,
     }
+    payload["edit_token"] = application_edit_token(app)
     if include_bindings:
         tenant_id = app.tenant_id
         menu_rows = await db.execute(
@@ -611,9 +614,13 @@ async def ensure_application_code_available(db, tenant_id, code, *, application_
         raise HTTPException(409, "Application code already exists")
 
 
-async def get_tenant_application(db, tenant_id, application_id):
+async def get_tenant_application(db, tenant_id, application_id, *, for_update=False):
     from app.models.relational import Application
 
+    if for_update:
+        from app.services.application_menus import lock_application
+
+        return await lock_application(db, tenant_id, application_id)
     app = await db.get(Application, application_id)
     if not app or app.tenant_id != tenant_id:
         raise HTTPException(404, "Application not found")
@@ -639,12 +646,17 @@ async def create_application(db, body: ApplicationCreate, user: dict):
 
 
 async def update_application(db, app, body: ApplicationUpdate, user: dict):
+    from app.services.application_menus import check_edit_token, set_application_default
+
     old_values = await _application_to_dict(db, app)
-    values = body.model_dump(exclude_unset=True)
+    check_edit_token(body.expected_token, old_values["edit_token"])
+    values = body.model_dump(exclude_unset=True, exclude={"expected_token"})
     if "code" in values:
         await ensure_application_code_available(db, app.tenant_id, body.code, application_id=app.id)
     for key, value in values.items():
         setattr(app, key, value)
+    if "default_route" in values:
+        await set_application_default(db, app, body.default_route or "/")
     await db.commit()
     await db.refresh(app)
     await write_audit_log(
@@ -697,7 +709,7 @@ async def admin_update_application(app_id: int, body: ApplicationUpdate, user: d
     async def _query(db):
         tenant_id = current_tenant_id(user)
         await lock_tenant_writes(db, tenant_id)
-        return await update_application(db, await get_tenant_application(db, tenant_id, app_id), body, user)
+        return await update_application(db, await get_tenant_application(db, tenant_id, app_id, for_update=True), body, user)
 
     result = await safe_db_call(_query)
     if result is None:
@@ -710,7 +722,7 @@ async def admin_delete_application(app_id: int, user: dict = Depends(require_adm
     async def _query(db):
         tenant_id = current_tenant_id(user)
         await lock_tenant_writes(db, tenant_id)
-        return await delete_application(db, await get_tenant_application(db, tenant_id, app_id), user)
+        return await delete_application(db, await get_tenant_application(db, tenant_id, app_id, for_update=True), user)
 
     result = await safe_db_call(_query)
     if result is None:

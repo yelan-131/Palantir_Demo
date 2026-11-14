@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApartmentOutlined,
   SearchOutlined,
@@ -81,6 +81,7 @@ import KnowledgeReader from '../../components/KnowledgeReader';
 import KnowledgeExplorer from '../../components/KnowledgeExplorer';
 import { parseKnowledgeMarkdown, prepareKnowledgeMarkdown } from '../../utils/knowledgeMarkdown';
 import './knowledgeWorkspace.css';
+import './dataAssetWorkspace.css';
 import {
   approveKnowledgeExtractionJob,
   commitKnowledgeExtractionJobToGraph,
@@ -1427,7 +1428,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       <aside className="data-asset-directory">
         <Card
           className="semantic-side-card"
-          title="数据资产目录"
+          title="数据源"
           extra={(
             <Space size={4}>
               <Button size="small" onClick={() => navigate('/data-center/sources')}>连接管理</Button>
@@ -1470,8 +1471,10 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                     setSelectedAssetId(item.id);
                     setSelectedTableId(item.tables[0]?.id);
                   }}
+                  aria-pressed={item.id === selectedAsset?.id}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
                       setSelectedAssetId(item.id);
                       setSelectedTableId(item.tables[0]?.id);
                     }
@@ -1479,7 +1482,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                 >
                   <span className="data-source-row-main">
                     <strong>{item.name}</strong>
-                    <small>{item.owner || item.type} · {item.freshness || '本地'}</small>
+                    <small>{item.type} · {item.owner || '未设置负责人'}</small>
                   </span>
                   <span className="data-source-row-count">{item.tables.length}表</span>
                   <span className={`data-source-status-dot ${getDataSourceStatusClass(item.status)}`} title={getDataSourceStatusLabel(item.status)} />
@@ -1503,13 +1506,13 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         </Card>
       </aside>
 
-      <main className="data-asset-main">
+      <section className="data-asset-main">
         <Card
           className="data-asset-main-card"
           title={
             <Space direction="vertical" size={2}>
-              <Typography.Text strong>结构化数据资产</Typography.Text>
-              <Typography.Text type="secondary">接入、盘点、治理并发布可进入对象与关系建模的数据资产</Typography.Text>
+              <Typography.Text strong>{selectedAsset?.name ?? '结构化数据资产'}</Typography.Text>
+              <Typography.Text type="secondary">选择数据表查看字段画像，完成识别后发布到对象与关系中心</Typography.Text>
             </Space>
           }
           extra={
@@ -1532,6 +1535,8 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
           <Table
             className="data-asset-table"
             rowKey="id"
+            size="small"
+            scroll={{ x: 620 }}
             dataSource={filteredTables}
             pagination={false}
             locale={{ emptyText: <Empty description={selectedAsset?.tables.length ? '没有匹配的数据资产' : '等待扫描元数据'} /> }}
@@ -1543,31 +1548,31 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
               {
                 title: '数据资产',
                 dataIndex: 'label',
+                width: 190,
                 render: (text, record: any) => (
                   <Space direction="vertical" size={2}>
                     <Space wrap>
                       <strong>{text}</strong>
-                      <Tag>{record.name}</Tag>
+                      {text !== record.name && <Tag>{record.name}</Tag>}
                     </Space>
-                    <Typography.Text type="secondary">{selectedAsset?.name} / {selectedAsset?.type} / {selectedAsset?.freshness}</Typography.Text>
+                    <Typography.Text type="secondary">{record.fields.length} 个字段</Typography.Text>
                   </Space>
                 ),
               },
-              { title: '记录数', dataIndex: 'rows', width: 100 },
+              { title: '记录数', dataIndex: 'rows', width: 80, align: 'right' },
               {
                 title: '质量分',
                 dataIndex: 'quality_score',
-                width: 150,
+                width: 90,
                 render: (score: number) => (
                   <Space>
-                    <Progress percent={score} size="small" showInfo={false} strokeColor={score >= 95 ? '#2f7d5b' : '#d46b08'} style={{ width: 72 }} />
                     <Tag color={score >= 95 ? 'success' : 'warning'}>{score}</Tag>
                   </Space>
                 ),
               },
               {
                 title: '语义状态',
-                width: 130,
+                width: 110,
                 render: (_, record: any) => {
                   const mapped = ontologyMappings.some(mapping =>
                     mapping.source_system === String(selectedAsset?.id)
@@ -1587,7 +1592,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
             ]}
           />
         </Card>
-      </main>
+      </section>
 
       <aside className="data-asset-detail">
         <Card className="data-asset-detail-card" title={selectedTable?.label ?? '资产详情'} extra={<Tag color={selectedTable?.quality_score >= 95 ? 'success' : 'warning'}>质量 {selectedTable?.quality_score ?? '-'}</Tag>}>
@@ -1610,7 +1615,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
                         renderItem={(field) => (
                           <List.Item className="data-field-item">
                             <List.Item.Meta
-                              title={<Space wrap><strong>{field.label}</strong><Tag>{field.name}</Tag><Tag>{field.type}</Tag>{field.primary_key ? <Tag color="blue">主键</Tag> : null}</Space>}
+                              title={<Space wrap><strong>{field.label}</strong>{field.label !== field.name && <Tag>{field.name}</Tag>}<Tag>{field.type}</Tag>{field.primary_key ? <Tag color="blue">主键</Tag> : null}</Space>}
                               description={<Space wrap><span>空值率 0%</span><span>唯一性 {field.primary_key ? '100%' : '86%'}</span><span>质量 {field.quality === 'warning' ? '需复核' : '正常'}</span></Space>}
                             />
                           </List.Item>

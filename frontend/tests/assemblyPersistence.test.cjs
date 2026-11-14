@@ -90,3 +90,24 @@ test('byte size is explicit, persisted and distinct from character limits',()=>{
  assert.equal(fieldStorageSize('integer'),'4 字节');assert.equal(fieldStorageSize('decimal'),'8 字节');
  assert.equal(fieldStorageSize('string',255),'最多 255 字节');assert.equal(fieldStorageSize('string'),'默认最多 1024 字节');assert.equal(fieldStorageSize('text'),'默认最多 65536 字节');assert.equal(fieldStorageSize('json'),'默认最多 1048576 字节');
 });
+
+
+test('form metadata refuses a stale editor snapshot and sends a token for the write race',async()=>{
+ let writes=0;
+ const latest={id:7,code:'source',status:'draft',config:{},edit_token:'new'};
+ const api={getPlatformForm:async()=>response(latest),updatePlatformForm:async(id,payload)=>{writes++;assert.equal(payload.expected_token,'new');return response({...latest,...payload});}};
+ await assert.rejects(persistForm(api,{id:'7',status:'draft',edit_token:'old'},{name:'Stale',code:'source'}),/其他编辑/);
+ assert.equal(writes,0);
+ await persistForm(api,{id:'7',status:'draft',edit_token:'new'},{name:'Fresh',code:'source'});
+ assert.equal(writes,1);
+});
+
+test('field create and update persist both query switches, including disabling an existing capability', () => {
+  const { assemblyFieldPayload, assemblyFieldUpdatePayload } = context.exports;
+  const values = { label: '数量', code: 'quantity', type: 'integer', searchable: false, sortable: true };
+  const created = assemblyFieldPayload(values, 0);
+  assert.equal(created.searchable, false);
+  assert.equal(created.sortable, true);
+  const patch = assemblyFieldUpdatePayload(values, { field_type: 'integer', searchable: true, sortable: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(patch)), { label: '数量', searchable: false, sortable: true });
+});

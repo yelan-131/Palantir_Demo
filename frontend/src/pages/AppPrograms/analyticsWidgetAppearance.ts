@@ -20,6 +20,8 @@ export const widgetFontOptions = [
   {value:'PingFang SC, Microsoft YaHei, sans-serif',label:'苹方 / 微软雅黑'},
 ];
 export type AnalyticsWidgetAppearance = {
+  surface?: 'plain' | 'soft' | 'card';
+  headingStyle?: 'inline' | 'bar';
   showTooltip?: boolean;
   animate?: boolean;
   enableZoom?: boolean;

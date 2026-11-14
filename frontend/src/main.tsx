@@ -10,6 +10,7 @@ import './shell.css';
 import './workspace.css';
 import './responsive.css';
 import './pages/AccountCenter/preferences.css';
+import './ui-system.css';
 import { TECH_WHITE_PALETTE as colors, TECH_WHITE_GEOMETRY as geometry, TECH_WHITE_TYPOGRAPHY as typography, SHELL_COLOR_VARIABLES } from './theme/techWhite';
 
 for (const [name, value] of Object.entries(SHELL_COLOR_VARIABLES)) {
@@ -33,6 +34,9 @@ const techWhiteTheme: ThemeConfig = {
     colorInfoBorder: colors.infoBorder,
     colorText: colors.text,
     colorTextSecondary: colors.muted,
+    colorTextTertiary: colors.faint,
+    colorTextPlaceholder: colors.muted,
+    controlHeight: geometry.controlHeight,
     colorBgBase: colors.canvas,
     colorBgContainer: colors.surface,
     colorBgLayout: colors.canvas,
@@ -131,7 +135,7 @@ const techWhiteTheme: ThemeConfig = {
       bodySortBg: colors.menu,
     },
     Menu: {
-      itemBorderRadius: 10,
+      itemBorderRadius: geometry.controlRadius,
       itemHeight: 36,
       itemColor: colors.muted,
       itemHoverColor: colors.text,

@@ -1,9 +1,11 @@
+import type {ComponentPresentation} from './presentation';
 import type {FilterSettings, ListSettings, ToolbarGroup} from './businessComponents';
 import type {AnalyticsWidgetAppearance} from '../AppPrograms/analyticsWidgetAppearance';
-export type WidgetType = 'record-list' | 'record-filter' | 'metric' | 'chart';
+export type WidgetType = 'record-list' | 'record-filter' | 'metric' | 'chart' | 'workspace';
 export interface PageWidget {
   id: string;
   type: WidgetType;
+  workspaceModule?: 'overview' | 'continuation' | 'recent' | 'support' | 'forms';
   title: string;
   width: 6 | 8 | 12 | 18 | 24;
   roleIds?: number[];
@@ -30,6 +32,7 @@ export interface PageWidget {
   unit?: string;
   threshold?: string;
   appearance?: AnalyticsWidgetAppearance;
+  presentation?: ComponentPresentation;
 }
 export interface PageDefinition {
   title: string;
@@ -38,7 +41,7 @@ export interface PageDefinition {
   filterFields: string[];
   roleIds: number[];
   widgets: PageWidget[];
-  style?: {gridSize?: number; cardOpacity?: number; cardBlur?: number; componentGap?: number; cardRadius?: number; preset?: 'clean' | 'factory' | 'executive'; background?: string | null;
+  style?: {componentDefaults?: ComponentPresentation; componentSurface?: 'plain' | 'soft' | 'card'; gridSize?: number; cardOpacity?: number; cardBlur?: number; componentGap?: number; cardRadius?: number; preset?: 'clean' | 'factory' | 'executive'; background?: string | null;
     cardBorder?: 'none' | 'light' | 'strong'; chartPalette?: 'manufacturing' | 'business' | 'warning' | 'mono';
     tableDensity?: 'compact' | 'standard' | 'comfortable' | null; filterTheme?: 'toolbar' | 'inline' | 'panel'; refreshInterval?: number};
 }

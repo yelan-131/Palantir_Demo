@@ -58,7 +58,7 @@ export function ModelAssignmentsPanel({ values, onConnection }: { values: Record
 }
 
 export function ModelExecutionFields({ values }: { values: Record<string, any> }) {
-  const automaticWindow = Number(values.contextPolicy?.maxContextTokens || 12000) + Number(values.maxTokens || 2048);
+  const automaticWindow = Number(values.contextPolicy?.maxContextTokens || 32768) + Number(values.maxTokens || 2048);
   const automaticIdle = Number(values.timeoutSeconds || 30) * 1000;
   return <div className="ai-execution-fields">
     <div className="ai-setting-block-heading"><h3>模型请求</h3><p>对应当前 DSH SDK 与 llm-pi-ai 适配器的参数；留空的可选项沿用默认值。</p></div>

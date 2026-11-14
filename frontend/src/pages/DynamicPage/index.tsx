@@ -593,10 +593,20 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         setConfigDenied(true); setConfigError('当前账号没有访问此表单的权限，请联系管理员。');
         setPlatformForm(null); setPageConfig(null); setFields([]); setData([]); setTotal(0);
         setDetailRecord(null); setModalOpen(false);
-      } else { setListError('查询失败，以下保留上次成功加载的结果。'); if(!embedded)message.error('加载数据失败'); }
+      } else {
+        const detail = error?.response?.data?.detail;
+        const fieldName = error?.response?.status === 400 && typeof detail === 'string'
+          ? /^Field is not indexed for filtering: (.+)$/.exec(detail)?.[1]
+          : undefined;
+        const field = fieldName ? fields.find(item => item.field_name === fieldName) : undefined;
+        setListError(field
+          ? `「${field.label}」暂不支持筛选。请联系管理员在「业务数据 → 字段结构」开启该字段的可搜索或可排序并发布表单。以下保留上次成功加载的结果。`
+          : '查询失败，以下保留上次成功加载的结果。');
+        if (!embedded) message.error('加载数据失败');
+      }
     } }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
-  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch]);
+  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch, fields]);
 
   useEffect(() => {
     if (!slug || aliasProgramRoute) return;
@@ -1100,22 +1110,22 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
 
   const previewToolbar = Boolean(toolbarTargetId && readOnly);
   const listToolbar = (
-        <Space className="dynamic-business-toolbar-actions" size={6} wrap>
+        <Space className={`dynamic-business-toolbar-actions${toolbarTargetId ? '' : ' dynamic-business-labeled-actions'}`} size={8} wrap>
           {(toolbarActions.includes('create') && (previewToolbar || canRunAction('create'))) && (
             <Tooltip title={platformForm?.runtime_submission_available ? '填写申请' : '新增'}>
-              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal} />
+              <Button aria-label={platformForm?.runtime_submission_available ? '填写申请' : '新增'} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal}>{!toolbarTargetId && (platformForm?.runtime_submission_available ? '填写申请' : '新增')}</Button>
             </Tooltip>
           )}
           {toolbarActions.includes('refresh')&&<Tooltip title="刷新">
-            <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} disabled={!toolbarActions.includes('refresh') || runtimePermissions.refresh === false} onClick={loadData} />
+            <Button aria-label="刷新" icon={<ReloadOutlined />} loading={loading} disabled={!toolbarActions.includes('refresh') || runtimePermissions.refresh === false} onClick={loadData}>{!toolbarTargetId && '刷新'}</Button>
           </Tooltip>}
-          {(toolbarActions.includes('import')&&(previewToolbar || canRunAction('import')&&canRunAction('create')))&&<Button disabled={readOnly || !toolbarActions.includes('import') || !canRunAction('import') || !canRunAction('create')} aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)} />}
+          {(toolbarActions.includes('import')&&(previewToolbar || canRunAction('import')&&canRunAction('create')))&&<Button disabled={readOnly || !toolbarActions.includes('import') || !canRunAction('import') || !canRunAction('create')} aria-label="批量导入" title="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>{!toolbarTargetId && '导入'}</Button>}
       {(toolbarActions.includes('export')&&(previewToolbar || canRunAction('export')))&&<Button disabled={readOnly || !toolbarActions.includes('export') || !canRunAction('export')} aria-label="导出当前页" title="导出当前页" icon={<DownloadOutlined/>} loading={exporting} onClick={async()=>{
         if(!platformForm)return;setExporting(true);
         try{const res=await exportPlatformDynamicRecords(platformForm.id,{page,page_size:viewConfig.table.pageSize,search:(externalSearch??search)||undefined,filters:structuredFilters.length?JSON.stringify(structuredFilters):undefined,sort_field:effectiveSortField||viewConfig.table.defaultSort?.fieldName,sort_order:effectiveSortOrder||(viewConfig.table.defaultSort?.order==='ascend'?'asc':'desc')});
           const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
-      }} />}
+      }}>{!toolbarTargetId && '导出当前页'}</Button>}
         </Space>
   );
 
@@ -1136,7 +1146,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       {display !== 'list' && filterContent}
 
       {!toolbarTargetId&&<div className="app-business-list-toolbar dynamic-business-list-toolbar">
-        <Typography.Text type="secondary">共 {total} 条记录{selectedRowKeys.length>0&&` · 已选 ${selectedRowKeys.length} 条`}</Typography.Text>
+        <Typography.Text type="secondary" role="status" aria-live="polite">{loading || configRefreshing ? '正在加载记录…' : <>共 <strong>{total.toLocaleString()}</strong> 条记录{selectedRowKeys.length>0&&` · 已选 ${selectedRowKeys.length} 条`}</>}</Typography.Text>
       </div>}
 
       <Table
@@ -1145,7 +1155,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         columns={tableColumns}
         rowKey="id"
         rowSelection={listSettings?.selection&&listSettings.selection!=='none'?{type:listSettings.selection==='single'?'radio':'checkbox',selectedRowKeys,onChange:keys=>setSelectedRowKeys(keys)}:undefined}
-        locale={listPresentation.emptyText?{emptyText:<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listPresentation.emptyText} />}:undefined}
+        locale={{emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listPresentation.emptyText || (listError ? '记录加载失败，请点击上方重试。' : (externalSearch ?? search) || structuredFilters.length ? '暂无匹配记录' : '暂无记录')}>
+          {!listPresentation.emptyText && !listError && <Typography.Text type="secondary">{(externalSearch ?? search) || structuredFilters.length ? '请调整筛选条件后重新查询。' : canRunAction('create') && toolbarActions.includes('create') ? '点击上方新增按钮创建第一条记录。' : '记录添加后会显示在这里。'}</Typography.Text>}
+        </Empty>}}
         onRow={disableRowAction ? undefined : record=>({onClick:event=>{
           if((event.target as HTMLElement).closest('button,a,input,.ant-select,.ant-popover'))return;
           if(viewConfig.table.rowClickAction==='detail')void openDetail(record);
@@ -1179,6 +1191,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       {platformForm?.code==='alert-center'&&!editorTab&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);setDetailRecord(null);}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
       <Drawer title={`${pageConfig.title} · 记录详情`} open={Boolean(detailRecord) && !editorTab && platformForm?.code!=='alert-center'} onClose={() => setDetailRecord(null)} width={560}
         extra={<Space>
+          {platformForm && detailRecord?._approval && <Button onClick={() => navigate(`/workflow?tab=initiated&source_form_id=${platformForm.id}&source_record_id=${detailRecord.id}`)}>查看流程</Button>}
           {!readOnly && (detailRecord?._approval ? detailRecord._approval.can_edit : canRunAction('edit')) && <Button onClick={() => detailRecord && openEditModal(detailRecord)}>编辑</Button>}
           {!readOnly && detailRecord?._approval?.can_submit && <Button type="primary" loading={submittingApproval} onClick={submitApproval}>{detailRecord._approval.status === 'rejected' ? '重新提交' : '提交审批'}</Button>}
         </Space>}>

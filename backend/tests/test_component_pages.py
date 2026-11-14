@@ -1399,3 +1399,76 @@ async def test_menu_page_target_rejects_drafts_and_obeys_page_audience(environme
     visible = await client.get(runtime_path)
     assert visible.status_code == 200, visible.text
     assert [item['route_path'] for item in visible.json()['data']] == [saved['route_path']]
+
+@pytest.mark.asyncio
+async def test_workspace_canvas_uses_versioned_server_page(pages_environment):
+    db, form, user, client = pages_environment
+    user['is_admin'] = False
+    assert (await client.post('/pages/workspace/home')).status_code == 403
+    assert (await client.get('/pages/workspace/home')).json() == {'code': None}
+    user['is_admin'] = True
+    binding = await client.post('/pages/workspace/home')
+    assert binding.status_code == 200, binding.text
+    code = binding.json()['code']
+    editor = (await client.get(f'/pages/{code}/editor')).json()
+    assert editor['publishedVersion'] == 1
+    assert {w['workspaceModule'] for w in editor['definition']['widgets']} == {'overview', 'continuation', 'recent', 'support', 'forms'}
+    draft = copy.deepcopy(editor['definition'])
+    draft['widgets'] = [draft['widgets'][-1], draft['widgets'][0]]
+    draft['widgets'][0]['width'] = 24
+    draft['widgets'][0]['title'] = '常用业务入口'
+    draft['style']['componentSurface'] = 'plain'
+    draft['style']['componentDefaults'] = {'container': {'surface': 'plain', 'padding': 0}, 'header': {'divider': False}, 'content': {'gap': 16}}
+    draft['widgets'][0]['presentation'] = {'header': {'visible': False, 'titleVisible': False, 'actionsVisible': True}, 'content': {'gap': 0, 'separators': False, 'innerSurface': 'plain'}}
+    draft['widgets'][0]['appearance'].update(surface='soft', headingStyle='inline', showTitle=False)
+    saved = await client.put(f'/pages/{code}/draft', json={'definition': draft, 'expectedRevision': editor['revision']})
+    assert saved.status_code == 200, saved.text
+    preview = await client.post(f'/pages/{code}/preview', json={'definition': draft, 'filters': {}})
+    assert preview.status_code == 200, preview.text
+    user['is_admin'] = False
+    runtime = (await client.get(f'/pages/{code}')).json()
+    assert len(runtime['definition']['widgets']) == 5  # drafts never leak to viewers
+    user['is_admin'] = True
+    published = await client.post(f'/pages/{code}/publish', json={'definition': draft, 'expectedRevision': saved.json()['revision']})
+    assert published.status_code == 200, published.text
+    assert (await client.post('/pages/workspace/home')).json()['code'] == code
+    latest = (await client.get(f'/pages/{code}/editor')).json()
+    assert latest['publishedVersion'] == 2  # opening home never overwrites the design
+    user['is_admin'] = False
+    runtime = (await client.get(f'/pages/{code}')).json()
+    assert len(runtime['definition']['widgets']) == 2
+    assert runtime['definition']['widgets'][0]['title'] == '常用业务入口'
+    assert runtime['definition']['style']['componentSurface'] == 'plain'
+    assert runtime['definition']['style']['componentDefaults']['container']['padding'] == 0
+    assert runtime['definition']['widgets'][0]['presentation']['header']['visible'] is False
+    assert runtime['definition']['widgets'][0]['presentation']['content']['gap'] == 0
+    assert runtime['definition']['widgets'][0]['presentation']['content']['separators'] is False
+    appearance = runtime['definition']['widgets'][0]['appearance']
+    assert appearance['surface'] == 'soft'
+    assert appearance['headingStyle'] == 'inline'
+    assert appearance['showTitle'] is False
+    data = await client.post(f'/pages/{code}/data', json={'filters': {}})
+    assert data.status_code == 200, data.text
+
+
+def test_workspace_modules_do_not_require_a_business_source():
+    value = component_pages.PageDefinition(title='工作台', widgets=[component_pages.PageWidget(
+        id='tasks', type='workspace', workspaceModule='support', title='我的待办')])
+    assert component_pages.source_definitions(value) == []
+
+
+def test_component_presentation_rejects_invalid_style_values():
+    from pydantic import ValidationError
+    for invalid in [{'container': {'padding': -1}}, {'container': {'background': 'url(example)'}}, {'content': {'gap': 99}}, {'header': {'layout': 'unknown'}}]:
+        with pytest.raises(ValidationError):
+            component_pages.ComponentPresentation.model_validate(invalid)
+
+
+def test_basic_section_versions_include_presentation_without_touching_data():
+    widget = {'id': 'one', 'type': 'workspace', 'presentation': {'container': {'padding': 0}}, 'dataBinding': {'formId': 1}}
+    snapshot = component_pages.widget_section(widget, 'basic')
+    assert snapshot['presentation']['container']['padding'] == 0
+    assert 'dataBinding' not in snapshot
+    merged = component_pages.merge_widget_section({'id': 'one', 'type': 'workspace', 'dataBinding': {'formId': 2}}, snapshot, 'basic')
+    assert merged['presentation'] == widget['presentation']
+    assert merged['dataBinding'] == {'formId': 2}

@@ -3,6 +3,7 @@ import {
   Alert,
   Card,
   Dropdown,
+  Empty,
   Spin,
   Table,
   Button,
@@ -382,6 +383,9 @@ export default function DataSourcePage() {
           columns={columns}
           dataSource={dataSources}
           loading={loading}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadFailed ? '暂时无法读取数据源' : '还没有数据源'}>
+            {!loadFailed && isAdmin && <Typography.Text type="secondary">点击右上方“新建数据源”，连接业务数据。</Typography.Text>}
+          </Empty> }}
           pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
         />
       </Card>

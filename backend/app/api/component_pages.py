@@ -23,6 +23,8 @@ router = APIRouter()
 
 
 class WidgetAppearance(BaseModel):
+    surface: Literal['plain', 'soft', 'card'] | None = None
+    headingStyle: Literal['inline', 'bar'] | None = None
     widthColumns: int | None = Field(default=None, ge=3, le=12)
     cardHeight: int | None = Field(default=None, ge=160, le=960)
     infoTextMode: Literal['auto', 'custom'] = 'auto'
@@ -143,10 +145,45 @@ class DataBinding(BaseModel):
     formId: int = Field(gt=0)
 
 
+class ContainerPresentation(BaseModel):
+    surface: Literal['plain', 'soft', 'card'] | None = None
+    background: str | None = Field(default=None, pattern=r'^#[0-9a-fA-F]{6}$')
+    border: Literal['none', 'light', 'strong'] | None = None
+    shadow: Literal['none', 'soft'] | None = None
+    radius: int | None = Field(default=None, ge=0, le=24)
+    padding: int | None = Field(default=None, ge=0, le=48)
+
+
+class HeaderPresentation(BaseModel):
+    visible: bool | None = None
+    titleVisible: bool | None = None
+    descriptionVisible: bool | None = None
+    actionsVisible: bool | None = None
+    layout: Literal['inline', 'stack'] | None = None
+    divider: bool | None = None
+    padding: int | None = Field(default=None, ge=0, le=48)
+
+
+class ContentPresentation(BaseModel):
+    density: Literal['compact', 'standard', 'comfortable'] | None = None
+    gap: int | None = Field(default=None, ge=0, le=48)
+    innerSurface: Literal['plain', 'soft', 'card'] | None = None
+    innerTitles: bool | None = None
+    separators: bool | None = None
+    overflow: Literal['auto', 'hidden'] | None = None
+
+
+class ComponentPresentation(BaseModel):
+    container: ContainerPresentation | None = None
+    header: HeaderPresentation | None = None
+    content: ContentPresentation | None = None
+
+
 class PageWidget(BaseModel):
     accessGroups: list[ToolbarGroup] | None = Field(default=None, max_length=20)
     id: str = Field(min_length=1, max_length=100)
-    type: Literal['record-list', 'record-filter', 'metric', 'chart']
+    type: Literal['record-list', 'record-filter', 'metric', 'chart', 'workspace']
+    workspaceModule: Literal['overview', 'continuation', 'recent', 'support', 'forms'] | None = None
     title: str = Field(min_length=1, max_length=100)
     width: Literal[6, 8, 12, 18, 24] = 24
     roleIds: list[int] = Field(default_factory=list, max_length=100)
@@ -172,9 +209,12 @@ class PageWidget(BaseModel):
     unit: str = Field(default='', max_length=30)
     threshold: str = Field(default='', max_length=100)
     appearance: WidgetAppearance = Field(default_factory=WidgetAppearance)
+    presentation: ComponentPresentation | None = None
 
 
 class PageStyle(BaseModel):
+    componentDefaults: ComponentPresentation | None = None
+    componentSurface: Literal['plain', 'soft', 'card'] | None = None
     gridSize: int = Field(default=44, ge=16, le=88)
     cardOpacity: float = Field(default=0.78, ge=0.3, le=1)
     cardBlur: int = Field(default=12, ge=0, le=24)
@@ -287,6 +327,8 @@ def widget_source_id(definition, widget):
 def source_definitions(definition):
     groups = {}
     for widget in definition.widgets:
+        if widget.type == 'workspace':
+            continue
         source_id = widget_source_id(definition, widget)
         if source_id is None:
             raise HTTPException(422, f'请为组件「{widget.title}」选择业务数据来源')
@@ -576,6 +618,43 @@ async def list_pages(db: AsyncSession = Depends(get_db), user=Depends(get_curren
         items.append({'code': page.code, 'title': (page.draft if user.get('is_admin') else definition)['title'],
                       'publishedVersion': page.published_version})
     return {'items': items}
+
+
+WORKSPACE_CODE = 'system-workspace-home'
+
+
+@router.get('/workspace/home')
+async def workspace_binding(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    page = await db.scalar(select(ComponentPage).where(
+        ComponentPage.tenant_id == current_tenant_id(user), ComponentPage.code == WORKSPACE_CODE))
+    return {'code': page.code if page and page.published_version else None}
+
+
+@router.post('/workspace/home')
+async def initialize_workspace(db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    # Serialize first-open creation for each tenant, like form/page binding.
+    from app.services.field_uniqueness import lock
+    await lock(db, current_tenant_id(user))
+    page = await db.scalar(select(ComponentPage).where(
+        ComponentPage.tenant_id == current_tenant_id(user), ComponentPage.code == WORKSPACE_CODE))
+    if page:
+        return {'code': page.code}
+    modules = [('overview', '工作概览', 24), ('continuation', '未完成工作', 12),
+               ('support', '待办与申请', 12), ('recent', '最近工作', 12), ('forms', '业务表单', 12)]
+    definition = PageDefinition(title='我的工作台', widgets=[PageWidget(
+        id=key, type='workspace', workspaceModule=key, title=title, width=width,
+        appearance=WidgetAppearance(showTitle=False)) for key, title, width in modules]).model_dump()
+    page = ComponentPage(tenant_id=current_tenant_id(user), code=WORKSPACE_CODE,
+                         draft=definition, revision=1, published_version=1)
+    db.add(page)
+    await db.flush()
+    db.add(ComponentPageVersion(tenant_id=page.tenant_id, page_id=page.id, version=1,
+                               definition=definition, published_by=current_user_id(user)))
+    await change_audit(db, tenant_id=page.tenant_id, user_id=current_user_id(user),
+                       action='create', resource_type='component_page', resource_id=page.id,
+                       new_values={'code': page.code, 'version': 1})
+    await db.commit()
+    return {'code': page.code}
 
 
 @router.get('/{code}/editor')

@@ -153,7 +153,7 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
             "_preview": {"target": body.name, "fields": {**preview, "状态": "草稿"}},
         }
 
-    app = await get_tenant_application(session, tenant_id, request.application_id)
+    app = await get_tenant_application(session, tenant_id, request.application_id, for_update=not prepare)
     before = await _application_to_dict(session, app)
     snapshot.update(application=before, updated_at=app.updated_at.isoformat() if app.updated_at else None)
     changes = {key: value for key, value in values.items() if key != "application_id"}

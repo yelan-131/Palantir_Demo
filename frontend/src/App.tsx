@@ -9,6 +9,7 @@ import {
   Modal,
   Space,
   Spin,
+  Skeleton,
   Typography,
   Tooltip,
   message,
@@ -227,10 +228,9 @@ function getRuntimePageTitle(pathname: string): string {
 
 function PageLoader() {
   return (
-    <div className="shell-page-loading" role="status" aria-live="polite">
-      <Spin size="large" tip="正在加载页面…">
-        <div style={{ minHeight: 200 }} />
-      </Spin>
+    <div className="shell-page-loading" role="status" aria-live="polite" aria-busy="true">
+      <span className="shell-loading-label">正在加载页面…</span>
+      <div aria-hidden="true"><Skeleton active title={{ width: '36%' }} paragraph={{ rows: 5, width: ['75%', '92%', '84%', '92%', '60%'] }} /></div>
     </div>
   );
 }
@@ -618,6 +618,7 @@ function AppContent() {
     <AiWorkbenchProvider>
     <AiPageActionRouter />
     <Layout className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
+      <a className="shell-skip-link" href="#workspace-main">跳转到页面内容</a>
       <ApplicationRail library={library} onOpen={openLibraryApp} onHome={() => { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); }} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
       {showContextMenu && smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
       {showContextMenu && <Sider id="shell-context-menu" width={248} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu shell-hierarchy-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
@@ -638,13 +639,24 @@ function AppContent() {
 
           <GlobalSearch />
           <Space className="shell-header-actions" size={4} align="center">
-            {releaseInfo && <Tooltip title="版本记录"><Button type="text" icon={<HistoryOutlined />} aria-label="打开版本记录" onClick={openReleaseHistory} /></Tooltip>}
+            {releaseInfo && (
+              <Tooltip title="版本记录">
+                <Button
+                  type="text"
+                  icon={<HistoryOutlined />}
+                  aria-label={`v${releaseInfo.version}，查看版本记录`}
+                  onClick={openReleaseHistory}
+                >
+                  v{releaseInfo.version}
+                </Button>
+              </Tooltip>
+            )}
             <NotificationCenter />
 
           </Space>
         </Header>}
 
-        <Content className="app-content">
+        <Content id="workspace-main" className="app-content" tabIndex={-1} aria-label="页面内容">
           <div className="content-surface">
             <ErrorBoundary>
               <Suspense fallback={<PageLoader />}>

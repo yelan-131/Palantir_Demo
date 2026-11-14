@@ -10,8 +10,8 @@ export const TECH_WHITE_PALETTE = {
   borderStrong: '#BBC3CB',
   text: '#252B32',
   muted: '#626C77',
-  faint: '#7E91AA',
-  icon: '#7F96B4',
+  faint: '#5F7082',
+  icon: '#64778C',
   primary: '#476791',
   primaryStrong: '#344D6B',
   featureEnd: '#F9FBFF',
@@ -49,7 +49,14 @@ export const TECH_WHITE_TYPOGRAPHY = {
   actionIcon: 16,
 } as const;
 
+/** Shared spacing for application chrome; published canvases own their spacing. */
+export const TECH_WHITE_SPACING = { small: 8, medium: 12, section: 16, panel: 24 } as const;
+
 export const SHELL_COLOR_VARIABLES: Record<string, string> = {
+  '--mf-space-small': `${TECH_WHITE_SPACING.small}px`,
+  '--mf-space-medium': `${TECH_WHITE_SPACING.medium}px`,
+  '--mf-space-section': `${TECH_WHITE_SPACING.section}px`,
+  '--mf-space-panel': `${TECH_WHITE_SPACING.panel}px`,
   '--mf-font-family': TECH_WHITE_TYPOGRAPHY.fontFamily,
   '--mf-font-title': `${TECH_WHITE_TYPOGRAPHY.pageTitle}px`,
   '--mf-font-section': `${TECH_WHITE_TYPOGRAPHY.sectionTitle}px`,
