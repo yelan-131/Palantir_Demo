@@ -1,6 +1,6 @@
 {
   "version": "0.3.21",
-  "released_at": null,
+  "released_at": "2026-11-14",
   "title": "AI 技能、应用页面与数据中心",
   "summary": "各租户可独立管理 AI 技能和工具。AI 助手扩展到应用、菜单及通用页面，数据中心梳理连接与映射审核，工作台更新审批与质量追溯。同时完善菜单和表单编辑保护、日期查询及工作台布局。",
   "highlights": [],
@@ -8,9 +8,9 @@
   "records": [
     {
       "version": "0.3.21",
-      "released_at": null,
-      "status": "draft",
-      "updated_at": "2026-11-13",
+      "released_at": "2026-11-14",
+      "status": "published",
+      "updated_at": "2026-11-14",
       "title": "AI 技能、应用页面与数据中心",
       "categories": {
         "added": [
@@ -423,6 +423,6 @@
     }
   ],
   "show_popup": true,
-  "status": "draft",
-  "updated_at": "2026-11-13"
+  "status": "published",
+  "updated_at": "2026-11-14"
 }
