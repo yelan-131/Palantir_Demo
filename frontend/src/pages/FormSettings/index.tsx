@@ -4731,9 +4731,19 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         return { form_id: lastSavedForm.current?.id, saved: true, published: false };
       }
       if (action.action === 'draft_new') {
-        setDatabaseFieldsByForm(fields => ({ ...fields, [staticBaseConfig.id]: [] }));
-        current.commitLayoutChange(() => []);
-        setDraftReviewReady(false);
+        if (!aiFormDraft || !action.draft?.fields.length) throw new Error('未收到完整的表单字段计划');
+        const fields = action.draft.fields.map(draftFieldToDesignerField);
+        const controls: LayoutControl[] = [];
+        action.draft.fields.forEach((definition, index) => {
+          const field = fields[index];
+          const control = applyNativeFieldProperties(makeFieldControl(field), field, definition);
+          controls.splice(Math.min(definition.position ?? controls.length, controls.length), 0, control);
+        });
+        setDatabaseFieldsByForm(value => ({ ...value, [staticBaseConfig.id]: fields }));
+        current.commitLayoutChange(() => controls);
+        setViewConfig(makeDesignerViewConfig({ ...baseConfig, fields }));
+        setSelectedControlId(controls[0]?.id || '');
+        setDraftReviewReady(true);
       }
       if (action.action === 'add_field' || action.action === 'set_field_properties') setDraftReviewReady(false);
       if (action.action === 'add_field') {
@@ -4785,9 +4795,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         required: control.rules.required.enabled, readonly: control.rules.readonly.enabled })), selected_field: selected?.fieldKey,
       label: selected?.name, required: selected?.rules.required.enabled,
       readonly: selected?.rules.readonly.enabled, unsaved_changes: hasUnsavedChanges,
-      saved: false, published: false });
+      review_ready: draftReviewReady, saved: false, published: false });
     setPageCallCompletion(null);
-  }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft]);
+  }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.fields]);
   useEffect(() => {
     if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig) return;
     setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, unsaved_changes: hasUnsavedChanges,

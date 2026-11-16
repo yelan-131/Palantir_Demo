@@ -552,9 +552,12 @@ function getTraceToolText(data: Record<string, unknown>, completed: boolean): st
   const tool = stringifyStepValue(data.tool) || '工具';
   const resultCount = data.result_count !== undefined ? ` · 结果 ${data.result_count}` : '';
   const summary = data.summary ? ` · ${stringifyStepValue(data.summary)}` : '';
-  const failed = ['failed', 'error', 'blocked'].includes(String(data.status || ''));
+  const status = String(data.status || '');
+  const label = status === 'validation_failed' ? '参数校验失败'
+    : status === 'blocked' ? '操作受阻'
+    : ['failed', 'error'].includes(status) ? '执行失败' : '已完成';
   return completed
-    ? `${tool} ${failed ? '执行失败' : '已完成'}${resultCount}${summary}`
+    ? `${tool} ${label}${resultCount}${summary}`
     : `调用 ${tool}`;
 }
 
@@ -873,7 +876,7 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
 }
 
 function getStatusLabel(status: MockSkillStatus) {
-  return status === 'failed' ? '未执行' : status === 'completed' ? '已执行' : status === 'draft_created' ? '草稿已生成' : '待复核';
+  return status === 'failed' ? '执行失败' : status === 'completed' ? '已执行' : status === 'draft_created' ? '草稿已生成' : '待复核';
 }
 
 function generateUnavailableReply(): AssistantReply {

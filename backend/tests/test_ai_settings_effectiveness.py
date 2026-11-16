@@ -13,6 +13,32 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 USER = {'sub': 'settings-audit', 'tenant_id': 1, 'roles': ['admin'], 'is_admin': True}
 
 
+@pytest.mark.parametrize('catalog', [False, True])
+def test_official_deepseek_limits_replace_legacy_defaults_in_sdk_and_preview(monkeypatch, tmp_path, catalog):
+    from app.services.ai.harness_parameters import effective_harness_parameters
+    from app.services.ai.harness_runtime import harness_options
+    from app.services.ai.model_catalog import catalog_from_legacy
+    from app.services.ai.settings import merge_ai_settings
+
+    monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
+    settings = merge_ai_settings({
+        'provider': 'deepseek', 'apiKey': 'test-key', 'maxTokens': 2048,
+        'chatModel': 'deepseek-chat', 'reasoningModel': 'deepseek-v4-pro',
+    })
+    if catalog:
+        services, assignments = catalog_from_legacy(settings)
+        services[0]['models'][0]['maxTokens'] = 2048
+        settings = merge_ai_settings({'modelServices': services, 'modelAssignments': assignments}, existing=settings)
+    for purpose, model in [('chat', 'deepseek-flash'), ('reasoning', 'deepseek-v4-pro')]:
+        params = effective_harness_parameters(settings, purpose)['parameters']
+        options = harness_options(settings, USER, purpose=purpose)
+        route = json.loads(options['env']['MF_DSH_PROVIDER_CONFIG'])['providers']['manufoundry']['models'][0]
+        assert route['id'] == model
+        assert route['contextWindow'] == params['contextWindow'] == 1_048_576
+        assert options['max_tokens'] == params['maxTokens'] == 393_216
+        assert params['inputBudgetTokens'] == 655_360
+
+
 def test_native_dsh_settings_reach_sdk_adapter_and_compaction(monkeypatch, tmp_path):
     from app.services.ai.settings import merge_ai_settings
     from app.services.ai.harness_runtime import harness_options

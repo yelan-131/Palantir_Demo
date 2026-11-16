@@ -135,10 +135,12 @@ SENSITIVE_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 SENSITIVE_KEY_MARKERS = ("api_key", "apikey", "password", "passwd", "secret", "token", "credential")
 
+DEEPSEEK_CONTEXT_WINDOW = 1_048_576
+DEEPSEEK_MAX_OUTPUT_TOKENS = 393_216
 DEEPSEEK_DEFAULTS: dict[str, str] = {
     "baseUrl": "https://api.deepseek.com",
-    "chatModel": "deepseek-chat",
-    "reasoningModel": "deepseek-reasoner",
+    "chatModel": "deepseek-flash",
+    "reasoningModel": "deepseek-v4-pro",
 }
 
 
@@ -330,6 +332,7 @@ def _normalize_provider_defaults(settings_data: dict[str, Any]) -> dict[str, Any
 def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
     clean_incoming = deepcopy(incoming)
     clean_incoming.pop("_catalogResolved", None)
+    clean_incoming.pop("_officialDeepSeekLimits", None)
     clean_incoming.pop("_testTarget", None)
     for group in ("contextPolicy", "memoryPolicy", "compactionPolicy", "ragPolicy", "safetyPolicy", "riskPolicy", "harnessPolicy"):
         if group in clean_incoming:
@@ -474,7 +477,10 @@ def validate_ai_settings(data: dict[str, Any]) -> None:
     policy = data.get("safetyPolicy") or {}
     if policy.get("agentLoopMode", "pipeline") not in {"harness"}:
         raise ValueError("Agent 推理架构无效")
-    for key, low, high in [("maxTokens", 32, 32768), ("timeoutSeconds", 1, 180), ("retryCount", 0, 3)]:
+    from .model_catalog import official_deepseek_model
+    official_model = official_deepseek_model(data.get('baseUrl'), data.get('chatModel'))
+    max_output = DEEPSEEK_MAX_OUTPUT_TOKENS if official_model else 32768
+    for key, low, high in [("maxTokens", 32, max_output), ("timeoutSeconds", 1, 180), ("retryCount", 0, 3)]:
         try:
             number = int(data.get(key, low))
         except (ValueError, TypeError):

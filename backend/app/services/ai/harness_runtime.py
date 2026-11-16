@@ -356,7 +356,8 @@ def harness_options(settings: dict[str, Any], user: dict[str, Any], *, token: st
     params = projection['parameters']
     settings = resolve_model_settings(settings, purpose)
     config = settings_to_provider_config(settings, purpose=purpose)
-    selected = model or (config.vision_model if purpose == 'document' else config.reasoning_model or config.chat_model)
+    selected = model or {'chat': config.chat_model, 'reasoning': config.reasoning_model or config.chat_model,
+                         'document': config.vision_model}[purpose]
     native = settings.get("harnessPolicy") or {}
     context_window = params['contextWindow']
     stream_idle_ms = params['streamIdleTimeoutMs']
@@ -368,7 +369,7 @@ def harness_options(settings: dict[str, Any], user: dict[str, Any], *, token: st
         "retryPolicy": {"mode": "normal", "maxRetries": config.retry_count},
         "compat": {"maxTokensField": "max_tokens", "supportsDeveloperRole": False, "supportsStore": False},
     }
-    if config.provider == "deepseek":
+    if config.provider == "deepseek" or settings.get('_officialDeepSeekLimits'):
         route["compat"].update({"thinkingFormat": "deepseek", "requiresReasoningContentOnAssistantMessages": True})
     if effort:
         # Explicit configuration declares this model's offered reasoning level;

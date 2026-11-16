@@ -1262,12 +1262,19 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
         yield _sse("run.accepted", {"status": "accepted", "message": body.message})
         yield _sse("assistant.note", {"message": "我收到请求了，会先整理上下文，再按需要调用工具。"})
         task = asyncio.create_task(_run_agent_for_user(body, current_user, event_sink=emit))
+        loop = asyncio.get_running_loop()
+        last_sent = loop.time()
         try:
             while not task.done() or not queue.empty():
                 try:
                     event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
                 except asyncio.TimeoutError:
+                    # Keep the browser connected while the model is thinking without emitting events.
+                    if loop.time() - last_sent >= 15:
+                        last_sent = loop.time()
+                        yield ": keep-alive\n\n"
                     continue
+                last_sent = loop.time()
                 yield _sse(event, data)
             result = await task
             payload = result.model_dump()

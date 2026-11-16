@@ -3,7 +3,29 @@ from copy import deepcopy
 import re
 from urllib.parse import urlparse
 
-from .settings import DEFAULT_CONTEXT_POLICY
+from .settings import DEFAULT_CONTEXT_POLICY, DEEPSEEK_CONTEXT_WINDOW, DEEPSEEK_MAX_OUTPUT_TOKENS
+
+
+def official_deepseek_model(base_url, model_id):
+    if urlparse(str(base_url or '')).hostname != 'api.deepseek.com':
+        return None
+    if model_id in {'deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'}:
+        return 'deepseek-flash'
+    if model_id in {'deepseek-flash', 'deepseek-v4-pro'}:
+        return model_id
+    return None
+
+
+def apply_deepseek_defaults(result, output=None, window=None):
+    native = result.setdefault('harnessPolicy', {})
+    native['contextWindow'] = min(int(window or DEEPSEEK_CONTEXT_WINDOW), DEEPSEEK_CONTEXT_WINDOW)
+    if output in (None, '', 2048):
+        output = DEEPSEEK_MAX_OUTPUT_TOKENS if native['contextWindow'] > DEEPSEEK_MAX_OUTPUT_TOKENS else min(2048, native['contextWindow'] // 2)
+    result['maxTokens'] = int(output)
+    context = result.setdefault('contextPolicy', {})
+    if context.get('maxContextTokens') in (None, DEFAULT_CONTEXT_POLICY['maxContextTokens']):
+        context['maxContextTokens'] = native['contextWindow'] - result['maxTokens']
+    result['_officialDeepSeekLimits'] = True
 
 
 def catalog_from_legacy(data):
@@ -19,7 +41,9 @@ def catalog_from_legacy(data):
         models.insert(0, {'id': chat, 'name': chat, 'inputTypes': ['text']})
     native = data.get('harnessPolicy') or {}
     for model in models:
-        model['maxTokens'] = int(data.get('maxTokens') or 2048)
+        output = data.get('maxTokens')
+        if not official_deepseek_model(data.get('baseUrl'), model['id']) or output not in (None, 2048):
+            model['maxTokens'] = int(output or 2048)
         if native.get('contextWindow'):
             model['contextWindow'] = native['contextWindow']
         if model['id'] == (data.get('reasoningModel') or chat) and native.get('reasoning_effort'):
@@ -69,11 +93,17 @@ def merge_catalog(incoming, existing, merged):
             model_ids.add(mid)
             if not isinstance(model.get('inputTypes', ['text']), list) or not model.get('inputTypes', ['text']) or any(t not in {'text', 'image'} for t in model.get('inputTypes', ['text'])):
                 raise ValueError('请选择有效的模型输入能力')
-            for key, low, high in (('maxTokens', 32, 32768), ('contextWindow', 1000, 2000000)):
+            official_model = official_deepseek_model(service['baseUrl'], mid)
+            output_limit = DEEPSEEK_MAX_OUTPUT_TOKENS if official_model else 32768
+            window_limit = DEEPSEEK_CONTEXT_WINDOW if official_model else 2000000
+            for key, low, high in (('maxTokens', 32, output_limit), ('contextWindow', 1000, window_limit)):
                 value = model.get(key)
                 if value not in (None, '') and (isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high):
                     raise ValueError(f'模型 {key} 超出支持范围')
-            if model.get('contextWindow') and int(model['contextWindow']) <= int(model.get('maxTokens') or merged.get('maxTokens', 2048)):
+            if official_model and model.get('maxTokens') == 2048:
+                model.pop('maxTokens', None)
+            output = model.get('maxTokens') or (0 if official_model else merged.get('maxTokens', 2048))
+            if model.get('contextWindow') and int(model['contextWindow']) <= int(output):
                 raise ValueError('模型上下文窗口必须大于输出上限')
             if model.get('reasoningEffort') not in (None, '', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
                 raise ValueError('不支持的推理强度')
@@ -101,8 +131,20 @@ def merge_catalog(incoming, existing, merged):
 
 
 def resolve_model_settings(data, purpose='chat'):
-    if 'modelServices' not in data or data.get('_catalogResolved'):
+    if data.get('_catalogResolved') or data.get('_officialDeepSeekLimits'):
         return data
+    if 'modelServices' not in data:
+        field = {'chat': 'chatModel', 'reasoning': 'reasoningModel', 'document': 'visionModel'}[purpose]
+        model_id = data.get(field) or (data.get('chatModel') if purpose != 'document' else None)
+        official_model = official_deepseek_model(data.get('baseUrl'), model_id)
+        if not official_model:
+            return data
+        result = deepcopy(data)
+        for key in ('chatModel', 'reasoningModel', 'visionModel'):
+            if replacement := official_deepseek_model(data.get('baseUrl'), data.get(key)):
+                result[key] = replacement
+        apply_deepseek_defaults(result, data.get('maxTokens'), (data.get('harnessPolicy') or {}).get('contextWindow'))
+        return result
     assignments = data.get('modelAssignments') or {}
     ref = assignments.get(purpose)
     if not ref and purpose == 'reasoning':
@@ -131,6 +173,10 @@ def resolve_model_settings(data, purpose='chat'):
     for source, target in (('contextWindow', 'contextWindow'), ('reasoningEffort', 'reasoning_effort')):
         if model.get(source) not in (None, ''):
             native[target] = model[source]
+    if official_model := official_deepseek_model(service['baseUrl'], model['id']):
+        result.update(chatModel=official_model, reasoningModel=official_model, visionModel=official_model)
+        apply_deepseek_defaults(result, model.get('maxTokens'),
+                                model.get('contextWindow') or (data.get('harnessPolicy') or {}).get('contextWindow'))
     if service.get('streamIdleTimeoutMs'):
         native['streamIdleTimeoutMs'] = service['streamIdleTimeoutMs']
     # An explicit catalog credential never inherits a secret from the environment.

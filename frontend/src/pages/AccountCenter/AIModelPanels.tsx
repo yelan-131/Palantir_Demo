@@ -11,7 +11,7 @@ export const MODEL_PROVIDER_CHOICES = [
 ];
 
 const modelExamples: Record<string, string[]> = {
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
   glm: ['glm-5.1', 'GLM-5.1', 'glm-4-flash', 'glm-4v-plus'],
   openai: ['gpt-4o', 'gpt-4o-mini'],
   qwen: ['qwen-plus', 'qwen-turbo'],

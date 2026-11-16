@@ -96,7 +96,7 @@ export function AiPageActionRouter() {
       // it can run into the new editor's own unsaved-change blocker.
       if (!navigating.current.has(action.id)) {
         navigating.current.add(action.id);
-        navigate(`${targetPath}?tab=form&legacy=1&draft=${action.draft_id}`, { state: { aiFormDraft: { ...action.draft, id: action.draft_id } } });
+        navigate(`${targetPath}?tab=form&legacy=1&draft=${action.draft_id}`, { state: { aiFormDraft: { ...action.draft, fields: [], id: action.draft_id } } });
       }
       return;
     }

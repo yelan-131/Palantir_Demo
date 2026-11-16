@@ -272,18 +272,13 @@ async def call_page_control(bridge, arguments):
 
     try:
         if request.action == 'draft_new':
-            # Drive the native editor incrementally; each next step waits for React's receipt.
-            fields = action['draft']['fields']
-            action['draft'] = {**action['draft'], 'fields': []}
             result = await dispatch(action)
-            for field in fields:
-                if not result.get('ok'):
-                    break
-                result = await dispatch({'id': uuid.uuid4().hex, 'type': 'form_designer',
-                    'form_id': 0, 'draft_id': action['draft_id'], 'action': 'add_field', 'field': field})
             if result.get('ok'):
-                result = await dispatch({'id': uuid.uuid4().hex, 'type': 'form_designer',
-                    'form_id': 0, 'draft_id': action['draft_id'], 'action': 'review'})
+                state = result.get('state') or {}
+                expected = {field.field_name for field in request.draft.fields}
+                actual = {field.get('field_name') for field in state.get('fields', [])}
+                if state.get('draft_id') != action['draft_id'] or actual != expected or not state.get('review_ready'):
+                    result = {'ok': False, 'state': state, 'error': '设计器回执未确认全部字段已加入草稿，请在当前画布检查字段后继续。'}
         elif request.action == 'configure_fields':
             result = {'ok': True}
             for change in request.changes:

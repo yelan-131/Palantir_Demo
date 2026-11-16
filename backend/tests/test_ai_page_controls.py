@@ -70,10 +70,17 @@ async def test_page_receipts_are_bound_to_current_user_and_tenant(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_missing_ui_connection_cannot_be_used_as_a_backdoor():
-    from app.services.ai.harness_runtime import PlatformBridge, tool_alias
+async def test_missing_ui_connection_cannot_be_used_as_a_backdoor(monkeypatch):
+    from app.services.ai import agent_registry, harness_runtime
+    from app.services.ai.harness_runtime import INVOKE_TOOL, PlatformBridge, tool_alias
+    skills, tools = agent_registry.load_seed_registry()
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value={'skills': skills, 'tools': tools}))
+    monkeypatch.setattr(harness_runtime, 'load_persisted_ai_settings', AsyncMock())
+    monkeypatch.setattr(harness_runtime, 'settings_snapshot', dict)
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
-    result = await bridge.call_tool(tool_alias('ui.form_designer'), {'action': 'open', 'form_id': 1})
+    bridge.described_tools.add('ui.form_designer')
+    result = await bridge.call_tool(tool_alias(INVOKE_TOOL), {'name': 'ui.form_designer',
+        'arguments': {'action': 'open', 'form_id': 1}})
     assert result['status'] == 'blocked'
     assert bridge.calls == 0
 
@@ -139,7 +146,7 @@ async def test_new_draft_checks_collision_and_never_creates_database_rows(monkey
         if action['action'] == 'draft_new':
             assert action['draft']['name'] == '入库单'
         bridge.page_actions[action['id']].set_result({'ok': True, 'state': {
-            'draft_id': action['draft_id'], 'saved': False, 'fields': DRAFT['fields']}})
+            'draft_id': action['draft_id'], 'saved': False, 'fields': DRAFT['fields'], 'review_ready': True}})
     bridge.event_sink = AsyncMock(side_effect=sink)
     result = await mod.call_page_control(bridge, {'action': 'draft_new', 'draft': DRAFT})
     assert result['status'] == ('validation_failed' if existing else 'completed')
@@ -149,7 +156,7 @@ async def test_new_draft_checks_collision_and_never_creates_database_rows(monkey
     if existing:
         bridge.event_sink.assert_not_awaited()
     else:
-        assert operations == ['draft_new', 'add_field', 'add_field', 'review']
+        assert operations == ['draft_new']
         assert bridge.configuration_outcome['status'] == 'ui_draft'
         assert bridge.context['designerContext']['draft_id']
         # A following tool call in this same turn can preview the new draft.
@@ -170,7 +177,7 @@ async def test_new_draft_cannot_address_another_pages_draft(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_failed_native_field_step_stops_without_final_review(monkeypatch):
+async def test_incomplete_native_field_receipt_stops_without_final_review(monkeypatch):
     from app.services.ai import page_controls as mod
     from app.services.ai.harness_runtime import PlatformBridge
     db = AsyncMock(); db.scalar.return_value = None
@@ -181,11 +188,12 @@ async def test_failed_native_field_step_stops_without_final_review(monkeypatch):
     operations = []
     async def sink(event, action):
         operations.append(action['action'])
-        bridge.page_actions[action['id']].set_result({'ok': action['action'] != 'add_field', 'error': '画布未能加入字段'})
+        bridge.page_actions[action['id']].set_result({'ok': True, 'state': {
+            'draft_id': action['draft_id'], 'fields': DRAFT['fields'][:1], 'review_ready': True}})
     bridge.event_sink = sink
     result = await mod.call_page_control(bridge, {'action': 'draft_new', 'draft': DRAFT})
     assert result['status'] == 'blocked'
-    assert operations == ['draft_new', 'add_field']
+    assert operations == ['draft_new'] and '全部字段' in result['message']
     assert not bridge.configuration_outcome and not bridge.page_actions
     db.commit.assert_not_awaited()
 

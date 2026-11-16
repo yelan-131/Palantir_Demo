@@ -104,8 +104,8 @@ const GLM_CODING_PLAN_DEFAULTS = {
 const DEEPSEEK_AI_DEFAULTS = {
   provider: 'deepseek',
   baseUrl: 'https://api.deepseek.com',
-  chatModel: 'deepseek-chat',
-  reasoningModel: 'deepseek-reasoner',
+  chatModel: 'deepseek-flash',
+  reasoningModel: 'deepseek-v4-pro',
 };
 
 interface AuditLogRecord {

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .model_catalog import resolve_model_settings
-from .settings import DEFAULT_CONTEXT_POLICY, settings_to_provider_config
+from .settings import DEFAULT_CONTEXT_POLICY, DEEPSEEK_MAX_OUTPUT_TOKENS, settings_to_provider_config
 
 
 def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict:
@@ -28,6 +28,8 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
     execution = int(native.get('request_timeout_seconds') or min(3600, recommended))
     compaction = native.get('compaction') or {}
     message_budget = window - output
+    if message_budget <= 0:
+        raise ValueError(f'{purpose} 的模型上下文窗口必须大于输出上限')
     headroom = compaction.get('headroomTokens')
     headroom = int(headroom) if headroom not in (None, '') else min(output, max(1, int(message_budget * .1)))
     summary_output = int(compaction.get('maxTokens') or min(output, headroom or output))
@@ -56,8 +58,8 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
             'inputTypes': model.get('inputTypes') or (['text', 'image'] if purpose == 'document' else ['text']),
         },
         'sources': {
-            'contextWindow': '模型配置' if model.get('contextWindow') else '全局配置' if (data.get('harnessPolicy') or {}).get('contextWindow') else '输入预算 + 输出上限',
-            'maxTokens': '模型配置' if model.get('maxTokens') else '平台默认',
+            'contextWindow': '模型配置' if model.get('contextWindow') else '全局配置' if (data.get('harnessPolicy') or {}).get('contextWindow') else 'DeepSeek 官方上限' if effective.get('_officialDeepSeekLimits') else '输入预算 + 输出上限',
+            'maxTokens': 'DeepSeek 官方上限' if effective.get('_officialDeepSeekLimits') and output == DEEPSEEK_MAX_OUTPUT_TOKENS else '模型配置' if model.get('maxTokens') else '平台默认',
             'reasoningEffort': '模型配置' if model.get('reasoningEffort') else '全局配置' if native.get('reasoning_effort') else '模型默认',
             'streamIdleTimeoutMs': '服务配置' if service.get('streamIdleTimeoutMs') else '全局配置' if (data.get('harnessPolicy') or {}).get('streamIdleTimeoutMs') else '服务响应等待时间',
             'executionTimeoutSeconds': '全局配置' if native.get('request_timeout_seconds') else '工具预算、等待时间与重试次数计算',

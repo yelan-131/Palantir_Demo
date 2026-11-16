@@ -7,6 +7,15 @@ import type { FormInstance } from 'antd';
 export type TestTarget = { serviceId?: string; modelId?: string; purpose?: string };
 const number = (label: string, name: (string | number)[], min: number, max: number, extra?: string) => <Form.Item label={label} name={name} extra={extra}><InputNumber min={min} max={max} precision={0} placeholder="使用默认值" /></Form.Item>;
 
+function isOfficialDeepSeek(baseUrl: string, modelId: string) {
+  try {
+    return new URL(baseUrl).hostname === 'api.deepseek.com' &&
+      ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-chat', 'deepseek-reasoner'].includes(modelId);
+  } catch {
+    return false;
+  }
+}
+
 export function AIStatusSummary({ items }: { items: { label: string; value: string | number }[] }) {
   return <div className="ai-status-summary">{items.map(item => <Card key={item.label}><Statistic title={item.label} value={item.value} /></Card>)}</div>;
 }
@@ -40,17 +49,18 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
         <Form.List name={[field.name, 'models']}>{(models, { add: addModel, remove: removeModel }) => <>
           <div className="ai-model-column-head" aria-hidden="true"><span>模型 ID</span><span>显示名称</span><span>输入能力</span><span /></div><div className="ai-catalog-models">{models.map(modelField => {
             const model = service.models?.[modelField.name] || {};
+            const officialDeepSeek = isOfficialDeepSeek(service.baseUrl, model.id);
             const path = [modelField.name];
             return <div className="ai-catalog-model" key={modelField.key}>
               <div className="ai-catalog-model-row">
-                <Form.Item name={[...path, 'id']} aria-label="模型 ID" rules={[{ required: true, whitespace: true, message: '请输入模型 ID' }]}><Input aria-label="模型 ID" placeholder="例如：deepseek-chat" /></Form.Item>
+                <Form.Item name={[...path, 'id']} aria-label="模型 ID" rules={[{ required: true, whitespace: true, message: '请输入模型 ID' }]}><Input aria-label="模型 ID" placeholder="例如：deepseek-flash" /></Form.Item>
                 <Form.Item name={[...path, 'name']} ><Input aria-label="显示名称" placeholder="可选，默认使用模型 ID" /></Form.Item>
                 <Form.Item name={[...path, 'inputTypes']} ><Select aria-label="输入能力" mode="multiple" options={[{ label: '文本', value: 'text' }, { label: '图像', value: 'image' }]} /></Form.Item>
                 <Button type="text" aria-label={`移除模型 ${model.id || modelField.name + 1}`} icon={<DeleteOutlined />} disabled={models.length === 1 || used(service.id, model.id)} onClick={() => removeModel(modelField.name)} />
               </div>
               <Collapse ghost items={[{ key: 'model', label: '参数设置', children: <div className="ai-catalog-field-grid">
-                {number('上下文窗口 · Token', [...path, 'contextWindow'], 1000, 2000000)}
-                {number('最大输出 · Token', [...path, 'maxTokens'], 32, 32768)}
+                {number('上下文窗口 · Token', [...path, 'contextWindow'], 1000, officialDeepSeek ? 1048576 : 2000000, officialDeepSeek ? '官方上限 1,048,576，输入和输出共用' : undefined)}
+                {number('最大输出 · Token', [...path, 'maxTokens'], 32, officialDeepSeek ? 393216 : 32768, officialDeepSeek ? '官方上限 393,216' : undefined)}
                 <Form.Item name={[...path, 'reasoningEffort']} label="推理强度"><Select allowClear placeholder="模型默认" options={['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map(value => ({ value, label: value }))} /></Form.Item>
               </div> }]} />
             </div>;
