@@ -40,14 +40,14 @@ async def _not_implemented(payload: dict[str, Any], context: ToolHandlerContext)
 
 
 async def _knowledge_search(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
-    from app.api.knowledge import _search_knowledge_payload_async
+    from app.services.knowledge_retrieval import _search_knowledge_payload_async
     query = str(payload.get("query") or "")
     rag = (context.settings or {}).get("ragPolicy") or {}
     limit = max(1, min(int(payload.get("limit") or rag.get("topK", 5)), 20))
     tenant_id = require_tenant_id(context.current_user)
     results = await _search_knowledge_payload_async(query, limit=limit, document_id=payload.get("document_id"), tenant_id=tenant_id)
     if not results and payload.get("document_id"):
-        from app.api.knowledge import _document_context_payload_async
+        from app.services.knowledge_retrieval import _document_context_payload_async
         results = (await _document_context_payload_async(str(payload["document_id"]), tenant_id))[:limit]
     threshold = float(rag.get("similarityThreshold", 0.15))
     max_chars = int(rag.get("maxEvidenceChars", 1200))
@@ -96,14 +96,14 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
     limit = max(1, min(int(payload.get("limit") or 20), 100))
     async with db_session() as session:
         if context.tool_name == "platform.application_settings.query":
-            from app.api.deps import require_admin
+            from app.core.principal import ensure_admin
             from .form_menu_tools import application_menus
-            await require_admin(context.current_user or {})
+            ensure_admin(context.current_user or {})
             subject = payload.get('subject') or 'applications'
             if subject == 'pages':
-                from app.api.component_pages import list_pages
+                from app.services.component_page_definitions import list_pages
 
-                pages = (await list_pages(session, context.current_user or {}))["items"]
+                pages = (await list_pages(db=session, user=context.current_user or {}))["items"]
                 items = [page for page in pages if page["publishedVersion"] > 0]
                 return {"subject": "pages", "items": items[:limit], "count": min(len(items), limit),
                         "has_more": len(items) > limit}

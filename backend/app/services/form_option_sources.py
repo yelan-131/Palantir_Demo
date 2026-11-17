@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import HTTPException
 from sqlalchemy import select
-from app.api.deps import current_tenant_id
+from app.core.principal import current_tenant_id
 from app.models.relational import DataSource, SystemSetting
 
 MAX_OPTIONS = 1000

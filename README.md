@@ -1,10 +1,10 @@
 # ManuFoundry / Palantir Demo
 
-Current development version: 0.3.21 (draft, updated 2026-11-13).
+Current development version: 0.3.22 (draft, updated 2026-11-17).
 
-Draft notes: [0.3.21 — AI 技能、应用页面与数据中心](docs/operations/release-0.3.21.md).
+Draft notes: [0.3.22 — 业务列表内置筛选与接口鉴权加固](docs/operations/release-0.3.22.md).
 
-Latest published release: [0.3.20 — 业务数据、页面设计与应用菜单](docs/operations/release-0.3.20.md), released 2026-11-05.
+Latest published release: [0.3.21 — AI 技能、应用页面与数据中心](docs/operations/release-0.3.21.md), released 2026-11-14.
 
 Version numbering and release lifecycle: [project version policy](docs/operations/version-policy.md).
 
@@ -123,7 +123,6 @@ See [docs/operations/release-0.3.9.md](docs/operations/release-0.3.9.md) for the
 | Backend | FastAPI, SQLAlchemy 2, Alembic, Pydantic |
 | Databases | PostgreSQL, SQLite fallback |
 | Graph | Neo4j 5 Community |
-| Cache | Redis |
 | Deployment | Docker Compose |
 | Tests | pytest, TypeScript checks, Vite production build |
 
@@ -180,7 +179,6 @@ Development ports:
 - Backend: `http://localhost:8000`
 - PostgreSQL: `localhost:5432`
 - Neo4j Browser: `http://localhost:7474`
-- Redis: `localhost:6379`
 
 Production-style local run:
 
@@ -188,7 +186,7 @@ Production-style local run:
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
 ```
 
-The production-style frontend is exposed on host port `80`, and the backend remains available on port `8000`.
+The production-style frontend is exposed on host port `80`. The backend and data services bind to `127.0.0.1` only; public backend traffic goes through the frontend nginx proxy (`/api/` and `/health`).
 
 ## Verification
 

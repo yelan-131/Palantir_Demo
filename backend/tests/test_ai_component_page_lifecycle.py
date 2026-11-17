@@ -75,8 +75,7 @@ async def test_harness_creates_and_publishes_pages_only_after_confirmation(monke
     await call("pages.create", {"definition": {
         "title": title, "sourceFormId": form_id,
         "widgets": [
-            {"id": "filters", "type": "record-filter", "title": "筛选", "targetWidgetIds": ["records"]},
-            {"id": "records", "type": "record-list", "title": "新品登记"},
+            {"id": "records", "type": "record-list", "title": "新品登记", "showFilters": True},
         ],
     }}, "waiting_confirmation")
     async with db_session() as db:
@@ -97,7 +96,8 @@ async def test_harness_creates_and_publishes_pages_only_after_confirmation(monke
     page = await confirm()
     assert page["publishedVersion"] == 1
     assert page["publishedDefinition"]["sourceFormId"] == form_id
-    assert [widget["type"] for widget in page["publishedDefinition"]["widgets"]] == ["record-filter", "record-list"]
+    assert [widget["type"] for widget in page["publishedDefinition"]["widgets"]] == ["record-list"]
+    assert page["publishedDefinition"]["widgets"][0]["showFilters"] is True
     await call("pages.publish", args, "validation_failed")
     runtime_result = await call("pages.query", {"page_code": page["code"]}, "completed")
     assert runtime_result["result"]["publishedVersion"] == 1

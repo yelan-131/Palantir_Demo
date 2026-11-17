@@ -18,7 +18,8 @@ async def test_population_preserves_records_and_customized_pages(pages_environme
     assert not (await db.scalars(select(ComponentPage))).all()
     await populate_pages(db, apply=True)
     page = await db.scalar(select(ComponentPage))
-    assert [w['type'] for w in page.draft['widgets']] == ['record-filter', 'record-list']
+    assert [w['type'] for w in page.draft['widgets']] == ['record-list']
+    assert page.draft['widgets'][0]['showFilters'] is True
     assert page.draft['sourceFormId'] == form.id
     snapshot = copy.deepcopy(page.draft)
     assert (await populate_pages(db, apply=True))[0]['status'] == 'preserved'

@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests (SQLite, shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run test shard
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: 4
+        run: |
+          python - > shard.txt <<'PY'
+          import os
+          from pathlib import Path
+
+          files = sorted(str(path) for path in Path("tests").glob("test_*.py"))
+          print("\n".join(files[int(os.environ["SHARD_INDEX"])::int(os.environ["SHARD_TOTAL"])]))
+          PY
+          python -m pytest -q -p no:cacheprovider $(cat shard.txt)
+
+  backend-postgres:
+    name: Backend migrations and locking tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: manufoundry
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: manufoundry_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U manufoundry -d manufoundry_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: manufoundry
+      PGPASSWORD: ci-postgres-password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: manufoundry
+      POSTGRES_PASSWORD: ci-postgres-password
+      POSTGRES_DB: manufoundry_ci
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply Alembic migrations to an empty database
+        run: python -m alembic upgrade head
+      - name: Create disposable verification databases
+        run: |
+          psql -d manufoundry_ci -c "CREATE DATABASE record_service_verify_ci"
+          psql -d manufoundry_ci -c "CREATE DATABASE assembly_verify_ci"
+      - name: Run PostgreSQL-only tests
+        env:
+          RECORD_TEST_DATABASE_URL: postgresql+asyncpg://manufoundry:ci-postgres-password@localhost:5432/record_service_verify_ci
+          ASSEMBLY_TEST_DATABASE_URL: postgresql+asyncpg://manufoundry:ci-postgres-password@localhost:5432/assembly_verify_ci
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_record_service.py
+          tests/test_assembly_persistence.py
+          tests/test_application_menu_integrity.py
+          tests/test_settings_concurrency.py
+
+  frontend:
+    name: Frontend type check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

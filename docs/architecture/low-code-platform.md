@@ -62,9 +62,9 @@ Frontends may preview behavior, but backend services enforce write constraints.
 - `services/form_runtime.py`: published field resolution and record serialization.
 - `services/records.py`: common business record boundary for HTTP, AI, dashboards,
   and workflow consumers, including tenant/row/field authorization.
-- `api/form_engine/`: shared storage, naming, encoding, query, validation, and
-  sequence helpers. This is still a legacy API namespace, not an independent
-  domain package.
+- `services/form_engine/`: shared storage, naming, encoding, query, validation,
+  and sequence helpers. Moved out of `api/` in 0.3.22; it imports no route
+  modules.
 - `services/form_approval_config.py` and `form_application_lifecycle.py`: approval
   configuration and draft/submission lifecycle integration.
 - `services/form_imports.py`, `form_files.py`, `form_option_sources.py`,

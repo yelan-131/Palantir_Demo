@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import current_tenant_id, current_user_id, require_admin
+from app.core.principal import current_tenant_id, current_user_id, ensure_admin
 from app.services.form_runtime import _field_proxy_from_payload
 from app.services.form_schemas import (
     DesignerRulePreviewRequest,
@@ -49,7 +49,7 @@ async def evaluate_form_rules(form_id: int, body: FormRulePreviewRequest, db: As
 
 
 async def preview_designer_rules(form_id: int, body: DesignerRulePreviewRequest, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormField
     from app.services.form_rules import evaluate
     form = await db.get(Form, form_id)
@@ -73,7 +73,7 @@ async def preview_designer_rules(form_id: int, body: DesignerRulePreviewRequest,
 
 
 async def preview_form_reference_options(form_id: int, field_name: str, body: DesignerRulePreviewRequest, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormField
     from app.services.form_rules import archive_options
     form = await db.get(Form, form_id)
@@ -92,7 +92,7 @@ async def preview_form_reference_options(form_id: int, field_name: str, body: De
 
 
 async def preview_option_search_schema(form_id: int, field_name: str, body: DesignerRulePreviewRequest, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormField
     from app.services.option_search import schema
     form = await db.get(Form, form_id)

@@ -2,7 +2,7 @@
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.deps import current_tenant_id, current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 from app.core.db import db_session
 from app.models.relational import User, Role, UserRole
 

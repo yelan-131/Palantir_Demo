@@ -41,7 +41,7 @@ async def test_mock_provider_is_rejected_by_schema():
 
 @pytest.mark.asyncio
 async def test_agent_returns_confirmed_draft_skill():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
@@ -57,7 +57,7 @@ async def test_agent_returns_confirmed_draft_skill():
 
 @pytest.mark.asyncio
 async def test_agent_returns_confirmed_draft_after_guided_requirements():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
@@ -74,7 +74,7 @@ async def test_agent_returns_confirmed_draft_after_guided_requirements():
 
 @pytest.mark.asyncio
 async def test_agent_continues_pending_action_slot_state():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
@@ -96,7 +96,7 @@ async def test_agent_continues_pending_action_slot_state():
 
 @pytest.mark.asyncio
 async def test_low_code_adjustment_updates_confirmation_payload():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
@@ -119,7 +119,7 @@ async def test_low_code_adjustment_updates_confirmation_payload():
 
 @pytest.mark.asyncio
 async def test_generic_draft_payload_uses_action_contract_slots():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AgentRequest
 
@@ -194,7 +194,7 @@ def test_skill_tool_registry_contracts():
 
 
 def test_preflight_blocks_viewer_configuration_write():
-    from app.services.ai.preflight import preflight_agent_request
+    from tests.legacy_agent.preflight import preflight_agent_request
     from app.services.ai.settings import AI_SYSTEM_SETTINGS
 
     decision = preflight_agent_request(
@@ -210,7 +210,7 @@ def test_preflight_blocks_viewer_configuration_write():
 
 
 def test_preflight_blocks_viewer_business_query_without_capability():
-    from app.services.ai.preflight import preflight_agent_request
+    from tests.legacy_agent.preflight import preflight_agent_request
     from app.services.ai.settings import AI_SYSTEM_SETTINGS
 
     decision = preflight_agent_request(
@@ -534,7 +534,7 @@ async def test_dynamic_record_draft_checks_target_form_create_permission(monkeyp
 
 
 def test_prompt_builder_includes_tenant_context_memory_and_evidence():
-    from app.services.ai.prompt_builder import PromptBuildInput, PromptBuilder
+    from tests.legacy_agent.prompt_builder import PromptBuildInput, PromptBuilder
     from app.services.ai.schemas import ChatMessage
     from app.services.ai.tenant_profile import TenantProfile
 
@@ -583,7 +583,7 @@ def test_prompt_builder_includes_tenant_context_memory_and_evidence():
 
 
 def test_agent_runtime_routes_social_turns_away_from_rag():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     from app.services.ai.intent_router import route_intent
 
     runtime = AgentRuntime()
@@ -633,7 +633,7 @@ async def test_semantic_planner_cleans_form_name_particle(monkeypatch):
 @pytest.mark.asyncio
 async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
     from app.services.ai import semantic_planner
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     run_agent = AgentRuntime().run
     from app.services.ai.schemas import AIProviderConfig, AgentRequest
 
@@ -682,7 +682,7 @@ async def test_semantic_add_field_does_not_rename_pending_form(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_knowledge_answer_requires_model_configuration():
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     from app.services.ai.schemas import AIProviderConfig
     from app.services.ai.tenant_profile import TenantProfile
 

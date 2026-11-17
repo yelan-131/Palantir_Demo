@@ -8,10 +8,11 @@ from app.models.relational import Application, ApplicationMenuNode
 
 async def lock_application(db, tenant_id, application_id):
     if db.bind.dialect.name == "sqlite":
-        # SQLite ignores FOR UPDATE. Acquire its write lock before reading a token.
+        # SQLite ignores FOR UPDATE. Acquire its write lock before reading a token;
+        # pin updated_at so onupdate does not change the token being verified.
         await db.execute(update(Application).where(
             Application.id == application_id, Application.tenant_id == tenant_id,
-        ).values(id=Application.id))
+        ).values(id=Application.id, updated_at=Application.updated_at))
     app = await db.scalar(select(Application).where(
         Application.id == application_id, Application.tenant_id == tenant_id,
     ).with_for_update().execution_options(populate_existing=True))

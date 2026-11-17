@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api import applications
+from app.services import applications as applications_service
 from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Tenant
 from app.services.ai.application_admin_tools import execute_application_tool
 
@@ -17,7 +17,7 @@ ADMIN = {"tenant_id": 1, "uid": 1, "is_admin": True}
 @pytest_asyncio.fixture
 async def application_db(monkeypatch):
     audit = AsyncMock()
-    monkeypatch.setattr(applications, "write_audit_log", audit)
+    monkeypatch.setattr(applications_service, 'write_audit_log', audit)
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as connection:
         await connection.execute(text("PRAGMA foreign_keys=ON"))
@@ -76,6 +76,23 @@ async def test_application_tools_require_confirmation_and_enforce_lifecycle(appl
         assert result["data"]["status"] == status
     with pytest.raises(HTTPException, match="只能删除草稿"):
         await run("delete", target, prepare=True)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_survives_time_passing_after_preview(application_db):
+    session, _ = application_db
+    app = Application(tenant_id=1, code="aged", name="Aged", status="draft")
+    session.add(app)
+    await session.flush()
+    await session.execute(text("UPDATE applications SET updated_at = '2020-01-01 00:00:00' WHERE id = :id"), {"id": app.id})
+    await session.commit()
+    await session.refresh(app)
+
+    async def run(payload, *, prepare=False):
+        return await execute_application_tool("applications.publish", session, user=ADMIN, payload=payload, prepare=prepare)
+
+    confirmation = await run({"application_id": app.id}, prepare=True)
+    assert (await run(confirmation))["data"]["status"] == "published"
 
 
 @pytest.mark.asyncio

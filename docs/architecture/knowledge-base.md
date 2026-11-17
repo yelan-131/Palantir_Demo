@@ -313,7 +313,6 @@ Backend endpoints under `/api/v1/knowledge`:
 | `GET` | `/cards` | List knowledge cards |
 | `GET` | `/cards/{card_id}` | Get one knowledge card |
 | `GET` | `/related-cards` | Return knowledge cards linked to a business object |
-| `POST` | `/binding-candidates` | Suggest object bindings for cleaning/confirmation |
 | `GET` | `/ocr-pipeline` | Return the OCR and publishing pipeline |
 | `GET` | `/related` | Legacy evidence lookup |
 | `POST` | `/search` | Local TF-IDF retrieval for RAG-shaped search |

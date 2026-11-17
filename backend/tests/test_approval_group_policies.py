@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
-from app.api.workflow import _resolve_step_approver_ids
+from app.services.workflow_approvals import _resolve_step_approver_ids
 from app.services.approval_groups import evaluate_approval_groups
 from tests.test_workflow import client, _uid, _seed_users, _ok, _headers
 
@@ -19,7 +19,7 @@ def test_overlapping_or_sign_does_not_skip_member_needed_by_countersign():
 
 @pytest.mark.asyncio
 async def test_role_policies_pin_separate_groups_and_single_chooses_first(monkeypatch):
-    monkeypatch.setattr('app.api.workflow._resolve_users_by_role', AsyncMock(side_effect=[[1, 2], [2, 3], [4, 5]]))
+    monkeypatch.setattr('app.services.workflow_approvals._resolve_users_by_role', AsyncMock(side_effect=[[1, 2], [2, 3], [4, 5]]))
     groups = []
     step = {'assignee_rules': [{'type': 'role', 'value': role, 'approvalMode': mode}
         for role, mode in [('production', 'orSign'), ('quality', 'countersign'), ('owner', 'single')]]}
@@ -31,7 +31,7 @@ async def test_role_policies_pin_separate_groups_and_single_chooses_first(monkey
 @pytest.mark.asyncio
 async def test_empty_role_cannot_fall_back_to_initiator(monkeypatch):
     from fastapi import HTTPException
-    monkeypatch.setattr('app.api.workflow._resolve_users_by_role', AsyncMock(return_value=[]))
+    monkeypatch.setattr('app.services.workflow_approvals._resolve_users_by_role', AsyncMock(return_value=[]))
     with pytest.raises(HTTPException) as error:
         await _resolve_step_approver_ids(None, 1, {'assignee_rules': [{'type': 'role', 'value': 'empty', 'approvalMode': 'orSign'}]}, {}, {}, 9, 9)
     assert error.value.status_code == 409
@@ -86,7 +86,7 @@ def test_any_group_reject_ends_entire_node(client):
 
 
 def test_visual_graph_preserves_each_objects_mode():
-    from app.api.workflow import _get_steps_from_workflow
+    from app.services.workflow_views import _get_steps_from_workflow
     rules = [{'type': 'role', 'value': 'production', 'approvalMode': 'orSign'},
              {'type': 'role', 'value': 'quality', 'approvalMode': 'countersign'}]
     steps = _get_steps_from_workflow({'config': {
@@ -101,7 +101,7 @@ def test_form_trigger_pins_group_membership(client):
     import json
     from app.core.db import db_session
     from app.models.relational import Form, WorkflowDef, WorkflowBinding, WorkflowInstance
-    from app.api.forms import _start_form_workflows
+    from app.services.form_workflow_start import _start_form_workflows
 
     admin, a, b = [_uid() for _ in range(3)]
     _seed_users([admin, a, b], admin_uid=admin)

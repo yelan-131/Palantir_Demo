@@ -69,7 +69,7 @@ The deployment script:
 1. Validates Docker, Compose, `.env`, and compose config.
 2. Logs in to GHCR when `GHCR_USERNAME` and `GHCR_TOKEN` are set.
 3. Pulls backend and frontend images for `IMAGE_TAG`.
-4. Starts PostgreSQL, Neo4j, Redis, backend, and frontend.
+4. Starts PostgreSQL, Neo4j, backend, and frontend.
 5. Runs `alembic upgrade head` inside `manufoundry-backend`.
 6. Runs post-deploy health checks.
 

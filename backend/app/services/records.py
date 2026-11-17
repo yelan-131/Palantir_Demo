@@ -13,8 +13,8 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 from sqlalchemy import select, text
 
-from app.api.deps import current_tenant_id, current_user_id
-from app.api.form_engine import (
+from app.core.principal import current_tenant_id, current_user_id
+from app.services.form_engine import (
     _apply_record_encoding_rules,
     _apply_record_filters_query,
     _apply_record_search_query,
@@ -40,7 +40,7 @@ from app.api.form_engine import (
     _validate_record_status,
     _visible_field_subset,
 )
-from app.api._model_driven_shared import assert_safe_identifier
+from app.core.identifiers import assert_safe_identifier
 from app.core.permissions import evaluate_form_permission, allowed_form_fields
 from app.models.relational import Form, DynamicRecord, AuditLog
 from app.services.form_runtime import _latest_form_version, _runtime_form_fields, _record_payload
@@ -49,7 +49,7 @@ from app.services.tenant_onboarding import assert_tenant_quota
 
 
 async def create_record(form_id, body, db, user, *, defer_commit=False, draft=False, source="business"):
-    from app.api.forms import _start_form_workflows
+    from app.services.form_workflow_start import _start_form_workflows
     from app.models.relational import DynamicRecord, Form
 
     tenant_id = current_tenant_id(user)
@@ -181,7 +181,7 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
 
 
 async def update_record(form_id, record_id, body, db, user, *, defer_commit=False):
-    from app.api.forms import _protect_pending_form_record
+    from app.services.form_workflow_start import _protect_pending_form_record
     from app.models.relational import DynamicRecord, Form
 
     tenant_id = current_tenant_id(user)
@@ -312,7 +312,7 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
 
 
 async def delete_record(form_id, record_id, db, user):
-    from app.api.forms import _protect_pending_form_record
+    from app.services.form_workflow_start import _protect_pending_form_record
     from app.models.relational import DynamicRecord, Form
 
     tenant_id = current_tenant_id(user)
@@ -562,7 +562,7 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
     if settings.IS_PRODUCTION and search and not any(field.searchable for field in query_fields):
         raise HTTPException(400, "Query is not indexed for production dynamic records")
     if settings.IS_PRODUCTION:
-        from app.api.form_engine import _queryable_field_names
+        from app.services.form_engine import _queryable_field_names
         if any(str(item.get("field") or "") not in _queryable_field_names(query_fields) for item in filters):
             raise HTTPException(400, "Field is not indexed for filtering")
     records = await authorized_records(db, user, form, include_deleted=include_deleted, decorate=False, cache=cache)
@@ -640,7 +640,7 @@ async def write_fields(db, form, record, changes, *, user, system=False):
     fields = await runtime_fields(db, form)
     validate_business_keys(changes)
     _validate_record_data(fields, changes, partial=True)
-    from app.api.form_engine import _assert_unique_code_values
+    from app.services.form_engine import _assert_unique_code_values
     await _assert_unique_code_values(db, form.tenant_id, form, fields, changes, exclude_record_id=record["id"])
     merged = {**record["data"], **changes}
     from app.services.field_policies import protect_update
@@ -655,7 +655,7 @@ async def write_fields(db, form, record, changes, *, user, system=False):
             raise HTTPException(403, "Field permission denied")
     before = dict(record["data"])
     if _uses_physical_form_table(form):
-        from app.api.form_engine import _physical_write_payload
+        from app.services.form_engine import _physical_write_payload
         values = _physical_write_payload(fields, changes, set(changes))
         table = str(form.table_name)
         assert_safe_identifier(table)

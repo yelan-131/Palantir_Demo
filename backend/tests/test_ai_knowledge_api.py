@@ -341,7 +341,7 @@ def test_agent_endpoint_rejects_guest_by_default(client):
 
 def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_client, monkeypatch):
     from app.services.ai.agent_registry import seed_agent_registry_from_files
-    from app.services.ai.harness_runtime import PlatformBridge, tool_alias
+    from app.services.ai.harness_runtime import DESCRIBE_TOOL, INVOKE_TOOL, PlatformBridge, tool_alias
     from app.services.ai.settings import settings_snapshot
     from app.services.ai.schemas import AgentResponse
     from app.api import ai_assistant as api
@@ -350,7 +350,8 @@ def test_agent_endpoint_returns_draft_action_with_uploaded_evidence(ai_user_clie
     async def scripted_harness(request, user, **kwargs):
         bridge = PlatformBridge(user=user, settings=settings_snapshot(), context=request.context, event_sink=kwargs.get("event_sink"))
         await bridge.call_tool(tool_alias("knowledge.search"), {"query": "CAPA Rule"})
-        await bridge.call_tool(tool_alias("forms.create_dynamic_record_draft"), {"payload": {"category": "quality", "name": "CAPA draft"}})
+        await bridge.call_tool(tool_alias(DESCRIBE_TOOL), {"name": "forms.create_dynamic_record_draft"})
+        await bridge.call_tool(tool_alias(INVOKE_TOOL), {"name": "forms.create_dynamic_record_draft", "arguments": {"payload": {"category": "quality", "name": "CAPA draft"}}})
         return AgentResponse(answer="请确认草稿", actions=bridge.pending, evidence=bridge.evidence, items=bridge.items, requires_confirmation=True, mode="assisted", risk_level="medium")
     monkeypatch.setattr(api, "run_agent", scripted_harness)
     upload = ai_user_client.post(
@@ -597,7 +598,7 @@ def test_unified_agent_conversation_persists_messages_and_close(ai_user_client):
 def test_skill_tool_and_agent_run_lifecycle(ai_user_client, monkeypatch):
     # Historic proposals must remain confirmable after the kernel migration.
     from app.api import ai_assistant as api
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     async def legacy_plan(request, user, **kwargs):
         return await AgentRuntime().run(request, user=user, **kwargs)
     monkeypatch.setattr(api, "run_agent", legacy_plan)

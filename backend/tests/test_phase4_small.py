@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+USER = {"uid": 1, "tenant_id": 1, "is_admin": True}
+
 
 # ══════════════════════════════════════════════════════════
 # Scheduler tests
@@ -11,12 +13,12 @@ import pytest
 
 _SEED_JOBS = [
     {
-        "id": 1, "name": "每日生产报告", "cron": "0 8 * * *", "job_type": "report",
+        "id": 1, "tenant_id": 1, "name": "每日生产报告", "cron": "0 8 * * *", "job_type": "report",
         "config": {"report_type": "daily_production"}, "is_active": True,
         "last_run": "2026-05-13T08:00:00",
     },
     {
-        "id": 2, "name": "设备健康检查", "cron": "*/30 * * * *", "job_type": "sync",
+        "id": 2, "tenant_id": 1, "name": "设备健康检查", "cron": "*/30 * * * *", "job_type": "sync",
         "config": {"check_type": "health_score"}, "is_active": True,
         "last_run": None,
     },
@@ -37,7 +39,7 @@ def _reset_scheduler():
 async def test_list_jobs():
     """GET /scheduler/jobs returns seeded mock data."""
     from app.api.scheduler import list_jobs
-    result = await list_jobs()
+    result = await list_jobs(user=USER)
     assert "data" in result
     assert len(result["data"]) == 2
     assert result["data"][0]["name"] == "每日生产报告"
@@ -48,7 +50,7 @@ async def test_create_job():
     """POST /scheduler/jobs creates a new job."""
     from app.api.scheduler import create_job, JobCreate
     body = JobCreate(name="每周清理", cron="0 2 * * 0", job_type="cleanup", is_active=False)
-    result = await create_job(body)
+    result = await create_job(body, user=USER)
     assert result["name"] == "每周清理"
     assert result["job_type"] == "cleanup"
     assert result["is_active"] is False
@@ -56,7 +58,7 @@ async def test_create_job():
 
     # Verify it appears in listing
     from app.api.scheduler import list_jobs
-    all_jobs = await list_jobs()
+    all_jobs = await list_jobs(user=USER)
     assert len(all_jobs["data"]) == 3
 
 
@@ -67,7 +69,7 @@ async def test_create_job_invalid_type():
     from app.api.scheduler import create_job, JobCreate
     body = JobCreate(name="Bad", cron="* * * * *", job_type="invalid")
     with pytest.raises(HTTPException) as exc_info:
-        await create_job(body)
+        await create_job(body, user=USER)
     assert exc_info.value.status_code == 400
 
 
@@ -75,7 +77,7 @@ async def test_create_job_invalid_type():
 async def test_trigger_job():
     """POST /scheduler/jobs/{id}/trigger executes and updates last_run."""
     from app.api.scheduler import trigger_job
-    result = await trigger_job(job_id=1)
+    result = await trigger_job(job_id=1, user=USER)
     assert result["ok"] is True
     assert result["message"] == "Job executed"
     assert result["triggered_at"] is not None
@@ -87,7 +89,7 @@ async def test_trigger_job_not_found():
     from fastapi import HTTPException
     from app.api.scheduler import trigger_job
     with pytest.raises(HTTPException) as exc_info:
-        await trigger_job(job_id=9999)
+        await trigger_job(job_id=9999, user=USER)
     assert exc_info.value.status_code == 404
 
 
@@ -96,7 +98,7 @@ async def test_update_job():
     """PUT /scheduler/jobs/{id} updates a job."""
     from app.api.scheduler import update_job, JobUpdate
     body = JobUpdate(name="更新后的报告", is_active=False)
-    result = await update_job(job_id=1, body=body)
+    result = await update_job(job_id=1, body=body, user=USER)
     assert result["name"] == "更新后的报告"
     assert result["is_active"] is False
 
@@ -105,10 +107,10 @@ async def test_update_job():
 async def test_delete_job():
     """DELETE /scheduler/jobs/{id} removes a job."""
     from app.api.scheduler import delete_job, list_jobs
-    result = await delete_job(job_id=1)
+    result = await delete_job(job_id=1, user=USER)
     assert result["ok"] is True
 
-    all_jobs = await list_jobs()
+    all_jobs = await list_jobs(user=USER)
     assert len(all_jobs["data"]) == 1
     assert all_jobs["data"][0]["id"] == 2
 
@@ -118,7 +120,7 @@ async def test_delete_job():
 # ══════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_search_returns_results():
+async def test_search_returns_results(legacy_model_driven_demo):
     """GET /search?q=keyword returns matching results from mock data."""
     from app.api.search import cross_entity_search
     result = await cross_entity_search(q="DMG")
@@ -130,7 +132,7 @@ async def test_search_returns_results():
 
 
 @pytest.mark.asyncio
-async def test_search_returns_supplier_results():
+async def test_search_returns_supplier_results(legacy_model_driven_demo):
     """GET /search?q=宝钢 returns supplier results."""
     from app.api.search import cross_entity_search
     result = await cross_entity_search(q="宝钢")
@@ -149,7 +151,7 @@ async def test_search_no_results():
 
 
 @pytest.mark.asyncio
-async def test_search_filters_by_models():
+async def test_search_filters_by_models(legacy_model_driven_demo):
     """GET /search?q=...&models=equipment limits search scope."""
     from app.api.search import cross_entity_search
     result = await cross_entity_search(q="DMG", models="equipment")

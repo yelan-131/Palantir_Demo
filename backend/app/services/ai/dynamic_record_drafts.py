@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_tenant_id
+from app.core.principal import current_tenant_id
 from app.core.permissions import has_form_permission
 from app.models.relational import Form, FormField
 

@@ -45,7 +45,8 @@ async def test_rules_do_not_fallback_to_mock_in_production(monkeypatch):
                 rules_mod.ValidateRequest(
                     model_name="equipment",
                     data={"name": "CNC-01", "health_score": 90},
-                )
+                ),
+                user={"uid": 1, "tenant_id": 1, "is_admin": True},
             )
 
     assert exc_info.value.status_code == 503

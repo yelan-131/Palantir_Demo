@@ -1,9 +1,14 @@
 """Tests for the Rules Engine — CRUD and validation."""
 
+import copy
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+USER = {"uid": 1, "tenant_id": 1, "is_admin": True}
+
+pytestmark = pytest.mark.usefixtures("legacy_model_driven_demo")
 
 
 # ── Fixtures ──────────────────────────────────────────────
@@ -12,7 +17,7 @@ import pytest
 def _reset_mock_rules():
     """Reset mock state between tests."""
     from app.api import rules as rules_mod
-    original = list(rules_mod.MOCK_RULES)
+    original = copy.deepcopy(rules_mod.MOCK_RULES)
     original_id = rules_mod._next_mock_id
     yield
     rules_mod.MOCK_RULES.clear()
@@ -26,7 +31,7 @@ def _reset_mock_rules():
 async def test_list_rules_all():
     """GET /rules returns all rules."""
     from app.api.rules import list_rules
-    result = await list_rules(model_id=None)
+    result = await list_rules(model_id=None, user=USER)
     assert "data" in result
     assert len(result["data"]) >= 2  # at least mock rules
 
@@ -35,7 +40,7 @@ async def test_list_rules_all():
 async def test_list_rules_filtered_by_model():
     """GET /rules?model_id=1 returns only rules for model 1."""
     from app.api.rules import list_rules
-    result = await list_rules(model_id=1)
+    result = await list_rules(model_id=1, user=USER)
     assert "data" in result
     for r in result["data"]:
         assert r["model_id"] == 1
@@ -50,7 +55,7 @@ async def test_create_rule():
         field_name="status", condition='{"operator": "required"}',
         message="Status is required",
     )
-    result = await create_rule(body)
+    result = await create_rule(body, user=USER)
     assert result["name"] == "Test rule"
     assert result["field_name"] == "status"
     assert result["id"] is not None
@@ -65,7 +70,7 @@ async def test_create_rule_invalid_condition():
         model_id=1, name="Bad", condition="not-json",
     )
     with pytest.raises(HTTPException) as exc_info:
-        await create_rule(body)
+        await create_rule(body, user=USER)
     assert exc_info.value.status_code == 400
 
 
@@ -78,7 +83,7 @@ async def test_create_rule_missing_operator():
         model_id=1, name="Bad", condition='{"value": 5}',
     )
     with pytest.raises(HTTPException) as exc_info:
-        await create_rule(body)
+        await create_rule(body, user=USER)
     assert exc_info.value.status_code == 400
 
 
@@ -87,7 +92,7 @@ async def test_update_rule():
     """PUT /rules/{id} updates a rule in mock store."""
     from app.api.rules import RuleUpdate, update_rule
     body = RuleUpdate(name="Updated name", message="New message")
-    result = await update_rule(rule_id=1, body=body)
+    result = await update_rule(rule_id=1, body=body, user=USER)
     assert result["name"] == "Updated name"
     assert result["message"] == "New message"
 
@@ -99,7 +104,7 @@ async def test_update_rule_not_found():
     from app.api.rules import RuleUpdate, update_rule
     body = RuleUpdate(name="X")
     with pytest.raises(HTTPException) as exc_info:
-        await update_rule(rule_id=9999, body=body)
+        await update_rule(rule_id=9999, body=body, user=USER)
     assert exc_info.value.status_code == 404
 
 
@@ -107,11 +112,11 @@ async def test_update_rule_not_found():
 async def test_delete_rule():
     """DELETE /rules/{id} removes a rule from mock store."""
     from app.api.rules import delete_rule, list_rules
-    before = await list_rules(model_id=None)
+    before = await list_rules(model_id=None, user=USER)
     count_before = len(before["data"])
-    result = await delete_rule(rule_id=1)
+    result = await delete_rule(rule_id=1, user=USER)
     assert result["ok"] is True
-    after = await list_rules(model_id=None)
+    after = await list_rules(model_id=None, user=USER)
     assert len(after["data"]) == count_before - 1
 
 
@@ -125,7 +130,7 @@ async def test_validate_required_pass():
         model_name="equipment",
         data={"name": "CNC-01", "health_score": 90},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is True
     assert result["errors"] == []
 
@@ -138,7 +143,7 @@ async def test_validate_required_fail():
         model_name="equipment",
         data={"health_score": 90},  # missing 'name'
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is False
     assert any(e["field"] == "name" for e in result["errors"])
 
@@ -151,7 +156,7 @@ async def test_validate_required_empty_string():
         model_name="equipment",
         data={"name": "  ", "health_score": 50},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is False
     assert any(e["field"] == "name" for e in result["errors"])
 
@@ -164,7 +169,7 @@ async def test_validate_min_pass():
         model_name="equipment",
         data={"name": "CNC-01", "health_score": 50},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is True
 
 
@@ -176,7 +181,7 @@ async def test_validate_min_fail():
         model_name="equipment",
         data={"name": "CNC-01", "health_score": -5},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is False
     assert any(e["field"] == "health_score" for e in result["errors"])
 
@@ -189,7 +194,7 @@ async def test_validate_max_fail():
         model_name="equipment",
         data={"name": "CNC-01", "health_score": 150},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is False
     assert any("100" in e["message"] or "health_score" in e["field"] for e in result["errors"])
 
@@ -202,7 +207,7 @@ async def test_validate_no_rules_for_model():
         model_name="nonexistent_model",
         data={"anything": "goes"},
     )
-    result = await validate_data(body)
+    result = await validate_data(body, user=USER)
     assert result["valid"] is True
     assert result["errors"] == []
 

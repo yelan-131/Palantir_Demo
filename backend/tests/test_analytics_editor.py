@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.api import forms
+from app.services import form_admin
 from app.models.relational import AuditLog, Form, FormField, FormVersion
 from tests.test_analytics_sources import source_design
 from tests.test_record_service import environment, seed
@@ -230,6 +231,7 @@ async def test_preview_rejects_malformed_structure_and_filters_without_500(envir
 async def test_stale_legacy_save_cannot_overwrite_managed_dashboard(environment, monkeypatch):
     from unittest.mock import AsyncMock
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     db, _, form, user, client = environment
     await published_board(db, form, user)
     stale_config = copy.deepcopy(form.config)
@@ -267,6 +269,7 @@ async def test_stale_legacy_save_cannot_overwrite_managed_dashboard(environment,
 async def test_legacy_initialization_and_general_publish_still_work(environment, monkeypatch):
     from unittest.mock import AsyncMock
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     db, _, form, user, client = environment
     user['is_admin'] = True
     initial = (await client.get(f'{BASE}/editor')).json()

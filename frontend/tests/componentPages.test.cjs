@@ -87,27 +87,51 @@ test('switching one component source clears its stale fields and incompatible li
  assert.deepEqual(plain(next.filterFields),['title']);
 });
 
-test('list filter creation binds the selected source and scopes queries to that list',()=>{
- const {ensureListFilter}=context.exports;
- const page={sourceFormId:1,filterFields:[],widgets:[{id:'other',type:'record-list'},{id:'list',type:'record-list',title:'申请',dataBinding:{formId:20},showFilters:true}]};
- const result=ensureListFilter(page,'list','filter');
- assert.equal(result.created,true);
- assert.deepEqual(plain(result.definition.widgets.map(item=>item.id)),['other','filter','list']);
- assert.deepEqual(plain(result.definition.widgets[1].dataBinding),{formId:20});
- assert.deepEqual(plain(result.definition.widgets[1].targetWidgetIds),['list']);
- assert.equal(result.definition.widgets[2].showFilters,false);
+test('a dedicated filter becomes part of its list without losing its configuration',()=>{
+ const {mergeListFilters}=context.exports;
+ const filter={id:'filter',type:'record-filter',targetWidgetIds:['list'],filterFields:['title'],
+  filterSettings:{queryMode:'change',schemes:[{id:'scheme',name:'查询',groups:[{columns:['title']}]}]}};
+ const list={id:'list',type:'record-list',title:'申请',showFilters:false};
+ const page={sourceFormId:1,widgets:[filter,list]};
+ const result=mergeListFilters(page);
+ assert.equal(result.merged.get('filter'),'list');
+ assert.deepEqual(plain(result.definition.widgets),[{...list,showFilters:true,filterFields:filter.filterFields,filterSettings:filter.filterSettings}]);
  assert.equal(page.widgets.length,2);
- const reused=ensureListFilter(result.definition,'list','another');
- assert.equal(reused.created,false);
- assert.equal(reused.filterId,'filter');
- assert.equal(reused.definition,result.definition);
+ assert.equal(mergeListFilters(result.definition).definition,result.definition);
 });
-test('unbound, unrelated and full pages cannot gain an invalid automatic filter',()=>{
- const {ensureListFilter}=context.exports;
- assert.equal(ensureListFilter({widgets:[{id:'list',type:'record-list'}]},'list','f'),undefined);
- assert.equal(ensureListFilter({sourceFormId:1,widgets:[{id:'metric',type:'metric'}]},'metric','f'),undefined);
- const widgets=Array.from({length:30},(_,i)=>({id:String(i),type:'record-list',title:String(i)}));
- assert.equal(ensureListFilter({sourceFormId:1,widgets},'1','f'),undefined);
+
+test('removing a redundant filter preserves an explicitly configured list',()=>{
+ const {mergeListFilters}=context.exports;
+ const filter={id:'filter',type:'record-filter',targetWidgetIds:['list'],filterFields:['old']};
+ const list={id:'list',type:'record-list',showFilters:true,filterFields:['current']};
+ const result=mergeListFilters({sourceFormId:1,widgets:[filter,list]});
+ assert.equal(result.merged.get('filter'),'list');
+ assert.equal(result.definition.widgets.length,1);
+ assert.equal(result.definition.widgets[0],list);
+});
+
+test('published pages display one list filter while retaining the stored legacy layout',()=>{
+ const {pagePresentation}=context.exports;
+ const publishedDefinition={sourceFormId:1,widgets:[
+  {id:'filter',type:'record-filter',targetWidgetIds:['list'],filterFields:['title']},
+  {id:'list',type:'record-list',showFilters:false},
+ ]};
+ const state={publishedVersion:1,publishedDefinition};
+ const visible=pagePresentation(state,false,false).definition;
+ assert.deepEqual(plain(visible.widgets),[{id:'list',type:'record-list',showFilters:true,filterFields:['title']}]);
+ assert.equal(publishedDefinition.widgets.length,2);
+});
+
+test('shared, restricted and different-source filters retain their separate identity',()=>{
+ const {mergeListFilters}=context.exports;
+ const list={id:'list',type:'record-list'};
+ const filter={id:'filter',type:'record-filter',targetWidgetIds:['list']};
+ for(const overrides of [{targetWidgetIds:['list','metric']},{roleIds:[2]},{accessGroups:[]},{dataBinding:{formId:2}}]){
+  const page={sourceFormId:1,widgets:[list,{...filter,...overrides}]};
+  assert.equal(mergeListFilters(page).definition,page);
+ }
+ const page={sourceFormId:1,widgets:[list,filter,{...filter,id:'second'}]};
+ assert.equal(mergeListFilters(page).definition,page);
 });
 
 test('filter and chart contributions intersect without losing another source on clear',()=>{
@@ -147,15 +171,6 @@ test('changing list source synchronizes linked filters and clears old field refe
  assert.deepEqual(plain(next.widgets[1].filterSettings.requiredFields),[]);
  assert.equal(page.widgets[1].dataBinding.formId,1);
 });
-test('configure linked filter repairs a stale source rather than creating a duplicate',()=>{
- const page={widgets:[{id:'list',type:'record-list',dataBinding:{formId:2}},{id:'filter',type:'record-filter',dataBinding:{formId:1},targetWidgetIds:['list']}]};
- const result=context.exports.ensureListFilter(page,'list','new');
- assert.equal(result.filterId,'filter');
- assert.equal(result.definition.widgets.length,2);
- assert.equal(result.definition.widgets[1].dataBinding.formId,2);
- assert.deepEqual(plain(result.definition.widgets[1].targetWidgetIds),['list']);
-});
-
 test('switching a source clears filter schemes with references to its old fields',()=>{
  const value={title:'page',sourceFormId:1,filterFields:[],roleIds:[],widgets:[{id:'filter',type:'record-filter',title:'F',width:24,aggregate:'count',filterFields:['old'],filterSettings:{schemes:[{id:'scheme',name:'old',groups:[{columns:['old']}]}],requiredFields:['old']}}]};
  const next=context.exports.bindWidgetSource(value,'filter',2);

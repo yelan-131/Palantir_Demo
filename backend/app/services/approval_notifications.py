@@ -2,7 +2,7 @@
 from urllib.parse import quote, parse_qs, urlparse
 from sqlalchemy import select
 from app.models.relational import Notification, User, WorkflowInstance
-from app.api.deps import current_tenant_id
+from app.core.principal import current_tenant_id
 
 
 def _state(instance):
@@ -71,7 +71,7 @@ async def notification_context(db, notifications, user):
     """Reuse the inbox's form/record permissions and real current-node task membership."""
     if not any(n.resource_type == 'workflow_instance' for n in notifications):
         return {}
-    from app.api.workflow import _workflow_business_dataset
+    from app.services.workflow_views import _workflow_business_dataset
     dataset = await _workflow_business_dataset(db, user)
     contexts = {item['workflow']['id']: dict(item) for item in dataset['items'] if item.get('workflow')}
     if contexts:

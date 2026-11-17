@@ -60,10 +60,12 @@ async def test_publish_and_record_read_use_stable_option_codes(environment, monk
     import json
     from unittest.mock import AsyncMock
     from app.api import forms
+    from app.services import form_admin
     from app.models.relational import FormField
     from sqlalchemy import select
     db, _, form, user, client = environment
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     user['is_admin'] = True
     field = await db.scalar(select(FormField).where(FormField.form_id == form.id, FormField.field_name == 'status'))
     field.field_type = 'enum'

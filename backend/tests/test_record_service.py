@@ -11,6 +11,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import forms, dashboard, workflow
+from app.services import form_admin
 from app.api.deps import get_db, get_current_user
 from app.models.relational import Base, Tenant, User, Role, UserRole, Form, FormField, FormPermission, RolePermission, AuditLog, FormVersion
 from app.services import records
@@ -636,7 +637,7 @@ async def publish_field_rules(db,form,client,user,rules_by_field):
     previous=user['is_admin'];user['is_admin']=True
     try:
         from unittest.mock import patch,AsyncMock
-        with patch.object(forms,'write_audit_log',AsyncMock()):
+        with patch.object(forms, 'write_audit_log', AsyncMock()), patch.object(form_admin, 'write_audit_log', AsyncMock()):
             response=await client.post(f'/forms/{form.id}/publish')
     finally:user['is_admin']=previous
     return response
@@ -764,6 +765,7 @@ async def test_form_field_capacity_rejects_new_fields_at_system_default(environm
     db, _, form, _, _ = environment
     actor = {'uid': 1, 'tenant_id': 1, 'is_admin': True}
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     for index in range(DEFAULT_FORM_FIELDS - 4):
         db.add(FormField(tenant_id=1, form_id=form.id, field_name=f'capacity_{index}', label='容量测试', field_type='string'))
     await db.commit()

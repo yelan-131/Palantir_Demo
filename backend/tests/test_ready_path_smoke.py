@@ -184,6 +184,7 @@ def test_ready_path_api_smoke_and_audit_contract():
                     "title": f"Approve record {record_id}",
                     "resource_type": "dynamic_record",
                     "resource_id": record_id,
+                    "variables": {"form_id": form_id},
                     "form_data": record["data"],
                 },
             ),
@@ -349,8 +350,20 @@ def test_dynamic_record_submit_generates_code_and_starts_bound_workflow():
 
         assert first["data"]["material_code"].endswith("-001")
         assert second["data"]["material_code"].endswith("-002")
-        assert first["workflow_instances"][0]["workflow_id"] == workflow["id"]
-        assert first["workflow_instances"][0]["approver_ids"]
+        assert first["status"] == "draft"
+        assert first["workflow_instances"] == []
+
+        submitted = _assert_ok(
+            client.post(
+                f"/api/v1/forms/{form_id}/records/{first['id']}/submit",
+                headers=headers,
+                json={"expected_status": "draft"},
+            ),
+            context="submit first draft record",
+        )["data"]
+        assert submitted["status"] == "pending"
+        assert submitted["workflow_instances"][0]["workflow_id"] == workflow["id"]
+        assert submitted["workflow_instances"][0]["approver_ids"]
 
 
 @pytest.mark.asyncio

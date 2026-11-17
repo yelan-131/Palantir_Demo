@@ -29,7 +29,6 @@ introduce separately deployed microservices.
 | Backend | FastAPI 0.115, Uvicorn 0.34, Python 3.11, Pydantic 2, SQLAlchemy 2, Alembic |
 | Relational database | PostgreSQL 16 in Docker; SQLite fallback for local/demo bootstrap |
 | Graph database | Neo4j 5 community |
-| Supporting infrastructure | Redis 7 is included in Compose; inclusion does not imply a separate worker service |
 | Analytics libraries | pandas, numpy, scipy, scikit-learn |
 | AI execution | Official DeepSeek Harness SDK/runtime; platform-owned MCP bridge, tool registry, permissions, confirmations, and audit |
 | Optional libraries | Prophet, Celery, LangChain remain commented dependencies rather than the active Agent runtime |
@@ -62,8 +61,8 @@ flowchart TB
 The diagram describes the service direction for the refactored form paths.
 Some legacy route-owned helpers remain; see the current boundaries below.
 PostgreSQL is the Compose relational database; SQLite is an explicitly selected
-local/test alternative, not a second production database. Redis is supporting
-Compose infrastructure and is not the source of form definitions or records.
+local/test alternative, not a second production database. There is no cache or
+message broker; Redis was removed from Compose in 0.3.22 because no code used it.
 
 ## 4. Frontend Architecture
 
@@ -301,15 +300,18 @@ Implemented now:
 
 Remaining consolidation work:
 
-- Application/menu, action/permission CRUD, and workflow-start compatibility
-  helpers still contain route-owned logic in `api/forms.py`.
-- Some services still use helpers under `api/form_engine` and lazy imports from
-  route modules. The backend is not yet a fully independent domain layer.
-- `FormSettings/index.tsx` remains a large frontend composition surface even
-  though controls, layout utilities, and several editors are reusable.
+- `FormSettings/index.tsx` still hosts the designer page composition, but module-level
+  types, options, field/encoding/workflow helpers, analytics designers, and publish
+  checks now live in sibling modules under `frontend/src/pages/FormSettings/`.
+  Further extraction of the remaining page-local render helpers is optional.
 - New AI tool definitions are present in seed/fallback files. Existing persisted
   registries need the normal registry import/update flow before those tools are
   available. A local code change is not a production deployment.
+
+Layering note: `app/core`, `app/models`, and `app/services` must not import
+`app.api`. Route modules may re-export service helpers for compatibility; new
+callers should prefer the service modules. `backend/tests/test_layering.py`
+enforces the lower-layer ban.
 
 Reference/planned:
 

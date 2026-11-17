@@ -1,7 +1,16 @@
 import type {ViewConfig} from '@/utils/viewConfig';
 
 export type FilterControlMode = "dropdown" | "radio" | "multi-dropdown" | "checkbox";
-export interface FilterScheme {id:string;name:string;showKeyword:boolean;groups:ToolbarGroup[];fieldControls?:Record<string,FilterControlMode>;}
+export interface FilterScheme {
+  id: string;
+  name: string;
+  showKeyword: boolean;
+  groups: ToolbarGroup[];
+  fieldControls?: Record<string, FilterControlMode>;
+  defaultRows?: number | null;
+  fieldsPerRow?: number | null;
+}
+export const DEFAULT_FILTER_LAYOUT = {rows: 2, columns: 4};
 export interface FilterSettings {
   schemes?: FilterScheme[] | null;
   toolbarGroups?: ToolbarGroup[] | null;
@@ -72,7 +81,7 @@ export function clearedFilterValues(filters: Array<{id:string; controlType:strin
   return Object.fromEntries(filters.map(filter=>[filter.id,['text','keyword'].includes(filter.controlType)?'':null]));
 }
 
-/** The server has already removed groups that do not match the viewer. */
+/** List button actions apply to every visible filter scheme. Legacy standalone groups are projected by the server. */
 export function filterButtonActions(settings?: FilterSettings): string[] {
   return settings?.toolbarGroups == null ? ['query','reset'] : [...new Set(settings.toolbarGroups.flatMap(group=>group.actions).filter(action=>action==='query'||action==='reset'))];
 }

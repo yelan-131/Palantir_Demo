@@ -4,12 +4,13 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.api.deps import get_current_user
 from app.services.graph_fallback import try_graph_or_mock
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ── Mock data ──────────────────────────────────────────────

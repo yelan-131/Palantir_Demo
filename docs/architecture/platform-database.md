@@ -17,7 +17,7 @@ storage. Existing dynamic forms remain supported by the shared record service.
 
 Creating a physical form and adding its fields can execute `CREATE TABLE` and
 `ALTER TABLE`. Field archival changes metadata and does not drop a column.
-Physical provisioning is centralized in `api/form_engine/physical.py` and reused
+Physical provisioning is centralized in `services/form_engine/physical.py` and reused
 by UI/AI field operations through `services/form_fields.py`. Configuration writes
 must not be described as universally metadata-only.
 

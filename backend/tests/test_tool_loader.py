@@ -15,7 +15,7 @@ from app.services.ai.tool_registry import (
     to_openai_function_brief,
     to_openai_function,
 )
-from app.services.ai.tool_loader import ToolLoader
+from tests.legacy_agent.tool_loader import ToolLoader
 
 
 # ---------------------------------------------------------------------------

@@ -7,17 +7,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.api.applications import (
-    ApplicationCreate,
-    ApplicationUpdate,
-    _application_to_dict,
-    create_application,
-    delete_application,
-    ensure_application_code_available,
-    get_tenant_application,
-    update_application,
-)
-from app.api.deps import require_admin
+from app.services.applications import ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application
+from app.core.principal import ensure_admin
 from app.models.relational import ApplicationForm, ApplicationMenuNode
 from app.services.field_uniqueness import lock
 from app.services.tenant_onboarding import assert_tenant_quota
@@ -127,7 +118,7 @@ def _snapshot_digest(snapshot):
 
 
 async def execute_application_tool(operation, session, *, user, payload, prepare=False):
-    await require_admin(user)
+    ensure_admin(user)
     tenant_id = require_tenant_id(user)
     arguments = payload if prepare else {
         key: value for key, value in payload.items() if key not in {"_preview", "_application_snapshot"}

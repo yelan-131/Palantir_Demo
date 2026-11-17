@@ -8,15 +8,12 @@ from app.models.relational import Form, ComponentPage
 
 
 async def content_definition(db, form):
-    from app.api.component_pages import PageDefinition
+    from app.services.component_page_definitions import PageDefinition
     config = form.config or {}
     design = config.get('analyticsDesignDraft') or config.get('analyticsDesign')
     if not design:
         return PageDefinition(title=form.name, sourceFormId=form.id, widgets=[
-            {'id': 'filters', 'type': 'record-filter', 'title': form.name + '筛选',
-             'targetWidgetIds': ['records'], 'width': 24},
-            {'id': 'records', 'type': 'record-list', 'title': form.name, 'width': 24,
-             'showFilters': False}])
+            {'id': 'records', 'type': 'record-list', 'title': form.name, 'width': 24}])
     sources = {f.code: f.id for f in (await db.scalars(select(Form).where(Form.tenant_id == form.tenant_id))).all()}
     sources.update({str(value): value for value in list(sources.values())})
     datasets = {item['id']: item for item in design.get('datasets', [])}
@@ -132,7 +129,7 @@ async def populate_pages(db, *, apply=False):
 
 async def upgrade_content_pages(db, *, apply=False):
     """Upgrade only exact, unpublished output of the previous converter."""
-    from app.api.component_pages import PageDefinition
+    from app.services.component_page_definitions import PageDefinition
     results = []
     forms = (await db.scalars(select(Form).order_by(Form.id))).all()
     for form in forms:

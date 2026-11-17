@@ -7,13 +7,12 @@ objects should come from configured meta models, forms, and physical
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 
 from app.core.db import safe_db_call as try_db
+from app.core.identifiers import assert_safe_identifier  # noqa: F401
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -75,15 +74,6 @@ class MenuItemUpdate(BaseModel):
     route_path: Optional[str] = None
     sort_order: Optional[int] = None
     is_visible: Optional[bool] = None
-
-
-_IDENT_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-
-
-def assert_safe_identifier(name: str) -> None:
-    """Defense-in-depth check on dynamic table/column names."""
-    if not _IDENT_RE.match(name):
-        raise HTTPException(400, f"Invalid identifier: {name!r}")
 
 
 # Domain-neutral defaults. These used to expose manufacturing demo objects as

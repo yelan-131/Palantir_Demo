@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, select
 
-from app.api.deps import current_tenant_id, current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 from app.models.relational import Form, FormVersion, User
 from app.services.analytics_dataset_range import validate_range
 from app.services.analytics_data import load_data

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from openpyxl import Workbook
 from tests.test_record_service import environment
 from app.api import forms
+from app.services import form_admin
 from app.models.relational import Form, FormField, FormPermission, DataSource, SystemSetting
 from app.services import form_option_sources as sources, records
 from app.services.form_imports import parse_file, convert
@@ -17,6 +18,7 @@ from app.services.form_imports import parse_file, convert
 
 async def publish(db,form,user,client,monkeypatch,config):
     monkeypatch.setattr(forms,'write_audit_log',AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     form.config=config;await db.commit();await db.refresh(form)
     user['is_admin']=True
     response=await client.post('/forms/1/publish');assert response.status_code==200,response.text

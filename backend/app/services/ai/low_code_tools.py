@@ -10,8 +10,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._model_driven_shared import assert_safe_identifier
-from app.api.deps import current_tenant_id, current_user_id
+from app.core.identifiers import assert_safe_identifier
+from app.core.principal import current_tenant_id, current_user_id
 from app.core.audit import write_audit_log
 from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Form, FormField, FormLayout
 
@@ -52,7 +52,7 @@ def _physical_table_name(code: str, assembly_kind: str, tenant_id: int | None = 
 async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fields: list[FormField]) -> None:
     """Compatibility adapter; all physical DDL belongs to the shared form engine."""
     from types import SimpleNamespace
-    from app.api.form_engine import _ensure_physical_form_table as ensure_storage
+    from app.services.form_engine import _ensure_physical_form_table as ensure_storage
     await ensure_storage(session, SimpleNamespace(storage_mode="physical_table", table_name=table_name), fields)
 
 
@@ -619,7 +619,7 @@ async def execute_create_form_definition(
     if normalized_fields:
         await add_form_fields(form.id, normalized_fields, session, user, defer_commit=True)
     else:
-        from app.api.form_engine import _ensure_physical_form_table as ensure_storage
+        from app.services.form_engine import _ensure_physical_form_table as ensure_storage
         await ensure_storage(session, form, [])
     created_fields = list((await session.scalars(select(FormField).where(
         FormField.form_id == form.id, FormField.tenant_id == tenant_id)

@@ -7,20 +7,20 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.api._model_driven_shared import SAFE_COLUMNS, MOCK_DATA, assert_safe_identifier
+from app.api.deps import get_current_user
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
-# Text-type columns eligible for LIKE search (string / text-like)
-_TEXT_COLUMNS: dict[str, list[str]] = {}
-for _tbl, _cols in SAFE_COLUMNS.items():
-    _TEXT_COLUMNS[_tbl] = [
-        c for c in sorted(_cols)
+def _text_columns(table: str) -> list[str]:
+    """Text-type columns eligible for LIKE search (string / text-like)."""
+    return [
+        c for c in sorted(SAFE_COLUMNS.get(table, ()))
         if c != "id" and not any(
             kw in c for kw in ("_id", "score", "quantity", "rating", "price", "stock", "days", "rate")
         )
@@ -67,7 +67,7 @@ async def cross_entity_search(
             for model_name in model_list:
                 if all_total >= MAX_TOTAL:
                     break
-                text_cols = _TEXT_COLUMNS.get(model_name, [])
+                text_cols = _text_columns(model_name)
                 if not text_cols:
                     continue
 
@@ -110,7 +110,7 @@ async def cross_entity_search(
         if total >= MAX_TOTAL:
             break
         mock_records = MOCK_DATA.get(model_name, [])
-        text_cols = _TEXT_COLUMNS.get(model_name, [])
+        text_cols = _text_columns(model_name)
 
         matched = []
         for rec in mock_records:

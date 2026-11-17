@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.api.deps import current_tenant_id, require_admin
+from app.core.principal import current_tenant_id, ensure_admin
 from app.models.relational import Application, ApplicationMenuNode, Form
 from app.services.field_uniqueness import lock
 
@@ -110,7 +110,7 @@ def _snapshot(operation, request, application, nodes, destination):
 
 async def _entry_target(session, user, request, *, required_host_form_id=None):
     if request.page_code is not None:
-        from app.api.component_pages import bound_host, find_page, published
+        from app.services.component_page_definitions import bound_host, find_page, published
 
         page = await find_page(session, user, request.page_code)
         version = await published(session, page)
@@ -135,10 +135,10 @@ async def _entry_target(session, user, request, *, required_host_form_id=None):
 
 
 async def execute_menu_tool(operation, session, *, user, payload, prepare=False):
-    from app.api.forms import _create_application_menu_node, _delete_application_menu_node, _update_application_menu_node
+    from app.services.application_menu_nodes import _create_application_menu_node, _delete_application_menu_node, _update_application_menu_node
     from app.services.form_schemas import MenuNodeCreate, MenuNodeUpdate
 
-    await require_admin(user)
+    ensure_admin(user)
     tenant_id = current_tenant_id(user)
     request = MENU_REQUESTS[operation].model_validate({
         key: value for key, value in payload.items() if key not in {"_menu_snapshot", "_preview"}

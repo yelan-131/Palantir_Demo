@@ -1,7 +1,7 @@
 """Tests for the ContextCompactor (Phase 3)."""
 import pytest
 
-from app.services.ai.compactor import ContextCompactor, StructuredSummary
+from tests.legacy_agent.compactor import ContextCompactor, StructuredSummary
 
 
 def _make_messages(count: int, *, system: bool = True) -> list[dict]:

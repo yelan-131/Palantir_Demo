@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { acknowledgePageAction } from '@/services/api';
 import { useAiWorkbench } from './context';
+import type { AiLayoutOperation } from '@/utils/aiFormLayout';
 import type { ComponentOperation } from '@/pages/ComponentPages/componentOperations';
 
 export interface FieldProperties {
@@ -20,6 +21,7 @@ export interface DraftField extends FieldProperties {
 }
 export interface NewFormDraft {
   name: string; code: string; description: string; fields: DraftField[];
+  layout_operations?: AiLayoutOperation[];
   menu_target?: { application_id: number; parent_id?: number; menu_title?: string; destination: string };
 }
 
@@ -27,12 +29,13 @@ export interface PageAction {
   id: string;
   type: 'form_designer';
   form_id: number;
-  action: 'draft_new' | 'add_field' | 'review' | 'confirm_draft' | 'open' | 'select_field' | 'set_field_properties' | 'preview';
+  action: 'draft_new' | 'add_field' | 'review' | 'confirm_draft' | 'open' | 'select_field' | 'set_field_properties' | 'preview' | 'inspect_layout' | 'configure_layout';
   draft_id?: string;
   draft?: NewFormDraft;
   field?: NewFormDraft['fields'][number];
   field_name?: string;
   properties?: FieldProperties;
+  layout_operations?: AiLayoutOperation[];
 }
 export type PageController = (action: PageAction) => Promise<Record<string, unknown>>;
 export type ComponentPageAction = { id: string; type: 'component_page'; page_code: string } & (

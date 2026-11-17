@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import forms, workflow, notifications
+from app.services import form_admin
 from app.api.deps import get_current_user, get_db
 from app.models.relational import Base, Tenant, User, Role, UserRole, Form, FormField, FormPermission, Notification, WorkflowInstance
 from app.services.form_approval_config import save_approval_settings
@@ -49,6 +50,7 @@ async def isolated_flow(tmp_path, monkeypatch, storage='dynamic', stages=None):
             app.dependency_overrides[get_current_user] = current_user
             app.dependency_overrides[get_db] = database
             monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+            monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
             monkeypatch.setattr(workflow, 'write_audit_log', AsyncMock())
             monkeypatch.setattr(notifications, '_try_db', execute_in_fixture)
             async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:

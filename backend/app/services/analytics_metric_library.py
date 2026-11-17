@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
-from app.api.deps import current_tenant_id, current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 from app.models.relational import AnalyticsSharedMetric, AnalyticsSharedMetricVersion, Form, FormVersion
 from app.services.analytics_runtime import AnalyticsError, design_errors, parse_expression, source_errors
 from app.services.field_uniqueness import lock

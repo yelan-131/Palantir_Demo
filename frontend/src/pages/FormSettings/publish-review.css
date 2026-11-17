@@ -1,0 +1,180 @@
+.publish-review.ant-modal {
+  max-width: calc(100vw - 32px);
+}
+
+.publish-review.ant-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
+  padding: 0;
+  border-radius: 12px;
+  color: var(--mf-ink, #182e40);
+  background: var(--mf-surface, #fff);
+}
+
+.publish-review.ant-modal .ant-modal-header {
+  flex: none;
+  margin: 0;
+  padding: 20px 56px 20px 24px;
+  border-bottom: 1px solid var(--mf-border, #dce5ed);
+  background: inherit;
+}
+
+.publish-review.ant-modal .ant-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.publish-review.ant-modal .ant-modal-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+}
+
+.publish-review.ant-modal .ant-modal-footer {
+  flex: none;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--mf-border, #dce5ed);
+}
+
+.publish-review-grid {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 240px;
+}
+
+.publish-review-overview {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  padding: 24px;
+  color: var(--mf-ink, #182e40);
+}
+
+.publish-review-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: #216345;
+}
+
+.publish-review-status.is-blocked { color: #a62f2a; }
+
+.publish-review-totals {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 20px;
+  padding: 12px 0;
+  border-block: 1px solid var(--mf-border, #dce5ed);
+  color: var(--mf-ink-secondary, #435768);
+  font-size: 13px;
+}
+
+.publish-review-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.publish-review-totals dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-review-source,
+.publish-review-overview .component-source-impact {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  color: var(--mf-ink-secondary, #435768);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.publish-review-overview .component-source-impact p,
+.publish-review-overview .component-source-impact ul {
+  margin: 0;
+}
+
+.publish-review-overview .component-source-impact ul { padding-inline-start: 16px; }
+.publish-review-overview .component-source-impact summary { cursor: pointer; }
+
+.publish-review-checks {
+  min-width: 0;
+  padding: 24px;
+  border-inline-start: 1px solid var(--mf-border, #dce5ed);
+  background: var(--mf-surface-soft, #f7f9fc);
+}
+
+.publish-review-checks section + section { margin-top: 20px; }
+
+.publish-review-checks h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.publish-review-rows {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.publish-review-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--mf-border, #dce5ed);
+  overflow-wrap: anywhere;
+}
+
+.publish-review-row > .anticon { margin-top: 3px; color: #48735e; }
+.publish-review-row.is-error > .anticon { color: #a62f2a; }
+.publish-review-row.is-warning > .anticon { color: #875109; }
+.publish-review-row strong { font-size: 13px; font-weight: 600; }
+
+.publish-review-row p,
+.publish-review-clear {
+  margin: 4px 0 0;
+  color: var(--mf-ink-secondary, #435768);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.publish-review-details { margin-top: 16px; }
+.publish-review-details:first-child { margin-top: 0; }
+
+.publish-review-details summary {
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.publish-review-details summary span {
+  margin-inline-start: 4px;
+  color: var(--mf-ink-secondary, #435768);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-review-checks:focus-visible {
+  outline: 2px solid var(--mf-focus, #2563a6);
+  outline-offset: -2px;
+}
+
+@container (max-width: 600px) {
+  .publish-review-grid { grid-template-columns: minmax(0, 1fr); }
+  .publish-review-overview { position: static; padding: 16px; }
+  .publish-review-checks { padding: 16px; border-inline-start: 0; border-top: 1px solid var(--mf-border, #dce5ed); }
+}

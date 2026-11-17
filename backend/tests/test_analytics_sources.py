@@ -64,8 +64,10 @@ async def test_invalid_filters_return_422_without_reading_other_fields(environme
 async def test_publication_blocks_bad_formulas_sources_and_cross_dataset_bindings(environment, monkeypatch):
     from unittest.mock import AsyncMock
     from app.api import forms
+    from app.services import form_admin
     db, factory, form, user, client = environment
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     user['is_admin'] = True
     design = source_design()
     form.config = {'analyticsDesignDraft': design}

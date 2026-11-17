@@ -1,166 +1,124 @@
-"""Tests for the Template Marketplace — list, detail, instantiate."""
+"""Tests for the Template Marketplace — package manifests, detail, instantiate."""
 from __future__ import annotations
 
+import json
+
 import pytest
+from fastapi import HTTPException
 
 
-# ── List templates ───────────────────────────────────────
+@pytest.fixture()
+def template_root(tmp_path, monkeypatch):
+    from app.api import templates as templates_mod
+
+    root = tmp_path / "data" / "templates"
+    for package_id, name, category in (
+        ("alpha-pack", "Alpha 包", "production"),
+        ("beta-pack", "Beta 包", "quality"),
+    ):
+        package_dir = root / package_id
+        package_dir.mkdir(parents=True)
+        (package_dir / "manifest.json").write_text(
+            json.dumps({
+                "id": package_id,
+                "name": name,
+                "category": category,
+                "version": "0.1.0",
+                "description": f"{name} 描述",
+                "seedData": {"path": "data/seed", "mode": "optional"},
+                "tables": {"legacyDemoTables": ["equipment", "suppliers"]},
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(templates_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(templates_mod, "TEMPLATE_ROOT", root)
+    return root
+
 
 @pytest.mark.asyncio
-async def test_list_templates_returns_3():
-    """GET /templates returns 3 templates."""
+async def test_list_templates_reads_package_manifests(template_root):
     from app.api.templates import list_templates
+
     result = await list_templates()
-    assert "data" in result
-    assert len(result["data"]) == 3
-    assert "categories" in result
-    # Should be grouped into 3 categories
-    assert len(result["categories"]) == 3
+
+    assert [t["package_id"] for t in result["data"]] == ["alpha-pack", "beta-pack"]
+    assert [t["id"] for t in result["data"]] == [1, 2]
+    assert set(result["categories"]) == {"production", "quality"}
+    alpha = result["data"][0]
+    assert alpha["name"] == "Alpha 包"
+    assert alpha["is_public"] is True
+    assert alpha["config"]["manifestPath"] == "data/templates/alpha-pack/manifest.json"
+    assert alpha["config"]["models"] == [
+        {"name": "equipment", "source": "legacy_demo_table"},
+        {"name": "suppliers", "source": "legacy_demo_table"},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_list_templates_categories():
-    """Templates are grouped into correct categories."""
-    from app.api.templates import list_templates
-    result = await list_templates()
-    cats = result["categories"]
-    assert "生产管理" in cats
-    assert "质量管理" in cats
-    assert "供应链" in cats
-    # Each category summary has required fields
-    for cat_items in cats.values():
-        for item in cat_items:
-            assert "id" in item
-            assert "name" in item
-            assert "icon" in item
-            assert "field_count" in item
+async def test_list_templates_without_template_root_is_empty(tmp_path, monkeypatch):
+    from app.api import templates as templates_mod
 
+    monkeypatch.setattr(templates_mod, "TEMPLATE_ROOT", tmp_path / "missing")
+    result = await templates_mod.list_templates()
+    assert result == {"data": [], "categories": {}}
 
-# ── Get template detail ─────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_get_template_by_id():
-    """GET /templates/{id} returns full template config."""
+async def test_get_template_by_id(template_root):
     from app.api.templates import get_template
-    result = await get_template(template_id=1)
-    assert "data" in result
-    t = result["data"]
-    assert t["id"] == 1
-    assert t["name"] == "设备管理"
-    assert "model" in t
-    assert "fields" in t
-    assert "page" in t
-    assert len(t["fields"]) == 6  # equipment has 6 fields
 
-
-@pytest.mark.asyncio
-async def test_get_template_2_inspection():
-    """GET /templates/2 returns quality inspection template."""
-    from app.api.templates import get_template
     result = await get_template(template_id=2)
-    t = result["data"]
-    assert t["name"] == "质检流程"
-    assert t["page"]["paradigm"] == "form-flow"
+    assert result["data"]["package_id"] == "beta-pack"
+    assert result["data"]["category"] == "quality"
 
 
 @pytest.mark.asyncio
-async def test_get_template_3_supplier():
-    """GET /templates/3 returns supplier management template."""
+async def test_get_template_not_found(template_root):
     from app.api.templates import get_template
-    result = await get_template(template_id=3)
-    t = result["data"]
-    assert t["name"] == "供应商管理"
-    assert t["page"]["paradigm"] == "master-detail"
 
-
-@pytest.mark.asyncio
-async def test_get_template_not_found():
-    """GET /templates/{id} returns 404 for invalid ID."""
-    from fastapi import HTTPException
-    from app.api.templates import get_template
     with pytest.raises(HTTPException) as exc_info:
         await get_template(template_id=9999)
     assert exc_info.value.status_code == 404
 
 
-# ── Instantiate template ────────────────────────────────
-
 @pytest.mark.asyncio
-async def test_instantiate_creates_records():
-    """POST /templates/{id}/instantiate returns mock IDs (DB unavailable in test)."""
-    from app.api.templates import instantiate_template, InstantiateRequest
-    body = InstantiateRequest()
-    result = await instantiate_template(template_id=1, body=body)
-    assert "model_id" in result
-    assert "page_id" in result
-    assert "menu_id" in result
-    assert "route_path" in result
-    assert result["route_path"].startswith("/dynamic/")
-
-
-@pytest.mark.asyncio
-async def test_instantiate_with_custom_name():
-    """POST /templates/{id}/instantiate with custom name uses that name."""
-    from app.api.templates import instantiate_template, InstantiateRequest
-    body = InstantiateRequest(name="我的设备管理")
-    result = await instantiate_template(template_id=1, body=body)
-    assert "model_id" in result
-    assert "route_path" in result
-
-
-@pytest.mark.asyncio
-async def test_instantiate_not_found():
-    """POST /templates/{id}/instantiate returns 404 for invalid ID."""
-    from fastapi import HTTPException
+async def test_instantiate_registers_package_without_importing_seed_data(template_root):
     from app.api.templates import InstantiateRequest, instantiate_template
-    body = InstantiateRequest()
+
+    result = await instantiate_template(
+        template_id=1,
+        body=InstantiateRequest(name="我的包", customizations={"theme": "dark"}),
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "packaged"
+    assert result["template"]["package_id"] == "alpha-pack"
+    assert result["customizations"] == {"theme": "dark"}
+
+
+@pytest.mark.asyncio
+async def test_instantiate_default_body(template_root):
+    from app.api.templates import instantiate_template
+
+    result = await instantiate_template(template_id=2)
+    assert result["status"] == "packaged"
+    assert result["customizations"] == {}
+
+
+@pytest.mark.asyncio
+async def test_instantiate_not_found(template_root):
+    from app.api.templates import InstantiateRequest, instantiate_template
+
     with pytest.raises(HTTPException) as exc_info:
-        await instantiate_template(template_id=9999, body=body)
+        await instantiate_template(template_id=9999, body=InstantiateRequest())
     assert exc_info.value.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_instantiate_default_body():
-    """POST /templates/{id}/instantiate works with no body (uses defaults)."""
-    from app.api.templates import instantiate_template
-    # Pass None to simulate omitted body
-    result = await instantiate_template(template_id=2)
-    assert "model_id" in result
-    assert "page_id" in result
-
-
-# ── Template data integrity ─────────────────────────────
-
-@pytest.mark.asyncio
-async def test_all_templates_have_required_keys():
-    """Each template has model, fields, page, and metadata keys."""
+async def test_repository_ships_manufacturing_demo_package():
     from app.api.templates import list_templates
-    result = await list_templates()
-    for t in result["data"]:
-        assert "id" in t
-        assert "name" in t
-        assert "category" in t
-        assert "description" in t
-        assert "icon" in t
-        assert "model" in t
-        assert "fields" in t
-        assert "page" in t
-        assert isinstance(t["fields"], list)
-        assert len(t["fields"]) > 0
-        assert "name" in t["model"]
-        assert "table_name" in t["model"]
-        assert "name" in t["page"]
-        assert "paradigm" in t["page"]
 
-
-@pytest.mark.asyncio
-async def test_enum_fields_have_enum_values():
-    """Fields with field_type 'enum' must have enum_values."""
-    from app.api.templates import list_templates
     result = await list_templates()
-    for t in result["data"]:
-        for f in t["fields"]:
-            if f["field_type"] == "enum":
-                assert f.get("enum_values") is not None, (
-                    f"Template '{t['name']}' field '{f['field_name']}' is enum but has no enum_values"
-                )
+    packages = {t["package_id"]: t for t in result["data"]}
+    assert "manufacturing-demo" in packages
+    assert packages["manufacturing-demo"]["config"]["seedData"]["mode"] == "optional"

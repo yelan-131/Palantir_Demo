@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def legacy_proposals(monkeypatch):
     from app.api import ai_assistant as api
-    from app.services.ai.legacy_runtime import AgentRuntime
+    from tests.legacy_agent.legacy_runtime import AgentRuntime
     from app.services.ai.settings import AI_SYSTEM_SETTINGS, load_persisted_ai_settings
     from copy import deepcopy
     previous = deepcopy(AI_SYSTEM_SETTINGS)
@@ -434,7 +434,7 @@ def test_ai_agent_can_resume_saved_draft_for_confirmation():
 
 
 def test_action_slot_filling_extracts_followup_details():
-    from app.services.ai.action_state import create_or_update_action_state
+    from tests.legacy_agent.action_state import create_or_update_action_state
 
     first = create_or_update_action_state(
         existing=None,
@@ -456,7 +456,7 @@ def test_action_slot_filling_extracts_followup_details():
 
 
 def test_action_slot_filling_uses_generic_contract_terms():
-    from app.services.ai.action_state import create_or_update_action_state
+    from tests.legacy_agent.action_state import create_or_update_action_state
 
     first = create_or_update_action_state(
         existing=None,
@@ -653,7 +653,7 @@ def test_low_code_followup_uses_supplied_name_before_fields():
 
 
 def test_low_code_confirmation_adjustment_overrides_form_name():
-    from app.services.ai.action_state import create_or_update_action_state
+    from tests.legacy_agent.action_state import create_or_update_action_state
 
     existing = {
         "status": "ready_for_confirmation",

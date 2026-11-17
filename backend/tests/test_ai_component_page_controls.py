@@ -9,6 +9,7 @@ from app.services.ai import component_page_controls as mod
 
 @pytest.mark.parametrize('arguments', [
     {'action': 'save'},
+    {'action': 'apply', 'operations': [{'action': 'add', 'widget_id': 'filters', 'widget_type': 'record-filter'}]},
     {'action': 'apply', 'operations': [{'action': 'edit', 'widget_id': 'records'}]},
     {'action': 'apply', 'operations': [{'action': 'edit', 'widget_id': 'records', 'properties': {'roleIds': [1]}}]},
     {'action': 'apply', 'operations': [{'action': 'edit', 'widget_id': 'records', 'appearance': {'titleFontSize': 100}}]},
@@ -54,16 +55,29 @@ async def test_harness_exposes_five_registered_tools_and_honors_individual_disab
     monkeypatch.setattr(harness_runtime, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(harness_runtime, 'settings_snapshot', lambda: {})
     bridge = harness_runtime.PlatformBridge(
-        user={'tenant_id': 1, 'is_admin': True}, settings={}, component_page_task=True,
+        user={'tenant_id': 1, 'is_admin': True}, settings={},
         context={'componentPageContext': {'code': 'inspection'}, 'pageControlsSupported': True},
         event_sink=AsyncMock(),
     )
-    assert {tool['name'] for tool in bridge.available_tools()} == set(map(harness_runtime.tool_alias, definitions))
+    describe = harness_runtime.tool_alias(harness_runtime.DESCRIBE_TOOL)
+    invoke = harness_runtime.tool_alias(harness_runtime.INVOKE_TOOL)
+    assert {describe, invoke} <= {tool['name'] for tool in bridge.available_tools()}
+
+    discovered = await bridge.call_tool(describe, {})
+    assert discovered['status'] == 'completed'
+    assert {tool['name'] for tool in discovered['tools']} & mod.TOOL_DETAILS.keys() == definitions.keys()
+
     appearance = 'ui.component_page.update_appearance'
+    described = await bridge.call_tool(describe, {'name': appearance})
+    assert described['status'] == 'completed'
     active.pop(appearance)
-    alias = harness_runtime.tool_alias(appearance)
-    assert len(bridge.available_tools()) == 4
-    result = await bridge.call_tool(alias, {'widget_id': 'records', 'appearance': {'showTitle': False}})
+    discovered = await bridge.call_tool(describe, {})
+    assert discovered['status'] == 'completed'
+    assert {tool['name'] for tool in discovered['tools']} & mod.TOOL_DETAILS.keys() == definitions.keys() - {appearance}
+    result = await bridge.call_tool(invoke, {
+        'name': appearance,
+        'arguments': {'widget_id': 'records', 'appearance': {'showTitle': False}},
+    })
     assert result['status'] == 'blocked'
     bridge.event_sink.assert_not_awaited()
 

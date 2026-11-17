@@ -3,7 +3,7 @@ import copy
 from sqlalchemy import select,delete
 from fastapi import HTTPException
 from app.models.relational import Role,FormPermission
-from app.api.deps import current_tenant_id,current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 
 
 async def role_configs(db,user,form,*,cache=None):

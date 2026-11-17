@@ -12,12 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db
 from app.api.forms import (_ensure_form_permission, _runtime_form_fields, _runtime_visible_field_names,
                            _record_payload, create_dynamic_record, DynamicRecordCreate)
-from app.api.form_engine import _uses_physical_form_table, _physical_record_payload, _physical_column_name
-from app.api._model_driven_shared import assert_safe_identifier
+from app.services.form_engine import _uses_physical_form_table, _physical_record_payload, _physical_column_name
+from app.core.identifiers import assert_safe_identifier
 from app.core.permissions import allowed_form_fields
 from app.database import DB_TYPE
 from app.models.relational import Form, DynamicRecord, AuditLog, User
 from app.services.alert_service import (alert_payload, filter_alerts, is_material_request, next_status, normalize_status)
+from app.services.alert_records import (
+    _records,
+)
 
 router = APIRouter()
 
@@ -50,29 +53,6 @@ async def _context(db, user, action='view'):
     if not {'title', 'status'} <= visible:
         raise HTTPException(403, '缺少告警标题或状态的查看权限')
     return form, fields, visible
-
-
-async def _records(db, form, fields, visible, record_id=None, lock=False, *, user=None):
-    from app.services.records import read_raw, iter_raw, authorized_records, require_record_permission, project_record
-    if record_id is not None:
-        try:
-            record = await read_raw(db, form, record_id, lock=lock)
-        except HTTPException as exc:
-            if exc.status_code == 404:
-                return []
-            raise
-        if user is not None:
-            await require_record_permission(db, user, form, "view", record)
-            record = await project_record(db, user, form, record, fields)
-        records = [record]
-    elif user is not None:
-        records = await authorized_records(db, user, form, decorate=False)
-    else:
-        records = [record async for record in iter_raw(db, form)]
-    records.sort(key=lambda record: record["id"], reverse=True)
-    if visible is not None:
-        records = [{**record, "data": {key: value for key, value in record["data"].items() if key in visible}} for record in records]
-    return records
 
 
 async def _events(db, form, ids):

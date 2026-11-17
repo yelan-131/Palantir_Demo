@@ -1,7 +1,9 @@
 import { widgetSourceId, type PageDefinition, type PageWidget, type WidgetType } from './model';
 
-export const componentNames: Record<WidgetType, string> = {
-  'record-list': '业务列表', 'record-filter': '业务筛选', metric: '指标卡', chart: '分组图表', workspace: '工作台模块',
+export type AddableWidgetType = Exclude<WidgetType, 'record-filter'>;
+
+export const componentNames: Record<AddableWidgetType, string> = {
+  'record-list': '业务列表', metric: '指标卡', chart: '分组图表', workspace: '工作台模块',
 };
 
 type ComponentProperties = Partial<Pick<PageWidget, 'title' | 'width' | 'dataBinding' | 'dimension' |
@@ -9,17 +11,15 @@ type ComponentProperties = Partial<Pick<PageWidget, 'title' | 'width' | 'dataBin
   'showFilters' | 'filterFields' | 'chartType' | 'format' | 'unit' | 'threshold'>>;
 
 export type ComponentOperation =
-  | { action: 'add'; widget_id: string; widget_type: WidgetType }
+  | { action: 'add'; widget_id: string; widget_type: AddableWidgetType }
   | { action: 'edit'; widget_id: string; properties?: ComponentProperties;
       appearance?: PageWidget['appearance']; interaction?: Pick<Partial<PageWidget>, 'interaction' | 'targetWidgetIds'>;
       list_settings?: PageWidget['listSettings']; filter_settings?: PageWidget['filterSettings'] };
 
-export function newComponent(definition: PageDefinition, id: string, type: WidgetType, firstField?: string): PageWidget {
+export function newComponent(definition: PageDefinition, id: string, type: AddableWidgetType, firstField?: string): PageWidget {
   return {
     id, type, title: componentNames[type], width: type === 'metric' ? 6 : 24, aggregate: 'count',
     showFilters: false,
-    targetWidgetIds: type === 'record-filter' ? definition.widgets.filter(widget =>
-      widget.type === 'record-list' && widgetSourceId(definition, widget) === definition.sourceFormId).map(widget => widget.id) : undefined,
     dimension: type === 'chart' ? definition.filterFields[0] || firstField : undefined,
   };
 }
@@ -32,6 +32,7 @@ export function applyComponentOperations(definition: PageDefinition, operations:
   for (const operation of operations) {
     const index = widgets.findIndex(widget => widget.id === operation.widget_id);
     if (operation.action === 'add') {
+      if (!Object.prototype.hasOwnProperty.call(componentNames, operation.widget_type)) throw new Error('不支持此组件类型');
       if (index !== -1) throw new Error(`组件标识已存在：${operation.widget_id}`);
       if (widgets.length >= 30) throw new Error('页面最多支持 30 个组件');
       const firstField = definition.sourceFormId ? formFields(definition.sourceFormId)?.[0] : undefined;
@@ -39,14 +40,14 @@ export function applyComponentOperations(definition: PageDefinition, operations:
     } else if (operation.action === 'edit') {
       if (index === -1) throw new Error(`找不到组件：${operation.widget_id}`);
       const current = widgets[index];
+      if (current.type === 'record-filter') throw new Error('旧版独立筛选已停用编辑，请使用列表筛选');
       if (operation.list_settings && current.type !== 'record-list') throw new Error('列表设置仅适用于业务列表');
-      if (operation.filter_settings && current.type !== 'record-filter') throw new Error('筛选设置仅适用于业务筛选');
-      if (operation.interaction?.interaction !== undefined && current.type !== 'chart'
-        && !(current.type === 'record-filter' && operation.interaction.interaction === 'filter')) {
+      if (operation.filter_settings && current.type !== 'record-list') throw new Error('筛选设置仅适用于业务列表');
+      if (operation.interaction?.interaction !== undefined && current.type !== 'chart') {
         throw new Error('点击行为仅适用于分组图表');
       }
-      if (operation.interaction?.targetWidgetIds !== undefined && !['record-filter', 'chart'].includes(current.type)) {
-        throw new Error('业务筛选和分组图表可以设置联动目标');
+      if (operation.interaction?.targetWidgetIds !== undefined && current.type !== 'chart') {
+        throw new Error('联动目标仅适用于分组图表');
       }
       widgets[index] = {
         ...current, ...operation.properties, ...operation.interaction,

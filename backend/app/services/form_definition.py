@@ -7,9 +7,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
-from app.api._model_driven_shared import assert_safe_identifier
+from app.core.identifiers import assert_safe_identifier
 from app.core.permissions import has_form_permission
-from app.api.form_engine import _field_allowed_values, _field_value_is_compatible, _is_anonymous_reader
+from app.services.form_engine import _field_allowed_values, _field_value_is_compatible, _is_anonymous_reader
 from app.services.form_runtime import _latest_form_version, _field_proxy_from_payload
 
 

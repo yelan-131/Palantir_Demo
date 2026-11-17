@@ -6,10 +6,12 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter()
+from app.api.deps import get_current_user
+
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 ROOT = Path(__file__).resolve().parents[3]
 TEMPLATE_ROOT = ROOT / "data" / "templates"

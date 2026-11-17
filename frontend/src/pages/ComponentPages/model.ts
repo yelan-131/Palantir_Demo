@@ -56,9 +56,10 @@ export interface PageState {
 /** An unpublished page remains usable as an admin preview after leaving its editor. */
 export function pagePresentation(state: PageState | undefined, admin: boolean, editing: boolean, draft?: PageDefinition) {
   const draftPreview = Boolean(admin && state && !state.publishedVersion && !editing);
+  const storedDefinition = state?.publishedDefinition ?? (draftPreview ? state?.definition : undefined);
   return {
     draftPreview,
-    definition: editing ? draft : state?.publishedDefinition ?? (draftPreview ? state?.definition : undefined),
+    definition: editing ? draft : storedDefinition && mergeListFilters(storedDefinition).definition,
     startEditing: Boolean(admin && state && !state.publishedVersion && !state.definition.widgets.length),
   };
 }
@@ -113,20 +114,27 @@ export function bindWidgetSource(definition: PageDefinition, id: string, formId?
   })}))};
 }
 
-/** Reuse an existing same-source filter, or insert one immediately before its list. */
-export function ensureListFilter(definition: PageDefinition, listId: string, newId: string) {
-  const list = definition.widgets.find(widget=>widget.id===listId&&widget.type==='record-list');
-  const formId = list && widgetSourceId(definition,list);
-  if(!list || !formId)return undefined;
-  const existing = definition.widgets.find(widget=>widget.type==='record-filter'&&widget.targetWidgetIds?.includes(listId));
-  if(existing){
-    if(widgetSourceId(definition,existing)===formId)return {definition,filterId:existing.id,created:false};
-    const repaired=bindWidgetSource(definition,existing.id,formId);
-    return {definition:{...repaired,widgets:repaired.widgets.map(w=>w.id===existing.id?{...w,targetWidgetIds:[listId]}:w)},filterId:existing.id,created:false};
-  }
-  if(definition.widgets.length>=30||definition.widgets.some(widget=>widget.id===newId))return undefined;
-  const filter:PageWidget={id:newId,type:'record-filter',title:list.title+'筛选',width:24,aggregate:'count',dataBinding:{formId},targetWidgetIds:[listId],filterFields:null,filterSettings:{queryMode:'submit',resetMode:'defaults',requiredFields:[]}};
-  return {definition:{...definition,widgets:definition.widgets.flatMap(widget=>widget.id===listId?[filter,{...widget,showFilters:false}]:[widget])},filterId:newId,created:true};
+/** Move a filter into its sole list when doing so preserves its source and audience. */
+export function mergeListFilters(definition: PageDefinition) {
+  const merged = new Map<string, string>();
+  const widgets = definition.widgets.map(list => {
+    if (list.type !== 'record-list') return list;
+    const linked = definition.widgets.filter(widget => widget.type === 'record-filter' && widget.targetWidgetIds?.includes(list.id));
+    if (linked.length !== 1) return list;
+    const [filter] = linked;
+    const sourceId = widgetSourceId(definition, list);
+    if (!sourceId || widgetSourceId(definition, filter) !== sourceId || filter.targetWidgetIds?.length !== 1 ||
+        filter.roleIds?.length || filter.accessGroups != null) return list;
+    merged.set(filter.id, list.id);
+    const hasListConfiguration = list.showFilters === true &&
+      (list.filterFields != null || list.filterSettings?.schemes != null || list.filterSettings?.toolbarGroups != null);
+    return hasListConfiguration ? list :
+      {...list, showFilters:true, filterFields:filter.filterFields, filterSettings:filter.filterSettings};
+  });
+  return {
+    definition: merged.size ? {...definition, widgets:widgets.filter(widget => !merged.has(widget.id))} : definition,
+    merged,
+  };
 }
 
 /** Keep source contributions independent so clearing one interaction preserves others. */

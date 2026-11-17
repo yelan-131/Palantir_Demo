@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
-from app.api.deps import require_admin
+from app.core.principal import ensure_admin
 from app.models.relational import Application, ApplicationMenuNode, Form
 from app.services.field_uniqueness import lock
 from app.services.form_runtime import _latest_form_version
@@ -40,10 +40,10 @@ async def resolve_menu_target(db, tenant_id, target):
 
 
 async def publish_form_to_menu(db, user, payload, *, prepare=False):
-    from app.api.forms import _create_application_menu_node
+    from app.services.application_menu_nodes import _create_application_menu_node
     from app.services.form_schemas import MenuNodeCreate
 
-    await require_admin(user)
+    ensure_admin(user)
     tenant_id = require_tenant_id(user)
     target = FormMenuTarget.model_validate(payload)
     if not prepare:

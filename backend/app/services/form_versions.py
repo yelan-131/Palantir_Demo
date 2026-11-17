@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import current_tenant_id, current_user_id, require_admin
+from app.core.principal import current_tenant_id, current_user_id, ensure_admin
 from app.core.audit import write_audit_log
 from app.services.form_runtime import _latest_form_version
 from app.services.form_definition import (
@@ -20,7 +20,7 @@ from app.services.form_definition import (
 
 
 async def preview_form_publish(form_id: int, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form
     tenant_id = current_tenant_id(user)
     form = await db.get(Form, form_id)
@@ -31,7 +31,7 @@ async def preview_form_publish(form_id: int, db: AsyncSession, user: dict):
 
 
 async def publish_form(form_id: int, db: AsyncSession, user: dict, *, defer_commit: bool = False):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormVersion
     tenant_id = current_tenant_id(user)
     form = await db.get(Form, form_id)
@@ -65,7 +65,7 @@ async def publish_form(form_id: int, db: AsyncSession, user: dict, *, defer_comm
 
 
 async def restore_form_draft(form_id: int, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormField
     form = await db.get(Form, form_id)
     if not form or form.tenant_id != current_tenant_id(user):

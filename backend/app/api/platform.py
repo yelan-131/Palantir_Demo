@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_tenant_id, current_user_id, get_db, require_admin
+from app.api.deps import current_tenant_id, current_user_id, get_db, require_admin, require_platform_admin
 from app.core.audit import write_audit_log
 from app.core.security import hash_password
 from app.services.tenant_onboarding import (
@@ -23,12 +23,6 @@ from app.services.tenant_onboarding import (
     create_password_reset,
     normalize_domain,
 )
-
-def require_platform_admin(user: dict = Depends(require_admin)) -> dict:
-    if current_tenant_id(user) != 1:
-        raise HTTPException(403, "Platform admin privilege required")
-    return user
-
 
 router = APIRouter(dependencies=[Depends(require_platform_admin)])
 

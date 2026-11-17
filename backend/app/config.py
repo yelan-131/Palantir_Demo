@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     APP_NAME: str = "ManuFoundry"
-    APP_VERSION: str = "0.3.21"
+    APP_VERSION: str = "0.3.22"
     APP_MODE: str = "demo"
     DEBUG: bool = True
     SQL_ECHO: bool = False  # opt-in SQL tracing, independent of web debug mode
@@ -21,10 +21,6 @@ class Settings(BaseSettings):
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "manufoundry123"
-
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 0
 
     # Security ── single source of truth for JWT signing
     SECRET_KEY: str = "manufoundry-secret-key-change-in-production"

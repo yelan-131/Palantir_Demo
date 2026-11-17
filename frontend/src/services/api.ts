@@ -418,8 +418,6 @@ export const getRelatedKnowledgeCards = (params?: { object_type?: string; object
   api.get('/knowledge/related-cards', { params });
 export const getRelatedKnowledge = (params?: { object_type?: string; object_id?: string; limit?: number }) =>
   api.get('/knowledge/related', { params });
-export const suggestKnowledgeBindings = (data: { text: string; limit?: number }) =>
-  api.post('/knowledge/binding-candidates', data);
 export const getKnowledgeOcrPipeline = () => api.get('/knowledge/ocr-pipeline');
 export const getKnowledgeDocumentOcr = (documentId: string) =>
   api.get<KnowledgeOcrResult>(`/knowledge/documents/${documentId}/ocr`);

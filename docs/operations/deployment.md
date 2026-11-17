@@ -51,8 +51,8 @@ The frontend reads `frontend/.env.local`; the current local proxy target is
 | Server project path | `/root/Palantir_Demo` |
 | Frontend public port | `80` |
 | Frontend container port | `80` |
-| Backend port | `8000` |
-| Backend health endpoint | `http://111.229.172.100:8000/health` |
+| Backend port | `8000`, bound to `127.0.0.1` on the server |
+| Backend health endpoint | `http://111.229.172.100/health` (proxied by frontend nginx) |
 
 ## Compose Files
 
@@ -108,12 +108,13 @@ Production mode is fail-fast:
 | Service | Image/build | Host port | Container port | Notes |
 | --- | --- | --- | --- | --- |
 | `frontend` | `frontend/Dockerfile` | `80` | `80` | nginx static frontend and `/api/` reverse proxy |
-| `backend` | `backend/Dockerfile` | `8000` | `8000` | FastAPI |
-| `postgres` | `postgres:16-alpine` | `5432` in development compose | `5432` | relational database |
-| `neo4j` | `neo4j:5-community` | `7474`, `7687` in development compose | `7474`, `7687` | graph database |
-| `redis` | `redis:7-alpine` | `6379` in development compose | `6379` | cache |
+| `backend` | `backend/Dockerfile` | `8000` (`127.0.0.1` only in production and release compose) | `8000` | FastAPI |
+| `postgres` | `postgres:16-alpine` | `5432` (`127.0.0.1` only in production and release compose) | `5432` | relational database |
+| `neo4j` | `neo4j:5-community` | `7474`, `7687` (`127.0.0.1` only in production and release compose) | `7474`, `7687` | graph database |
 
-The production overlay switches backend/frontend Dockerfiles, removes source mounts, runs backend without reload, and maps the frontend to `80:80`.
+Redis was removed in 0.3.22. A server upgraded from an earlier version still has a `manufoundry-redis` container; remove it with `docker compose ... up -d --remove-orphans` (or `docker rm -f manufoundry-redis`). The `redis_data` volume can then be deleted.
+
+The production overlay switches backend/frontend Dockerfiles, removes source mounts, runs backend without reload, maps the frontend to `80:80`, and binds backend and data-service ports to the server loopback interface. Public traffic reaches the backend only through frontend nginx (`/api/` and `/health`). With `APP_MODE=production`, `/docs`, `/redoc` and `/openapi.json` are disabled, and `/api/v1/system/metrics` requires an administrator token.
 
 ## Update Server Flow
 
@@ -128,7 +129,9 @@ When the user asks to update or sync the server, use this flow:
 
 ## Automatic CD
 
-Production deployment is automated by `.github/workflows/deploy.yml`.
+The workflow files described in this section (`.github/workflows/ci.yml` and `.github/workflows/deploy.yml`) are not present in the repository as of 2026-11-17; deployments currently follow the manual flow above.
+
+Planned behavior: production deployment is automated by `.github/workflows/deploy.yml`.
 
 Triggers:
 
@@ -254,17 +257,18 @@ curl -I http://111.229.172.100
 Backend:
 
 ```bash
-curl -fsS http://111.229.172.100:8000/health
-curl -fsS http://111.229.172.100:8000/api/v1/system/readiness
-curl -fsS http://111.229.172.100:8000/api/v1/release/current
-curl -fsS http://111.229.172.100:8000/api/v1/productization/readiness
-curl -fsS "http://111.229.172.100:8000/api/v1/dashboard/programs/line-status?limit=5"
+curl -fsS http://111.229.172.100/health
+curl -fsS http://111.229.172.100/api/v1/system/readiness
+curl -fsS http://111.229.172.100/api/v1/release/current
+curl -fsS http://111.229.172.100/api/v1/productization/readiness
 ```
+
+Port `8000` is not reachable from the public network. On the server, the backend can still be checked directly with `curl -fsS http://127.0.0.1:8000/health`. Business endpoints such as `/api/v1/dashboard/programs/*` require a bearer token.
 
 Authenticated SaaS smoke checks can be run with explicit credentials or environment variables:
 
 ```bash
-SMOKE_USERNAME=<admin-user> SMOKE_PASSWORD=<admin-password> python scripts/production_smoke.py --base-url http://111.229.172.100:8000
+SMOKE_USERNAME=<admin-user> SMOKE_PASSWORD=<admin-password> python scripts/production_smoke.py --base-url http://111.229.172.100
 ```
 
 Do not hard-code production administrator credentials in workflow files or repository-tracked scripts.
@@ -275,11 +279,7 @@ Expected backend response:
 {"status":"healthy"}
 ```
 
-Swagger:
-
-```text
-http://111.229.172.100:8000/docs
-```
+Swagger is disabled when `APP_MODE=production`. Use a local demo-mode backend at `http://127.0.0.1:8000/docs`.
 
 ## Rollback
 
@@ -290,7 +290,7 @@ cd /root/Palantir_Demo
 git log --oneline -5
 git checkout <previous-good-commit>
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
-curl -fsS http://111.229.172.100:8000/health
+curl -fsS http://111.229.172.100/health
 ```
 
 Return to the normal branch after the incident is resolved.
@@ -298,7 +298,7 @@ Return to the normal branch after the incident is resolved.
 ## Known Deployment Notes
 
 - `frontend/nginx.conf` is the active nginx config.
-- `/api/` is proxied from frontend nginx to `http://backend:8000/api/`.
+- `/api/` is proxied from frontend nginx to `http://backend:8000/api/`, and `/health` to `http://backend:8000/health`.
 - The backend has `GET /health` outside `/api/v1`.
 - Production should set `DEMO_AUTH_OPTIONAL=false` and a real `SECRET_KEY`.
 - The default CORS origins are local development origins; production should use explicit production origins.

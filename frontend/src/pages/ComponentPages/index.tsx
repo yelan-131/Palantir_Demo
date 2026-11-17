@@ -5,16 +5,17 @@ import {Alert, Button, Card, Col, Dropdown, Drawer, Modal, Row, Select, Space, S
 import {DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@ant-design/icons';
 import StatisticalWidget from './StatisticalWidget';
 import FilterWidget from './FilterWidget';
+import RecordListWidget from './RecordListWidget';
 import ResizeHandle from './ResizeHandle';
 import {dashboardStyleDefaults} from '../AppPrograms/analyticsWidgetAppearance';
 import api, {getPlatformForm, listPlatformForms, type PlatformForm} from '@/services/api';
 import {useAuthStore} from '@/stores/authStore';
 import {useShellPageTitle} from '@/components/ShellPageTitle';
 import {useAiWorkbench} from '@/components/AiChatWidget/context';
-import {applyComponentOperations, componentNames, newComponent} from './componentOperations';
+import {applyComponentOperations, componentNames, newComponent, type AddableWidgetType} from './componentOperations';
 import DynamicPage from '../DynamicPage';
 import type {RuntimeAnalyticsData} from '../AppPrograms/analyticsTypes';
-import {ensureListFilter, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget, type WidgetType} from './model';
+import {mergeListFilters, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget} from './model';
 import {pagePresentation} from './model';
 import SourceImpactNotice from './SourceImpactNotice';
 import Inspector, {sections, type BusinessTab, type Panel, type WidgetTab} from './Inspector';
@@ -100,7 +101,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const request = useRef(0);
   const resolvedIdentity = useRef<string>();
   const dirty = Boolean(draft && state && JSON.stringify(draft) !== JSON.stringify(state.definition));
-  const {draftPreview, definition:active} = pagePresentation(state,admin,editing,draft);
+  const {draftPreview, definition:active} = useMemo(() => pagePresentation(state,admin,editing,draft), [state,admin,editing,draft]);
   const selectedWidget = active?.widgets.find(item=>item.id===selected);
   const sourceId = panel === 'widget' || sourceEditor ? widgetSourceId(active, selectedWidget) : active?.sourceFormId;
   const sourceActive = Boolean(editing && draft && sourceEditor && sourceId);
@@ -126,11 +127,12 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
         if (admin) {
           const response = await api.get<PageState>(`/pages/${code}/editor`);
           if (current) {
+            const openEditor = startInEditor || pagePresentation(response.data, admin, false).startEditing;
             const definition = response.data.definition;
             resolvedIdentity.current = identity;
             setState(response.data);
             setDraft(definition);
-            setEditing(startInEditor || pagePresentation(response.data, admin, false).startEditing);
+            setEditing(openEditor);
             setPanel(definition.widgets.length ? 'widget' : startInEditor ? 'add' : 'style');
             if (startInEditor) setSelected(definition.widgets[0]?.id);
           }
@@ -178,6 +180,20 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const publishedVersion = state?.publishedVersion;
   const dataSignature = pageDataSignature(active);
   const filterSignature = JSON.stringify([filters,chartFilters,widgetFilters]);
+  useLayoutEffect(() => {
+    if (!editing || !draft || saving || sourceActive) return;
+    const {definition, merged} = mergeListFilters(draft);
+    if (!merged.size) return;
+    setDraft(definition);
+    setWidgetFilters({});
+    setPublishCheck(undefined);
+    const migratedSelection = selected && merged.get(selected);
+    if (migratedSelection) {
+      setSelected(migratedSelection);
+      setWidgetTab('data');
+    }
+  }, [draft, editing, saving, selected, sourceActive]);
+
   const refresh = useCallback(() => setRefreshKey(value => value + 1), []);
   useEffect(() => {
     if (editing || !publishedVersion) return;
@@ -294,13 +310,6 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     } catch (failure) { setError(errorText(failure));return false; }
     finally { setSaving(false); }
   };
-  const configureListFilter = () => {
-    if(!draft || !selected || saving || sourceActive)return;
-    const next=ensureListFilter(draft,selected,`filter-${Date.now()}-${Math.random().toString(36).slice(2,8)}`);
-    if(!next){message.info('请先绑定业务来源，页面最多支持 30 个组件');return;}
-    if(next.created)changeDraft(next.definition);
-    setSelected(next.filterId);setPanel('widget');setWidgetTab('data');
-  };
   const openBusiness = (tab:BusinessTab) => {
     if(saving)return;
     if(!sourceActive)sourceInitialTab.current=tab;
@@ -330,7 +339,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     window.addEventListener('resize',resize);window.visualViewport?.addEventListener('resize',resize);
     return ()=>{observer.disconnect();window.removeEventListener('resize',resize);window.visualViewport?.removeEventListener('resize',resize);};
   },[editing,sourceActive]);
-  const add = (type: WidgetType) => {
+  const add = (type: AddableWidgetType) => {
     if (!draft) return;
     const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     changeDraft({...draft, widgets: [...draft.widgets, newComponent(draft, id, type, fields[0]?.field_name)]});
@@ -345,7 +354,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const dropComponent = (event: React.DragEvent, target?: string) => {
     if (!editing || !draft) return;
     event.preventDefault(); event.stopPropagation();
-    const type = event.dataTransfer.getData('component/type') as WidgetType;
+    const type = event.dataTransfer.getData('component/type') as AddableWidgetType;
     if (Object.prototype.hasOwnProperty.call(componentNames, type)) add(type);
     else if (target) changeDraft(moveWidget(draft, event.dataTransfer.getData('component/id'), target));
   };
@@ -375,21 +384,24 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const beginEditing = async (next:Panel, id?:string, tab:WidgetTab='basic') => {
     if(saving||sourceActive)return;
     if(sourceEditor){setSourceEditor(undefined);sourceInitialTab.current=undefined;}
+    let selectedId = id || selected || draft?.widgets[0]?.id;
     if (!editing) {
       setSaving(true);setError('');
       try {
         const response=await api.get<PageState>('/pages/'+code+'/editor');
-        setState(response.data);setDraft(response.data.definition);setPast([]);setFuture([]);
-        setFilters({});setDataError('');setEditing(true);
+        const definition = response.data.definition;
+        selectedId = selectedId || definition.widgets[0]?.id;
+        setState(response.data);setDraft(definition);setPast([]);setFuture([]);
+        setFilters({});setWidgetFilters({});setDataError('');setEditing(true);
       } catch(failure){setError(errorText(failure));return;} finally{setSaving(false);}
     }
-    setPanel(next);setSelected(id||selected||draft?.widgets[0]?.id);setWidgetTab(tab);
+    setPanel(next);setSelected(selectedId);setWidgetTab(tab);
   };
   const contextWidget = active?.widgets.find(item => item.id === contextWidgetId);
   const sourceIsBusiness = source && !['analysis', 'analytics', 'dashboard', 'report'].includes(String(source.config?.assemblyKind));
   const openContextAction = async (key: string) => {
     setContextOpen(false);
-    if (key.startsWith('source:')) {await beginEditing(contextWidget ? 'widget' : 'data',contextWidget?.id);setSelected(contextWidget?.id);openBusiness(key.slice(7) as BusinessTab);return;}
+    if (key.startsWith('source:')) {await beginEditing(contextWidget ? 'widget' : 'data',contextWidget?.id);openBusiness(key.slice(7) as BusinessTab);return;}
     if(key==='edit'||key.startsWith('widget-'))await beginEditing(contextWidget?'widget':'style',contextWidget?.id,'basic');
     else await beginEditing(key as Panel);
   };
@@ -410,7 +422,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     if (item.type === 'record-filter') return source?.status === 'published' ? <FilterWidget key={`${source.id}:${item.id}`} widget={item} sourceId={source.id} onChange={value=>setWidgetFilters(previous=>({...previous,[item.id]:value}))}/> : <Alert type="info" message="请先发布来源业务表单" />;
     const query = componentQuery(active!, widgetFilters, chartFilters, item.id);
     if(!query.ready)return <Alert type="info" showIcon message="请先填写必填筛选条件并查询" description="关联的筛选组件校验通过后，将显示列表数据。" />;
-    if (item.type === 'record-list') return source?.status==='published' ? <DynamicPage key={`${item.id}:${source.id}`} formSlug={String(source.id)} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} display={item.showFilters === false ? 'list' : 'all'} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
+    if (item.type === 'record-list') return source?.status==='published' ? <RecordListWidget key={`${item.id}:${source.id}:${item.showFilters !== false}`} widget={item} sourceId={source.id} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
     if (loadingData) return <div className="component-widget-preview"><Spin /></div>;
     const widgetErrors = data?.widgetErrors?.[item.id] ?? data?.errors;
     if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用" description={dataError || widgetErrors?.join('；')} />;
@@ -431,6 +443,8 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const hasUnpublishedDraft = state && JSON.stringify(state.definition)!==JSON.stringify(state.publishedDefinition);
   const selectWidget = (id:string) => {if(!saving&&!sourceActive){setSelected(id);setPanel('widget');}};
   const errorNotice = error && <Alert type="error" showIcon message={error} />;
+  const onlyWidget = active?.widgets.length === 1 ? active.widgets[0] : undefined;
+  const fillList = !sourceActive && !workspace && onlyWidget?.type === 'record-list' && !onlyWidget.customHeight;
   const canvas = <main className={'analytics-workspace-canvas component-page-canvas component-filter-layout-'+(active?.style?.filterTheme??'toolbar')} aria-label="业务页面画布" tabIndex={admin?0:undefined}
     onContextMenuCapture={admin?event=>{
       const target=event.target instanceof Element?event.target:null;
@@ -447,7 +461,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
       </div>}
       {!active.widgets.length&&<div className="component-page-empty"><Typography.Title level={4}>空白页面</Typography.Title><Typography.Paragraph>{admin?'右键添加组件，开始搭建业务页面。':'此页面暂未添加组件。'}</Typography.Paragraph></div>}
       <div className="component-page-grid" onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event)}>
-        <Row gutter={[active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
+        <Row gutter={[fillList ? 0 : active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
           const appearance = item.appearance;
           const presentation = resolvePresentation(active, item);
           const titleAlign = appearance?.titleAlign ?? 'left';
@@ -482,7 +496,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
               onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
               onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:undefined}>
             {renderWidget(item)}
-            {editing&&!saving&&!sourceActive&&<ResizeHandle title={item.title} onCommit={size=>{if(draft)changeDraft({...draft,widgets:draft.widgets.map(widget=>widget.id===item.id?{...widget,...size}:widget)});}}/>}
+            {editing&&!saving&&!sourceActive&&item.type!=='record-filter'&&<ResizeHandle title={item.title} onCommit={size=>{if(draft)changeDraft({...draft,widgets:draft.widgets.map(widget=>widget.id===item.id?{...widget,...size}:widget)});}}/>}
           </WidgetFrame>
         </Col>;})}</Row>
       </div>
@@ -518,7 +532,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const headerActions = <div className="analytics-settings-history analytics-settings-history-inline"><Space size={0}>
     <Tooltip title="撤销"><Button type="text" aria-label="撤销" icon={<UndoOutlined />} disabled={!past.length||saving||sourceActive} onClick={undo} /></Tooltip>
     <Tooltip title="重做"><Button type="text" aria-label="重做" icon={<RedoOutlined />} disabled={!future.length||saving||sourceActive} onClick={redo} /></Tooltip>
-    <Tooltip title={panel==='widget'?'组件版本管理':'页面版本管理'}><Button type="text" aria-label={panel==='widget'?'组件版本管理':'页面版本管理'} icon={<HistoryOutlined />} loading={historyLoading} disabled={saving||historyLoading||sourceActive||(panel==='widget'&&(!selected||(widgetTab!=='basic'&&widgetTab!=='data')))} onClick={()=>void (panel==='widget'?openSectionHistory():openPageHistory())} /></Tooltip>
+    <Tooltip title={panel==='widget'?'组件版本管理':'页面版本管理'}><Button type="text" aria-label={panel==='widget'?'组件版本管理':'页面版本管理'} icon={<HistoryOutlined />} loading={historyLoading} disabled={saving||historyLoading||sourceActive||(panel==='widget'&&(!selected||selectedWidget?.type==='record-filter'||(widgetTab!=='basic'&&widgetTab!=='data')))} onClick={()=>void (panel==='widget'?openSectionHistory():openPageHistory())} /></Tooltip>
     <Tooltip title="保存草稿"><Button type="text" aria-label="保存草稿" icon={<SaveOutlined />} loading={saving} disabled={!dirty||saving||sourceActive} onClick={()=>void save(false)} /></Tooltip>
   </Space></div>;
   const footer = <>
@@ -527,11 +541,11 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     </div></div>
   </>;
   const sourceImpact=sourceActive&&draft&&sourceId?<SourceImpactNotice definition={draft} sourceId={sourceId} sourceName={source?.name||`数据源 #${sourceId}`} mode={sourceEditor==='flow'?'flow':'form'}/>:undefined;
-  return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')}>
+  return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')+(fillList?' component-page-fill-list':'')}>
     {!sourceActive&&<NavigationGuard enabled={dirty||saving} onBlocked={reportBlocked} />}
     <div className="analytics-workspace-body">
       <div className="component-page-preview">
-        <div hidden={sourceActive}>{admin?<Dropdown trigger={['contextMenu']} disabled={saving||sourceActive} open={contextOpen} onOpenChange={setContextOpen} overlayClassName="analytics-context-menu" menu={{
+        <div className="component-page-canvas-host" hidden={sourceActive}>{admin?<Dropdown trigger={['contextMenu']} disabled={saving||sourceActive} open={contextOpen} onOpenChange={setContextOpen} overlayClassName="analytics-context-menu" menu={{
           'aria-label':contextWidget?contextWidget.title+'配置菜单':workspace?'工作台配置菜单':'表单页面配置菜单',
           items:[
             ...buildAnalyticsContextMenu({widgetTitle:contextWidget?.title,pageLabel:workspace?'工作台':'页面',sections}),
@@ -544,7 +558,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
       </div>
       {editing&&draft&&<div className="analytics-settings-page">
         <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
-          sourceImpact={sourceImpact} sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,footer:setSourceFooterTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} onListFilter={configureListFilter} sourceIsBusiness={Boolean(sourceIsBusiness)}
+          sourceImpact={sourceImpact} sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,footer:setSourceFooterTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} sourceIsBusiness={Boolean(sourceIsBusiness)}
           onPanel={setPanel} onTab={changeWidgetTab} onChange={changeDraft} onAdd={add} onSelect={selectWidget}
           onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} footer={footer} />
       </div>}

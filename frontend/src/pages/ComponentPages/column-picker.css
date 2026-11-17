@@ -3,7 +3,7 @@
 .component-inline-columns-tools>.ant-input-affix-wrapper {min-width:0;flex:1;font-size:11px;}
 .component-inline-columns-tools>.ant-btn {flex-shrink:0;width:24px;padding:0;}
 .component-inline-columns-status {display:flex;justify-content:space-between;gap:8px;padding:3px 2px 6px;font-size:11px;color:var(--mf-muted);}
-.component-inline-columns-list {max-height:321px;overflow:auto;overscroll-behavior:contain;border-top:1px solid var(--property-border);}
+.component-inline-columns-list {border-top:1px solid var(--property-border);}
 .component-inline-column {display:flex;align-items:center;gap:4px;height:32px;min-height:32px;box-sizing:border-box;padding:3px 2px;border-bottom:1px solid color-mix(in srgb,var(--property-border),transparent 55%);font-size:12px;}
 .component-inline-column:hover {background:var(--property-soft);}
 .component-inline-column-handle {color:var(--mf-faint);font-size:11px;cursor:grab;flex-shrink:0;}
@@ -23,6 +23,8 @@
 .component-inline-columns-table-heading>span:not(:first-child) {text-align:center;}
 .component-inline-column>.component-inline-column-check {display:flex;justify-content:center;width:30px;flex:0 0 30px;}
 
-.component-filter-field-picker .component-inline-columns-table-heading {grid-template-columns:minmax(0,1fr) 30px;}
-.component-filter-control-mode {width:86px;flex:none;}
+.component-filter-field-picker {--filter-mode-width:86px;}
+.component-filter-field-picker .component-inline-columns-table-heading {grid-template-columns:minmax(0,1fr) 30px var(--filter-mode-width);}
+.component-inline-column-mode {flex:0 0 var(--filter-mode-width);min-width:0;text-align:center;color:var(--mf-muted);font-size:11px;}
+.component-inline-column-mode .component-filter-control-mode {width:100%;}
 .component-filter-control-mode .ant-select-selection-item {font-size:11px;}

@@ -351,6 +351,7 @@ export interface RecordListComponentProps {
   toolbarTargetId?: string;
   filterSettings?: FilterSettings;
   fieldControls?: Record<string, FilterControlMode>;
+  filterLayout?: {rows:number; columns:number};
   listSettings?: ListSettings;
   tableDensity?: 'compact' | 'standard' | 'comfortable' | null;
   display?: 'all' | 'filters' | 'list';
@@ -363,7 +364,7 @@ export interface RecordListComponentProps {
   readOnly?: boolean;
   disableRowAction?: boolean;
 }
-export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', filterSettings, fieldControls, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
+export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', filterSettings, fieldControls, filterLayout, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
   const filterFormId = useId();
   const allowedFilterActions = filterButtonActions(filterSettings);
   const canQuery = allowedFilterActions.includes('query');
@@ -1094,7 +1095,10 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         }}
       >
         {keywordInHeader&&toolbarTarget&&createPortal(<Space size={6} wrap>{keywordField}{filterActions}</Space>,toolbarTarget)}
-        <div className="dynamic-filter-fields">
+        <div className="dynamic-filter-fields" style={filterLayout ? {
+          '--filter-columns': filterLayout.columns,
+          gridTemplateRows: filterLayout.rows ? `repeat(${filterLayout.rows}, minmax(56px, auto))` : undefined,
+        } as React.CSSProperties : undefined}>
         {!keywordInHeader&&keywordField}
         {activeFilters.map((filter) => (
           <Form.Item key={filter.id} name={filter.id} label={filter.label} rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>

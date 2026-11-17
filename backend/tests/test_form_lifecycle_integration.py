@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import forms, workflow
+from app.services import form_admin
 from app.api.deps import get_current_user, get_db
 from app.models.relational import (
     Base, Tenant, User, Role, UserRole, Form, FormField, FormPermission,
@@ -54,6 +55,7 @@ async def test_business_draft_rejection_resubmit_approval_and_personal_history(t
             app.dependency_overrides[get_db] = database
             # Generic audit used to open another session; isolate it from the fixture.
             monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+            monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
             monkeypatch.setattr(workflow, 'write_audit_log', AsyncMock())
             async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
                 response = await client.post('/forms/1/records', json={'data': {'status': 'Open'}})

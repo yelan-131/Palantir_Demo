@@ -32,7 +32,7 @@ def reference_payload(page, state, definition, metric_id):
 
 
 async def impact_pages(db, user, metric_id, number, metric):
-    from app.api.component_pages import PageDefinition, validate_publish, validate_draft_sources
+    from app.services.component_page_definitions import PageDefinition, validate_publish, validate_draft_sources
     pages = await reference_pages(db, user['tenant_id'], metric_id, lock_pages=True)
     plans, refs, signatures, errors = [], [], [], []
     for page, states in pages:

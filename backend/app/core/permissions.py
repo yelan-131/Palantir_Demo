@@ -11,12 +11,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
-from app.api.deps import current_tenant_id
+from app.core.principal import current_tenant_id
 from app.services.iam import condition_matches
 
 
@@ -297,18 +295,6 @@ async def evaluate_form_permission(
     return {"allowed": False, "source": "default", "reason": "no matching allow", "matched": matched + form_matched}
 
 
-def require_permission(resource_type: str, resource_key: str, action: str):
-    async def checker(
-        user: dict = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
-    ) -> dict:
-        if not await has_permission(user, resource_type, resource_key, action, db):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Permission denied")
-        return user
-
-    return checker
-
-
 def _binding_allows(binding, action: str) -> bool:
     if action in {"view", "read"}:
         return bool(binding.enabled)
@@ -400,16 +386,3 @@ async def allowed_form_fields(user: dict, form_id: int, action: str, fields: lis
     from app.services.designer_permissions import field_settings
     settings=await field_settings(db,user,fields,cache=cache)
     return allowed-{name for name,value in settings.items() if value.get("hidden")}
-
-
-def require_form_permission(action: str):
-    async def checker(
-        form_id: int,
-        user: dict = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
-    ) -> dict:
-        if not await has_form_permission(user, form_id, action, db):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Form permission denied")
-        return user
-
-    return checker

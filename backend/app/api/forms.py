@@ -16,12 +16,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form as FormParam
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._model_driven_shared import assert_safe_identifier
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
-from app.services.application_menus import (lock_application, menu_nodes, validate_parent, validate_tree, sync_menu_default, set_application_default)
+from app.services.application_menus import lock_application, menu_nodes, validate_tree
 from app.config import settings
 from app.database import DB_TYPE
 from app.core.audit import write_audit_log
@@ -32,7 +31,7 @@ from app.services.tenant_onboarding import assert_tenant_quota
 # Storage-agnostic form engine (naming/validation/encoding/query/physical/
 # sequences) extracted from this module; names are re-imported so existing
 # call sites and tests (`from app.api.forms import ...`) keep working.
-from app.api.form_engine import (  # noqa: F401  (re-exported names)
+from app.services.form_engine import (  # noqa: F401  (re-exported names)
     ALLOWED_RECORD_STATUSES,
     ANALYTICS_FORM_KINDS,
     PHYSICAL_FORM_STORAGE_MODES,
@@ -121,20 +120,20 @@ from app.services.form_schemas import (  # noqa: F401; compatibility exports
     FormApplicationSubmit,
 )
 
-from app.services.form_definition import (  # noqa: F401; compatibility exports
+from app.services.form_definition import (
     _uid,
     _ensure_form_permission,
-    _validate_field_name,
     _normalize_field_type,
     _normalize_form_field_data,
+    _validate_field_name,
     _form_payload,
     _field_payload,
+    _permission_payload,
     _permission_design_from_config,
     _form_version_payload,
     _field_cfg_value,
     _field_cfg_name,
     _field_cfg_label,
-    _field_cfg_is_active,
     _field_cfg_allowed_values,
     _field_cfg_value_is_compatible,
     _record_field_impact,
@@ -145,11 +144,22 @@ from app.services.form_definition import (  # noqa: F401; compatibility exports
     _build_publish_preview,
     _build_publish_preview_inner,
     _layout_payload,
-    _action_payload,
-    _permission_payload,
-    _workflow_binding_payload,
     INITIAL_FORM_VERSION,
     FIELD_TYPE_ALIASES,
+)
+from app.services.form_workflow_start import (
+    _protect_pending_form_record,
+    _start_form_workflows,
+)
+from app.services.application_menu_nodes import (
+    _create_application_menu_node,
+    _delete_application_menu_node,
+    _menu_node_payload,
+    _update_application_menu_node,
+)
+from app.services import form_admin as form_admin_service
+from app.services.form_published_payload import (
+    _published_form_payload,
 )
 
 router = APIRouter()
@@ -258,77 +268,6 @@ async def form_reference_options(form_id: int, field_name: str, body: FormRulePr
 logger = logging.getLogger(__name__)
 
 INITIAL_WORKFLOW_VERSION = "v1"
-
-
-MENU_NODE_PERMISSION_PREFIX = "menu_node:"
-
-
-def _menu_node_permission_key(node_id: int) -> str:
-    return f"{MENU_NODE_PERMISSION_PREFIX}{node_id}"
-
-
-def _entry_role_ids_from_config(config: Optional[dict]) -> list[int]:
-    if not isinstance(config, dict) or config.get("permission_mode") != "custom":
-        return []
-    role_ids = config.get("role_ids")
-    if not isinstance(role_ids, list):
-        return []
-    normalized: list[int] = []
-    for role_id in role_ids:
-        try:
-            value = int(role_id)
-        except (TypeError, ValueError):
-            continue
-        if value > 0 and value not in normalized:
-            normalized.append(value)
-    return normalized
-
-
-def _normalized_menu_node_config(config: Optional[dict]) -> dict:
-    normalized = dict(config or {})
-    if "permission_mode" in normalized or "role_ids" in normalized:
-        normalized["permission_synced"] = True
-    normalized.pop("permission_rules", None)
-    return normalized
-
-
-async def _sync_menu_node_entry_permissions(db: AsyncSession, node) -> None:
-    """Persist menu entry role shortcuts into the unified role permission table."""
-    from app.models.relational import RolePermission
-
-    permission_key = _menu_node_permission_key(node.id)
-    await db.execute(
-        RolePermission.__table__.delete().where(
-            RolePermission.tenant_id == node.tenant_id,
-            RolePermission.resource_type == "menu",
-            RolePermission.resource_key == permission_key,
-        )
-    )
-    for role_id in _entry_role_ids_from_config(node.config):
-        db.add(RolePermission(
-            tenant_id=node.tenant_id,
-            role_id=role_id,
-            resource_type="menu",
-            resource_key=permission_key,
-            action="view",
-            effect="allow",
-            data_scope="all",
-            condition_json={"managed_by": "application_menu_node", "node_id": node.id},
-            priority=100,
-            enabled=bool(node.visible),
-        ))
-
-
-async def _delete_menu_node_entry_permissions(db: AsyncSession, node) -> None:
-    from app.models.relational import RolePermission
-
-    await db.execute(
-        RolePermission.__table__.delete().where(
-            RolePermission.tenant_id == node.tenant_id,
-            RolePermission.resource_type == "menu",
-            RolePermission.resource_key == _menu_node_permission_key(node.id),
-        )
-    )
 
 
 def _validate_form_code(code: str) -> None:
@@ -453,18 +392,6 @@ def _application_form_payload(binding) -> dict:
     }
 
 
-def _workflow_instance_title(form, record_payload: dict, binding_config: Optional[dict]) -> str:
-    binding_config = binding_config or {}
-    data = record_payload.get("data") if isinstance(record_payload, dict) else {}
-    title_field = binding_config.get("title_field") or binding_config.get("titleField")
-    if title_field and isinstance(data, dict) and data.get(str(title_field)):
-        return str(data[str(title_field)])
-    for key in ("title", "name", "material_code", "material_no", "code", "alertId", "risk_no"):
-        if isinstance(data, dict) and data.get(key):
-            return f"{form.name} - {data[key]}"
-    return f"{form.name} #{record_payload.get('id')}"
-
-
 async def _runtime_submission_available(db, tenant_id, form_id, trigger_action="submit"):
     from app.models.relational import WorkflowBinding, WorkflowDef
     return bool(await db.scalar(
@@ -474,169 +401,6 @@ async def _runtime_submission_available(db, tenant_id, form_id, trigger_action="
                WorkflowDef.tenant_id == tenant_id, WorkflowDef.status.in_(["published", "active"]))
         .limit(1)
     ))
-
-
-async def _start_form_workflows(
-    db: AsyncSession,
-    *,
-    tenant_id: int,
-    form,
-    record_payload: dict,
-    user: dict,
-    trigger_action: str = "submit",
-) -> list[dict]:
-    if form.code == "material-application" and trigger_action != "manual_submit":
-        return []
-    from app.api.workflow import (
-        _add_approval_notifications,
-        _find_first_approval_step,
-        _resolve_step_approver_ids,
-        _set_current_assignees,
-        _workflow_config_steps,
-    )
-    from app.models.relational import WorkflowApproval, WorkflowBinding, WorkflowDef, WorkflowDefVersion, WorkflowInstance
-
-    bindings = (await db.execute(
-        select(WorkflowBinding)
-        .where(
-            WorkflowBinding.tenant_id == tenant_id,
-            WorkflowBinding.form_id == form.id,
-            WorkflowBinding.trigger_action == trigger_action,
-            WorkflowBinding.enabled == True,
-        )
-        .order_by(WorkflowBinding.id)
-    )).scalars().all()
-    if not bindings:
-        return []
-
-    started: list[dict] = []
-    initiator_id = current_user_id(user)
-    form_data = record_payload.get("data") if isinstance(record_payload.get("data"), dict) else {}
-    for binding in bindings:
-        workflow_def = await db.get(WorkflowDef, binding.workflow_id)
-        if not workflow_def or workflow_def.tenant_id != tenant_id or workflow_def.status not in {"published", "active"}:
-            raise HTTPException(409, "此表单的审批流程尚未发布，请联系管理员配置")
-        snapshot = await db.scalar(select(WorkflowDefVersion).where(
-            WorkflowDefVersion.tenant_id == tenant_id,
-            WorkflowDefVersion.workflow_id == workflow_def.id,
-            WorkflowDefVersion.version == int(workflow_def.version or 1),
-            WorkflowDefVersion.status.in_(["published", "active"]),
-        ))
-        raw_config = snapshot.config if snapshot else workflow_def.config
-        config = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
-        managed = str((config or {}).get("domainCode", "")).startswith("form-approval:") or (config or {}).get("domainCode") == "material-application-approval"
-        if managed and not snapshot:
-            raise HTTPException(409, "审批流程缺少已发布版本，请重新发布配置")
-        steps = _workflow_config_steps(config if isinstance(config, dict) else {}, form_data)
-        first_step_index = _find_first_approval_step(steps) if steps else 0
-        current_step = steps[first_step_index] if steps and first_step_index < len(steps) else None
-        variables = {
-            "form_id": form.id,
-            "form_code": form.code,
-            "record_id": record_payload.get("id"),
-            "trigger_action": trigger_action,
-        }
-        if managed:
-            for step in steps:
-                if step.get("type") != "approval":
-                    continue
-                stage_ids = await _resolve_step_approver_ids(db, tenant_id, step, form_data, variables,
-                                                           initiator_id, None, allow_fallback=False)
-                if not stage_ids:
-                    raise HTTPException(409, f"审批节点 {step.get('name', '')} 没有有效审批人，请重新配置")
-            if not current_step or current_step.get("type") != "approval":
-                raise HTTPException(409, "审批流程没有有效审批节点")
-        approval_groups: list[dict] = []
-        approver_ids = await _resolve_step_approver_ids(
-            db,
-            tenant_id,
-            current_step or {},
-            form_data,
-            variables,
-            initiator_id,
-            initiator_id,
-            allow_fallback=not managed,
-            approval_groups=approval_groups,
-        ) if current_step and current_step.get("type") == "approval" else []
-        state = {
-            "current_node": current_step.get("node_id", current_step.get("name", "start")) if current_step else "end",
-            "current_step": first_step_index,
-            "resource_type": "dynamic_record",
-            "resource_id": record_payload.get("id"),
-            "variables": variables,
-        }
-        if config.get('nodes') and not config.get('steps'):
-            state['execution_node_ids'] = [step['node_id'] for step in steps]
-        _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
-        title = _workflow_instance_title(form, record_payload, binding.config)
-        from app.services.workflow_dispatch import enqueue
-        enqueue(state, steps, 0, first_step_index if any(step.get('type')=='approval' for step in steps) else len(steps))
-        if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps):
-            state.update(current_node='end',current_step=max(0,len(steps)-1))
-        instance = WorkflowInstance(
-            tenant_id=tenant_id,
-            workflow_id=workflow_def.id,
-            workflow_version=int(workflow_def.version or 1),
-            title=title,
-            initiator_id=initiator_id,
-            form_data=json.dumps(form_data, ensure_ascii=False, default=str),
-            workflow_state=json.dumps(state, ensure_ascii=False, default=str),
-            status="approved" if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps) else "pending",
-        )
-        db.add(instance)
-        await db.flush()
-        if current_step and current_step.get("type") == "approval":
-            for approver_id in approver_ids:
-                db.add(WorkflowApproval(
-                    instance_id=instance.id,
-                    approver_id=approver_id,
-                    node_id=current_step.get("node_id", current_step.get("name", "")),
-                ))
-            await _add_approval_notifications(db, tenant_id, approver_ids, title, instance.id)
-        started.append({
-            "instance_id": instance.id,
-            "workflow_id": workflow_def.id,
-            "status": instance.status,
-            "current_step": first_step_index,
-            "current_step_name": current_step.get("name") if current_step else None,
-            "approver_ids": approver_ids,
-        })
-    return started
-
-
-def _published_form_payload(form, version, *, applications: Optional[list] = None) -> dict:
-    snapshot = version.snapshot or {}
-    form_snapshot = snapshot.get("form") or {}
-    config = form_snapshot.get("config") or form.config or {}
-    live_config = form.config or {}
-    snapshot_view = config.get("viewConfig") if isinstance(config, dict) else None
-    live_view = live_config.get("viewConfig") if isinstance(live_config, dict) else None
-    if (
-        isinstance(live_view, dict)
-        and (
-            not isinstance(snapshot_view, dict)
-            or not (snapshot_view.get("table") or {}).get("columns")
-            or (not (snapshot_view.get("filters") or []) and (live_view.get("filters") or []))
-        )
-    ):
-        config = {**config, "viewConfig": live_view}
-        if live_config.get("formLayout") and not config.get("formLayout"):
-            config["formLayout"] = live_config.get("formLayout")
-        if live_config.get("viewConfigMeta"):
-            config["viewConfigMeta"] = live_config.get("viewConfigMeta")
-    payload = {
-        **_form_payload(form),
-        **{key: value for key, value in form_snapshot.items() if key in {"name", "code", "description", "model_id", "table_name", "storage_mode", "status", "owner_id", "config"}},
-        "schema_mode": "published",
-        "published_version": version.version,
-        "published_at": version.published_at.isoformat() if version.published_at else None,
-        "fields": [field for field in snapshot.get("fields", []) if _field_cfg_is_active(field)],
-        "permission_design": _permission_design_from_config(config),
-    }
-    payload["config"] = config
-    if applications is not None:
-        payload["applications"] = applications
-    return payload
 
 
 async def _runtime_permission_summary(user: dict, form_id: int, db: AsyncSession) -> dict:
@@ -703,72 +467,6 @@ async def _runtime_field_permission_summary(user: dict, form, fields: list, db: 
                     if name in summary and isinstance(field_config, dict):
                         summary[name]["required"] = summary[name]["required"] or bool(field_config.get("required"))
     return summary
-
-
-async def _ensure_application_form_binding(db: AsyncSession, application_id: int, form_id: int) -> None:
-    from app.models.relational import ApplicationForm
-    from app.models.relational import Form
-
-    form = await db.get(Form, form_id)
-    tenant_id = getattr(form, "tenant_id", None)
-    existing = await db.scalar(
-        select(ApplicationForm).where(
-            ApplicationForm.application_id == application_id,
-            ApplicationForm.form_id == form_id,
-            ApplicationForm.tenant_id == tenant_id,
-        )
-    )
-    if existing:
-        if not existing.enabled:
-            existing.enabled = True
-        return
-    db.add(ApplicationForm(tenant_id=tenant_id, application_id=application_id, form_id=form_id))
-
-
-async def _menu_node_payload(db: AsyncSession, node) -> dict:
-    from app.models.relational import RolePermission
-
-    config = dict(node.config or {})
-    permission_key = _menu_node_permission_key(node.id)
-    role_rows = (await db.execute(
-        select(RolePermission.role_id).where(
-            RolePermission.tenant_id == node.tenant_id,
-            RolePermission.resource_type == "menu",
-            RolePermission.resource_key == permission_key,
-            RolePermission.effect == "allow",
-            RolePermission.enabled.is_(True),
-        )
-    )).fetchall()
-    synced_role_ids = sorted({int(row[0]) for row in role_rows})
-    # Hiding an entry disables its grants, but must retain the configured role
-    # selection so a refresh/edit/show cycle does not erase the policy.
-    if not node.visible and config.get("permission_synced"):
-        synced_role_ids = _entry_role_ids_from_config(config)
-    if config.get("permission_synced"):
-        config["role_ids"] = synced_role_ids
-        config["permission_mode"] = "custom" if synced_role_ids else config.get("permission_mode", "inherit")
-    elif synced_role_ids:
-        config["role_ids"] = synced_role_ids
-        config["permission_mode"] = "custom"
-    payload = {
-        "id": node.id,
-        "application_id": node.application_id,
-        "parent_id": node.parent_id,
-        "node_type": node.node_type,
-        "title": node.title,
-        "icon": node.icon,
-        "form_id": node.form_id,
-        "page_code": (node.route_path or "").removeprefix("/pages/") if node.node_type == "page" else None,
-        "route_path": node.route_path,
-        "visible": node.visible,
-        "default_entry": node.default_entry,
-        "sort_order": node.sort_order,
-        "config": config,
-    }
-    from app.services.application_menus import edit_token
-    payload["edit_token"] = edit_token(payload)
-    return payload
-
 
 
 def _default_view_config(fields: list[dict]) -> dict:
@@ -1032,50 +730,7 @@ async def copy_form(
     user: dict = Depends(require_admin),
 ):
     """Copy design metadata atomically; business records and versions stay separate."""
-    from app.models.relational import Form, FormField, FormLayout, FormAction, FormPermission
-
-    tenant_id = current_tenant_id(user)
-    source = await db.get(Form, form_id)
-    if not source or source.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    if await db.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == body.code)):
-        raise HTTPException(409, "Form code already exists")
-    config = copy.deepcopy(source.config or {})
-    config.pop("publishedSchemaVersion", None)
-    config.pop("publishedAt", None)
-    if config.get("viewConfigMeta"):
-        config["viewConfigMeta"] = {"status": "draft"}
-    target = Form(
-        tenant_id=tenant_id, name=body.name, code=body.code,
-        description=source.description, model_id=source.model_id,
-        storage_mode="physical_table", status="draft", owner_id=_uid(user), config=config,
-        table_name=_physical_table_name_for_form(tenant_id, body.code, config),
-    )
-    db.add(target)
-    await db.flush()
-    copied_fields = []
-    for model in (FormField, FormLayout, FormAction, FormPermission):
-        rows = (await db.scalars(select(model).where(
-            model.tenant_id == tenant_id, model.form_id == form_id,
-        ))).all()
-        for row in rows:
-            values = {column.name: copy.deepcopy(getattr(row, column.name))
-                      for column in model.__table__.columns
-                      if column.name not in {"id", "form_id", "created_at", "updated_at"}}
-            cloned = model(form_id=target.id, **values)
-            db.add(cloned)
-            if model is FormField:
-                copied_fields.append(cloned)
-    await db.flush()
-    await _ensure_physical_form_table(db, target, copied_fields)
-    await db.commit()
-    await db.refresh(target)
-    await write_audit_log(
-        tenant_id=tenant_id, user_id=current_user_id(user), action="create",
-        resource_type="form", resource_id=target.id,
-        new_values={"copied_from": form_id, "code": body.code},
-    )
-    return {"data": _form_payload(target, fields=copied_fields)}
+    return await form_admin_service.copy_form(form_id=form_id, body=body, db=db, user=user)
 
 
 @router.get("/applications/{application_id}/forms")
@@ -1179,24 +834,6 @@ async def list_application_menu_nodes(
     return {"data": [await _menu_node_payload(db, node) for node in nodes]}
 
 
-async def _set_menu_page_target(db: AsyncSession, user: dict, values: dict, node=None) -> None:
-    from app.api.component_pages import find_page, published
-
-    page_code = values.pop("page_code", None)
-    if page_code is not None:
-        if values.get("form_id") is not None:
-            raise HTTPException(422, "请选择一个菜单目标")
-        page = await find_page(db, user, page_code)
-        if await published(db, page) is None:
-            raise HTTPException(409, "请先发布目标页面")
-        values.update(node_type="page", form_id=None, route_path=f"/pages/{page.code}")
-    elif values.get("node_type") == "page" or (
-        node is not None and node.node_type == "page"
-        and {"node_type", "form_id", "route_path"}.intersection(values)
-    ):
-        raise HTTPException(422, "请选择目标页面")
-
-
 @router.post("/applications/{application_id}/menu-nodes")
 async def create_application_menu_node(
     application_id: int,
@@ -1208,40 +845,6 @@ async def create_application_menu_node(
 
     await lock(db, current_tenant_id(user))
     return await _create_application_menu_node(application_id, body, db, user)
-
-
-async def _create_application_menu_node(application_id, body, db, user, *, defer_commit=False):
-    from app.models.relational import Application, ApplicationMenuNode, Form
-
-    tenant_id = current_tenant_id(user)
-    app = await lock_application(db, tenant_id, application_id)
-    form = await db.get(Form, body.form_id) if body.form_id is not None else None
-    if body.form_id is not None and (not form or form.tenant_id != tenant_id):
-        raise HTTPException(404, "Form not found")
-    await validate_parent(db, app, body.parent_id)
-
-    values = body.model_dump()
-    await _set_menu_page_target(db, user, values)
-    values["config"] = _normalized_menu_node_config(values.get("config"))
-    if values.get("form_id") and not values.get("route_path"):
-        form_config = form.config or {}
-        form_kind = str(form_config.get("assemblyKind") or form_config.get("kind") or form_config.get("type") or "").lower()
-        values["route_path"] = (
-            f"/program/{form.code}"
-            if form_kind in {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
-            else f"/dynamic/{form.code}"
-        )
-    node = ApplicationMenuNode(tenant_id=tenant_id, application_id=application_id, **values)
-    db.add(node)
-    await db.flush()
-    await sync_menu_default(db, app, node)
-    await _sync_menu_node_entry_permissions(db, node)
-    if node.form_id is not None:
-        await _ensure_application_form_binding(db, application_id, node.form_id)
-    if not defer_commit:
-        await db.commit()
-    await db.refresh(node)
-    return {"data": await _menu_node_payload(db, node)}
 
 
 class MenuOrderItem(BaseModel):
@@ -1293,46 +896,6 @@ async def update_application_menu_node(
     return await _update_application_menu_node(application_id, node_id, body, db, user)
 
 
-async def _update_application_menu_node(application_id, node_id, body, db, user):
-    from app.models.relational import ApplicationMenuNode, Form
-
-    tenant_id = current_tenant_id(user)
-    app = await lock_application(db, tenant_id, application_id)
-    node = await db.get(ApplicationMenuNode, node_id)
-    if not node or node.application_id != application_id or node.tenant_id != tenant_id:
-        raise HTTPException(404, "Menu node not found")
-    from app.services.application_menus import check_edit_token
-    current = await _menu_node_payload(db, node)
-    check_edit_token(body.expected_token, current["edit_token"])
-    updates = body.model_dump(exclude_unset=True, exclude={"expected_token"})
-    await _set_menu_page_target(db, user, updates, node)
-    form = await db.get(Form, updates["form_id"]) if "form_id" in updates and updates["form_id"] is not None else None
-    if "form_id" in updates and updates["form_id"] is not None and (not form or form.tenant_id != tenant_id):
-        raise HTTPException(404, "Form not found")
-    if "parent_id" in updates:
-        await validate_parent(db, app, updates["parent_id"], node.id)
-    was_default = node.default_entry
-    if updates.get("form_id") and not updates.get("route_path"):
-        form_config = form.config or {}
-        form_kind = str(form_config.get("assemblyKind") or form_config.get("kind") or form_config.get("type") or "").lower()
-        updates["route_path"] = (
-            f"/program/{form.code}"
-            if form_kind in {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
-            else f"/dynamic/{form.code}"
-        )
-    if "config" in updates:
-        updates["config"] = _normalized_menu_node_config(updates.get("config"))
-    for key, value in updates.items():
-        setattr(node, key, value)
-    await sync_menu_default(db, app, node, was_default)
-    await _sync_menu_node_entry_permissions(db, node)
-    if node.form_id is not None:
-        await _ensure_application_form_binding(db, application_id, node.form_id)
-    await db.commit()
-    await db.refresh(node)
-    return {"data": await _menu_node_payload(db, node)}
-
-
 @router.delete("/applications/{application_id}/menu-nodes/{node_id}")
 async def delete_application_menu_node(
     application_id: int,
@@ -1344,30 +907,6 @@ async def delete_application_menu_node(
 
     await lock(db, current_tenant_id(user))
     return await _delete_application_menu_node(application_id, node_id, db, user)
-
-
-async def _delete_application_menu_node(application_id, node_id, db, user, *, defer_commit=False):
-    from app.models.relational import ApplicationMenuNode
-
-    tenant_id = current_tenant_id(user)
-    app = await lock_application(db, tenant_id, application_id)
-    node = await db.get(ApplicationMenuNode, node_id)
-    if not node or node.application_id != application_id or node.tenant_id != tenant_id:
-        raise HTTPException(404, "Menu node not found")
-    nodes = await menu_nodes(db, app)
-    siblings = [item for item in nodes if item.parent_id == node.parent_id and item.id != node.id]
-    sort_order = max((item.sort_order for item in siblings), default=-1) + 1
-    for child in sorted((item for item in nodes if item.parent_id == node.id), key=lambda item: (item.sort_order, item.id)):
-        child.parent_id = node.parent_id
-        child.sort_order = sort_order
-        sort_order += 1
-    if node.default_entry:
-        await set_application_default(db, app, "/")
-    await _delete_menu_node_entry_permissions(db, node)
-    await db.delete(node)
-    if not defer_commit:
-        await db.commit()
-    return {"ok": True}
 
 
 @router.get("/{form_id}/publish/preview")
@@ -1501,47 +1040,7 @@ async def update_form(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form
-
-    tenant_id = current_tenant_id(user)
-    updates = body.model_dump(exclude_unset=True, exclude={"expected_token"})
-    from app.services.field_uniqueness import lock
-    from app.services.application_menus import form_edit_token, check_edit_token
-    await lock(db, tenant_id)
-    form = await db.scalar(select(Form).where(
-        Form.id == form_id, Form.tenant_id == tenant_id,
-    ).with_for_update().execution_options(populate_existing=True))
-    if not form:
-        raise HTTPException(404, "Form not found")
-    check_edit_token(body.expected_token, form_edit_token(form))
-    if 'config' in updates:
-        await db.refresh(form)
-        current_config = form.config or {}
-        analytics_meta = current_config.get('analyticsDesignMeta') or {}
-        if (analytics_meta.get('managedBy') == 'analytics-editor'
-                and (isinstance(current_config.get('analyticsDesign'), dict)
-                     or await _latest_form_version(db, tenant_id, form_id) is not None)):
-            incoming_config = updates['config'] or {}
-            if any(incoming_config.get(key) != current_config.get(key)
-                   for key in ('analyticsDesign', 'analyticsDesignDraft', 'analyticsDesignMeta')):
-                raise HTTPException(409, '看板配置已由看板编辑器管理，请重新加载表单设置；修改看板请从看板编辑器操作')
-    old_values = _form_payload(form)
-    if updates.get("table_name"):
-        _validate_physical_table_name(tenant_id, updates["table_name"])
-    for key, value in updates.items():
-        setattr(form, key, value)
-    await db.commit()
-    await db.refresh(form)
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="update",
-        resource_type="form",
-        resource_id=form.id,
-        old_values=old_values,
-        new_values=updates,
-    )
-    return {"data": _form_payload(form)}
+    return await form_admin_service.update_form(form_id=form_id, body=body, db=db, user=user)
 
 
 @router.delete("/{form_id}")
@@ -1550,43 +1049,7 @@ async def delete_form(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import ApplicationForm, ApplicationMenuNode, Form
-
-    tenant_id = current_tenant_id(user)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    if form.status not in {"draft"}:
-        raise HTTPException(409, "Only draft forms can be deleted")
-
-    binding_count = await db.scalar(
-        select(func.count(ApplicationForm.id)).where(
-            ApplicationForm.form_id == form_id,
-            ApplicationForm.tenant_id == tenant_id,
-        )
-    ) or 0
-    menu_binding_count = await db.scalar(
-        select(func.count(ApplicationMenuNode.id)).where(
-            ApplicationMenuNode.form_id == form_id,
-            ApplicationMenuNode.tenant_id == tenant_id,
-        )
-    ) or 0
-    if binding_count or menu_binding_count:
-        raise HTTPException(409, "Form is bound to an application menu")
-
-    old_values = _form_payload(form)
-    await db.delete(form)
-    await db.commit()
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="delete",
-        resource_type="form",
-        resource_id=form_id,
-        old_values=old_values,
-        new_values={"deleted": True},
-    )
-    return {"data": {"id": form_id, "deleted": True}}
+    return await form_admin_service.delete_form(form_id=form_id, db=db, user=user)
 
 
 @router.post("/{form_id}/fields")
@@ -1651,19 +1114,7 @@ async def list_form_actions(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    from app.models.relational import Form, FormAction
-
-    tenant_id = current_tenant_id(user)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    await _ensure_form_permission(db, user, form_id, "view")
-    actions = (await db.execute(
-        select(FormAction)
-        .where(FormAction.form_id == form_id, FormAction.tenant_id == tenant_id)
-        .order_by(FormAction.sort_order, FormAction.id)
-    )).scalars().all()
-    return {"data": [_action_payload(action) for action in actions]}
+    return await form_admin_service.list_form_actions(form_id=form_id, db=db, user=user)
 
 
 @router.post("/{form_id}/actions")
@@ -1673,18 +1124,7 @@ async def create_form_action(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form, FormAction
-
-    tenant_id = current_tenant_id(user)
-    assert_safe_identifier(body.action_key)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    action = FormAction(tenant_id=tenant_id, form_id=form_id, **body.dict())
-    db.add(action)
-    await db.commit()
-    await db.refresh(action)
-    return {"data": _action_payload(action)}
+    return await form_admin_service.create_form_action(form_id=form_id, body=body, db=db, user=user)
 
 
 @router.put("/{form_id}/actions/{action_id}")
@@ -1695,17 +1135,7 @@ async def update_form_action(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import FormAction
-
-    tenant_id = current_tenant_id(user)
-    action = await db.get(FormAction, action_id)
-    if not action or action.form_id != form_id or action.tenant_id != tenant_id:
-        raise HTTPException(404, "Action not found")
-    for key, value in body.dict(exclude_unset=True).items():
-        setattr(action, key, value)
-    await db.commit()
-    await db.refresh(action)
-    return {"data": _action_payload(action)}
+    return await form_admin_service.update_form_action(form_id=form_id, action_id=action_id, body=body, db=db, user=user)
 
 
 @router.delete("/{form_id}/actions/{action_id}")
@@ -1715,15 +1145,7 @@ async def delete_form_action(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import FormAction
-
-    tenant_id = current_tenant_id(user)
-    action = await db.get(FormAction, action_id)
-    if not action or action.form_id != form_id or action.tenant_id != tenant_id:
-        raise HTTPException(404, "Action not found")
-    await db.delete(action)
-    await db.commit()
-    return {"ok": True}
+    return await form_admin_service.delete_form_action(form_id=form_id, action_id=action_id, db=db, user=user)
 
 
 @router.get("/{form_id}/permissions")
@@ -1732,16 +1154,7 @@ async def list_form_permissions(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form, FormPermission
-
-    tenant_id = current_tenant_id(user)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    permissions = (await db.execute(
-        select(FormPermission).where(FormPermission.form_id == form_id, FormPermission.tenant_id == tenant_id).order_by(FormPermission.id)
-    )).scalars().all()
-    return {"data": [_permission_payload(permission) for permission in permissions]}
+    return await form_admin_service.list_form_permissions(form_id=form_id, db=db, user=user)
 
 
 @router.post("/{form_id}/permissions")
@@ -1751,27 +1164,7 @@ async def create_form_permission(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form, FormField, FormPermission, Role
-
-    tenant_id = current_tenant_id(user)
-    form = await db.get(Form, form_id)
-    role = await db.get(Role, body.role_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    if not role or role.tenant_id != tenant_id:
-        raise HTTPException(404, "Role not found")
-    if body.field_name:
-        _validate_field_name(body.field_name)
-        existing_field = await db.scalar(
-            select(FormField).where(FormField.form_id == form_id, FormField.tenant_id == tenant_id, FormField.field_name == body.field_name)
-        )
-        if not existing_field:
-            raise HTTPException(404, "Field not found")
-    permission = FormPermission(tenant_id=tenant_id, form_id=form_id, **body.dict())
-    db.add(permission)
-    await db.commit()
-    await db.refresh(permission)
-    return {"data": _permission_payload(permission)}
+    return await form_admin_service.create_form_permission(form_id=form_id, body=body, db=db, user=user)
 
 
 @router.put("/{form_id}/permissions/{permission_id}")
@@ -1782,25 +1175,7 @@ async def update_form_permission(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import FormField, FormPermission
-
-    tenant_id = current_tenant_id(user)
-    permission = await db.get(FormPermission, permission_id)
-    if not permission or permission.form_id != form_id or permission.tenant_id != tenant_id:
-        raise HTTPException(404, "Permission not found")
-    updates = body.dict(exclude_unset=True)
-    if updates.get("field_name"):
-        _validate_field_name(updates["field_name"])
-        existing_field = await db.scalar(
-            select(FormField).where(FormField.form_id == form_id, FormField.tenant_id == tenant_id, FormField.field_name == updates["field_name"])
-        )
-        if not existing_field:
-            raise HTTPException(404, "Field not found")
-    for key, value in updates.items():
-        setattr(permission, key, value)
-    await db.commit()
-    await db.refresh(permission)
-    return {"data": _permission_payload(permission)}
+    return await form_admin_service.update_form_permission(form_id=form_id, permission_id=permission_id, body=body, db=db, user=user)
 
 
 @router.delete("/{form_id}/permissions/{permission_id}")
@@ -1810,15 +1185,7 @@ async def delete_form_permission(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import FormPermission
-
-    tenant_id = current_tenant_id(user)
-    permission = await db.get(FormPermission, permission_id)
-    if not permission or permission.form_id != form_id or permission.tenant_id != tenant_id:
-        raise HTTPException(404, "Permission not found")
-    await db.delete(permission)
-    await db.commit()
-    return {"ok": True}
+    return await form_admin_service.delete_form_permission(form_id=form_id, permission_id=permission_id, db=db, user=user)
 
 
 @router.get("/{form_id}/workflow-bindings")
@@ -1827,16 +1194,7 @@ async def list_workflow_bindings(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form, WorkflowBinding
-
-    tenant_id = current_tenant_id(user)
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    bindings = (await db.execute(
-        select(WorkflowBinding).where(WorkflowBinding.form_id == form_id, WorkflowBinding.tenant_id == tenant_id).order_by(WorkflowBinding.id)
-    )).scalars().all()
-    return {"data": [_workflow_binding_payload(binding) for binding in bindings]}
+    return await form_admin_service.list_workflow_bindings(form_id=form_id, db=db, user=user)
 
 
 @router.post("/{form_id}/workflow-bindings")
@@ -1846,21 +1204,7 @@ async def create_workflow_binding(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import Form, WorkflowBinding, WorkflowDef
-
-    tenant_id = current_tenant_id(user)
-    assert_safe_identifier(body.trigger_action)
-    form = await db.get(Form, form_id)
-    wf = await db.get(WorkflowDef, body.workflow_id)
-    if not form or form.tenant_id != tenant_id:
-        raise HTTPException(404, "Form not found")
-    if not wf or wf.tenant_id != tenant_id:
-        raise HTTPException(404, "Workflow definition not found")
-    binding = WorkflowBinding(tenant_id=tenant_id, form_id=form_id, **body.dict())
-    db.add(binding)
-    await db.commit()
-    await db.refresh(binding)
-    return {"data": _workflow_binding_payload(binding)}
+    return await form_admin_service.create_workflow_binding(form_id=form_id, body=body, db=db, user=user)
 
 
 @router.put("/{form_id}/workflow-bindings/{binding_id}")
@@ -1871,24 +1215,7 @@ async def update_workflow_binding(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import WorkflowBinding, WorkflowDef
-
-    tenant_id = current_tenant_id(user)
-    binding = await db.get(WorkflowBinding, binding_id)
-    if not binding or binding.form_id != form_id or binding.tenant_id != tenant_id:
-        raise HTTPException(404, "Workflow binding not found")
-    updates = body.dict(exclude_unset=True)
-    if updates.get("workflow_id") is not None:
-        wf = await db.get(WorkflowDef, updates["workflow_id"])
-        if not wf or wf.tenant_id != tenant_id:
-            raise HTTPException(404, "Workflow definition not found")
-    if updates.get("trigger_action"):
-        assert_safe_identifier(updates["trigger_action"])
-    for key, value in updates.items():
-        setattr(binding, key, value)
-    await db.commit()
-    await db.refresh(binding)
-    return {"data": _workflow_binding_payload(binding)}
+    return await form_admin_service.update_workflow_binding(form_id=form_id, binding_id=binding_id, body=body, db=db, user=user)
 
 
 @router.delete("/{form_id}/workflow-bindings/{binding_id}")
@@ -1898,15 +1225,7 @@ async def delete_workflow_binding(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
-    from app.models.relational import WorkflowBinding
-
-    tenant_id = current_tenant_id(user)
-    binding = await db.get(WorkflowBinding, binding_id)
-    if not binding or binding.form_id != form_id or binding.tenant_id != tenant_id:
-        raise HTTPException(404, "Workflow binding not found")
-    await db.delete(binding)
-    await db.commit()
-    return {"ok": True}
+    return await form_admin_service.delete_workflow_binding(form_id=form_id, binding_id=binding_id, db=db, user=user)
 
 
 @router.get("/{form_id}/records")
@@ -2005,30 +1324,6 @@ async def _record_creation_audit(db, defer_commit, **values):
     await db.flush()
     if not defer_commit:
         await db.commit()
-
-
-async def _protect_pending_form_record(db, tenant_id, form_id, record_id):
-    """Keep submitted source content stable while managed approval is pending."""
-    from app.models.relational import WorkflowInstance, WorkflowDef, WorkflowDefVersion
-    rows = (await db.execute(select(WorkflowInstance, WorkflowDef)
-        .join(WorkflowDef, WorkflowDef.id == WorkflowInstance.workflow_id)
-        .where(WorkflowInstance.tenant_id == tenant_id, WorkflowDef.tenant_id == tenant_id,
-               WorkflowInstance.status.in_(["pending", "in_progress"])))).all()
-    for instance, definition in rows:
-        snapshot = await db.scalar(select(WorkflowDefVersion).where(
-            WorkflowDefVersion.tenant_id == tenant_id, WorkflowDefVersion.workflow_id == definition.id,
-            WorkflowDefVersion.version == instance.workflow_version)) if instance.workflow_version else None
-        raw_config = snapshot.config if snapshot else definition.config
-        try:
-            config = json.loads(raw_config or "{}") if isinstance(raw_config, str) else raw_config or {}
-            state = json.loads(instance.workflow_state or "{}") if isinstance(instance.workflow_state, str) else instance.workflow_state or {}
-        except (ValueError, TypeError):
-            continue
-        variables = state.get("variables") or {}
-        if (config.get("domainCode") == f"form-approval:{form_id}"
-                and str(variables.get("form_id")) == str(form_id)
-                and str(variables.get("record_id")) == str(record_id)):
-            raise HTTPException(409, "记录正在审批中，不能修改或删除，请先完成审批")
 
 
 @router.put("/{form_id}/records/{record_id}")

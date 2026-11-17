@@ -39,7 +39,7 @@ else
 fi
 
 python "$ROOT/scripts/doctor.py" --env "$ENV_FILE" --compose "$COMPOSE_FILE" --skip-runtime
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres neo4j redis
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d postgres neo4j
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d backend frontend
 docker exec manufoundry-backend alembic upgrade head
 python "$ROOT/scripts/doctor.py" --env "$ENV_FILE" --compose "$COMPOSE_FILE" --wait 60

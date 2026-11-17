@@ -78,7 +78,7 @@ async def load_data(db, tenant_id, form, design, *, user, filters=None, widget_f
             dataset_sources[dataset_id] = source_form.code
             if widget_record_queries:
                 from types import SimpleNamespace
-                from app.api.form_engine import _record_matches_search, _record_matches_filters
+                from app.services.form_engine import _record_matches_search, _record_matches_filters
                 query_fields = [field for field in source_fields if field.field_name in visible and not field.archived]
                 for widget in design.get('widgets') or []:
                     query = widget_record_queries.get(widget['id'])

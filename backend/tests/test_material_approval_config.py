@@ -92,7 +92,7 @@ def test_new_version_preserves_published_snapshot():
 
 
 def test_runtime_steps_compatible():
-    from app.api.workflow import _workflow_config_steps
+    from app.services.workflow_views import _workflow_config_steps
     steps = _workflow_config_steps(workflow_config(99))
     assert steps[1]["type"] == "approval"
     assert steps[1]["assignee_rules"] == [{"type": "user", "value": ["99"]}]
@@ -116,7 +116,7 @@ def test_refuse_unexpected_binding_and_inactive_approver():
 
 
 def test_fixed_approver_resolves_to_active_user():
-    from app.api.workflow import _resolve_step_approver_ids
+    from app.services.workflow_approvals import _resolve_step_approver_ids
     async def case(db):
         step = workflow_config(1)["steps"][1]
         ids = await _resolve_step_approver_ids(db, 1, step, {}, {}, 999, 999)

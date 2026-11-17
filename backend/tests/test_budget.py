@@ -16,7 +16,7 @@ _BACKEND_ROOT = str(Path(__file__).resolve().parent)
 if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
-from app.services.ai.budget import BudgetTracker
+from tests.legacy_agent.budget import BudgetTracker
 
 
 # ── Unit tests for BudgetTracker ──────────────────────────────
@@ -142,7 +142,7 @@ class TestRuntimeBudgetExhausted:
         We inject a pre-exceeded budget into the state so the budget check fires
         on the very first loop iteration, before any LLM call is made.
         """
-        from app.services.ai.legacy_runtime import AgentRuntime
+        from tests.legacy_agent.legacy_runtime import AgentRuntime
         from app.services.ai.schemas import AgentRequest
 
         runtime = AgentRuntime()
@@ -166,18 +166,18 @@ class TestRuntimeBudgetExhausted:
         exceeded_budget = BudgetTracker(max_input_tokens=10, max_output_tokens=10)
         exceeded_budget.accumulate({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150})
 
-        with patch("app.services.ai.legacy_runtime.settings_snapshot", return_value={
+        with patch("tests.legacy_agent.legacy_runtime.settings_snapshot", return_value={
             "provider": "glm", "baseUrl": "", "apiKey": "",
             "chatModel": "glm-5.1", "reasoningModel": "glm-5.1",
             "embeddingModel": "embedding-3", "visionModel": "glm-4v-plus",
             "safetyPolicy": {"agentMaxInputTokens": 10, "agentMaxOutputTokens": 10, "maxToolSteps": 5},
         }), \
-        patch("app.services.ai.legacy_runtime.safety_policy_snapshot", return_value={
+        patch("tests.legacy_agent.legacy_runtime.safety_policy_snapshot", return_value={
             "agentMaxInputTokens": 10, "agentMaxOutputTokens": 10, "maxToolSteps": 5,
         }), \
-        patch("app.services.ai.legacy_runtime.BudgetTracker", return_value=exceeded_budget), \
-        patch("app.services.ai.legacy_runtime.preflight_agent_request") as mock_preflight_fn, \
-        patch("app.services.ai.legacy_runtime.get_provider") as mock_get_provider:
+        patch("tests.legacy_agent.legacy_runtime.BudgetTracker", return_value=exceeded_budget), \
+        patch("tests.legacy_agent.legacy_runtime.preflight_agent_request") as mock_preflight_fn, \
+        patch("tests.legacy_agent.legacy_runtime.get_provider") as mock_get_provider:
 
             resp = await runtime.run(request, user=user)
 
@@ -194,7 +194,7 @@ class TestRuntimeBudgetExhausted:
     @pytest.mark.asyncio
     async def test_budget_check_stops_loop_before_llm_call(self) -> None:
         """Verify that budget.is_exceeded() check at loop top prevents the LLM call."""
-        from app.services.ai.budget import BudgetTracker
+        from tests.legacy_agent.budget import BudgetTracker
 
         bt = BudgetTracker(max_input_tokens=10, max_output_tokens=10)
         # Simulate a previous turn that exceeded the budget

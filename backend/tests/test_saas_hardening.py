@@ -88,7 +88,8 @@ def test_readiness_metrics_and_tenant_export_redaction():
         listed = _ok(client.get(f"/api/v1/platform/tenants/{tenant['id']}/exports", headers=headers), "list exports")
         assert any(item["id"] == created["data"]["id"] for item in listed["data"])
 
-        metrics = _ok(client.get("/api/v1/system/metrics"), "metrics")
+        assert client.get("/api/v1/system/metrics").status_code == 401
+        metrics = _ok(client.get("/api/v1/system/metrics", headers=headers), "metrics")
         assert metrics["data"]["requests_total"] >= 1
 
 

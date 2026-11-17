@@ -2,7 +2,7 @@ import copy
 
 import pytest
 from fastapi import HTTPException
-from app.api.workflow import _workflow_config_steps, _instance_steps
+from app.services.workflow_views import _workflow_config_steps, _instance_steps
 from app.services.workflow_routing import route_node_ids, validate_graph
 from tests.test_workflow import client, _uid, _seed_users, _headers, _ok
 
@@ -140,7 +140,7 @@ def test_old_page_cannot_approve_another_node_assigned_to_same_person(client, en
 
 def test_workflow_detail_does_not_truncate_a_form_after_twelve_fields():
     from types import SimpleNamespace
-    from app.api.workflow import _field_summary
+    from app.services.workflow_views import _field_summary
     fields = [SimpleNamespace(field_name=f'field_{i}', id=i) for i in range(13)]
     data = {field.field_name: 'value' for field in fields}
     assert len(_field_summary(fields, data, limit=None)) == 13

@@ -3,7 +3,7 @@ import ast
 import json
 from fastapi import HTTPException
 from sqlalchemy import select
-from app.api.deps import current_tenant_id,current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 from app.services.form_rules import control_rule,config
 
 

@@ -209,8 +209,14 @@ async def test_harness_proposal_writes_real_form_only_after_confirmation(monkeyp
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
     code = 'harness_form_' + uuid.uuid4().hex[:8]
     bridge = mod.PlatformBridge(user=USER, settings=settings, context={})
-    result = await bridge.call_tool(mod.tool_alias('forms.create_form_definition'), {'form': {'name': 'Harness Test', 'code': code}, 'fields': [{'field_name': 'name', 'label': 'Name', 'field_type': 'string'}]})
-    assert result['status'] == 'waiting_confirmation'
+    name = 'forms.create_form_definition'
+    described = await bridge.call_tool(mod.tool_alias(mod.DESCRIBE_TOOL), {'name': name})
+    assert described['status'] == 'completed', described
+    result = await bridge.call_tool(mod.tool_alias(mod.INVOKE_TOOL), {'name': name, 'arguments': {
+        'form': {'name': 'Harness Test', 'code': code},
+        'fields': [{'field_name': 'name', 'label': 'Name', 'field_type': 'string'}],
+    }})
+    assert result['status'] == 'waiting_confirmation', result
     async with db_session() as session:
         assert await session.scalar(select(Form).where(Form.code == code)) is None
     response = AgentResponse(answer='Confirm', actions=bridge.pending, requires_confirmation=True, risk_level='high')

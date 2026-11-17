@@ -24,27 +24,35 @@ test('add, style, rename and link components in one editable draft without alter
   const page = initial();
   const draft = applyComponentOperations(page, [
     { action: 'add', widget_id: 'summary', widget_type: 'metric' },
-    { action: 'add', widget_id: 'conditions', widget_type: 'record-filter' },
-    { action: 'edit', widget_id: 'conditions', properties: { filterFields: ['status'] },
-      filter_settings: { queryMode: 'change' }, interaction: { targetWidgetIds: ['records', 'summary'] } },
-    { action: 'edit', widget_id: 'records', properties: { title: '当班记录' }, appearance: { titleColor: '#264c64' },
-      list_settings: { pageSize: 20 } },
+    { action: 'add', widget_id: 'conditions', widget_type: 'chart' },
+    { action: 'edit', widget_id: 'conditions', interaction: { targetWidgetIds: ['records', 'summary'] } },
+    { action: 'edit', widget_id: 'records',
+      properties: { title: '当班记录', showFilters: true, filterFields: ['status'] },
+      appearance: { titleColor: '#264c64' },
+      list_settings: { pageSize: 20 }, filter_settings: { queryMode: 'change' } },
   ], fields);
   assert.equal(page.widgets.length, 1);
   assert.equal(page.widgets[0].title, '巡检记录');
   assert.equal(draft.widgets[0].appearance.radius, 4);
   assert.equal(draft.widgets[0].appearance.titleColor, '#264c64');
   assert.equal(draft.widgets[0].listSettings.pageSize, 20);
-  assert.equal(draft.widgets[2].filterSettings.queryMode, 'change');
+  assert.equal(draft.widgets[0].filterSettings.queryMode, 'change');
+  assert.equal(draft.widgets[0].showFilters, true);
   assert.equal(draft.widgets[2].targetWidgetIds.join(','), 'records,summary');
 });
 
 test('an invalid link rejects the entire batch without partially changing the page', () => {
   const page = initial();
   assert.throws(() => applyComponentOperations(page, [
-    { action: 'add', widget_id: 'conditions', widget_type: 'record-filter' },
+    { action: 'add', widget_id: 'conditions', widget_type: 'chart' },
     { action: 'edit', widget_id: 'conditions', properties: { dataBinding: { formId: 8 } },
       interaction: { targetWidgetIds: ['records'] } },
   ], fields), /同一业务来源/);
   assert.equal(page.widgets.length, 1);
+});
+
+test('retired standalone filters cannot be added through canvas operations', () => {
+  assert.throws(() => applyComponentOperations(initial(), [
+    { action: 'add', widget_id: 'conditions', widget_type: 'record-filter' },
+  ], fields), /不支持此组件类型/);
 });

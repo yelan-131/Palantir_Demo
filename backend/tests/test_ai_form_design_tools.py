@@ -25,10 +25,9 @@ def sample(schema):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('operation', FORM_DESIGN_TOOLS)
 async def test_registered_tools_delegate_validated_arguments(operation, monkeypatch):
-    from app.services import form_fields, form_layouts, form_versions
-    from app.api import forms
+    from app.services import form_admin, form_fields, form_layouts, form_versions
     module_name, function, body_model, id_key = FORM_DESIGN_TOOLS[operation]
-    module = {'routes': forms, 'form_fields': form_fields, 'form_layouts': form_layouts,
+    module = {'form_admin': form_admin, 'form_fields': form_fields, 'form_layouts': form_layouts,
               'form_versions': form_versions}[module_name]
     real_function = getattr(module, function)
     schema = form_design_request_model(operation).model_json_schema()

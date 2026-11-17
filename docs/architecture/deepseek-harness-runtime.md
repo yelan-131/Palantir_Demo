@@ -23,8 +23,9 @@ Authenticated UI / API
 
 `backend/app/services/ai/runtime.py` is the application facade;
 `orchestrator.py` routes to `harness_runtime.py`. The earlier state-machine
-implementation is isolated in `legacy_runtime.py` for historical proposal and
-pending-operation compatibility tests. No public application route selects it.
+implementation lives in `backend/tests/legacy_agent/` and is used only by
+historical proposal and pending-operation compatibility tests. It is not part of
+the application package.
 
 The custom Cordis patch reuses the official SDK-minimal kernel. It disables
 shell/terminal tools and supplies `dsh-llm-pi-ai`, `dsh-mcp-client`, token

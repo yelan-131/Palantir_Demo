@@ -30,7 +30,7 @@ async def internal_asset_table(db, tenant_id, kind, resource_id):
             for field in await runtime_fields(db, resource)
             if not field.archived and field.visible_in_form
         ]
-        from app.api.form_engine import _uses_physical_form_table
+        from app.services.form_engine import _uses_physical_form_table
         from sqlalchemy import text
         if _uses_physical_form_table(resource):
             table = db.bind.dialect.identifier_preparer.quote(resource.table_name)

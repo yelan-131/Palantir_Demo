@@ -166,6 +166,16 @@ def _tool_definition(row: AIAgentToolDefinition) -> dict[str, Any]:
     return {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key, "enabled": row.enabled}
 
 
+def _refresh_stored_input_schemas(tools: dict[str, dict[str, Any]]) -> None:
+    """Use the current platform schema wherever a stored built-in tool is read."""
+    platform_tools = {**application_menu_definitions(), **page_definitions()}
+    if TOOL_DETAILS.keys() & tools.keys():
+        platform_tools.update(registry_definitions())
+    for name in platform_tools.keys() & tools.keys():
+        if tools[name]["handler_key"] == name:
+            tools[name]["input_schema"] = platform_tools[name]["input_schema"]
+
+
 def _admin_record(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> dict[str, Any]:
     definition = _tool_definition(row) if isinstance(row, AIAgentToolDefinition) else _skill_definition(row)
     return {
@@ -214,13 +224,16 @@ async def load_agent_registry(*, include_disabled: bool = False, tenant_id: int 
             source = "bundled"
             all_skills, all_tools = _bundled_defaults()
         else:
-            all_skills = {row.name: _admin_record(row) for row in skill_rows}
-            all_tools = {row.name: _admin_record(row) for row in tool_rows}
+            skills = {row.name: _skill_definition(row) for row in skill_rows}
+            tools = {row.name: _tool_definition(row) for row in tool_rows}
+            _refresh_stored_input_schemas(tools)
+            all_skills = {row.name: _admin_record(row) for row in skill_rows} if include_disabled else skills
+            all_tools = {row.name: {**_admin_record(row), **tools[row.name]} for row in tool_rows} if include_disabled else tools
         if include_disabled:
             await _add_registry_actor_names(session, [*all_skills.values(), *all_tools.values()], tenant_id)
     if not include_disabled or tenant_id is None:
-        skills = {row.name: _skill_definition(row) for row in skill_rows} if source == "database" else all_skills
-        tools = {row.name: _tool_definition(row) for row in tool_rows} if source == "database" else all_tools
+        if source == "bundled":
+            skills, tools = all_skills, all_tools
         skills, tools = _active_definitions(skills, tools)
         if tenant_id is None:
             set_runtime_agent_registry(skills=skills, tools=tools)

@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import current_tenant_id, current_user_id, require_admin
+from app.core.principal import current_tenant_id, current_user_id, ensure_admin
 from app.core.audit import write_audit_log
-from app.api.form_engine import _dynamic_record_field_impact, _ensure_physical_form_table
+from app.services.form_engine import _dynamic_record_field_impact, _ensure_physical_form_table
 from app.services.form_schemas import (
     FormFieldCreate,
     FormFieldUpdate,
@@ -31,7 +31,7 @@ async def add_form_fields(form_id: int, fields: list[dict], db: AsyncSession, us
     from app.services.field_limits import DEFAULT_FORM_FIELDS
     from app.services.form_layouts import append_field_to_layouts
 
-    await require_admin(user)
+    ensure_admin(user)
     tenant_id = current_tenant_id(user)
     form = await db.scalar(select(Form).where(
         Form.id == form_id, Form.tenant_id == tenant_id).with_for_update())
@@ -90,7 +90,7 @@ async def create_form_field(form_id: int, body: FormFieldCreate, db: AsyncSessio
 
 
 async def update_form_field(form_id: int, field_id: int, body: FormFieldUpdate, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormField
     tenant_id = current_tenant_id(user)
     field = await db.get(FormField, field_id)
@@ -124,7 +124,7 @@ async def update_form_field(form_id: int, field_id: int, body: FormFieldUpdate, 
 
 
 async def archive_form_field(form_id: int, field_id: int, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import FormField
     tenant_id = current_tenant_id(user)
     field = await db.get(FormField, field_id)

@@ -330,7 +330,7 @@ def test_layout_action_permission_and_workflow_schemas_are_config_only():
 def test_action_and_workflow_identifiers_share_safe_rules():
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
-    from app.api._model_driven_shared import assert_safe_identifier
+    from app.core.identifiers import assert_safe_identifier
 
     assert_safe_identifier("submit")
     assert_safe_identifier("approve_and_archive")
@@ -340,7 +340,7 @@ def test_action_and_workflow_identifiers_share_safe_rules():
 
 def test_professional_flow_graph_resolves_executable_steps():
     pytest.importorskip("fastapi")
-    from app.api.workflow import _get_steps_from_workflow
+    from app.services.workflow_views import _get_steps_from_workflow
 
     workflow = {
         "config": {
@@ -367,7 +367,7 @@ def test_professional_flow_graph_resolves_executable_steps():
 
 def test_utf8_byte_limits_measure_bytes_and_do_not_change_design_required_flags():
     from types import SimpleNamespace
-    from app.api.form_engine.validation import _validate_record_data, _field_value_is_compatible
+    from app.services.form_engine.validation import _validate_record_data, _field_value_is_compatible
     from app.api.forms import _normalize_form_field_data
     from fastapi import HTTPException
     field = SimpleNamespace(field_name='name', label='名称', field_type='string', required=False,

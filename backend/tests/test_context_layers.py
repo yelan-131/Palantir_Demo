@@ -9,7 +9,7 @@ import pytest
 # Ensure the backend package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.services.ai.context_layers import ContextLayer, LayeredContext
+from tests.legacy_agent.context_layers import ContextLayer, LayeredContext
 from app.services.ai.schemas import ChatMessage, ToolCall, ToolCallFunction
 
 

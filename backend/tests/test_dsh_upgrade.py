@@ -96,11 +96,11 @@ async def test_tool_budget_signals_process_stop(monkeypatch):
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: {'safetyPolicy': {'maxToolSteps': 1}})
     monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
-    tool = SimpleNamespace(name='test.query', handler_key='forms.query_records')
-    monkeypatch.setattr(mod, 'tool_registry', lambda: {'test.query': tool})
     monkeypatch.setattr(mod, 'decide_tool_permission', lambda *args: SimpleNamespace(allowed=True))
     bridge = mod.PlatformBridge(USER, {}, {}, calls=1)
-    result = await bridge.call_tool(mod.tool_alias(tool.name), {})
+    described = await bridge.call_tool(mod.tool_alias(mod.DESCRIBE_TOOL), {'name': 'forms.query_records'})
+    assert described['status'] == 'completed' and not bridge.stop_event.is_set()
+    result = await bridge.call_tool(mod.tool_alias(mod.INVOKE_TOOL), {'name': 'forms.query_records', 'arguments': {}})
     assert result['status'] == 'blocked' and bridge.stop_event.is_set() and bridge.calls == 1
 
 

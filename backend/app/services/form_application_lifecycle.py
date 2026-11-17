@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select, text
-from app.api.deps import current_user_id
+from app.core.principal import current_user_id
 from app.models.relational import AuditLog, DynamicRecord, Form, WorkflowBinding, WorkflowInstance, User
 
 

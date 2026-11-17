@@ -11,9 +11,8 @@ asyncpg==0.30.0
 aiosqlite==0.20.0
 psycopg2-binary==2.9.10
 
-# Graph + cache
+# Graph
 neo4j==5.26.0
-redis==5.2.1
 
 # Validation / settings
 pydantic==2.14.1

@@ -14,6 +14,10 @@ from app.services.ai.page_controls import PageControlRequest
     {'action': 'open'}, {'action': 'set_field_properties', 'form_id': 1},
     {'action': 'set_field_properties', 'form_id': 1, 'field_name': 'qty', 'properties': {'min': 20, 'max': 1}},
     {'action': 'set_field_properties', 'form_id': 1, 'field_name': 'qty', 'properties': {'role': 'admin'}},
+    {'action': 'configure_layout', 'form_id': 1},
+    {'action': 'inspect_layout', 'form_id': 1, 'layout_operations': [{'op': 'add', 'control_id': 'group', 'control_type': 'container'}]},
+    {'action': 'configure_layout', 'form_id': 1, 'layout_operations': [{'op': 'add', 'control_id': 'table', 'control_type': 'editable-table'}]},
+    {'action': 'configure_layout', 'form_id': 1, 'layout_operations': [{'op': 'move', 'field_name': 'qty', 'slot_id': 'first'}]},
     {'action': 'run_script', 'form_id': 1}, {'action': 'open', 'form_id': 0},
 ])
 def test_only_explicit_existing_page_actions_are_accepted(payload):
@@ -270,3 +274,42 @@ async def test_rich_plan_drives_native_steps_and_reviews_only_after_success(monk
         assert operations == ['set_field_properties', 'add_field', 'add_field', 'add_field', 'add_field', 'review']
         assert bridge.configuration_outcome['status'] == 'ui_draft'
         assert bridge.context['designerContext']['fields'][-1]['field_type'] == 'boolean'
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('new_form', [True, False])
+async def test_layout_batch_dispatches_once_and_requires_browser_receipt(monkeypatch, new_form):
+    from app.services.ai import page_controls as mod
+    from app.services.ai.harness_runtime import PlatformBridge
+
+    db = AsyncMock()
+    db.scalar.return_value = None if new_form else SimpleNamespace(id=7)
+    manager = AsyncMock()
+    manager.__aenter__.return_value = db
+    monkeypatch.setattr(mod, 'db_session', lambda: manager)
+    monkeypatch.setattr(mod, 'decide_ai_permission', lambda *args, **kwargs: SimpleNamespace(allowed=True))
+    bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
+    operations = [{'op': 'add', 'control_id': 'group', 'control_type': 'container'},
+                  {'op': 'move', 'field_name': 'material', 'parent_id': 'group'}]
+    received = []
+
+    async def sink(event, action):
+        received.append(action)
+        payload = action['draft'] if new_form else action
+        assert payload['layout_operations'] == operations
+        bridge.page_actions[action['id']].set_result({'ok': True, 'state': {
+            'draft_id': action.get('draft_id'), 'form_id': action['form_id'] or None,
+            'fields': DRAFT['fields'], 'review_ready': True, 'saved': False, 'published': False,
+            'layout_controls': [{'control_id': 'group'}], 'layout_operation_count': len(operations),
+        }})
+
+    bridge.event_sink = sink
+    request = ({'action': 'draft_new', 'draft': {**DRAFT, 'layout_operations': operations}} if new_form else
+               {'action': 'configure_layout', 'form_id': 7, 'layout_operations': operations})
+    result = await mod.call_page_control(bridge, request)
+    assert result['status'] == 'completed'
+    assert bridge.configuration_outcome['status'] == 'ui_draft'
+    assert mod.page_control_model_result(result)['result']['layout_controls'] == [{'control_id': 'group'}]
+    assert len(received) == 1
+    db.commit.assert_not_awaited()

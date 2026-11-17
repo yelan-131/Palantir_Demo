@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select, text
 from app.models.relational import AuditLog, DynamicRecord, Form, User, WorkflowInstance, WorkflowApproval, WorkflowDef, WorkflowDefVersion
-from app.api.deps import current_user_id
+from app.core.principal import current_user_id
 
 STATUS_LABELS = {'draft': '待提交', 'pending': '待审批', 'approved': '已通过', 'rejected': '已驳回'}
 
@@ -67,7 +67,7 @@ async def sync_material_instance(db, inst, user=None, action=None, comment=None)
         raise HTTPException(409, '申请表单已不存在')
     if action == 'reject' and not str(comment or '').strip():
         raise HTTPException(422, '驳回时必须填写原因')
-    from app.api.alerts import _records
+    from app.services.alert_records import _records
     from app.services.form_runtime import _runtime_form_fields
     fields = await _runtime_form_fields(db, inst.tenant_id, form.id)
     records = await _records(db, form, fields, None, variables.get('record_id'), lock=True)

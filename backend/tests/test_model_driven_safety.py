@@ -14,7 +14,7 @@ import pytest
 
 def test_safe_identifier_accepts_known_names():
     pytest.importorskip("fastapi")
-    from app.api._model_driven_shared import assert_safe_identifier
+    from app.core.identifiers import assert_safe_identifier
 
     for name in ["factories", "production_lines", "spc_points", "work_orders", "id"]:
         assert_safe_identifier(name)  # must not raise
@@ -32,7 +32,7 @@ def test_safe_identifier_accepts_known_names():
 def test_safe_identifier_rejects_garbage(bad: str):
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
-    from app.api._model_driven_shared import assert_safe_identifier
+    from app.core.identifiers import assert_safe_identifier
 
     with pytest.raises(HTTPException):
         assert_safe_identifier(bad)
@@ -58,7 +58,7 @@ def test_resolve_table_unknown_model_returns_404():
     assert exc.value.status_code == 404
 
 
-def test_resolve_table_known_alias_resolves():
+def test_resolve_table_known_alias_resolves(legacy_model_driven_demo):
     pytest.importorskip("fastapi")
     from app.api.model_driven_data import _resolve_table
 

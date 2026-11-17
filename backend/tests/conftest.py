@@ -27,3 +27,17 @@ os.environ.setdefault(
     "SQLITE_DB_PATH",
     str(Path(tempfile.gettempdir()) / f"manufoundry_pytest_{os.getpid()}.db"),
 )
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture()
+def legacy_model_driven_demo():
+    from app.api import _model_driven_shared as shared
+    from tests import legacy_model_driven_demo as demo
+
+    snapshot = demo.install(shared)
+    try:
+        yield demo
+    finally:
+        demo.restore(shared, snapshot)

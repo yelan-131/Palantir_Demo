@@ -51,9 +51,11 @@ async def test_limits_survive_publish_and_enforce_create_edit_and_clear(environm
     from unittest.mock import AsyncMock
     from sqlalchemy import select
     from app.api import forms
+    from app.services import form_admin
     from app.models.relational import FormField
     db, _, form, user, client = environment
     monkeypatch.setattr(forms,'write_audit_log',AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     user['is_admin']=True
     field=await db.scalar(select(FormField).where(FormField.form_id==1,FormField.field_name=='status'))
     field.field_type='enum'

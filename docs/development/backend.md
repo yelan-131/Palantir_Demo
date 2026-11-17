@@ -14,7 +14,6 @@ Source of truth: `backend/app/main.py`, `backend/app/api/*`,
 | ORM and migrations | SQLAlchemy 2 async, Alembic |
 | Database drivers | asyncpg, psycopg2, aiosqlite |
 | Graph database | Neo4j async driver |
-| Cache/task dependency | Redis client is installed; no Celery worker is active |
 | Auth | python-jose JWT, passlib bcrypt |
 | Analytics/RAG support | pandas, numpy, scipy, scikit-learn |
 
@@ -56,7 +55,6 @@ Important variables:
 | `CORS_ORIGINS` | explicit frontend origins |
 | `POSTGRES_*` | relational database connection |
 | `NEO4J_*` | graph database connection |
-| `REDIS_*` | Redis connection parameters |
 | `LOG_LEVEL` | application logging level |
 | `APP_MODE` | `demo` or `production`; production rejects unsafe fallbacks |
 | `AI_PROVIDER` / `AI_BASE_URL` / `AI_*_MODEL` | backend AI provider defaults; current defaults target GLM-compatible APIs |
@@ -164,7 +162,6 @@ Important rules:
 - `GET /knowledge/cards`
 - `GET /knowledge/cards/{card_id}`
 - `GET /knowledge/related-cards`
-- `POST /knowledge/binding-candidates`
 - `GET /knowledge/ocr-pipeline`
 - `GET /knowledge/related`
 - `POST /knowledge/search`
@@ -218,8 +215,6 @@ Additional Agent action scaffolding:
 | Module | Responsibility |
 | --- | --- |
 | `intent_router.py` | Classify each turn into conversation, knowledge, business query, page help, or action preparation. |
-| `action_state.py` | Preserve multi-turn slot-filling state for pending actions. |
-| `action_payloads.py` | Build conservative payloads from action contracts. |
 | `dynamic_record_drafts.py` | Resolve confirmed domain draft actions to platform forms and create `dynamic_records.status = "draft"` rows when possible. |
 
 Non-low-code confirmed actions first try to create a dynamic-record draft. If no
@@ -245,9 +240,12 @@ In production mode:
 
 - JWTs are passed as Bearer tokens.
 - `SECRET_KEY`, CORS, and `DEMO_AUTH_OPTIONAL` must be production-hardened.
-- Use `require_admin` for admin/configuration-only APIs.
-- Use `app.core.permissions.has_permission` or `require_permission` for generic
-  resource/action authorization.
+- Use `require_admin` for admin/configuration-only APIs; inside services use
+  `app.core.principal.ensure_admin`.
+- Use `app.core.permissions.has_permission` or `app.api.deps.require_permission`
+  for generic resource/action authorization.
+- Services must not import `app.api.deps`; `tests/test_layering.py` enforces the
+  service-to-route import boundary.
 - Use `app.core.permissions.has_form_permission` for platform form runtime
   record access.
 - Frontend menu or button visibility is never the final security boundary.
@@ -302,3 +300,23 @@ onboarding, SaaS hardening, business tenant isolation, dashboard program data,
 and low-code AI agent tools.
 When changing an endpoint contract, update the relevant tests and
 `docs/development/api-reference.md`.
+
+Tests default to a temporary SQLite database. Row-locking and concurrency tests
+skip on SQLite; run them against a disposable PostgreSQL database by setting
+`RECORD_TEST_DATABASE_URL` (database name must start with
+`record_service_verify_`) or `ASSEMBLY_TEST_DATABASE_URL` (prefix
+`assembly_verify_`). These tests drop and recreate their tables.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on pushes to `main`/`master` and on pull
+requests:
+
+| Job | What it checks |
+| --- | --- |
+| `backend-tests` | full pytest suite on Python 3.11 and SQLite, split into four shards by test file |
+| `backend-postgres` | `alembic upgrade head` on an empty PostgreSQL 16 database, then the PostgreSQL-only record, assembly, menu, and settings concurrency tests |
+| `frontend` | `npm ci` and `npm run build` (TypeScript build plus Vite production build) |
+
+CI does not build images or deploy; server updates follow
+`docs/operations/deployment.md`.

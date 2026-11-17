@@ -38,7 +38,7 @@ if ($Offline) {
 }
 
 python scripts/doctor.py --env $EnvFile --compose $ComposeFile --skip-runtime
-docker compose --env-file $EnvFile -f $ComposeFile up -d postgres neo4j redis
+docker compose --env-file $EnvFile -f $ComposeFile up -d postgres neo4j
 docker compose --env-file $EnvFile -f $ComposeFile up -d backend frontend
 docker exec manufoundry-backend alembic upgrade head
 python scripts/doctor.py --env $EnvFile --compose $ComposeFile --wait 60

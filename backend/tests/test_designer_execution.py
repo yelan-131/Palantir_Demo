@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 from tests.test_record_service import environment, seed
 from app.api import forms
+from app.services import form_admin
 from app.models.relational import Form, FormField, FormPermission, User
 from app.services import records
 
@@ -13,6 +14,7 @@ from app.services import records
 async def test_permissions_are_drafts_until_publish_and_restore_is_real(environment,monkeypatch):
     db,factory,form,user,client=environment
     monkeypatch.setattr(forms,'write_audit_log',AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     own=await seed(db,'Own',uid=1);await seed(db,'Other',uid=2)
     draft={'roles':{'reader':{'actions':{'view':True,'create':True,'edit':True,'export':True,'saveDraft':False,'submit':False},'fields':{'title':{'visible':True,'editable':True,'required':True}},'data':{'scope':'assigned','sensitiveFields':'full'}}}}
     form.config={'permissionDesignDraft':draft,'viewConfigDraft':{'filters':[],'table':{'columns':[{'id':'title','fieldName':'title','enabled':True}],'rowClickAction':'none'}}}
@@ -60,6 +62,7 @@ async def test_export_uses_published_field_and_row_permissions(environment):
 async def test_organization_source_label_and_type_settings_survive_publish(environment,monkeypatch):
     db,_,form,user,client=environment
     monkeypatch.setattr(forms,'write_audit_log',AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     person=await db.get(User,2);person.display_name='Test Person'
     field=await db.scalar(select(FormField).where(FormField.form_id==1,FormField.field_name=='secret'))
     field.validation={'maxBytes':64}

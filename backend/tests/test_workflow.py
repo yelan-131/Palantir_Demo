@@ -130,14 +130,14 @@ def test_workflow_view_status_is_user_scoped():
 
 
 def test_get_steps_from_workflow_with_top_level_steps():
-    from app.api.workflow import _get_steps_from_workflow
+    from app.services.workflow_views import _get_steps_from_workflow
 
     wf = {"steps": [{"name": "审批", "type": "approval"}]}
     assert _get_steps_from_workflow(wf) == [{"name": "审批", "type": "approval"}]
 
 
 def test_get_steps_from_workflow_from_config_nodes():
-    from app.api.workflow import _get_steps_from_workflow
+    from app.services.workflow_views import _get_steps_from_workflow
 
     wf = {
         "config": {
@@ -158,7 +158,8 @@ def test_get_steps_from_workflow_from_config_nodes():
 
 
 def test_find_first_and_next_actionable_step():
-    from app.api.workflow import _find_first_approval_step, _find_next_actionable_step
+    from app.api.workflow import _find_next_actionable_step
+    from app.services.workflow_approvals import _find_first_approval_step
 
     steps = [
         {"type": "start"},

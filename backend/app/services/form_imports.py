@@ -13,7 +13,7 @@ from xml.etree.ElementTree import ParseError
 
 from fastapi import HTTPException
 from sqlalchemy import select
-from app.api.deps import current_tenant_id, current_user_id
+from app.core.principal import current_tenant_id, current_user_id
 from app.models.relational import Form, SystemSetting
 from app.services import records
 from app.services.form_runtime import _latest_form_version
@@ -167,7 +167,7 @@ async def _execute(db, user, form_id, filename, content, mapping, request_key, s
     if schema_version != version.version:
         raise HTTPException(409, '表单配置已发布新版本，请重新预览并检查列映射')
     from app.services.form_rules import evaluate
-    from app.api.form_engine.validation import _validate_record_data
+    from app.services.form_engine.validation import _validate_record_data
     from app.services.form_schemas import DynamicRecordCreate
     from app.services.form_application_lifecycle import enabled
     managed = await enabled(db, form)

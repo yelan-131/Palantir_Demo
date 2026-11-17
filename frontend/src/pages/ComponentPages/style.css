@@ -5,6 +5,32 @@
 .component-page-filters {padding:10px 12px;margin-bottom:12px;background:var(--mf-surface,#fff);border:1px solid var(--mf-border);border-radius:8px;}
 .component-page-filters .ant-select {min-width:150px;}
 .component-page-grid {min-height:200px;}
+/* A single list uses the shell's available height. Keep a minimum table area
+   so the canvas can scroll when wrapped filters take up most of the viewport. */
+.component-page-fill-list {height:100%;min-height:0;box-sizing:border-box;}
+.component-page-fill-list>.analytics-workspace-body {height:100%;align-items:stretch;}
+.component-page-fill-list .component-page-preview {height:100%;overflow:hidden auto;}
+.component-page-fill-list :is(.component-page-canvas-host,.component-page-canvas,.component-page-grid,.component-page-grid>.ant-row>.ant-col,
+ .component-frame-content>.form-workspace,.form-workspace-runtime:has(>.component-page-list),.component-page-list,.component-page-list>.dynamic-business-content) {
+ display:flex;flex-direction:column;min-width:0;
+}
+.component-page-fill-list .component-page-canvas-host {min-height:100%;}
+.component-page-fill-list :is(.component-page-canvas,.component-page-grid,.component-page-grid>.ant-row,
+ .component-page-widget-record-list,.component-frame-content>.form-workspace,.form-workspace-runtime:has(>.component-page-list),
+ .component-page-list,.component-page-list>.dynamic-business-content) {flex:1 0 auto;height:auto;}
+.component-page-fill-list .component-page-list .dynamic-business-table {flex:1 0 auto;contain:size;}
+
+@media(min-width:1101px) {
+ .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:has(>.component-page-filters) {align-items:stretch;grid-template-rows:minmax(min-content,1fr);}
+ .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:has(>.component-page-filters):has(>.ant-alert) {grid-template-rows:auto minmax(min-content,1fr);}
+ .component-page-fill-list .component-filter-layout-panel>.component-page-filters {align-self:start;}
+ .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:not(:has(>.component-page-filters)) {display:flex;gap:0;}
+}
+.tech-white-shell .app-content .component-page-fill-list .component-page-list .ant-table-body {overflow-y:auto!important;}
+@media(max-width:800px) {
+ .component-page-fill-list.analytics-workspace-configuring>.analytics-workspace-body {height:auto;}
+ .component-page-fill-list.analytics-workspace-configuring .component-page-preview {flex:none;height:var(--component-editor-height,70dvh);}
+}
 .component-page-widget {overflow:hidden;min-width:0;}
 .component-page-widget>.ant-card-head {min-height:46px;padding-inline:16px;}
 .component-page-widget>.ant-card-head .ant-card-head-title {font-size:13px;font-weight:600;}
@@ -59,6 +85,9 @@
 .tech-white-shell .app-content .component-page .component-page-filters .ant-select {min-width:130px;}
 .tech-white-shell .app-content .component-page .component-page-filters>.ant-space {margin:0;gap:8px!important;}
 .tech-white-shell .app-content .component-page .component-page-filters .ant-select-selector {background:var(--mf-surface,#fff);}
+@container analytics-canvas (max-width:850px) {
+  .tech-white-shell .app-content .component-page-fill-list :is(.component-filter-layout-toolbar,.component-filter-layout-inline)>.component-page-filters {column-gap:8px;}
+}
 .tech-white-shell .app-content .component-page .component-record-filter .dynamic-business-filter {
   padding:0;margin:0;border:0;border-radius:0;background:transparent;box-shadow:none;
   grid-template-columns:repeat(4,minmax(0,1fr)) auto;align-items:end;gap:12px 16px;
@@ -209,15 +238,27 @@
 .component-source-properties .form-designer-right .designer-props .property-inspector-group:not([open])>:not(summary) {display:none;}
 
 /* Keep the inspector stationary while the canvas scrolls independently. */
+.component-page .analytics-editor-form-inspector>.analytics-editor-panel-body {
+ overflow:hidden auto;
+ overscroll-behavior-y:contain;
+ scrollbar-gutter:stable;
+ scrollbar-color:color-mix(in srgb,var(--mf-muted) 55%,transparent) transparent;
+}
+.component-page .analytics-editor-form-inspector>.analytics-editor-panel-body:focus-visible {
+ outline:2px solid var(--mf-primary);
+ outline-offset:-2px;
+}
 @media(min-width:801px) {
  .component-page.analytics-workspace-configuring .analytics-workspace-body {height:var(--component-editor-height,calc(100dvh - 112px));min-height:0;align-items:stretch;overflow:hidden;}
- .component-page.analytics-workspace-configuring .component-page-preview {height:100%;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;}
+ .component-page.analytics-workspace-configuring .component-page-preview {height:100%;min-height:0;overflow:hidden auto;overscroll-behavior:contain;}
+ .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-canvas-host:not([hidden]) {display:grid;min-height:100%;min-width:0;}
+ .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-canvas {display:flex;flex-direction:column;}
+ .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-grid {flex:1;min-width:0;}
  .component-page.analytics-workspace-configuring .analytics-settings-page {position:relative;top:auto;height:100%;min-height:0;align-self:stretch;}
- .component-page.analytics-workspace-configuring .analytics-editor-panel-body {overscroll-behavior:contain;}
 }
 
 @media(min-width:801px) {
- .tech-white-shell .app-content>.content-surface:has(.component-page.analytics-workspace-configuring) {overflow:hidden;scrollbar-gutter:auto;min-height:0;}
+ .tech-white-shell .app-content>.content-surface:has(.component-page:is(.analytics-workspace-configuring,.component-page-fill-list)) {overflow:hidden;scrollbar-gutter:auto;min-height:0;}
  .tech-white-shell .app-content .component-page.analytics-workspace-configuring {height:100%;min-height:0;box-sizing:border-box;overflow:hidden;}
  .component-page.analytics-workspace-configuring .analytics-workspace-body {height:100%;}
 }
@@ -311,26 +352,36 @@
 .component-source-properties .professional-flow-properties .property-inspector-row:has(textarea) {align-items:start;padding-top:7px;padding-bottom:7px;}
 .component-source-properties .professional-flow-properties textarea.ant-input {height:auto;min-height:48px;font-size:12px;line-height:1.6;border-radius:5px;}
 
-/* Each filter owns a full-width field grid; the keyword occupies one of four cells. */
+/* The keyword occupies one cell in the same grid as the other filters. */
 .tech-white-shell .app-content .component-page .component-record-filter .dynamic-business-filter {display:block;width:100%;}
-.tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;max-height:none;overflow:visible;gap:12px 16px;}
-.component-filter-scheme-tabs {padding:8px 10px 0;}
-.component-filter-scheme-tabs .ant-tabs-nav {margin-bottom:8px;}
-.component-filter-scheme-tabs .ant-tabs-tab {padding:4px 8px!important;font-size:12px;}
+.tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {width:100%;display:grid;grid-template-columns:repeat(var(--filter-columns,4),minmax(0,1fr));grid-auto-rows:auto;max-height:none;overflow:visible;gap:12px 16px;}
 .component-filter-schemes-runtime>.ant-tabs>.ant-tabs-nav {margin-bottom:12px;}
 @container business-filter (max-width:560px) {
- .tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {grid-template-columns:repeat(2,minmax(0,1fr));}
+ .tech-white-shell .app-content .component-page .component-record-filter .dynamic-filter-fields {grid-template-columns:repeat(min(2,var(--filter-columns,4)),minmax(0,1fr));}
 }
 
-.component-filter-scheme-group>.property-inspector-group-title {gap:4px;padding:2px 8px;}
-.component-filter-scheme-group>.property-inspector-group-title>.property-inspector-group-actions {flex:1;min-width:0;margin:0;}
-.component-filter-scheme-group .component-filter-scheme-tabs {padding:0;flex:1;min-width:0;}
-.component-filter-scheme-group .component-filter-scheme-tabs>.ant-tabs-nav {margin:0;}
-.component-filter-scheme-group .component-filter-scheme-tabs .ant-tabs-tab {padding:4px!important;margin-right:2px!important;}
-.component-filter-scheme-group .component-filter-scheme-tabs .ant-tabs-nav-add {padding:0 3px;min-width:22px;}
-
-.component-filter-scheme-heading {flex:1;min-width:0;}
-.component-filter-scheme-heading .ant-tabs {width:100%;}
+.component-config-tab-group {
+  --inspector-tab-surface:color-mix(in srgb,var(--mf-primary,#47627b) 12%,var(--mf-surface,#fff));
+  background:var(--inspector-tab-surface);
+}
+.component-config-tab-group>.component-toolbar-group {background:var(--mf-surface,#fff);}
+.component-config-tab-bar {
+  display:flex;align-items:end;gap:4px;padding-inline:4px 8px;
+  background:var(--mf-surface,#fff);
+}
+.component-config-tab-group .component-config-tabs {
+  --inspector-tab-inset:4px;--inspector-tab-padding:8px;--inspector-tab-overflow:hidden;
+  --inspector-tab-list-width:max-content;--inspector-tab-flex:0 0 auto;
+  flex:1;background:transparent;
+}
+.component-config-tab-label {display:block;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.component-config-tab-actions {
+  display:flex;flex:none;align-items:center;gap:4px;margin-block:4px;
+  padding-inline-start:4px;border-inline-start:1px solid var(--mf-border);
+}
+.component-config-tab-actions .ant-btn {width:24px;height:24px;padding:0;color:var(--mf-muted);}
+.component-config-tab-actions .ant-btn-dangerous:not(:disabled):is(:hover,:focus-visible) {color:var(--ant-color-error,#b42318);}
+.component-config-tab-actions .ant-btn:disabled {opacity:.45;}
 .component-table-striped > td { background: rgba(44,110,132,.04) !important; }
 
 .component-list-header-actions .component-header-keyword {margin:0;width:clamp(120px,15vw,205px);}

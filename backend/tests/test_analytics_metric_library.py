@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.api import forms
+from app.services import form_admin
 from app.models.relational import AnalyticsSharedMetricVersion, Form, FormVersion
 from tests.test_record_service import environment, seed
 from tests.test_analytics_sources import source_design
@@ -260,6 +261,7 @@ async def test_full_form_publish_resolves_shared_definition_and_blocks_stale_bin
     db, _, form, user, client = environment
     user['is_admin'] = True
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     item = await library(client)
     design = bound_design(item)
     design['metrics'][0]['expression'] = 'count(*)'

@@ -10,7 +10,7 @@ import pytest
 # Ensure the backend package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.services.ai.tool_result_processor import (
+from tests.legacy_agent.tool_result_processor import (
     DEFAULT_MAX_RESULT_CHARS,
     ToolResultProcessor,
     format_tool_result,

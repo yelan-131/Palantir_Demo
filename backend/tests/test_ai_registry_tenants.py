@@ -110,3 +110,48 @@ async def test_registry_and_dsh_isolate_same_name_imports(monkeypatch, tmp_path)
     await update_agent_registry(AIAgentRegistryRequest(**first), users[0])
     assert name not in (await get_agent_registry(users[0]))["data"]["skills"]
     assert (await get_agent_registry(users[1]))["data"]["skills"][name]["instructions"] == "TENANT_BODY_1"
+
+
+
+@pytest.mark.asyncio
+async def test_stored_platform_schemas_follow_current_contract_without_resetting_registry():
+    from app.database import init_db
+    from app.core.db import db_session
+    from app.models.relational import AIAgentToolDefinition
+    from app.services.ai.agent_registry import AgentRegistryError, load_seed_registry, save_agent_registry_payload
+    from sqlalchemy import select
+
+    await init_db()
+    tenant_id = 823
+    skills, tools = load_seed_registry()
+    names = ("pages.create", "pages.save_draft", "applications.create", "menus.create_entry", "ui.component_page.add")
+    tools["pages.create"]["title"] = "Tenant page tool"
+    tools["pages.save_draft"]["enabled"] = False
+    await save_agent_registry_payload({"skills": skills, "tools": tools}, tenant_id=tenant_id, seed_import=True)
+
+    stale_schema = {"type": "object", "properties": {}}
+    query = select(AIAgentToolDefinition).where(
+        AIAgentToolDefinition.tenant_id == tenant_id, AIAgentToolDefinition.name.in_(names),
+    )
+    # Simulate registry rows persisted by an earlier backend.
+    async with db_session() as session:
+        for row in (await session.scalars(query)).all():
+            row.definition = {**row.definition, "input_schema": stale_schema}
+        await session.commit()
+
+    active = (await load_agent_registry(tenant_id=tenant_id))["tools"]
+    admin = await load_agent_registry(tenant_id=tenant_id, include_disabled=True)
+    for name in names:
+        assert admin["tools"][name]["input_schema"] == tools[name]["input_schema"]
+        if name != "pages.save_draft":
+            assert active[name]["input_schema"] == tools[name]["input_schema"]
+    assert active["pages.create"]["title"] == "Tenant page tool"
+    assert admin["tools"]["pages.save_draft"]["enabled"] is False
+    assert "pages.save_draft" not in active
+
+    async with db_session() as session:
+        assert all(row.definition["input_schema"] == stale_schema for row in (await session.scalars(query)).all())
+
+    admin["tools"]["pages.create"]["input_schema"] = stale_schema
+    with pytest.raises(AgentRegistryError, match=r"pages\.create.*input_schema"):
+        await save_agent_registry_payload(admin, tenant_id=tenant_id)

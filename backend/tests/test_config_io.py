@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _reset_mock_state():
+def _reset_mock_state(legacy_model_driven_demo):
     """Reset all shared mock stores between tests."""
     from app.api import config_io as cio
     from app.api import _model_driven_shared as shared

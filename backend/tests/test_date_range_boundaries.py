@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 import pytest
 from sqlalchemy import Column, Integer, JSON, MetaData, String, Table, create_engine, select, text
-from app.api.form_engine.query import _record_matches_filters, _apply_record_filters_query
-from app.api.form_engine.physical import _physical_filter_clause
+from app.services.form_engine.query import _record_matches_filters, _apply_record_filters_query
+from app.services.form_engine.physical import _physical_filter_clause
 
 
 @pytest.mark.parametrize("field_type,ui", [

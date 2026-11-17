@@ -5,7 +5,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -66,6 +66,9 @@ app = FastAPI(
     description="制造业数据操作系统 — 制造数智平台",
     version=settings.APP_VERSION,
     lifespan=lifespan,
+    docs_url=None if settings.IS_PRODUCTION else "/docs",
+    redoc_url=None if settings.IS_PRODUCTION else "/redoc",
+    openapi_url=None if settings.IS_PRODUCTION else "/openapi.json",
 )
 
 
@@ -198,7 +201,10 @@ async def readiness():
     }
 
 
-@app.get("/api/v1/system/metrics", tags=["system"])
+from app.api.deps import require_admin  # noqa: E402
+
+
+@app.get("/api/v1/system/metrics", tags=["system"], dependencies=[Depends(require_admin)])
 async def metrics():
     return {"data": METRICS}
 

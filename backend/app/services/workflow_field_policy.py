@@ -31,7 +31,7 @@ async def current_policy(db, user, form, record_id, *, cache=None):
         definition_ids = {instance.workflow_id for instance in instances}
         definitions = (await db.scalars(select(WorkflowDef).where(
             WorkflowDef.tenant_id == form.tenant_id, WorkflowDef.id.in_(definition_ids)))).all() if definition_ids else []
-        from app.api.workflow import _configs_for_instances, _instance_steps
+        from app.services.workflow_views import _configs_for_instances, _instance_steps
         configs = await _configs_for_instances(db, instances, {d.id: d for d in definitions})
         by_instance = {}
         for instance in instances:

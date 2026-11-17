@@ -95,12 +95,17 @@ def test_dashboard_tools_are_registered_and_writes_require_confirmation():
         assert tools[name]['permission_check'] == 'config'
 
 
-def test_dashboard_request_does_not_enter_business_form_designer():
-    from app.services.ai.configuration_completion import expects_configuration, expects_native_designer
+def test_dashboard_tools_stay_discoverable_from_form_designer_context():
+    from app.services.ai import harness_runtime as mod
+    from app.services.ai.settings import merge_ai_settings
+    settings = merge_ai_settings({'aiEnabled': True, 'agentMode': 'confirm'})
     context = {'pageControlsSupported': True, 'designerContext': {'form_id': 1}}
-    assert expects_configuration('创建报修看板', context)
-    assert not expects_native_designer('创建报修看板', context)
-    assert not expects_native_designer('把数量指标改成汇总', {**context, 'designerContext': {'kind': 'analysis'}})
+    bridge = mod.PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings=settings,
+                                context=context, event_sink=AsyncMock())
+    definitions = bridge.tool_definitions()
+    assert 'dashboards.create' in definitions
+    assert '确认卡片' in definitions['dashboards.create']['description']
+    assert mod.tool_alias('dashboards.create') not in {tool['name'] for tool in bridge.available_tools()}
 
 
 @pytest.mark.asyncio
@@ -118,8 +123,12 @@ async def test_harness_prepares_dashboard_confirmation_without_executing(monkeyp
     from app.services.ai.tool_handlers import TOOL_HANDLERS
     execute = AsyncMock()
     monkeypatch.setitem(TOOL_HANDLERS, 'dashboards.create', execute)
-    result = await bridge.call_tool(mod.tool_alias('dashboards.create'), {
-        'source_form_code': 'repairs', 'name': '报修看板', 'code': 'repair_board'})
+    payload = {'source_form_code': 'repairs', 'name': '报修看板', 'code': 'repair_board'}
+    direct = await bridge.call_tool(mod.tool_alias('dashboards.create'), payload)
+    assert direct['status'] == 'blocked' and not bridge.pending
+    described = await bridge.call_tool(mod.tool_alias(mod.DESCRIBE_TOOL), {'name': 'dashboards.create'})
+    assert described['status'] == 'completed'
+    result = await bridge.call_tool(mod.tool_alias(mod.INVOKE_TOOL), {'name': 'dashboards.create', 'arguments': payload})
     assert result['status'] == 'waiting_confirmation'
     assert bridge.pending[0].skill == 'dashboards.create'
     execute.assert_not_awaited()

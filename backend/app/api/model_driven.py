@@ -11,11 +11,12 @@ This file remains the single import surface so `main.py` keeps using
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api import model_driven_data, model_driven_menus, model_driven_meta
+from app.api.deps import require_platform_admin_for_writes
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_platform_admin_for_writes)])
 router.include_router(model_driven_meta.router)
 router.include_router(model_driven_data.router)
 router.include_router(model_driven_menus.router)

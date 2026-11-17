@@ -4,7 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, ValidationError, create_model, ConfigDict
 from fastapi import HTTPException
 
-from app.api.deps import require_admin
+from app.core.principal import ensure_admin
 from app.services import form_layouts, form_rule_preview, form_versions
 from app.services.form_schemas import FormRulePreviewRequest
 
@@ -18,7 +18,7 @@ class FormToolRequest(BaseModel):
 
 async def execute_form_configuration_tool(operation, session, *, user, payload):
     """Explicit allowlist: tools cannot choose arbitrary service functions."""
-    await require_admin(user)
+    ensure_admin(user)
     try:
         request = FormToolRequest.model_validate(payload)
     except ValidationError as exc:
@@ -48,9 +48,9 @@ FORM_DESIGN_TOOLS = {
     "forms.save_layout": ("form_layouts", "upsert_form_layout", "FormLayoutUpsert", "layout_type"),
     "forms.publish": ("form_versions", "publish_form", None, None),
     "forms.restore_draft": ("form_versions", "restore_form_draft", None, None),
-    "forms.update_definition": ("routes", "update_form", "FormUpdate", None),
-    "forms.copy": ("routes", "copy_form", "FormCopy", None),
-    "forms.delete": ("routes", "delete_form", None, None),
+    "forms.update_definition": ("form_admin", "update_form", "FormUpdate", None),
+    "forms.copy": ("form_admin", "copy_form", "FormCopy", None),
+    "forms.delete": ("form_admin", "delete_form", None, None),
 }
 for resource, singular, model, id_key in (
     ("actions", "form_action", "FormAction", "action_id"),
@@ -63,7 +63,7 @@ for resource, singular, model, id_key in (
             "workflow_bindings": "list_workflow_bindings",
         }[resource]
         FORM_DESIGN_TOOLS[f"forms.{verb}_{resource}"] = (
-            "routes", function, model + suffix if suffix else None,
+            "form_admin", function, model + suffix if suffix else None,
             id_key if verb in {"update", "delete"} else None,
         )
 
@@ -80,7 +80,7 @@ def form_design_request_model(operation):
 
 
 async def execute_form_design_tool(operation, session, *, user, payload):
-    await require_admin(user)
+    ensure_admin(user)
     if operation not in FORM_DESIGN_TOOLS:
         raise HTTPException(422, "Unsupported form design operation")
     try:
@@ -88,12 +88,9 @@ async def execute_form_design_tool(operation, session, *, user, payload):
     except ValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
     module_name, function, body_model, id_key = FORM_DESIGN_TOOLS[operation]
-    if module_name == "routes":
-        from app.api import forms as module
-    else:
-        from app.services import form_fields, form_layouts, form_versions
-        module = {"form_fields": form_fields, "form_layouts": form_layouts,
-                  "form_versions": form_versions}[module_name]
+    from app.services import form_admin, form_fields, form_layouts, form_versions
+    module = {"form_admin": form_admin, "form_fields": form_fields, "form_layouts": form_layouts,
+              "form_versions": form_versions}[module_name]
     arguments = {"form_id": request.form_id, "db": session, "user": user}
     if id_key:
         arguments[id_key] = getattr(request, id_key)

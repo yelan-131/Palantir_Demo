@@ -98,7 +98,7 @@ def test_chat_message_api_dict_strips_none_fields():
 
 @pytest.mark.asyncio
 async def test_tool_use_loop_executes_read_tool_then_answers(monkeypatch):
-    from app.services.ai import tool_use_loop
+    from tests.legacy_agent import tool_use_loop
     from app.services.ai.schemas import AgentRequest
 
     provider = _ScriptedProvider(
@@ -139,7 +139,7 @@ async def test_tool_use_loop_executes_read_tool_then_answers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tool_use_loop_freezes_side_effect_tool(monkeypatch):
-    from app.services.ai import tool_use_loop
+    from tests.legacy_agent import tool_use_loop
     from app.services.ai.schemas import AgentRequest
     from app.services.ai.tool_registry import ToolDefinition
 
@@ -183,7 +183,7 @@ async def test_tool_use_loop_freezes_side_effect_tool(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tool_use_loop_resume_executes_pending_confirmed(monkeypatch):
-    from app.services.ai import tool_use_loop
+    from tests.legacy_agent import tool_use_loop
     from app.services.ai.confirmations import CONFIRMATIONS, async_create_confirmation_payload, reset_store
     from app.services.ai.schemas import FrozenContext
 
@@ -241,7 +241,7 @@ async def test_tool_use_loop_resume_executes_pending_confirmed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tool_use_loop_stops_when_budget_exceeded(monkeypatch):
-    from app.services.ai import tool_use_loop
+    from tests.legacy_agent import tool_use_loop
     from app.services.ai.schemas import AgentRequest
 
     provider = _ScriptedProvider(
@@ -274,8 +274,8 @@ async def test_tool_use_loop_stops_when_budget_exceeded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_runtime_dispatches_to_tool_use_loop_when_enabled(monkeypatch):
-    from app.services.ai import legacy_runtime as runtime_module
-    from app.services.ai import tool_use_loop
+    from tests.legacy_agent import legacy_runtime as runtime_module
+    from tests.legacy_agent import tool_use_loop
     from app.services.ai.schemas import AgentRequest, AgentResponse
 
     async def fake_run(request, **kwargs):

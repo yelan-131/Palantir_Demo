@@ -1,7 +1,7 @@
 """Shared form schemas contracts for HTTP and tool callers."""
 from __future__ import annotations
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class FormRulePreviewRequest(BaseModel):
@@ -83,6 +83,14 @@ class FormFieldCreate(BaseModel):
     validation: Optional[dict] = None
     ui_config: Optional[dict] = None
     sort_order: int = 0
+
+    @field_validator('default_value', mode='before', json_schema_input_type=str | bool | None)
+    @classmethod
+    def serialize_boolean_default(cls, value: Any, info: ValidationInfo) -> Any:
+        # Field defaults are stored as text and parsed by the record engine.
+        if isinstance(value, bool) and info.data.get('field_type') in {'boolean', 'bool'}:
+            return 'true' if value else 'false'
+        return value
 
 
 class FormFieldUpdate(BaseModel):

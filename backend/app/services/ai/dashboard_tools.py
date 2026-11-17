@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from app.api.deps import current_tenant_id, require_admin
+from app.core.principal import current_tenant_id, ensure_admin
 from app.models.relational import Form
 from app.services import analytics_editor
 from app.services.analytics_data import load_data
@@ -68,13 +68,13 @@ async def source_preview(db, user, request):
 async def execute_dashboard_tool(operation, db, *, user, payload):
     request = REQUESTS[operation].model_validate(payload)
     if operation == 'dashboards.query':
-        from app.api.dashboard import _query_form_program
+        from app.services.dashboard_programs import _query_form_program
         result = await _query_form_program(db, current_tenant_id(user), request.program_id,
             request.limit, user=user, filters=request.filters, widget_filters=request.widget_filters)
         if result is None or not isinstance(result.get('analyticsDesign'), dict):
             raise HTTPException(404, '已发布看板不存在或不可用')
         return result
-    await require_admin(user)
+    ensure_admin(user)
     if operation in {'dashboards.preview_source', 'dashboards.create'}:
         prepared = await source_preview(db, user, request)
         if operation == 'dashboards.preview_source':

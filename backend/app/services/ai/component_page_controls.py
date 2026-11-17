@@ -13,10 +13,10 @@ from .policies import decide_ai_permission
 TOOL = 'ui.component_page'
 TOOL_DETAILS = {
     f'{TOOL}.inspect': ('查看画布', '读取当前画布的组件 ID、数据来源和配置。可指定组件 ID 查看详情。'),
-    f'{TOOL}.add': ('添加组件', '在当前画布添加业务列表、业务筛选、指标卡或分组图表。widget_id 自定且须唯一。'),
+    f'{TOOL}.add': ('添加组件', '在当前画布新增业务列表、指标卡或分组图表。widget_id 需唯一。'),
     f'{TOOL}.update_properties': ('修改组件属性', '修改指定组件的名称、尺寸、数据源、统计口径、列表或筛选配置。'),
     f'{TOOL}.update_appearance': ('调整组件外观', '修改指定组件的标题样式、配色、圆角或图表外观。'),
-    f'{TOOL}.set_interaction': ('设置组件联动', '设置同源组件联动。业务筛选只传 targetWidgetIds，图表也可设置点击行为。'),
+    f'{TOOL}.set_interaction': ('设置组件交互', '设置图表点击行为和同来源联动目标。'),
 }
 
 
@@ -27,7 +27,7 @@ class Operation(BaseModel):
 
 class AddWidget(Operation):
     action: Literal['add']
-    widget_type: Literal['record-list', 'record-filter', 'metric', 'chart']
+    widget_type: Literal['record-list', 'metric', 'chart']
 
 
 def patch_model(name, source, fields):
@@ -42,7 +42,7 @@ def patch_model(name, source, fields):
 @lru_cache(maxsize=1)
 def component_models():
     # Import lazily so the component API can keep using the AI services independently.
-    from app.api.component_pages import FilterSettings, ListSettings, PageWidget, WidgetAppearance
+    from app.services.component_page_definitions import FilterSettings, ListSettings, PageWidget, WidgetAppearance
 
     properties = patch_model('ComponentProperties', PageWidget, (
         'title', 'width', 'dataBinding', 'dimension', 'measure', 'aggregate', 'expression',

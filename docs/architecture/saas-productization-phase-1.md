@@ -69,7 +69,7 @@ Production rules:
 | Workflow binding and instances | Ready foundation | Tenant-filtered definitions/instances and audit on start/approval/cancel. |
 | Reports | Ready foundation | Tenant-filtered report CRUD and snapshots. |
 | Audit logs | Ready foundation | Core actions include tenant/user/resource metadata. |
-| System readiness | Ready foundation | `/api/v1/system/readiness` reports database, Redis, and Neo4j readiness; `/api/v1/release/current` exposes release metadata. |
+| System readiness | Ready foundation | `/api/v1/system/readiness` reports database, migration, SMTP, storage, and production-configuration readiness; `/api/v1/release/current` exposes release metadata. |
 | Route/menu smoke guard | Ready foundation | `frontend/src/config/readyPathSmoke.ts` asserts required ready-path routes, breadcrumbs, and business menus. |
 
 The backend exposes the current machine-readable readiness contract at:

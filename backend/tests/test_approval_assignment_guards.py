@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
-from app.api.workflow import _resolve_step_approver_ids
+from app.services.workflow_approvals import _resolve_step_approver_ids
 
 @pytest.mark.asyncio
 async def test_partial_fixed_approver_set_is_rejected_without_fallback():

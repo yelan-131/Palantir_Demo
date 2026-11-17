@@ -18,7 +18,7 @@
 
 ### 2. 当前代码事实
 
-- `runtime.py` 的 `AgentRuntime` 继承 `HarnessRuntime`；`orchestrator.py` 直接调用 `harness_runtime.run()`。主入口已经使用 DSH；`legacy_runtime.py`、`tool_use_loop.py` 的存在不代表当前入口同时启用了双循环。
+- `runtime.py` 的 `AgentRuntime` 继承 `HarnessRuntime`；`orchestrator.py` 直接调用 `harness_runtime.run()`。主入口已经使用 DSH。旧的确定性规划器（`legacy_runtime.py`、`tool_use_loop.py`、`action_state.py`、`action_payloads.py` 等）已移到 `backend/tests/legacy_agent/`，只在测试中生成历史提案，不随应用加载。
 - `agent_registry.py` 从数据库加载启用的注册项，校验后设置运行时缓存。`data/agent_registry/*.json` 是显式初始化种子，`backend/app/services/ai/assets/` 是打包副本；不能把三者描述成三个可独立编辑的运行时来源。
 - `PlatformBridge.available_tools()` 过滤权限并生成 MCP 定义；`api/ai_harness.py` 的 `tools/list` 和 `tools/call` 提供模型调用边界。
 - `skills.py` 的 `SkillDefinition` 保留数据库注册元数据。表单生成的正文已独立到 `form_design_skill.md`，由 `skill_loader.py` 提供版本和内容摘要，经 `platform.skills.read` 按需读取。系统提示仅提供用途目录，正文不提前注入。这是平台 MCP 适配，不是 DSH 原生技能目录集成；其他业务技能仍以注册元数据为主。
@@ -134,14 +134,14 @@ The first OpenClaw-style enterprise scaffold is now present in the backend:
 | Confirmation | `backend/app/services/ai/confirmations.py` | Server-generated confirmation tokens for write-like AI actions. |
 | Agent Run State | `backend/app/services/ai/agent_runs.py` | In-memory lifecycle for the general AI assistant: create, fetch, confirm, cancel. |
 | Intent Router | `backend/app/services/ai/intent_router.py` | Routes each turn into conversation, knowledge, business query, page help, or action preparation. |
-| Action State | `backend/app/services/ai/action_state.py` | Maintains multi-turn slot filling for pending action preparation. |
-| Action Payloads | `backend/app/services/ai/action_payloads.py` | Builds conservative action payloads from action contracts and collected slots. |
+| Action State (legacy, tests only) | `backend/tests/legacy_agent/action_state.py` | Maintains multi-turn slot filling for pending action preparation in the pre-Harness planner. |
+| Action Payloads (legacy, tests only) | `backend/tests/legacy_agent/action_payloads.py` | Builds conservative action payloads from action contracts and collected slots. |
 | Audit | `backend/app/services/ai/audit.py`, `GET /api/v1/ai/audit` | Shared in-memory AI audit helper used by agent and draft flows. |
 | AI Draft Persistence | `backend/app/api/ai_assistant.py`, migration `0025_ai_drafts.py`, `GET /api/v1/ai/drafts` | Persists confirmed or saved Agent drafts by tenant/user/skill/payload/evidence/status. |
 | Knowledge Agent Persistence | `backend/app/api/knowledge.py`, migration `0015_ai_agent_runtime.py` | Relational persistence for knowledge-center conversations, messages, runs, tool calls, and memory entries. |
 | Knowledge Directories | `GET/POST/PUT /api/v1/knowledge/directories`, `POST /api/v1/knowledge/directories/{id}/move` | Demo directory tree API for the Obsidian-style knowledge page. |
 | Low-Code Agent Tools | `backend/app/services/ai/planner.py`, `backend/app/services/ai/low_code_tools.py`, `backend/app/services/ai/dynamic_record_drafts.py` | Deterministic planning, confirmed admin-only form-definition creation, and confirmed domain draft creation into platform dynamic records when a matching form exists. |
-| Model-Driven Tool Loop | `backend/app/services/ai/tool_use_loop.py`, safety policy `agentLoopMode` | Opt-in LLM function-calling loop: the model plans tool calls, read/analyze tools execute through the envelope, side-effect tools freeze into `FrozenContext` + confirmation token, `resume()` continues after explicit confirmation. Default stays `pipeline`. |
+| Model-Driven Tool Loop (legacy, tests only) | `backend/tests/legacy_agent/tool_use_loop.py`, safety policy `agentLoopMode` | Opt-in LLM function-calling loop: the model plans tool calls, read/analyze tools execute through the envelope, side-effect tools freeze into `FrozenContext` + confirmation token, `resume()` continues after explicit confirmation. Default stays `pipeline`. |
 
 The legacy `/api/v1/ai/agent` endpoint remains compatible, but it now also
 creates an observable `run_id` and returns `steps`, `risk_level`, and
@@ -228,7 +228,12 @@ system prompt from the browser.
 
 ### 3.3.1 Loop Modes
 
-The runtime supports two scheduling modes selected by the
+This section describes the pre-Harness planner, now kept in
+`backend/tests/legacy_agent/` for tests only. The application always runs
+DeepSeek Harness: settings force `agentLoopMode` to `harness` and reject other
+values.
+
+The legacy runtime supports two scheduling modes selected by the
 `safetyPolicy.agentLoopMode` setting:
 
 | Mode | Module | Planner | Notes |
@@ -505,7 +510,7 @@ The low-code form creation flow has split into two distinct tools:
 | Stage | Tool / module | Behavior |
 | --- | --- | --- |
 | Semantic planning | `ai.semantic_plan_low_code_form`, `backend/app/services/ai/semantic_planner.py` | Uses the configured LLM to convert a user turn and pending draft into a structured operation such as `create_form`, `rename_form`, or `add_field`. This is read-only and may fall back to deterministic planning. |
-| Draft state merge | `backend/app/services/ai/action_state.py` | Merges structured semantic slots into the pending action state without letting regex extraction overwrite explicit LLM slots. |
+| Draft state merge (legacy, tests only) | `backend/tests/legacy_agent/action_state.py` | Merges structured semantic slots into the pending action state without letting regex extraction overwrite explicit LLM slots. |
 | Confirmation card | `low_code.create_form_definition` skill output | Shows the current form draft and waits for human confirmation. |
 | Configuration write | `forms.create_form_definition`, `backend/app/services/ai/low_code_tools.py` | Creates form metadata, fields, layouts, optional menu binding, audit event, and route only after confirmation and permission checks. |
 | Existing form field change | `low_code.add_form_field` -> `forms.add_form_field` | Adds fields to an existing form after the same semantic planning, permission, confirmation, and audit gates. |

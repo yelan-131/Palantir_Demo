@@ -1,16 +1,19 @@
 import React from 'react';
 import FilterSchemes from './FilterSchemes';
 import ColumnPicker from './ColumnPicker';
-import ToolbarGroups from './ToolbarGroups';
+import ToolbarGroups, {PropertySubgroup} from './ToolbarGroups';
 import {Alert, Button, Input, InputNumber, Select, Switch} from 'antd';
 import {PropertyGroup, PropertyRow} from '@/components/PropertyInspector';
 import type {PlatformFormField} from '@/services/api';
 import type {ViewConfig} from '@/utils/viewConfig';
+import {filterButtonActions} from './businessComponents';
 import type {PageWidget} from './model';
 
-export default function BusinessProperties({widget,tab,fields,view,onChange,disabled,roles}: {
+export default function BusinessProperties({widget,tab,fields,view,onChange,disabled,roles,selectedFilterScheme,onSelectFilterScheme,selectedDisplayGroup,onSelectDisplayGroup}: {
   roles:Array<{id:number;name:string;label?:string}>; widget:PageWidget; tab:'data'|'interaction'|'toolbar'; fields:PlatformFormField[]; view?:ViewConfig;
   onChange:(value:Partial<PageWidget>)=>void; disabled:boolean;
+  selectedFilterScheme?:string; onSelectFilterScheme?:(id:string)=>void;
+  selectedDisplayGroup?:string; onSelectDisplayGroup?:(id:string)=>void;
 }) {
   const options = fields.map(field=>({label:field.label,value:field.field_name}));
   const sourceFilters = view?.filters?.filter(filter=>filter.enabled!==false).map(filter=>filter.fieldName);
@@ -27,24 +30,40 @@ export default function BusinessProperties({widget,tab,fields,view,onChange,disa
   const patchList = (value:Partial<NonNullable<PageWidget['listSettings']>>) => onChange({listSettings:{...list,...value}});
   const names = widget.filterFields ?? sourceFilters ?? filterOptions.map(option=>option.value);
   const columns = list.displayGroups == null ? list.columns ?? sourceColumns ?? columnOptions.map(option=>option.value) : [...new Set(list.displayGroups.flatMap(group=>group.columns||[]))];
-  if(widget.type==='record-filter')return tab==='data'?<FilterSchemes key={widget.id} settings={filter} names={names} options={filterOptions} roles={roles} disabled={disabled} onChange={patchFilter}/>:tab==='toolbar'?<ToolbarGroups scope="filter" groups={filter.toolbarGroups??[{id:'default-filter-buttons',name:'默认权限组',roleIds:[],actions:['query','reset']}]} roles={roles} disabled={disabled} onChange={toolbarGroups=>patchFilter({toolbarGroups})} renderGroup={(group,patch)=><details className="component-toolbar-buttons" open><summary>按钮组</summary>
-    <PropertyRow label="查询按钮"><Switch size="small" disabled={disabled} checked={group.actions.includes('query')} onChange={checked=>patch({actions:checked?[...group.actions,'query']:group.actions.filter(action=>action!=='query')})}/></PropertyRow>
-    {group.actions.includes('query')&&<>
+  const buttonActions = filterButtonActions(filter);
+  const setButtonEnabled = (action:'query'|'reset', enabled:boolean) => {
+    const actions = enabled ? [...buttonActions,action] : buttonActions.filter(item=>item!==action);
+    patchFilter({toolbarGroups:[{id:'default-filter-buttons',name:'查询与重置按钮',roleIds:[],actions}]});
+  };
+  const filterButtons = <PropertySubgroup title="查询与重置按钮" hint="按钮随当前筛选方案的适用对象显示。">
+    <PropertyRow label="查询按钮"><Switch size="small" disabled={disabled} checked={buttonActions.includes('query')} onChange={enabled=>setButtonEnabled('query',enabled)}/></PropertyRow>
+    {buttonActions.includes('query')&&<>
       <PropertyRow label="查询方式"><Select value={filter.queryMode??'submit'} options={[{label:'点击查询',value:'submit'},{label:'条件变化自动查询',value:'change'}]} onChange={queryMode=>patchFilter({queryMode})}/></PropertyRow>
-      {filter.queryMode!=='change'&&<PropertyRow label="查询文字" hint="同一筛选组件的按钮文字与行为由全部权限组共用。"><Input maxLength={20} value={filter.queryLabel??'查询'} onChange={event=>patchFilter({queryLabel:event.target.value})}/></PropertyRow>}
+      {filter.queryMode!=='change'&&<PropertyRow label="查询文字"><Input maxLength={20} value={filter.queryLabel??'查询'} onChange={event=>patchFilter({queryLabel:event.target.value})}/></PropertyRow>}
     </>}
-    <PropertyRow label="重置按钮"><Switch size="small" disabled={disabled} checked={group.actions.includes('reset')} onChange={checked=>patch({actions:checked?[...group.actions,'reset']:group.actions.filter(action=>action!=='reset')})}/></PropertyRow>
-    {group.actions.includes('reset')&&<>
+    <PropertyRow label="重置按钮"><Switch size="small" disabled={disabled} checked={buttonActions.includes('reset')} onChange={enabled=>setButtonEnabled('reset',enabled)}/></PropertyRow>
+    {buttonActions.includes('reset')&&<>
       <PropertyRow label="重置行为"><Select value={filter.resetMode??'defaults'} options={[{label:'恢复来源默认值',value:'defaults'},{label:'清空所有条件',value:'clear'}]} onChange={resetMode=>patchFilter({resetMode})}/></PropertyRow>
-      <PropertyRow label="重置文字" hint="同一筛选组件的按钮文字与行为由全部权限组共用。"><Input maxLength={20} value={filter.resetLabel??'重置'} onChange={event=>patchFilter({resetLabel:event.target.value})}/></PropertyRow>
+      <PropertyRow label="重置文字"><Input maxLength={20} value={filter.resetLabel??'重置'} onChange={event=>patchFilter({resetLabel:event.target.value})}/></PropertyRow>
     </>}
-  </details>}/>:null;
+  </PropertySubgroup>;
   if(widget.type!=='record-list')return null;
   const enabledActions = list.toolbarActions ?? view?.table?.toolbarActions ?? [];
   if(tab==='toolbar') return <ToolbarGroups groups={list.toolbarGroups ?? [{id:'default-toolbar',name:'默认权限组',roleIds:[],actions:enabledActions}]} roles={roles} disabled={disabled} onChange={toolbarGroups=>patchList({toolbarGroups})}/>;
   if(tab==='data')return <>
+    <PropertyGroup title="列表筛选">
+      <PropertyRow label="启用列表筛选" hint="在表格上方显示查询条件，使用当前列表的业务来源。">
+        <Switch aria-label="启用列表筛选" size="small" disabled={disabled} checked={widget.showFilters!==false}
+          onChange={showFilters=>onChange({showFilters})}/>
+      </PropertyRow>
+      {widget.showFilters!==false&&<FilterSchemes key={widget.id} settings={filter} names={names} options={filterOptions}
+    roles={roles} disabled={disabled} onChange={patchFilter} selected={selectedFilterScheme} onSelect={onSelectFilterScheme}>
+        {filterButtons}
+      </FilterSchemes>}
+    </PropertyGroup>
     <PropertyGroup title="列表显示">
-      <ToolbarGroups scope="display" groups={list.displayGroups??[{id:'default-display',name:'默认权限组',roleIds:[],actions:[],columns}]} roles={roles} disabled={disabled} initialValues={{columns:[...columns],defaultSort:null,inheritDefaultSort:false,pageSize:view?.table?.pageSize??20,emptyText:'暂无符合条件的数据'}} onChange={displayGroups=>patchList({displayGroups})} renderGroup={(group,patch)=>{
+      <ToolbarGroups scope="display" selectedGroup={selectedDisplayGroup} onSelectGroup={onSelectDisplayGroup}
+        groups={list.displayGroups??[{id:'default-display',name:'默认权限组',roleIds:[],actions:[],columns}]} roles={roles} disabled={disabled} initialValues={{columns:[...columns],defaultSort:null,inheritDefaultSort:false,pageSize:view?.table?.pageSize??20,emptyText:'暂无符合条件的数据'}} onChange={displayGroups=>patchList({displayGroups})} renderGroup={(group,patch)=>{
         const selected=group.columns??columns;
         const sortable=group.sortableColumns??view?.table?.columns.filter(column=>column.sortable).map(column=>column.fieldName)??[];
         const inheritedSort=list.defaultSort??(view?.table?.defaultSort?{field:view.table.defaultSort.fieldName,order:view.table.defaultSort.order==='ascend'?'asc' as const:'desc' as const}:null);

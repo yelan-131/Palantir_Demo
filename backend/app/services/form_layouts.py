@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api._model_driven_shared import assert_safe_identifier
-from app.api.deps import current_tenant_id, require_admin
+from app.core.identifiers import assert_safe_identifier
+from app.core.principal import current_tenant_id, ensure_admin
 from app.services.form_schemas import (
     FormLayoutUpsert,
 )
@@ -26,7 +26,7 @@ async def list_form_layouts(form_id: int, db: AsyncSession, user: dict):
 
 
 async def upsert_form_layout(form_id: int, layout_type: str, body: FormLayoutUpsert, db: AsyncSession, user: dict):
-    await require_admin(user)
+    ensure_admin(user)
     from app.models.relational import Form, FormLayout
     tenant_id = current_tenant_id(user)
     assert_safe_identifier(layout_type)

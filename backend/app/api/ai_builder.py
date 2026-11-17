@@ -5,15 +5,16 @@ definitions and page layouts based on user descriptions.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.api._model_driven_shared import MOCK_MODELS
+from app.api.deps import get_current_user
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ── Pydantic schemas ──────────────────────────────────────

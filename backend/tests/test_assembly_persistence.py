@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api import applications, forms, admin
+from app.services import applications as applications_service
+from app.services import form_admin
 from app.api.deps import get_db, get_current_user
 from app.models.relational import Base, Tenant, User
 
@@ -56,7 +58,9 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
     monkeypatch.setattr(applications, 'safe_db_call', safe_call)
     monkeypatch.setattr(admin, '_try_db', safe_call)
     monkeypatch.setattr(applications, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(applications_service, 'write_audit_log', AsyncMock())
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     async def request(client, method, path, payload=None, expected=200):
         response = await client.request(method, path, json=payload)
         assert response.status_code == expected, response.text
@@ -170,7 +174,7 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 # Size limits count UTF-8 bytes in physical rows too. A smaller
                 # limit cannot silently invalidate already stored values.
                 from app.models.relational import Form as StoredForm
-                from app.api.form_engine.naming import _physical_column_name
+                from app.services.form_engine.naming import _physical_column_name
                 from sqlalchemy import text
                 async with sessions() as data_db:
                     stored_form = await data_db.get(StoredForm, fid)

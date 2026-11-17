@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from types import SimpleNamespace
 
-from app.api.workflow import _personal_workflow_views, _workflow_business_dataset
+from app.services.workflow_views import _personal_workflow_views, _workflow_business_dataset
 
 
 def test_pending_is_current_node_task_not_admin_visibility():

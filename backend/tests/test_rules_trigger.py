@@ -14,6 +14,10 @@ import json
 
 import pytest
 
+USER = {"uid": 1, "tenant_id": 1, "is_admin": True}
+
+pytestmark = pytest.mark.usefixtures("legacy_model_driven_demo")
+
 
 # ── Helpers ────────────────────────────────────────────────
 
@@ -243,7 +247,7 @@ class TestEvaluateTriggersIntegration:
             record=record,
             old_record=old_record,
         )
-        return _run(evaluate_triggers(body))
+        return _run(evaluate_triggers(body, user=USER))
 
     def test_matching_trigger_fires(self):
         """equipment with health_score=42 should fire the 低健康分自动工单 trigger."""
@@ -324,10 +328,12 @@ class TestTriggerEndpoints:
         """Create a test client with just the rules router mounted."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+        from app.api.deps import get_current_user
         from app.api.rules import router
 
         app = FastAPI()
         app.include_router(router)
+        app.dependency_overrides[get_current_user] = lambda: USER
         return TestClient(app)
 
     def test_list_triggers_for_model(self, client):

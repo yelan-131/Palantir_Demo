@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import AsyncIterator, Optional
 
-from fastapi import Cookie, Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import db_session
 from app.core.logging import get_logger
+from app.core.principal import current_tenant_id, current_user_id, ensure_admin  # noqa: F401
 from app.core.security import decode_access_token
 
 logger = get_logger(__name__)
@@ -70,23 +71,46 @@ async def get_current_user(
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if not user.get("is_admin"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin privilege required")
+    return ensure_admin(user)
+
+
+def require_platform_admin(user: dict = Depends(require_admin)) -> dict:
+    if current_tenant_id(user) != 1:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform admin privilege required")
     return user
 
 
-def current_tenant_id(user: dict) -> int:
-    """Return the active tenant id carried by the auth token.
-
-    Tokens must carry tenant context; request handlers no longer infer demo
-    tenant 1 on behalf of the caller.
-    """
-    tenant_id = user.get("tenant_id")
-    if isinstance(tenant_id, int) and tenant_id > 0:
-        return tenant_id
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Tenant context required")
+async def require_platform_admin_for_writes(request: Request, user: dict = Depends(get_current_user)) -> dict:
+    """Reads need a signed-in user; writes to platform-wide metadata need a platform admin."""
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        require_platform_admin(await require_admin(user))
+    return user
 
 
-def current_user_id(user: dict) -> Optional[int]:
-    uid = user.get("uid")
-    return int(uid) if isinstance(uid, int) and uid > 0 else None
+def require_permission(resource_type: str, resource_key: str, action: str):
+    async def checker(
+        user: dict = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> dict:
+        from app.core.permissions import has_permission
+
+        if not await has_permission(user, resource_type, resource_key, action, db):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Permission denied")
+        return user
+
+    return checker
+
+
+def require_form_permission(action: str):
+    async def checker(
+        form_id: int,
+        user: dict = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> dict:
+        from app.core.permissions import has_form_permission
+
+        if not await has_form_permission(user, form_id, action, db):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Form permission denied")
+        return user
+
+    return checker

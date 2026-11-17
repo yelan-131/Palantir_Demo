@@ -174,9 +174,19 @@ Important helpers:
 | --- | --- |
 | `get_user_role_ids(user, db)` | Reads current role membership from the database |
 | `has_permission(user, resource_type, resource_key, action, db)` | Checks generic `role_permissions` |
-| `require_permission(resource_type, resource_key, action)` | FastAPI dependency factory for generic permissions |
 | `has_form_permission(user, form_id, action, db, field_name=None)` | Checks platform form permissions |
-| `require_form_permission(action)` | Dependency factory for form routes with `form_id` path param |
+
+FastAPI dependency factories built on these helpers live in
+`backend/app/api/deps.py`:
+
+| Dependency | Purpose |
+| --- | --- |
+| `require_permission(resource_type, resource_key, action)` | Generic permission check for a route |
+| `require_form_permission(action)` | Form permission check for routes with a `form_id` path param |
+
+Services take the user dict directly and use `app.core.principal`
+(`current_tenant_id`, `current_user_id`, `ensure_admin`) instead of route
+dependencies.
 
 The current matching rules are:
 
@@ -392,7 +402,7 @@ async def update_config(user: dict = Depends(require_admin)):
 Generic RBAC endpoint:
 
 ```python
-from app.core.permissions import require_permission
+from app.api.deps import require_permission
 
 @router.post("/reports/{report_code}/publish")
 async def publish_report(

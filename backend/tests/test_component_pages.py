@@ -266,10 +266,12 @@ async def test_new_page_is_private_draft_until_first_publication(pages_environme
 async def test_page_record_create_edit_submit_and_approval_share_the_existing_flow(pages_environment, monkeypatch):
     from unittest.mock import AsyncMock
     from app.api import forms, workflow
+    from app.services import form_admin
     from app.models.relational import WorkflowInstance
     from app.services.form_approval_config import save_approval_settings
     db, _, user, client = pages_environment
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     monkeypatch.setattr(workflow, 'write_audit_log', AsyncMock())
     await save_approval_settings(db, 1, 1, 1, {'enabled': True,
         'stages': [{'name': 'Review', 'approver_ids': [2], 'approval_mode': 'single'}]})
@@ -312,7 +314,8 @@ async def test_new_business_form_binding_is_idempotent_and_keeps_field_drafts(pa
     response = await client.post('/pages/forms/1/binding')
     assert response.status_code == 200, response.text
     page = response.json()
-    assert [w['type'] for w in page['definition']['widgets']] == ['record-filter', 'record-list']
+    assert [w['type'] for w in page['definition']['widgets']] == ['record-list']
+    assert page['definition']['widgets'][0]['showFilters'] is True
     assert page['definition']['sourceFormId'] == 1
     assert page['hostForm']['id'] == 1
     assert (await client.post('/pages/forms/1/binding')).json()['code'] == page['code']
@@ -1005,7 +1008,7 @@ async def test_multi_choice_filter_uses_selected_values_for_both_storage_adapter
 
 def test_multi_choice_matches_array_members_and_scalar_values():
     from types import SimpleNamespace
-    from app.api.form_engine.query import _record_matches_filters
+    from app.services.form_engine.query import _record_matches_filters
     fields = [SimpleNamespace(field_name='kind', archived=False)]
     predicate = [{'field':'kind','op':'in','value':['A','C']}]
     assert _record_matches_filters(SimpleNamespace(data={'kind':['B','C']}),fields,predicate)
@@ -1016,7 +1019,7 @@ def test_multi_choice_matches_array_members_and_scalar_values():
 @pytest.mark.asyncio
 async def test_multi_choice_sql_matches_whole_array_options(pages_environment):
     from sqlalchemy import literal
-    from app.api.form_engine.query import _selection_filter_clause
+    from app.services.form_engine.query import _selection_filter_clause
     db, _, _, _ = pages_environment
     assert await db.scalar(select(_selection_filter_clause(literal('["A", "B"]'), ['B'], db.bind.dialect.name)))
     assert not await db.scalar(select(_selection_filter_clause(literal('["ABC"]'), ['A'], db.bind.dialect.name)))
@@ -1104,6 +1107,21 @@ def test_filter_button_groups_match_subjects_and_preserve_legacy_defaults():
     assert widget == original
     assert resolve({'filterSettings': {}}, set()) == {'filterSettings': {}}
     assert actions(resolve({'filterSettings': {'toolbarGroups': []}}, {4}, 12, {8})) == set()
+
+
+def test_list_filter_buttons_follow_visible_schemes_without_separate_audiences():
+    widget = {'type': 'record-list', 'filterSettings': {
+        'schemes': [{'id': 'scheme', 'groups': [{'roleIds': [4], 'columns': ['title']}]}],
+        'toolbarGroups': [{'roleIds': [9], 'actions': ['query']}, {'userIds': [12], 'actions': ['reset']}],
+    }}
+    resolve = component_pages.resolve_filter_groups
+    role_with_scheme = component_pages.resolve_filter_schemes(resolve(widget, {4}), {4})
+    assert role_with_scheme['filterSettings']['schemes'][0]['id'] == 'scheme'
+    groups = role_with_scheme['filterSettings']['toolbarGroups']
+    assert groups == [{'id': 'default-filter-buttons', 'name': '查询与重置按钮', 'roleIds': [], 'actions': ['query', 'reset']}]
+    role_without_scheme = component_pages.resolve_filter_schemes(resolve(widget, {9}, 12), {9}, 12)
+    assert role_without_scheme['filterSettings']['schemes'] == []
+    assert resolve({'type': 'record-list', 'filterSettings': {'toolbarGroups': []}}, {4})['filterSettings']['toolbarGroups'][0]['actions'] == []
 
 
 @pytest.mark.asyncio

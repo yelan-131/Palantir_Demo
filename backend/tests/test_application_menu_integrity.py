@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api import applications, forms, admin
+from app.services import applications as applications_service
+from app.services import form_admin
 from app.api.deps import get_db, get_current_user
 from app.models.relational import Base, Tenant, User
 
@@ -56,7 +58,9 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
     monkeypatch.setattr(applications, 'safe_db_call', safe_call)
     monkeypatch.setattr(admin, '_try_db', safe_call)
     monkeypatch.setattr(applications, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(applications_service, 'write_audit_log', AsyncMock())
     monkeypatch.setattr(forms, 'write_audit_log', AsyncMock())
+    monkeypatch.setattr(form_admin, 'write_audit_log', AsyncMock())
     async def request(client, method, path, payload=None, expected=200):
         response = await client.request(method, path, json=payload)
         assert response.status_code == expected, response.text

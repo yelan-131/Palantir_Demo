@@ -4,10 +4,18 @@ const fs=require('node:fs');
 const path=require('node:path');
 const ts=require('typescript');
 const vm=require('node:vm');
-const source=fs.readFileSync(path.join(__dirname,'../src/pages/FormSettings/index.tsx'),'utf8');
-const ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
-const names=['mapPlatformBusinessType','mapDesignerFieldType','makeRuntimeFormLayout'];
-const functions=ast.statements.filter(node=>ts.isFunctionDeclaration(node)&&names.includes(node.name?.text)).map(node=>node.getText(ast)).join('\n');
+const functionsByFile = {
+  'platformFields.ts': ['mapPlatformBusinessType'],
+  'fieldBusinessType.ts': ['inferBusinessTypeFromLegacyType', 'getFieldBusinessType', 'mapDesignerFieldType'],
+  'workflowConfig.ts': ['makeRuntimeFormLayout'],
+};
+const functions = Object.entries(functionsByFile).flatMap(([file, names]) => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/pages/FormSettings', file), 'utf8');
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  return ast.statements
+    .filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text))
+    .map(node => node.getText(ast).replace(/^export /, ''));
+}).join('\n');
 const layoutCtx={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/utils/formLayout.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,layoutCtx);
 const ctx={buildRuntimeLayout:layoutCtx.exports.buildRuntimeLayout,getControlColumnSpan:layoutCtx.exports.getControlColumnSpan,getFieldBusinessType:field=>field.businessType,getEffectiveControlTypeForControl:control=>control.controlType};
 vm.createContext(ctx);

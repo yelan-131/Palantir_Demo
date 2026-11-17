@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError, OperationalError
 
-from app.api.deps import current_tenant_id
+from app.core.principal import current_tenant_id
 from app.core.permissions import allowed_form_fields
 from app.models.relational import Material, Supplier, Equipment, ProductionLine, User, OrgUnit, Role
 
@@ -84,7 +84,7 @@ def control_rule(rule, data, fallback):
 
 def states(fields, data):
     result = {}
-    from app.api.form_engine.encoding import _is_encoding_field, _encoding_rule_for_field
+    from app.services.form_engine.encoding import _is_encoding_field, _encoding_rule_for_field
     for field in fields:
         ui = config(field)
         rules = ui.get('rules') or {}
@@ -327,7 +327,7 @@ async def evaluate(db, user, fields, incoming, *, existing=None, enforce=False, 
             ui = config(field)
             if ui.get('controlType') == 'upload' and data.get(name) not in (None, ''):
                 from app.services.form_files import validate_value
-                from app.api.deps import current_user_id
+                from app.core.principal import current_user_id
                 data[name] = validate_value(data[name], tenant_id=current_tenant_id(user), form_id=field.form_id, field_name=name,
                     uid=current_user_id(user), rules=ui.get('typeSettings') or {}, existing=(existing or {}).get(name))
         # Configured conditional requirements apply even to AI drafts.

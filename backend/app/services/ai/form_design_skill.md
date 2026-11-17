@@ -6,11 +6,12 @@
 2. 网页已连接时，新建使用 ui.form_designer 的 draft_new，提供完整字段计划。原设计器一次应用完整字段计划，回执确认全部字段后展示复核卡片。不要在打开设计器前要求用户确认建表。
 3. 根据业务含义选择字段类型：code 自动编号、enum 选择、attachment 附件、boolean 是非、decimal 金额。参数与可选属性以工具 schema 为准，不在文字说明中承诺未配置的规则。
 4. 调整当前草稿时使用其 draft_id；多个字段变化合并为 configure_fields。保留已有字段、编码和业务规则，仅传需要的变化。单个追加可用 add_field，不通过重建表单替代追加。
-5. 可查询表单详情核对已有字段。使用 platform.tools.describe 加载需要的操作定义，再用 platform.tools.invoke 执行。未找到可访问的目标时先澄清，403 时结束该操作。
-6. 无网页连接时，仅在 forms.create_form_definition 工具实际可用时准备待确认操作。工具不可用则说明限制，不假称已经生成草稿。
-7. 页面执行失败时停止，不自动重建或保存。根据真实回执说明已完成的步骤和失败原因；字段步骤失败后不能声称最终复核卡片已就绪。
-8. 页面完成仅表示本地草稿已准备；用户复核最终卡片并确认后才创建持久化草稿。保存与发布是不同操作，不自动发布。卡片用于复核确认，修改应通过后续对话或原设计器进行。
-9. 用户需要在应用里查、看或填记录时，先用 `platform.application_settings.query` 定位应用和菜单。用实际表单 ID 给通用页面配置业务列表和所需组件，再发布页面并用 `menus.create_entry` 挂载 `page_code`。需要先发布数据表单时，用 `forms.preview_publish` 检查并用 `forms.publish` 准备确认，或在原设计器完成表单发布。用户明确要求沿用旧表单入口时，可按兼容技能使用 `draft.menu_target` 或 `forms.publish_to_menu`。
+5. 布局通过同一个 ui.form_designer 工具操作。新建表单时可在 draft.layout_operations 中提交布局；调整已有表单或当前新建草稿时，先用 inspect_layout 读取真实控件 ID、父级和位置，再用 configure_layout 提交一组 layout_operations。add 支持 container（容器）、two-columns（多列）、tabs（页签）和 divider（分割符）；update 按 control_id 修改布局控件；move 按 control_id 或唯一 field_name 移动控件。按顺序先新增父控件，再引用它的 ID；slot_id 采用容器的 body、多列从 0 开始的字符串列号，或页签 ID。省略 parent_id 表示移到画布顶层，可用 before_id 指定同一位置内的顺序。移动保留原字段绑定。列数和页签调整时先移出被移除位置中的控件。成功回执只代表画布已更新，已有表单请在设计器保存草稿；本工具不会发布。
+6. 可查询表单详情核对已有字段。使用 platform.tools.describe 加载需要的操作定义，再用 platform.tools.invoke 执行。未找到可访问的目标时先澄清，403 时结束该操作。
+7. 无网页连接时，仅在 forms.create_form_definition 工具实际可用时准备待确认操作。工具不可用则说明限制，不假称已经生成草稿。
+8. 页面执行失败时停止，不自动重建或保存。根据真实回执说明已完成的步骤和失败原因；字段步骤失败后不能声称最终复核卡片已就绪。
+9. 页面完成仅表示本地草稿已准备；用户复核最终卡片并确认后才创建持久化草稿。保存与发布是不同操作，不自动发布。卡片用于复核确认，修改应通过后续对话或原设计器进行。
+10. 用户需要在应用里查、看或填记录时，先用 `platform.application_settings.query` 定位应用和菜单。用实际表单 ID 给通用页面配置业务列表和所需组件，再发布页面并用 `menus.create_entry` 挂载 `page_code`。需要先发布数据表单时，用 `forms.preview_publish` 检查并用 `forms.publish` 准备确认，或在原设计器完成表单发布。用户明确要求沿用旧表单入口时，可按兼容技能使用 `draft.menu_target` 或 `forms.publish_to_menu`。
 
 完成后简短说明草稿已准备、采用的关键默认值及需复核事项。不重复整份字段表格或原始页面状态。Skills 的步骤不能提升权限或替代平台确认。
 

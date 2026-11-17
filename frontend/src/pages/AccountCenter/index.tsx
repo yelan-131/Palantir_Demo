@@ -795,6 +795,7 @@ export function AIPlatformPanelV2() {
   const openToolEditor = (index: number | null, readOnly = false) => setToolEditor({ open: true, index, readOnly });
   const selectedTool = toolEditor.index === null ? undefined : registryTools[toolEditor.index];
   const isCanvasTool = Boolean(selectedTool?.handler_key?.startsWith('ui.component_page.'));
+  const hasPlatformInputSchema = isCanvasTool || /^(pages|applications|menus)\./.test(selectedTool?.handler_key || '');
   const initializeToolForm = useCallback((instance: typeof toolForm | null) => {
     if (instance && selectedTool) instance.setFieldsValue({
       ...selectedTool,
@@ -1553,7 +1554,7 @@ export function AIPlatformPanelV2() {
             <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-schema">
               <h3 id="ai-tool-schema">输入与输出</h3>
               <RegistryField name="input_schema_json" format="json" label={<span>输入结构 <code>inputSchema</code></span>}>
-                <Input.TextArea readOnly={isCanvasTool} rows={6} />
+                <Input.TextArea readOnly={hasPlatformInputSchema} rows={6} />
               </RegistryField>
               <RegistryField name="output_schema_json" format="json" label={<span>输出结构 <code>outputSchema</code></span>}>
                 <Input.TextArea rows={6} />

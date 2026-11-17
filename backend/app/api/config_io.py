@@ -12,7 +12,7 @@ import copy
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.config import settings
@@ -22,12 +22,13 @@ from app.api._model_driven_shared import (
     MOCK_PAGES,
     try_db,
 )
+from app.api.deps import require_platform_admin
 from app.api.rules import MOCK_RULES
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_platform_admin)])
 
 EXPORT_VERSION = "1.0"
 

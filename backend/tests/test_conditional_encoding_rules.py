@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 from fastapi import HTTPException
 
-from app.api.form_engine.encoding import _code_sequence_from_value, _render_code_template, _select_encoding_rule, _sequence_period_key
+from app.services.form_engine.encoding import _code_sequence_from_value, _render_code_template, _select_encoding_rule, _sequence_period_key
 
 
 def scheme(identifier, kind, extra=False):
@@ -61,7 +61,7 @@ def test_overlapping_rules_rejected_regardless_of_order(reverse):
 @pytest.mark.asyncio
 async def test_conflict_does_not_allocate_sequence(monkeypatch):
     from unittest.mock import AsyncMock
-    from app.api.form_engine import sequences
+    from app.services.form_engine import sequences
     allocate = AsyncMock()
     monkeypatch.setattr(sequences, '_allocate_code_sequence', allocate)
     field = SimpleNamespace(field_name='code', archived=False,
@@ -90,7 +90,7 @@ async def test_snapshot_rules_and_runtime_counters(tmp_path):
     from app.models.relational import Base, Tenant, Form, FormField, FormVersion
     from app.api.forms import _form_snapshot
     from app.services.form_runtime import _runtime_form_fields
-    from app.api.form_engine.sequences import _apply_record_encoding_rules
+    from app.services.form_engine.sequences import _apply_record_encoding_rules
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "encoding.db"}')
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
