@@ -1,6 +1,6 @@
 # ManuFoundry
 
-当前开发版本：0.3.22 草稿（2026-11-17 更新），见[发布说明草稿](docs/releases/release-0.3.22.md)。
+当前发布版本：0.3.22（2026-11-18），见[发布说明](docs/releases/release-0.3.22.md)。
 最新已发布版本：[0.3.21 — AI 技能、应用页面与数据中心](docs/releases/release-0.3.21.md)，2026-11-14 发布。
 版本编号与发布流程见[版本策略](docs/operations/version-policy.md)，历次版本见[文档索引](docs/README.md#6-发布说明历史)。
 

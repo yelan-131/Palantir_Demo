@@ -1,6 +1,6 @@
 {
   "version": "0.3.22",
-  "released_at": null,
+  "released_at": "2026-11-18",
   "title": "应用发布与表单版本、AI 业务技能及工作台更新",
   "summary": "表单版本支持恢复为草稿，应用首次发布后锁定编码；AI 搭建表单将保存草稿与发布、挂菜单分开确认。更新全局搜索、业务列表、表单设计器及管理界面，并纳入列表筛选、接口鉴权、全新库迁移和持续集成改进。",
   "highlights": [
@@ -13,9 +13,9 @@
   "records": [
     {
       "version": "0.3.22",
-      "released_at": null,
-      "status": "draft",
-      "updated_at": "2026-11-17",
+      "released_at": "2026-11-18",
+      "status": "published",
+      "updated_at": "2026-11-18",
       "title": "应用发布与表单版本、AI 业务技能及工作台更新",
       "categories": {
         "added": [
@@ -481,6 +481,6 @@
     }
   ],
   "show_popup": true,
-  "status": "draft",
-  "updated_at": "2026-11-17"
+  "status": "published",
+  "updated_at": "2026-11-18"
 }
