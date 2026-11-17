@@ -17,6 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    existing = set(sa.inspect(op.get_bind()).get_table_names())
+    if {"applications", "application_menus", "application_roles"} <= existing:
+        return
     op.create_table(
         "applications",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),

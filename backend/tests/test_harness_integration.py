@@ -25,7 +25,7 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
     from app.services.ai.tool_envelope import tool_execution_envelope
     from app.services.ai.settings import settings_snapshot
     from app.services.ai.policies import decide_tool_permission
-    from app.services.ai.skill_loader import SKILL_FILES, SKILL_TOOL, FORM_SKILL
+    from app.services.ai.skill_loader import SKILL_TOOL, FORM_SKILL, bundled_skill_package
 
     monkeypatch.setenv('AI_HARNESS_HOME', str(tmp_path))
     monkeypatch.setenv('AI_HARNESS_NATIVE_SKILLS', 'true' if read_skill == 'registry' else 'false')
@@ -39,14 +39,17 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         )
         external = SkillDefinition(**imported, title='External review', capability_level='qa')
         hidden = external.model_copy(update={'name': 'hidden-review', 'model_invocable': False, 'user_invocable': False})
+        manual = external.model_copy(update={'name': 'manual-review', 'model_invocable': False})
         blocked = external.model_copy(update={'name': 'blocked-review'})
-        registry = {**skill_registry(), external.name: external, hidden.name: hidden, blocked.name: blocked}
+        registry = {**skill_registry(), external.name: external, hidden.name: hidden, manual.name: manual, blocked.name: blocked}
         monkeypatch.setattr(harness_skills, 'skill_registry', lambda: registry)
         monkeypatch.setattr(skill_loader, 'skill_registry', lambda: registry)
     if read_skill == 'native':
         root = tmp_path / 'external-skills'
         root.mkdir()
-        (root / 'external-review.md').write_text(
+        package = root / 'external-review'
+        package.mkdir()
+        (package / 'SKILL.md').write_text(
             '---\nname: external-review\ndescription: Review external reports\n---\n\nEXTERNAL_REVIEW_BODY\n',
             encoding='utf-8',
         )
@@ -154,10 +157,11 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
             assert 'low-code-create-form-definition' in str(calls[0]['messages'])
             assert 'analysis-analyze-form-records' in str(calls[0]['messages'])
             assert 'hidden-review' not in str(calls[0]['messages'])
+            assert 'manual-review' not in str(calls[0]['messages'])
             assert 'blocked-review' not in str(calls[0]['messages'])
             assert not any('platform_skills_read_' in t['function']['name'] for t in calls[0]['tools'])
         elif read_skill is True:
-            assert bridge.loaded_skills[FORM_SKILL]['version'] == SKILL_FILES[FORM_SKILL][0]
+            assert bridge.loaded_skills[FORM_SKILL]['version'] == bundled_skill_package(FORM_SKILL)[0]['metadata']['version']
             assert 'draft_new' in str(calls[1]['messages'])
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512

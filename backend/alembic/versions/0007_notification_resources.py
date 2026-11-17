@@ -14,8 +14,11 @@ down_revision = "0006_platform_forms"
 
 
 def upgrade() -> None:
-    op.add_column("notifications", sa.Column("resource_type", sa.String(100), nullable=True))
-    op.add_column("notifications", sa.Column("resource_id", sa.Integer(), nullable=True))
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("notifications")}
+    if "resource_type" not in columns:
+        op.add_column("notifications", sa.Column("resource_type", sa.String(100), nullable=True))
+    if "resource_id" not in columns:
+        op.add_column("notifications", sa.Column("resource_id", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:

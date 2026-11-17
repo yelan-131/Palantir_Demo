@@ -58,3 +58,12 @@ test('record updates open the original record and report an update', () => {
   assert.equal(result.title, '记录已更新');
   assert.equal(result.href, '/dynamic/inbound?recordId=2');
 });
+
+test('saved form drafts link to the designer and call out separate publication', () => {
+  const result = context.getExecutionResult({
+    form: { id: 17, status: 'draft' }, route_path: '/form-settings/17?tab=form&legacy=1',
+  });
+  assert.equal(result.title, '表单草稿已保存');
+  assert.equal(result.detail, '发布需要单独确认');
+  assert.equal(result.href, '/form-settings/17?tab=form&legacy=1');
+});

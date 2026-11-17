@@ -12,8 +12,12 @@ const AlertCenter = lazy(() => import('../AlertCenter'));
 /** Existing form routes resolve their own page; no third creation entry is needed. */
 export default function FormPageEntry({kind, formSlug}: {kind: 'business' | 'program'; formSlug?:string}) {
   const params = useParams<{slug: string; programId: string}>();
+  const slug = formSlug || params.slug || params.programId || '';
+  return <BoundFormPage key={`${kind}:${slug}`} kind={kind} slug={slug} />;
+}
+
+function BoundFormPage({kind, slug}: {kind: 'business' | 'program'; slug: string}) {
   const [searchParams] = useSearchParams();
-  const slug = formSlug || params.slug || params.programId;
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
   const [binding, setBinding] = useState<{enabled: boolean; code?: string; form?: {id: number}}>();
   const [error, setError] = useState('');
@@ -22,7 +26,7 @@ export default function FormPageEntry({kind, formSlug}: {kind: 'business' | 'pro
     setBinding(undefined); setError('');
     (async () => {
       try {
-        const response = await api.get(`/pages/forms/${encodeURIComponent(slug || '')}/binding`);
+        const response = await api.get(`/pages/forms/${encodeURIComponent(slug)}/binding`);
         let value = response.data;
         if (value.enabled && !value.code && admin) {
           const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: true, populate: true});

@@ -37,20 +37,29 @@ async def test_page_call_waits_for_real_browser_receipt_and_does_not_write(monke
     monkeypatch.setattr(mod, 'decide_ai_permission', lambda *args, **kwargs: SimpleNamespace(allowed=True))
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
     received = asyncio.Event()
+    events = []
     async def sink(event, action):
-        assert event == 'ui.action'
-        received.set()
-        assert not bridge.page_actions[action['id']].done()
+        events.append((event, action))
+        if event == 'ui.action':
+            received.set()
+            assert not bridge.page_actions[action['id']].done()
     bridge.event_sink = sink
     task = asyncio.create_task(mod.call_page_control(bridge, {'action': operation,
         'form_id': 7, 'field_name': 'quantity', 'properties': {'label': '新名称'}}))
     await received.wait()
     assert not task.done()
+    started = events[0][1]
+    assert started['type'] == 'page_action' and started['status'] == 'running'
+    assert started['item_id'] == events[1][1]['id']
     future = next(iter(bridge.page_actions.values()))
     future.set_result({'ok': True, 'state': {'label': '新名称', 'saved': False, 'published': False}})
     result = await task
     assert result['status'] == 'completed' and result['result']['saved'] is False
     assert bridge.configuration_outcome['status'] == outcome
+    assert [event for event, _ in events] == ['item.created', 'ui.action', 'item.updated']
+    assert bridge.items == [events[-1][1]]
+    assert bridge.items[0]['item_id'] == started['item_id']
+    assert bridge.items[0]['status'] == 'completed'
     assert not bridge.page_actions
     db.commit.assert_not_awaited()
 
@@ -112,8 +121,9 @@ async def test_timeout_cancels_browser_queue_without_claiming_an_unsaved_dialog(
     monkeypatch.setattr(mod.asyncio, 'wait_for', timeout)
     result = await mod.call_page_control(bridge, {'action': 'draft_new', 'draft': DRAFT})
     calls = bridge.event_sink.await_args_list
-    assert [call.args[0] for call in calls] == ['ui.action', 'ui.action.cancel']
-    assert calls[0].args[1]['id'] == calls[1].args[1]['id']
+    assert [call.args[0] for call in calls] == ['item.created', 'ui.action', 'ui.action.cancel', 'item.updated']
+    assert calls[1].args[1]['id'] == calls[2].args[1]['id'] == bridge.items[0]['item_id']
+    assert bridge.items[0]['status'] == 'timeout'
     assert result['status'] == 'blocked'
     assert '未检测到' in result['message']
     assert not bridge.page_actions
@@ -145,6 +155,8 @@ async def test_new_draft_checks_collision_and_never_creates_database_rows(monkey
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
     operations = []
     async def sink(event, action):
+        if event != 'ui.action':
+            return
         operations.append(action['action'])
         assert action['form_id'] == 0
         if action['action'] == 'draft_new':
@@ -191,6 +203,8 @@ async def test_incomplete_native_field_receipt_stops_without_final_review(monkey
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
     operations = []
     async def sink(event, action):
+        if event != 'ui.action':
+            return
         operations.append(action['action'])
         bridge.page_actions[action['id']].set_result({'ok': True, 'state': {
             'draft_id': action['draft_id'], 'fields': DRAFT['fields'][:1], 'review_ready': True}})
@@ -211,6 +225,8 @@ async def test_append_field_uses_current_draft_and_keeps_prior_fields(monkeypatc
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context=context)
     new_field = {'field_name': 'return_date', 'label': '退料日期', 'field_type': 'date'}
     async def sink(event, action):
+        if event != 'ui.action':
+            return
         if action['action'] == 'add_field':
             assert action['field']['field_name'] == 'return_date'
         else:
@@ -257,6 +273,8 @@ async def test_rich_plan_drives_native_steps_and_reviews_only_after_success(monk
     operations = []
     fields = list(DRAFT['fields'])
     async def sink(event, action):
+        if event != 'ui.action':
+            return
         operations.append(action['action'])
         assert action['form_id'] == 0 and action['draft_id'] == 'a' * 32
         if action.get('field'):
@@ -295,6 +313,8 @@ async def test_layout_batch_dispatches_once_and_requires_browser_receipt(monkeyp
     received = []
 
     async def sink(event, action):
+        if event != 'ui.action':
+            return
         received.append(action)
         payload = action['draft'] if new_form else action
         assert payload['layout_operations'] == operations

@@ -75,7 +75,7 @@ release.json        发布清单，后端 /api/v1/release/current 读取此文�
 | --- | --- |
 | 运行时 | `harness_runtime`（DeepSeek Harness 封装与 MCP 桥）、`harness_parameters`、`harness_skills`、`harness_updates`、`runtime`、`orchestrator`、`agent_runs`、`run_recovery`、`events`、`hooks` |
 | 工具边界 | `tool_registry`、`tool_envelope`（权限、确认、审计、执行事件）、`tool_handlers`（可执行处理器白名单）、`tool_executor`、`policies`、`permission_resolver`、`confirmations`、`confirmation_store` |
-| 注册表与技能 | `agent_registry`、`agent_definition`、`agent_validation`、`skills`、`skill_loader`、`skill_import`（导入 SKILL.md）、`skill_instructions/`、`page_skill_registry`、`application_menu_registry`、`form_design_skill.md` |
+| 注册表与技能 | `agent_registry`、`agent_definition`、`agent_validation`、`skills`、`skill_loader`、`skill_import`（导入 SKILL.md）、`business_skills/*/SKILL.md`、`page_skill_registry`、`application_menu_registry` |
 | 业务工具 | `form_configuration_tools`、`form_record_tools`、`form_menu_tools`、`low_code_tools`、`dashboard_tools`、`component_page_tools`、`application_admin_tools`、`menu_admin_tools`、`dynamic_record_drafts` |
 | 页面联动 | `page_controls`、`component_page_controls`（让 AI 操作当前打开的设计器页面，由用户最终确认） |
 | 上下文与记忆 | `context_builder`、`agent_context_router`、`identity_context`、`tenant_context`、`tenant_profile`、`memory`、`chat_attachments` |

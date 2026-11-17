@@ -9,6 +9,9 @@ depends_on = None
 
 
 def upgrade():
+    existing = set(sa.inspect(op.get_bind()).get_table_names())
+    if {'analytics_shared_metrics', 'analytics_shared_metric_versions'} <= existing:
+        return
     op.create_table('analytics_shared_metrics',
         sa.Column('id', sa.String(64), primary_key=True),
         sa.Column('tenant_id', sa.Integer(), sa.ForeignKey('tenants.id'), nullable=False),

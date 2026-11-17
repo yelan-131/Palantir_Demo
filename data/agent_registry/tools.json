@@ -274,7 +274,7 @@
   "forms.create_form_definition": {
     "name": "forms.create_form_definition",
     "title": "Create form definition",
-    "description": "Create a low-code form definition, fields, layouts, and optional menu binding.",
+    "description": "Save a low-code form draft with fields and layouts. Publishing and adding a menu entry require separate confirmation.",
     "handler_key": "forms.create_form_definition",
     "side_effect": "configuration_write",
     "risk_level": "high",

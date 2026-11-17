@@ -6,8 +6,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.api import applications
 from app.services import applications as applications_service
-from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Tenant
+from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Role, Tenant
 from app.services.ai.application_admin_tools import execute_application_tool
 
 
@@ -93,6 +94,93 @@ async def test_confirmation_survives_time_passing_after_preview(application_db):
 
     confirmation = await run({"application_id": app.id}, prepare=True)
     assert (await run(confirmation))["data"]["status"] == "published"
+
+
+@pytest.mark.asyncio
+async def test_application_code_stays_locked_after_first_publish(application_db):
+    session, _ = application_db
+    app = Application(tenant_id=1, code="draft-code", name="巡检", status="draft")
+    session.add(app)
+    await session.commit()
+
+    async def update(**values):
+        return (await applications_service.update_application(
+            session, app, applications.ApplicationUpdate(**values), ADMIN,
+        ))["data"]
+
+    assert (await update(code="revised-draft"))["code_locked"] is False
+    published = await update(code="final-code", status="published")
+    assert published["code"] == "final-code"
+    assert published["code_locked"] is True
+    for status in ("published", "disabled", "draft"):
+        await update(status=status)
+        with pytest.raises(HTTPException, match="首次发布后不可修改"):
+            await update(code="changed-code")
+        with pytest.raises(HTTPException, match="首次发布后不可修改"):
+            await execute_application_tool(
+                "applications.update", session, user=ADMIN,
+                payload={"application_id": app.id, "code": "changed-code"}, prepare=True,
+            )
+        assert (await update(code="final-code", name="巡检应用"))["code"] == "final-code"
+
+
+@pytest.mark.asyncio
+async def test_application_settings_save_roles_and_validate_tenant(application_db):
+    session, _ = application_db
+    session.add_all([
+        Role(id=1, tenant_id=1, name="viewer", label="查看"),
+        Role(id=2, tenant_id=2, name="viewer", label="其他租户查看"),
+    ])
+    await session.commit()
+    created = (await applications_service.create_application(
+        session, applications.ApplicationCreate(name="巡检", code="inspection", role_ids=[1]), ADMIN,
+    ))["data"]
+    app = await session.get(Application, created["id"])
+    assert [role["id"] for role in created["roles"]] == [1]
+
+    async def update(**values):
+        return (await applications_service.update_application(
+            session, app, applications.ApplicationUpdate(**values), ADMIN,
+        ))["data"]
+
+    with pytest.raises(HTTPException, match="当前租户"):
+        await update(role_ids=[2])
+    cleared = await update(role_ids=[], expected_token=created["edit_token"])
+    assert cleared["roles"] == []
+    with pytest.raises(HTTPException, match="其他编辑更新"):
+        await update(role_ids=[1], expected_token=created["edit_token"])
+    saved = await update(role_ids=[1], name="巡检应用", expected_token=cleared["edit_token"])
+    assert saved["name"] == "巡检应用"
+    assert [role["id"] for role in saved["roles"]] == [1]
+
+
+@pytest.mark.asyncio
+async def test_application_order_is_tenant_scoped_and_rejects_stale_order(application_db, monkeypatch):
+    session, _ = application_db
+    session.add_all([
+        Application(id=1, tenant_id=1, name="甲", code="first", sort_order=10),
+        Application(id=2, tenant_id=1, name="乙", code="second", sort_order=20),
+        Application(id=3, tenant_id=2, name="其他租户", code="other", sort_order=30),
+    ])
+    await session.commit()
+
+    async def query_fixture_database(query):
+        return await query(session)
+
+    monkeypatch.setattr(applications, "safe_db_call", query_fixture_database)
+    with pytest.raises(HTTPException, match="全部应用"):
+        await applications.admin_reorder_applications(
+            applications.ApplicationOrderUpdate(expected=[1, 2], order=[2, 3]), ADMIN,
+        )
+    saved = await applications.admin_reorder_applications(
+        applications.ApplicationOrderUpdate(expected=[1, 2], order=[2, 1]), ADMIN,
+    )
+    assert [(app["id"], app["sort_order"]) for app in saved["data"]] == [(2, 1), (1, 2)]
+    assert (await session.get(Application, 3)).sort_order == 30
+    with pytest.raises(HTTPException, match="应用顺序已变化"):
+        await applications.admin_reorder_applications(
+            applications.ApplicationOrderUpdate(expected=[1, 2], order=[2, 1]), ADMIN,
+        )
 
 
 @pytest.mark.asyncio

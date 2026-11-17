@@ -1,20 +1,20 @@
 /* Application-level refinements. Geometry, data encodings and user-authored
    presentation inside the canvas remain owned by their existing components. */
 .tech-white-shell .app-header {
-  border-bottom: 1px solid var(--mf-border);
+  border-bottom: 1px solid var(--canon-border);
 }
 .tech-white-shell .shell-context-menu:not(.ant-layout-sider-collapsed) .shell-menu-heading {
-  padding-inline: 20px 12px;
+  padding-inline: 16px 8px;
 }
 .tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-item-selected {
   box-shadow: none;
-  color: var(--mf-primary-strong) !important;
+  color: var(--canon-primary) !important;
 }
 .tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-title {
-  font-weight: 500;
+  font-weight: 400;
 }
 .tech-white-shell .shell-hierarchy-menu .ant-menu-sub.ant-menu-inline::before {
-  background: var(--mf-border);
+  background: var(--canon-border-soft);
 }
 .tech-white-shell .shell-search-input {
   background: var(--mf-sidebar);
@@ -47,14 +47,14 @@
   z-index: 1200;
   transform: translateY(calc(-100% - 16px));
   padding: 10px 16px;
-  border-radius: var(--mf-control-radius);
-  background: var(--mf-primary-strong);
-  color: #fff;
+  border-radius: var(--canon-radius-control);
+  background: var(--canon-primary);
+  color: var(--canon-surface);
 }
 .shell-skip-link:focus {
   transform: none;
-  color: #fff;
-  outline: 2px solid var(--mf-focus);
+  color: var(--canon-surface);
+  outline: 2px solid var(--canon-focus);
   outline-offset: 2px;
 }
 .tech-white-shell :is(button, a, input, textarea, select, [role='tab'], [role='button']):focus-visible,

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identifiers import assert_safe_identifier
 from app.core.principal import current_tenant_id, current_user_id
 from app.core.audit import write_audit_log
-from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Form, FormField, FormLayout
+from app.models.relational import Application, ApplicationForm, Form, FormField, FormLayout
 
 
 FIELD_TYPE_ALIASES = {
@@ -59,7 +59,8 @@ async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fi
 CREATE_FORM_DEFINITION_CONTRACT = {
     "tool": "forms.create_form_definition",
     "required": ["form.name", "form.code", "fields"],
-    "optional": ["form.description", "menu.create", "menu.title", "menu.icon"],
+    "optional": ["form.description", "form.application_id"],
+    "effect": "只保存草稿。发布或挂载菜单需要单独确认。",
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values", "ui_config"],
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
 }
@@ -399,21 +400,21 @@ def _standard_analytics_design(form_code: str, form_name: str, fields: list[dict
 
 def _standard_form_config(base_config: dict[str, Any] | None, fields: list[dict[str, Any]]) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
+    base_config = dict(base_config or {})
     view_config = _standard_view_config(fields)
+    previous_view = base_config.pop("viewConfig", None)
     return {
-        **(base_config or {}),
+        **base_config,
         "createdByAgent": True,
-        "source": (base_config or {}).get("source") or "agent-low-code-form",
-        "viewConfig": (base_config or {}).get("viewConfig") or view_config,
-        "viewConfigDraft": (base_config or {}).get("viewConfigDraft") or (base_config or {}).get("viewConfig") or view_config,
-        "viewConfigMeta": (base_config or {}).get("viewConfigMeta") or {
+        "source": base_config.get("source") or "agent-low-code-form",
+        "viewConfigDraft": base_config.get("viewConfigDraft") or previous_view or view_config,
+        "viewConfigMeta": {
             "draftVersion": 1,
-            "publishedVersion": 1,
+            "publishedVersion": 0,
             "draftSavedAt": now,
-            "publishedAt": now,
-            "status": "published",
+            "status": "draft",
         },
-        "formLayout": (base_config or {}).get("formLayout") or _standard_form_layout(fields),
+        "formLayout": base_config.get("formLayout") or _standard_form_layout(fields),
     }
 
 
@@ -510,7 +511,7 @@ def build_low_code_form_payload(message: str, context: dict[str, Any] | None = N
             "name": str(raw_name),
             "code": form_code,
             "description": str(context.get("description") or "Created from an AI Agent low-code plan."),
-            "status": "draft" if assembly_kind == "analysis" else "published",
+            "status": "draft",
             "storage_mode": "physical_table",
             "table_name": _physical_table_name(form_code, assembly_kind),
             "application_id": context.get("application_id") or context.get("applicationId"),
@@ -532,7 +533,7 @@ async def execute_create_form_definition(
     user: dict[str, Any],
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create form metadata after AI confirmation and admin permission check."""
+    """Create a form draft after AI confirmation and admin permission check."""
 
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin privilege required for AI low-code configuration writes")
@@ -541,7 +542,6 @@ async def execute_create_form_definition(
     form_data = dict(payload.get("form") or {})
     fields = payload.get("fields") or []
     validate_field_rule_definitions(fields)
-    menu = dict(payload.get("menu") or {})
     field_configs = [field for field in fields if isinstance(field, dict)]
     base_config = form_data.get("config") if isinstance(form_data.get("config"), dict) else None
 
@@ -576,11 +576,9 @@ async def execute_create_form_definition(
         if not app or app.tenant_id != tenant_id:
             raise HTTPException(status_code=404, detail="Application not found")
 
-    requested_status = str(form_data.get("status") or "")
-    initial_status = "draft" if assembly_kind == "analysis" else "published"
-    if requested_status and requested_status != "draft":
-        initial_status = requested_status
-    if assembly_kind == 'analysis' and initial_status == 'draft':
+    for key in ("publishedSchemaVersion", "publishedAt", "_designerDraftReceipt"):
+        form_config.pop(key, None)
+    if assembly_kind == 'analysis':
         form_config.pop('analyticsDesign', None)
         form_config['analyticsDesignMeta'] = {**(form_config.get('analyticsDesignMeta') or {}),
             'status': 'draft', 'publishedVersion': 0, 'publishedAt': None}
@@ -599,7 +597,7 @@ async def execute_create_form_definition(
         description=form_data.get("description"),
         table_name=table_name,
         storage_mode=storage_mode,
-        status=initial_status,
+        status="draft",
         owner_id=current_user_id(user),
         config=form_config,
     )
@@ -625,7 +623,7 @@ async def execute_create_form_definition(
         FormField.form_id == form.id, FormField.tenant_id == tenant_id)
         .order_by(FormField.sort_order, FormField.id))).all())
 
-    view_config = form_config.get("viewConfig") or _standard_view_config(field_configs)
+    view_config = form_config.get("viewConfigDraft") or _standard_view_config(field_configs)
     form_layout = form_config.get("formLayout") or _standard_form_layout(field_configs)
     analytics_design = form_config.get("analyticsDesignDraft") or form_config.get("analyticsDesign")
     list_columns = [
@@ -640,38 +638,16 @@ async def execute_create_form_definition(
     ]
     if assembly_kind != "analysis":
         session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="list", config={"viewConfig": view_config, "columns": list_columns}))
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="view", config={"draft": view_config, "published": view_config, "meta": form_config.get("viewConfigMeta")}))
+        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="view", config={"draft": view_config, "meta": form_config.get("viewConfigMeta")}))
         session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form", config=form_layout or {"sections": [{"title": "业务信息", "fields": form_items}]}))
 
     if assembly_kind == "analysis":
         session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="analytics", config={"draft": analytics_design, "published": form_config.get('analyticsDesign'), "meta": form_config.get("analyticsDesignMeta")}))
 
     binding = None
-    menu_node = None
     if app is not None:
         binding = ApplicationForm(tenant_id=tenant_id, application_id=app.id, form_id=form.id, alias=form.name)
         session.add(binding)
-        if menu.get("create"):
-            menu_node = ApplicationMenuNode(
-                tenant_id=tenant_id,
-                application_id=app.id,
-                node_type="analytics" if assembly_kind == "analysis" else "form",
-                title=str(menu.get("title") or form.name),
-                icon=menu.get("icon") or ("BarChartOutlined" if assembly_kind == "analysis" else "FormOutlined"),
-                form_id=form.id,
-                route_path=f"/form-settings/{form.code}?tab=dashboard" if assembly_kind == "analysis" else f"/dynamic/{form.code}",
-                visible=True,
-                default_entry=False,
-                config={"assemblyKind": assembly_kind},
-            )
-            session.add(menu_node)
-
-    if assembly_kind != "analysis":
-        # The same impact checks, rule validation, snapshot promotion and
-        # permission publication used by the designer apply to AI creation.
-        from app.services.form_versions import publish_form
-        await session.flush()
-        await publish_form(form.id, session, user, defer_commit=True)
 
     await session.commit()
     await session.refresh(form)
@@ -688,8 +664,8 @@ async def execute_create_form_definition(
         "form": {"id": form.id, "name": form.name, "code": form.code, "status": form.status},
         "fields": [{"id": field.id, "field_name": field.field_name, "label": field.label} for field in created_fields],
         "application_binding": {"id": binding.id, "application_id": binding.application_id} if binding else None,
-        "menu_node": {"id": menu_node.id, "route_path": menu_node.route_path} if menu_node else None,
-        "route_path": f"/form-settings/{form.code}?tab=dashboard" if assembly_kind == "analysis" else f"/dynamic/{form.code}",
+        "menu_node": None,
+        "route_path": f"/form-settings/{form.code}?tab=dashboard" if assembly_kind == "analysis" else f"/form-settings/{form.id}?tab=form&legacy=1",
     }
 
 

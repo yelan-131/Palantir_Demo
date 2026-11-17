@@ -1,5 +1,6 @@
 import { timelineRange as getTimelineRange, timelinePosition, timelineTime, type TimelineRange } from '@/utils/qualityTimeline';
 import './style.css';
+import './command.css';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import {
   Alert,

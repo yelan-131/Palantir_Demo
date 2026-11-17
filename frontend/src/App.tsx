@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import {
   Alert,
   Button,
+  ConfigProvider,
   Input,
   Layout,
   Menu,
@@ -18,6 +19,7 @@ import type { MenuProps } from 'antd';
 import {
   AppstoreOutlined,
   CheckOutlined,
+  CloseOutlined,
   DatabaseOutlined,
   DownOutlined,
   HomeOutlined,
@@ -39,6 +41,7 @@ import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
 import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
 import NotificationCenter from './components/NotificationCenter';
+import { CANON_CSS_VARIABLES, canonTheme } from './theme/canon';
 import { settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
@@ -329,7 +332,7 @@ function findFirstDynamicMenuRoute(items: DynamicMenu[]): string | undefined {
   for (const item of items) {
     if (item.is_visible === false) continue;
     const routePath = normalizeRuntimeRoute(item.route_path);
-    if (routePath) return routePath;
+    if (routePath && routePath !== '/') return routePath;
     const childRoute = item.children?.length ? findFirstDynamicMenuRoute(item.children) : undefined;
     if (childRoute) return childRoute;
   }
@@ -381,8 +384,10 @@ function AppContent() {
   const [menusLoadedFor, setMenusLoadedFor] = useState<number | null>(null);
   const [firstApplicationRoute, setFirstApplicationRoute] = useState<string>();
   const [applications, setApplications] = useState<ApplicationInfo[]>([]);
-  const [currentApplication, setCurrentApplication] = useState<ApplicationInfo | null>(null);
-  const [rootApplicationId, setRootApplicationId] = useState<number | null>(null);
+  const [selectedApplication, setSelectedApplication] = useState<ApplicationInfo | null>(null);
+  // A navigation blocked by unsaved edits must keep the previous application selected.
+  const routeApplication = applications.find(app => app.id === location.state?.applicationId);
+  const currentApplication = routeApplication ?? selectedApplication;
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [acknowledgedRelease, setAcknowledgedRelease] = useState(() => {
     try { return localStorage.getItem('mf_acknowledged_release'); } catch { return null; }
@@ -390,25 +395,21 @@ function AppContent() {
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseRecordIndex, setReleaseRecordIndex] = useState(0);
   const library = useApplicationLibrary(applications);
-  const defaultApplicationPending = useRef(location.pathname === '/' && !location.state?.workspaceHome);
+  const defaultApplicationPending = useRef(location.pathname === '/' && !location.state?.workspaceHome && !location.state?.applicationId);
 
   useEffect(() => {
     if (!defaultApplicationPending.current) return;
-    if (location.pathname !== '/' || location.state?.workspaceHome) {
+    if (location.pathname !== '/' || location.state?.workspaceHome || location.state?.applicationId) {
       defaultApplicationPending.current = false;
       return;
     }
     const first = library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned))[0]?.application;
     if (!first) return;
     defaultApplicationPending.current = false;
-    setCurrentApplication(first);
-    setDynamicMenus([]);
-    localStorage.setItem('mf_current_app_id', String(first.id));
     const route = normalizeRuntimeRoute(first.default_route) || '/';
-    setRootApplicationId(route === '/' ? first.id : null);
-    if (route !== '/') navigate(route, { replace: true, state: location.state });
+    navigate(route, { replace: true, state: { ...location.state, applicationId: first.id } });
   }, [library, location.pathname, location.state, navigate]);
-  const isApplicationWorkspace = activeArea === 'business' && (location.pathname === '/' && rootApplicationId === currentApplication?.id || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
+  const isApplicationWorkspace = activeArea === 'business' && (location.pathname === '/' && Boolean(routeApplication) || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
   const isAccountPage = location.pathname === '/account-center';
   const isKnowledgeWorkspace = ['/data-center/knowledge', '/admin/knowledge'].includes(location.pathname);
   const railKey = isKnowledgeWorkspace ? 'knowledge' : isAccountPage || activeArea === 'admin' || activeArea === 'studio' || activeArea === 'data' || activeArea === 'plugins' ? 'account'
@@ -428,25 +429,31 @@ function AppContent() {
         const apps: ApplicationInfo[] = res.data?.data || [];
         setApplications(apps);
         if (!apps.length) {
-          setCurrentApplication(null);
+          setSelectedApplication(null);
           setDynamicMenus([]);
           return;
         }
         const storedId = Number(localStorage.getItem('mf_current_app_id'));
         const matched = apps.find((app) => app.id === storedId) || apps[0];
-        setCurrentApplication(matched);
+        setSelectedApplication(matched);
         localStorage.setItem('mf_current_app_id', String(matched.id));
       })
       .catch(() => {
         message.error('\u5e94\u7528\u5217\u8868\u52a0\u8f7d\u5931\u8d25');
         setApplications([]);
-        setCurrentApplication(null);
+        setSelectedApplication(null);
         setDynamicMenus([]);
       });
     loadApplications();
     window.addEventListener('applications-changed', loadApplications);
     return () => window.removeEventListener('applications-changed', loadApplications);
   }, []);
+
+  useEffect(() => {
+    if (!routeApplication) return;
+    setSelectedApplication(routeApplication);
+    localStorage.setItem('mf_current_app_id', String(routeApplication.id));
+  }, [routeApplication]);
 
   useEffect(() => {
     if (!currentApplication) return;
@@ -471,15 +478,14 @@ function AppContent() {
   }, [currentApplication, activeArea]);
 
   useEffect(() => {
-    if (location.pathname === '/' && rootApplicationId === currentApplication?.id && menusLoadedFor === currentApplication?.id && firstApplicationRoute) {
-      setRootApplicationId(null);
-      navigate(firstApplicationRoute);
+    if (location.pathname === '/' && routeApplication && menusLoadedFor === routeApplication.id && firstApplicationRoute) {
+      navigate(firstApplicationRoute, { replace: true, state: location.state });
     }
-  }, [location.pathname, rootApplicationId, currentApplication?.id, menusLoadedFor, firstApplicationRoute, navigate]);
+  }, [location.pathname, location.state, routeApplication, menusLoadedFor, firstApplicationRoute, navigate]);
 
   // Resolve bookmarked and search-result runtime pages to their actual application.
   useEffect(() => {
-    if (!isApplicationWorkspace || !currentApplication || menusLoadedFor !== currentApplication.id || location.pathname === '/') return;
+    if (routeApplication || !isApplicationWorkspace || !currentApplication || menusLoadedFor !== currentApplication.id || location.pathname === '/') return;
     const route = normalizeRuntimeRoute(location.pathname);
     if (normalizeRuntimeRoute(currentApplication.default_route) === route) return;
     if (findMenuLabelPath(dynamicMenus, route)) return;
@@ -498,14 +504,13 @@ function AppContent() {
         owner = results.find(Boolean);
       }
       if (!cancelled && owner && owner.id !== currentApplication.id) {
-        setDynamicMenus([]);
-        setCurrentApplication(owner);
+        setSelectedApplication(owner);
         localStorage.setItem('mf_current_app_id', String(owner.id));
       }
     };
     void resolve();
     return () => { cancelled = true; };
-  }, [isApplicationWorkspace, currentApplication, menusLoadedFor, dynamicMenus, applications, location.pathname]);
+  }, [routeApplication, isApplicationWorkspace, currentApplication, menusLoadedFor, dynamicMenus, applications, location.pathname]);
 
   useEffect(() => {
     getCurrentRelease()
@@ -599,13 +604,11 @@ function AppContent() {
 
 
   const switchApplication = (app: ApplicationInfo) => {
-    setRootApplicationId(app.default_route === '/' || !app.default_route ? app.id : null);
-    if (currentApplication?.id !== app.id) setDynamicMenus([]);
-    setCurrentApplication(app);
-    localStorage.setItem('mf_current_app_id', String(app.id));
-    const defaultRoute = app.default_route || '/';
-    navigate(normalizeRuntimeRoute(defaultRoute) || defaultRoute);
+    const route = normalizeRuntimeRoute(app.default_route) || '/';
+    navigate(route, { state: { applicationId: app.id } });
   };
+
+  const openWorkspace = () => navigate('/', { state: { workspaceHome: true } });
 
   const openLibraryApp = (entry: LibraryApp) => {
     if (entry.application) switchApplication(entry.application);
@@ -617,44 +620,44 @@ function AppContent() {
     <ShellPageTitleProvider fallback={runtimeTitle}>
     <AiWorkbenchProvider>
     <AiPageActionRouter />
-    <Layout className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
+    <Layout style={CANON_CSS_VARIABLES} className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <a className="shell-skip-link" href="#workspace-main">跳转到页面内容</a>
-      <ApplicationRail library={library} onOpen={openLibraryApp} onHome={() => { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); }} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
+      <ApplicationRail library={library} onOpen={openLibraryApp} onHome={openWorkspace} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
       {showContextMenu && smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}
-      {showContextMenu && <Sider id="shell-context-menu" width={248} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu shell-hierarchy-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
+      <ConfigProvider theme={canonTheme}>
+      {showContextMenu && <Sider id="shell-context-menu" width={216} collapsedWidth={smallViewport ? 0 : 64} collapsed={collapsed} trigger={null} theme="light" className="app-sider shell-context-menu shell-hierarchy-menu" aria-label="菜单栏" aria-hidden={smallViewport && collapsed || undefined} onTransitionEnd={(event) => { if (smallViewport && !collapsed && event.target === event.currentTarget && event.propertyName === 'width') event.currentTarget.querySelector<HTMLButtonElement>('.shell-menu-heading button')?.focus(); }}>
         <div className="shell-menu-heading">
           {!collapsed && <Typography.Text strong ellipsis>{sidebarTitle}</Typography.Text>}
           <Tooltip title={collapsed ? '展开菜单栏' : '折叠菜单栏'}><Button type="text" aria-label={collapsed ? '展开菜单栏' : '折叠菜单栏'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /></Tooltip>
         </div>
-        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={12} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') { setRootApplicationId(null); navigate('/', { state: { workspaceHome: true } }); } else navigate(String(key)); } }} />
+        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={8} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') openWorkspace(); else navigate(String(key)); } }} />
       </Sider>}
+      </ConfigProvider>
       <Layout className={`shell-workspace-layout${showContextMenu ? '' : ' shell-without-context-menu'}`} {...(showContextMenu && smallViewport && !collapsed ? { inert: '' } : {})}>
-        {!isKnowledgeWorkspace && <Header className="app-header">
+        {!isKnowledgeWorkspace && <ConfigProvider theme={canonTheme}><Header className="app-header">
           {showContextMenu && <Button className="shell-mobile-menu-toggle" type="text" aria-label="打开菜单栏" aria-controls="shell-context-menu" aria-expanded={!collapsed} icon={<MenuUnfoldOutlined />} onClick={() => setCollapsed(false)} />}
-          {location.pathname !== '/' && <ShellPageTitle />}
+          {location.pathname !== '/' && <ShellPageTitle section={showContextMenu ? sidebarTitle : undefined} />}
           {showReleaseNotice && <div className="shell-release-notice">
             <Button type="link" onClick={openReleaseHistory}>版本更新 v{releaseInfo.version}</Button>
-            <Button type="text" size="small" onClick={acknowledgeRelease} aria-label="关闭版本提示">×</Button>
+            <Button type="text" size="small" onClick={acknowledgeRelease} aria-label="关闭版本提示" icon={<CloseOutlined />} />
           </div>}
 
           <GlobalSearch />
           <Space className="shell-header-actions" size={4} align="center">
             {releaseInfo && (
-              <Tooltip title="版本记录">
+              <Tooltip title={`版本记录 · 当前 v${releaseInfo.version}`}>
                 <Button
                   type="text"
                   icon={<HistoryOutlined />}
                   aria-label={`v${releaseInfo.version}，查看版本记录`}
                   onClick={openReleaseHistory}
-                >
-                  v{releaseInfo.version}
-                </Button>
+                />
               </Tooltip>
             )}
             <NotificationCenter />
 
           </Space>
-        </Header>}
+        </Header></ConfigProvider>}
 
         <Content id="workspace-main" className="app-content" tabIndex={-1} aria-label="页面内容">
           <div className="content-surface">

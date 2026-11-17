@@ -61,7 +61,7 @@ const toolEntries: Record<string, [string, string]> = {
   'forms.get_record': ['读取一条业务记录', '按记录 ID 查看业务记录详情，并遵循字段权限。'],
   'forms.create_dynamic_record_draft': ['新增业务记录草稿', '在已有表单中保存一条草稿，例如巡检记录或采购申请。'],
   'forms.update_record': ['修改业务记录', '确认后只修改已有记录中指定的字段。'],
-  'forms.create_form_definition': ['创建表单定义', '创建表单、字段和布局，可接收明确的应用和菜单绑定参数。'],
+  'forms.create_form_definition': ['创建表单定义', '确认后将表单、字段和布局保存为草稿。发布或挂载菜单需要单独确认。'],
   'forms.update_definition': ['更新表单定义', '修改表单名称等信息。传入完整配置时会替换原配置。'],
   'forms.copy': ['复制表单配置', '复制表单设计和字段配置，生成独立表单。'],
   'forms.delete': ['删除草稿表单', '删除符合依赖检查的草稿表单，执行受安全策略约束。'],

@@ -9,6 +9,9 @@ depends_on = None
 
 
 def upgrade():
+    existing = set(sa.inspect(op.get_bind()).get_table_names())
+    if {'component_pages', 'component_page_versions'} <= existing:
+        return
     op.create_table('component_pages',
         sa.Column('id', sa.Integer(), primary_key=True),
         sa.Column('tenant_id', sa.Integer(), sa.ForeignKey('tenants.id'), nullable=False),

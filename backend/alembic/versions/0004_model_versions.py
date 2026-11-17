@@ -14,12 +14,16 @@ down_revision = "0003_rules"
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
     # Add version column to meta_models (default 1 for existing rows)
-    op.add_column(
-        "meta_models",
-        sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
-    )
+    if "version" not in {column["name"] for column in inspector.get_columns("meta_models")}:
+        op.add_column(
+            "meta_models",
+            sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
+        )
 
+    if "model_versions" in inspector.get_table_names():
+        return
     # Create model_versions table
     op.create_table(
         "model_versions",

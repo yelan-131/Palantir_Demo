@@ -2194,6 +2194,31 @@
   gap: 10px;
 }
 
+.designer-form-overview {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 4px;
+  color: var(--mf-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.designer-form-overview strong {
+  color: var(--mf-text);
+  font-weight: 500;
+}
+
+.designer-form-overview p {
+  margin: 0;
+}
+
+.designer-encoding-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
 .form-designer-right .designer-prop-section {
   display: grid;
   gap: 0;

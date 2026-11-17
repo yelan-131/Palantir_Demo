@@ -78,6 +78,11 @@ def upgrade() -> None:
         "SELECT 1, 'Default Tenant', 'default', 'active' "
         "WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE id = 1)"
     ))
+    if bind.dialect.name == "postgresql":
+        # The explicit id above does not advance the serial sequence.
+        bind.execute(sa.text(
+            "SELECT setval(pg_get_serial_sequence('tenants', 'id'), (SELECT MAX(id) FROM tenants))"
+        ))
 
     for table_name in TENANT_TABLES:
         if not _has_table(table_name) or _has_column(table_name, "tenant_id"):

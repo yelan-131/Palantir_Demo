@@ -2,7 +2,10 @@ import type { PlatformForm, PlatformFormField } from '@/services/api';
 
 type Response<T> = { data: { data: T } };
 export interface ApplicationProperties {
-  id: number; name: string; code: string; status: string; default_route: string; edit_token?: string;
+  id: number; name: string; code: string; status: string; default_route: string; edit_token?: string; code_locked?: boolean;
+}
+export function isApplicationCodeLocked(app: Pick<ApplicationProperties, 'id' | 'status' | 'code_locked'>) {
+  return app.id > 0 && (app.code_locked || ['published', 'active', 'disabled'].includes(app.status));
 }
 export type PropertyValues = Record<string, any>;
 type ApplicationApi = {
@@ -17,10 +20,13 @@ type FormApi = {
 
 export async function persistApplication(api: ApplicationApi, current: ApplicationProperties, values: PropertyValues, status = current.status) {
   const payload = {
-    name: values.name, code: values.code, description: values.description,
+    name: values.name, description: values.description,
+    ...(values.role_ids !== undefined ? { role_ids: values.role_ids } : {}),
+    ...(!isApplicationCodeLocked(current) ? { code: values.code } : {}),
     ...(current.id > 0 && current.edit_token ? {expected_token: current.edit_token} : {}),
     icon: values.icon, default_route: values.default_route || current.default_route || '/',
-    sort_order: Number(values.sort_order || 0), is_pinned: Boolean(values.is_pinned), status,
+    ...(current.id < 0 || values.sort_order !== undefined ? { sort_order: Number(values.sort_order || 0) } : {}),
+    is_pinned: Boolean(values.is_pinned), status,
   };
   const response = current.id < 0
     ? await api.adminCreateApplication(payload)

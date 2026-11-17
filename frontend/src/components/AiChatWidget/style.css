@@ -456,6 +456,19 @@
   background: #f7fbf7;
 }
 
+.ai-agent-trace-item[data-status="waiting_confirmation"] > div {
+  border-color: var(--mf-warning-border);
+  background: var(--mf-warning-bg);
+}
+
+.ai-agent-trace-item:is(
+  [data-status="failed"], [data-status="error"], [data-status="blocked"],
+  [data-status="validation_failed"], [data-status="timeout"], [data-status="interrupted"]
+) > div {
+  border-color: var(--mf-danger-border);
+  background: var(--mf-danger-bg);
+}
+
 .ai-agent-trace-item small {
   display: block;
   margin-bottom: 1px;

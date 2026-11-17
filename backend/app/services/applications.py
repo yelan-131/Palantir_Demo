@@ -12,6 +12,7 @@ from app.services.tenant_onboarding import assert_tenant_quota
 
 
 class ApplicationCreate(BaseModel):
+    role_ids: Optional[list[int]] = None
     name: str
     code: str
     description: Optional[str] = None
@@ -23,6 +24,7 @@ class ApplicationCreate(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
+    role_ids: Optional[list[int]] = None
     expected_token: Optional[str] = Field(default=None, max_length=64)
     name: Optional[str] = None
     code: Optional[str] = None
@@ -42,6 +44,7 @@ async def _application_to_dict(db: AsyncSession, app, include_bindings: bool = F
         "id": app.id,
         "name": app.name,
         "code": app.code,
+        "code_locked": application_code_locked(app),
         "description": app.description,
         "icon": app.icon,
         "default_route": app.default_route,
@@ -49,9 +52,19 @@ async def _application_to_dict(db: AsyncSession, app, include_bindings: bool = F
         "status": app.status,
         "is_pinned": app.is_pinned,
     }
-    payload["edit_token"] = application_edit_token(app)
+    tenant_id = app.tenant_id
+    role_rows = await db.execute(
+        select(Role)
+        .join(ApplicationRole, ApplicationRole.role_id == Role.id)
+        .where(ApplicationRole.application_id == app.id, ApplicationRole.tenant_id == tenant_id, Role.tenant_id == tenant_id)
+        .order_by(Role.id)
+    )
+    roles = [
+        {"id": role.id, "name": role.name, "label": role.label}
+        for role in role_rows.scalars().all()
+    ]
+    payload["edit_token"] = application_edit_token(app, [role["id"] for role in roles])
     if include_bindings:
-        tenant_id = app.tenant_id
         menu_rows = await db.execute(
             select(MenuItem, ApplicationMenu)
             .join(ApplicationMenu, ApplicationMenu.menu_id == MenuItem.id)
@@ -71,16 +84,7 @@ async def _application_to_dict(db: AsyncSession, app, include_bindings: bool = F
             }
             for menu, binding in menu_rows.fetchall()
         ]
-        role_rows = await db.execute(
-            select(Role)
-            .join(ApplicationRole, ApplicationRole.role_id == Role.id)
-            .where(ApplicationRole.application_id == app.id, ApplicationRole.tenant_id == tenant_id, Role.tenant_id == tenant_id)
-            .order_by(Role.id)
-        )
-        payload["roles"] = [
-            {"id": role.id, "name": role.name, "label": role.label}
-            for role in role_rows.scalars().all()
-        ]
+        payload["roles"] = roles
     return payload
 
 
@@ -92,6 +96,18 @@ async def ensure_application_code_available(db, tenant_id, code, *, application_
         query = query.where(Application.id != application_id)
     if await db.scalar(query) is not None:
         raise HTTPException(409, "Application code already exists")
+
+
+def application_code_locked(app) -> bool:
+    return app.code_locked or app.status in {"published", "active", "disabled"}
+
+
+async def validate_application_code_change(db, app, code):
+    if code == app.code:
+        return
+    if application_code_locked(app):
+        raise HTTPException(409, "应用编码在首次发布后不可修改")
+    await ensure_application_code_available(db, app.tenant_id, code, application_id=app.id)
 
 
 async def get_tenant_application(db, tenant_id, application_id, *, for_update=False):
@@ -107,6 +123,24 @@ async def get_tenant_application(db, tenant_id, application_id, *, for_update=Fa
     return app
 
 
+async def replace_application_roles(db, app, role_ids):
+    from app.models.relational import ApplicationRole, Role
+
+    role_ids = set(role_ids)
+    valid_ids = set(await db.scalars(select(Role.id).where(
+        Role.tenant_id == app.tenant_id, Role.id.in_(role_ids),
+    )))
+    if role_ids != valid_ids:
+        raise HTTPException(422, "所选角色不存在或不属于当前租户")
+    await db.execute(delete(ApplicationRole).where(
+        ApplicationRole.application_id == app.id, ApplicationRole.tenant_id == app.tenant_id,
+    ))
+    db.add_all([
+        ApplicationRole(tenant_id=app.tenant_id, application_id=app.id, role_id=role_id)
+        for role_id in sorted(role_ids)
+    ])
+
+
 async def create_application(db, body: ApplicationCreate, user: dict):
     from app.models.relational import Application
 
@@ -114,8 +148,15 @@ async def create_application(db, body: ApplicationCreate, user: dict):
     await assert_tenant_quota(db, tenant_id, "applications")
     await ensure_application_code_available(db, tenant_id, body.code)
     values = body.model_dump()
-    app = Application(tenant_id=tenant_id, **values)
+    app = Application(
+        tenant_id=tenant_id,
+        code_locked=body.status in {"published", "active", "disabled"},
+        **body.model_dump(exclude={"role_ids"}),
+    )
     db.add(app)
+    if body.role_ids is not None:
+        await db.flush()
+        await replace_application_roles(db, app, body.role_ids)
     await db.commit()
     await db.refresh(app)
     await write_audit_log(
@@ -128,15 +169,20 @@ async def create_application(db, body: ApplicationCreate, user: dict):
 async def update_application(db, app, body: ApplicationUpdate, user: dict):
     from app.services.application_menus import check_edit_token, set_application_default
 
-    old_values = await _application_to_dict(db, app)
+    old_values = await _application_to_dict(db, app, include_bindings=body.role_ids is not None)
     check_edit_token(body.expected_token, old_values["edit_token"])
     values = body.model_dump(exclude_unset=True, exclude={"expected_token"})
     if "code" in values:
-        await ensure_application_code_available(db, app.tenant_id, body.code, application_id=app.id)
+        await validate_application_code_change(db, app, body.code)
+    code_was_locked = application_code_locked(app)
     for key, value in values.items():
-        setattr(app, key, value)
+        if key != "role_ids":
+            setattr(app, key, value)
+    app.code_locked = code_was_locked or application_code_locked(app)
     if "default_route" in values:
         await set_application_default(db, app, body.default_route or "/")
+    if body.role_ids is not None:
+        await replace_application_roles(db, app, body.role_ids)
     await db.commit()
     await db.refresh(app)
     await write_audit_log(

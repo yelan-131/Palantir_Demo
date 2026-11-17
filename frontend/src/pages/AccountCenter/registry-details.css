@@ -1,0 +1,128 @@
+.ai-registry-detail .ant-modal-header { border-block-end: 1px solid var(--mf-border); }
+.ai-registry-detail .ant-modal-footer { border-block-start: 1px solid var(--mf-border); }
+
+.ai-registry-detail-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.ai-registry-detail-title .ai-registry-status { padding-top: 0; font-weight: 400; }
+
+.ai-registry-detail.ai-registry-dialog .ant-modal-body {
+  height: min(440px, calc(100dvh - 158px));
+  color: var(--mf-text);
+}
+
+.ai-registry-detail.ai-skill-dialog .ant-modal-body { height: min(570px, calc(100dvh - 158px)); }
+
+.registry-detail__tabs.ant-tabs > .ant-tabs-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 20px;
+  background: var(--mf-panel);
+}
+
+.registry-detail__tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding-block: 12px;
+  font-size: 13px;
+}
+
+.registry-detail__tabs .ant-tabs-content-holder {
+  min-width: 0;
+  padding-bottom: 24px;
+}
+
+.registry-detail__purpose { margin: 0 0 20px; line-height: 1.8; }
+
+.registry-detail__example {
+  margin: 0 0 24px;
+  padding: 12px 16px;
+  border-inline-start: 2px solid var(--mf-primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--mf-panel-soft);
+  line-height: 1.65;
+}
+
+.registry-detail__example span,
+.registry-detail__source-label {
+  color: var(--mf-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.registry-detail__example p { margin: 4px 0 0; }
+.registry-detail__source-label { margin: 0 0 8px; }
+
+.registry-detail__tabs h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.registry-detail__instructions { margin-bottom: 24px; }
+.registry-detail__instructions .knowledge-markdown-reader { font-size: 13px; line-height: 1.8; }
+.registry-detail__instructions .knowledge-markdown-reader ol { padding-inline-start: 24px; }
+.registry-detail__instructions .knowledge-markdown-reader li + li { margin-top: 9px; }
+.registry-detail__instructions .knowledge-markdown-reader li::marker { color: var(--mf-primary); font-weight: 600; }
+.registry-detail__instructions .knowledge-markdown-reader h2 { font-size: 14px; }
+.registry-detail__instructions .knowledge-markdown-reader :last-child { margin-bottom: 0; }
+
+.registry-detail__fold { padding: 14px 0; border-top: 1px solid var(--mf-border); }
+.registry-detail__fold summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.registry-detail__fold summary:hover,
+.registry-detail__fold summary:focus-visible { color: var(--mf-primary); }
+.registry-detail__fold[open] > summary { margin-bottom: 16px; }
+
+.registry-detail__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0 0 16px;
+}
+
+.registry-detail__facts > div {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--mf-border);
+  font-size: 13px;
+}
+
+.registry-detail__facts dt,
+.registry-detail__tools span { color: var(--mf-muted); }
+.registry-detail__facts dd { margin: 0; }
+
+.registry-detail__tools { margin: 0 0 10px; padding: 0; list-style: none; }
+.registry-detail__tools li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--mf-border);
+  font-size: 13px;
+}
+.registry-detail__tools li code { grid-column: 1 / -1; }
+
+.registry-detail__state { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+.registry-detail__schema + .registry-detail__schema { margin-top: 20px; }
+.registry-detail__code {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: 6px;
+  background: var(--mf-panel-soft);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+.ai-registry-detail .registry-detail__code code { color: var(--mf-text); }
+.registry-detail__code code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+@media (max-width: 575px) {
+  .ai-registry-detail-title { font-size: 16px; }
+  .registry-detail__facts { grid-template-columns: minmax(0, 1fr); }
+}

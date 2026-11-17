@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApartmentOutlined, AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, EllipsisOutlined, FolderOutlined, HistoryOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, ConfigProvider, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import AccountMenu, { type AccountMenuUser } from '../AccountMenu';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
+import { canonTheme } from '../../theme/canon';
 
 export interface ShellApplication {
   id: number;
@@ -62,11 +63,23 @@ export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, on
   const navigate = useNavigate();
   const fixedIcons: Record<string, React.ReactNode> = { home: <HomeOutlined />, workflow: <ApartmentOutlined />, scheduler: <HistoryOutlined />, more: <EllipsisOutlined /> };
   const railButton = (id: string, name: string, icon: React.ReactNode, onClick: () => void) => (
-    <Tooltip title={name} placement="right" key={id}>
-      <button type="button" className={`shell-rail-button ${activeKey === id ? 'is-active' : ''}`} aria-label={name} aria-pressed={activeKey === id} onClick={onClick}>{icon}</button>
+    <Tooltip
+      key={id}
+      title={name}
+      placement="right"
+      align={{ offset: [12, 0] }}
+      trigger={['hover', 'focus']}
+      mouseEnterDelay={1}
+      arrow={false}
+      color="#000"
+      classNames={{ body: 'shell-rail-tooltip' }}
+    >
+      <button type="button" className={`shell-rail-button ${activeKey === id ? 'is-active' : ''}`} aria-label={name} aria-current={activeKey === id ? 'page' : undefined} onClick={onClick}>
+        <span className="shell-rail-icon" aria-hidden="true">{icon}</span>
+      </button>
     </Tooltip>
   );
-  return <nav className="shell-app-rail" aria-label="应用栏">
+  return <ConfigProvider theme={canonTheme}><nav className="shell-app-rail" aria-label="应用栏">
     <div className="shell-rail-scroll">
       {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => app.id === 'home' ? onHome() : navigate(app.path)))}
       {library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
@@ -74,7 +87,7 @@ export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, on
       {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => navigate(app.path)))}
     </div>
     <div className="shell-rail-user"><AccountMenu compact active={activeKey === 'account'} user={user} onNavigate={navigate} onLogout={onLogout} /></div>
-  </nav>;
+  </nav></ConfigProvider>;
 }
 
 export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[]; onOpen: (app: LibraryApp) => void }) {

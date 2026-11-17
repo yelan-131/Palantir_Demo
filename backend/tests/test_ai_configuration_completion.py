@@ -106,6 +106,30 @@ async def test_deferred_tool_requires_discovery_and_live_permission(runtime, mon
 
 
 @pytest.mark.asyncio
+async def test_publish_confirmation_requires_an_existing_form(runtime, monkeypatch):
+    from fastapi import HTTPException
+    from app.services.ai import agent_registry
+    from app.services import form_versions
+    from app.core import db
+
+    mod, settings = runtime
+    settings['domains'] = ['low-code']
+    registry = await agent_registry.load_agent_registry(tenant_id=USER['tenant_id'])
+    manager = AsyncMock()
+    monkeypatch.setattr(db, 'db_session', lambda: manager)
+    preview = AsyncMock(side_effect=[HTTPException(404, 'Form not found'), {'data': {'blocking_count': 0}}])
+    monkeypatch.setattr(form_versions, 'preview_form_publish', preview)
+    bridge = mod.PlatformBridge(user=USER, settings=settings, context={})
+    alias = mod.tool_alias('forms.publish')
+    with mod.use_agent_registry(registry):
+        missing = await bridge._call_platform_tool(alias, {'form_id': 17})
+        assert missing['status'] == 'validation_failed' and not bridge.pending
+        ready = await bridge._call_platform_tool(alias, {'form_id': 17})
+    assert ready['status'] == 'waiting_confirmation'
+    assert bridge.pending[0].skill == 'forms.publish'
+
+
+@pytest.mark.asyncio
 async def test_page_receipt_survives_output_limit(runtime, monkeypatch):
     mod, settings = runtime
     from app.services.ai.schemas import AgentRequest

@@ -63,7 +63,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const [state, setState] = useState<PageState>();
   const [sectionHistory, setSectionHistory] = useState<{widgetId:string; tab:'basic'|'data'; items:Array<{version:number;pageVersion:number;snapshot:Partial<PageWidget>}>}>();
   const [historyLoading,setHistoryLoading] = useState(false);
-  const [pageHistory,setPageHistory] = useState<Array<{version:number;publishedAt:string;definition:PageDefinition}>>();
+  const [pageHistory,setPageHistory] = useState<Array<{version:number;publishedAt:string;title:string;widgetCount:number}>>();
   const [draft, setDraft] = useState<PageDefinition>();
   const [sources, setSources] = useState<Record<number, PlatformForm>>({});
   const [sourceErrors, setSourceErrors] = useState<Record<number,string>>({});
@@ -304,7 +304,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     try {
       const response = await api.request<PageState>({url: `/pages/${code}/${publish ? 'publish' : 'draft'}`, method: publish ? 'POST' : 'PUT', data: {definition: draft, expectedRevision: state.revision}});
       setState(response.data); setDraft(response.data.definition);
-      if (publish) { setEditing(false); setSelected(undefined);setPast([]);setFuture([]);setPublishCheck(undefined);setFilters({}); refresh(); }
+      if (publish) { setEditing(false); setSelected(undefined);setPast([]);setFuture([]);setPublishCheck(undefined);setFilters({}); refresh(); window.dispatchEvent(new Event('applications-changed')); }
       message.success(publish ? '页面已发布' : '草稿已保存');
       return true;
     } catch (failure) { setError(errorText(failure));return false; }
@@ -465,7 +465,11 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
           const appearance = item.appearance;
           const presentation = resolvePresentation(active, item);
           const titleAlign = appearance?.titleAlign ?? 'left';
-          const titleStyle: React.CSSProperties = {
+          const canonFrame = item.type==='record-list'||item.type==='record-filter';
+          const titleStyle: React.CSSProperties = canonFrame ? {
+            textAlign: titleAlign,
+            marginBottom: appearance?.showTitle === false ? undefined : appearance?.titleGap,
+          } : {
             textAlign: titleAlign,
             fontSize: appearance?.titleFontSize,
             fontFamily: appearance?.titleFontFamily,
@@ -476,7 +480,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
             lineHeight: appearance?.titleFontSize ? Math.max(20, Math.ceil(appearance.titleFontSize * 1.25)) + 'px' : undefined,
           };
           return <Col key={item.id} xs={24} lg={item.width} style={item.customWidth?{flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'}:undefined}>
-          <WidgetFrame data-component-widget-id={item.id} presentation={presentation}
+          <WidgetFrame data-component-widget-id={item.id} presentation={presentation} canon={canonFrame}
             style={{height:item.customHeight??undefined} as React.CSSProperties}
             className={'component-page-widget component-page-widget-'+item.type+(editing?' analytics-editable-widget':'')+(editing&&panel==='widget'&&selected===item.id?' analytics-selected-widget':'')}
             onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event,item.id)}
@@ -567,7 +571,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
       <Typography.Paragraph type="secondary">{draft?.title} · 当前线上版本 {state?.publishedVersion ? `v${state.publishedVersion}` : '尚未发布'}</Typography.Paragraph>
       <Alert type="info" showIcon message="管理整个页面的发布快照" description="包含页面主题、布局、全部组件、数据源绑定、筛选联动及页面权限。恢复只替换页面配置草稿，业务记录和共享数据源的字段、录入、审批流程配置保持原状；发布后才影响线上页面。" />
       {!pageHistory?.length&&<Typography.Paragraph>暂无已发布的页面版本</Typography.Paragraph>}
-      {pageHistory?.map(item=><div key={item.version} className="component-page-version-row"><div><strong>页面 v{item.version}{item.version===state?.publishedVersion?' · 线上版本':''}</strong><div>{item.definition.title} · {item.definition.widgets.length} 个组件</div><time>{new Date(item.publishedAt).toLocaleString()}</time></div><Button disabled={saving} onClick={()=>Modal.confirm({title:`恢复页面 v${item.version} 到草稿？`,content:'将替换当前整页配置，包括尚未保存的修改。线上页面和业务数据保持原状；可以撤销此操作，或检查草稿后再发布。',okText:'恢复到草稿',cancelText:'取消',onOk:()=>{changeDraft(structuredClone(item.definition));setSelected(undefined);setPanel('style');setPageHistory(undefined);message.success('整页配置已恢复到草稿，尚未发布');}})}>恢复到草稿</Button></div>)}
+      {pageHistory?.map(item=><div key={item.version} className="component-page-version-row"><div><strong>页面 v{item.version}{item.version===state?.publishedVersion?' · 线上版本':''}</strong><div>{item.title} · {item.widgetCount} 个组件</div><time>{new Date(item.publishedAt).toLocaleString()}</time></div><Button disabled={saving} onClick={()=>Modal.confirm({title:`恢复页面 v${item.version} 到草稿？`,content:'将替换当前整页配置，包括尚未保存的修改。线上页面和业务数据保持原状；可以撤销此操作，或检查草稿后再发布。',okText:'恢复到草稿',cancelText:'取消',onOk:async()=>{const detail=await api.get(`/pages/${code}/versions/${item.version}`);changeDraft(structuredClone(detail.data.definition));setSelected(undefined);setPanel('style');setPageHistory(undefined);message.success('整页配置已恢复到草稿，尚未发布');}})}>恢复到草稿</Button></div>)}
     </Modal>
       <Modal title={`${sectionHistory?.tab==='data'?'数据':'基本'} · 组件版本`} open={Boolean(sectionHistory)} onCancel={()=>{if(!saving)setSectionHistory(undefined);}} footer={<Button type="primary" loading={saving} onClick={()=>void publishSection()}>独立发布当前页签</Button>}>
         <Typography.Paragraph type="secondary">仅管理当前组件的当前页签。恢复后进入草稿，发布时不改变其他组件与页签。录入和流程版本由业务来源共享。</Typography.Paragraph>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from app.services.workflow_definitions import WorkflowDefCreate
 
 
 class FormRulePreviewRequest(BaseModel):
@@ -34,6 +35,7 @@ class FormCreate(BaseModel):
     storage_mode: str = "dynamic"
     status: str = "draft"
     config: dict = Field(default_factory=dict)
+    designer_draft: FormDesignerDraftCreate | None = None
 
 
 class FormUpdate(BaseModel):
@@ -93,6 +95,14 @@ class FormFieldCreate(BaseModel):
         return value
 
 
+class FormDesignerDraftCreate(BaseModel):
+    draft_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    fields: list[FormFieldCreate] = Field(min_length=1, max_length=60)
+    layout: dict
+    view: dict
+    workflow: WorkflowDefCreate
+
+
 class FormFieldUpdate(BaseModel):
     label: Optional[str] = None
     field_type: Optional[str] = None
@@ -125,6 +135,7 @@ class DynamicRecordUpdate(BaseModel):
 
 
 class MenuNodeCreate(BaseModel):
+    create_page: bool = False
     parent_id: Optional[int] = None
     node_type: str = "form"
     title: str

@@ -1,6 +1,7 @@
 import { Card, Typography } from 'antd';
 import { THEME_SWATCHES } from '../../theme/techWhite';
 import './style.css';
+import '../../pages/AccountCenter/account.css';
 
 const groups = [
   { key: 'neutral', label: '基础色阶', description: '页面层次、边界与文字' },

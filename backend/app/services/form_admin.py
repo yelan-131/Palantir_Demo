@@ -27,6 +27,7 @@ async def copy_form(*, form_id: int, body: FormCopy, db: AsyncSession, user: dic
     config = copy.deepcopy(source.config or {})
     config.pop("publishedSchemaVersion", None)
     config.pop("publishedAt", None)
+    config.pop("_designerDraftReceipt", None)
     if config.get("viewConfigMeta"):
         config["viewConfigMeta"] = {"status": "draft"}
     target = Form(
@@ -79,6 +80,12 @@ async def update_form(*, form_id: int, body: FormUpdate, db: AsyncSession, user:
     if 'config' in updates:
         await db.refresh(form)
         current_config = form.config or {}
+        if updates['config'] is not None or '_designerDraftReceipt' in current_config:
+            incoming_config = dict(updates['config'] or {})
+            incoming_config.pop('_designerDraftReceipt', None)
+            if '_designerDraftReceipt' in current_config:
+                incoming_config['_designerDraftReceipt'] = current_config['_designerDraftReceipt']
+            updates['config'] = incoming_config
         analytics_meta = current_config.get('analyticsDesignMeta') or {}
         if (analytics_meta.get('managedBy') == 'analytics-editor'
                 and (isinstance(current_config.get('analyticsDesign'), dict)

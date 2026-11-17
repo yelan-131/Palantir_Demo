@@ -294,7 +294,19 @@ async def page_versions(code: str, db: AsyncSession = Depends(get_db), user=Depe
         ComponentPageVersion.page_id == page.id, ComponentPageVersion.tenant_id == page.tenant_id
     ).order_by(ComponentPageVersion.version.desc()))).all()
     return {'items': [{'version': item.version, 'publishedAt': item.created_at,
-                       'definition': item.definition} for item in versions]}
+                       'title': (item.definition or {}).get('title') or '',
+                       'widgetCount': len((item.definition or {}).get('widgets') or [])} for item in versions]}
+
+
+@router.get('/{code}/versions/{version_number}')
+async def page_version(code: str, version_number: int, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    page = await find_page(db, user, code)
+    version = await db.scalar(select(ComponentPageVersion).where(
+        ComponentPageVersion.page_id == page.id, ComponentPageVersion.tenant_id == page.tenant_id,
+        ComponentPageVersion.version == version_number))
+    if version is None:
+        raise HTTPException(404, '页面版本不存在')
+    return {'version': version.version, 'publishedAt': version.created_at, 'definition': version.definition}
 
 
 @router.get('/{code}/widgets/{widget_id}/{section}/versions')

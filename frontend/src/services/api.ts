@@ -610,7 +610,19 @@ export const streamAgentChat = async (
   data: Record<string, unknown>,
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
-) => postAgentEventStream('/ai/agent/stream', data, onEvent, signal);
+) => {
+  let receivedResult = false;
+  try {
+    await postAgentEventStream('/ai/agent/stream', data, event => {
+      onEvent(event);
+      if (event.event === 'answer.completed' || event.event === 'run.failed') receivedResult = true;
+    }, signal);
+  } catch (error) {
+    // The final answer is already available if the connection drops after delivery.
+    if (!receivedResult) throw error;
+  }
+  if (!receivedResult) throw new Error('连接已中断，未收到本轮结果');
+};
 
 export const previewAgentAttachment = async (file: File, signal: AbortSignal) => {
   const formData = new FormData();
@@ -669,8 +681,14 @@ export const getAISettings = () => api.get('/ai/settings');
 export const updateAISettings = (settings: Record<string, unknown>) => api.put('/ai/settings', { settings });
 export const testSavedAISettings = (settings?: Record<string, unknown>) => api.post('/ai/settings/test', settings ? { settings } : undefined);
 export const getAIAgentRegistry = () => api.get('/ai/agent-registry');
+export type RegistrySkillDocument = {
+  instructions: string | null;
+  source_markdown: string | null;
+  package_name: string | null;
+  version: string | null;
+};
 export const getAIRegistrySkillInstructions = (name: string, signal: AbortSignal) =>
-  api.get<{ data: { instructions: string | null } }>(`/ai/agent-registry/skill-instructions/${encodeURIComponent(name)}`, { signal });
+  api.get<{ data: RegistrySkillDocument }>(`/ai/agent-registry/skill-instructions/${encodeURIComponent(name)}`, { signal });
 export const seedAIAgentRegistry = () => api.post('/ai/agent-registry/seed');
 export const updateAIAgentRegistry = (payload: Record<string, unknown>) => api.put('/ai/agent-registry', payload);
 export type SkillMarkdown = {
@@ -745,6 +763,8 @@ export const listApplications = () => api.get('/applications');
 export const getApplication = (id: number) => api.get(`/applications/${id}`);
 export const listApplicationMenus = (id: number) => api.get(`/applications/${id}/menus`);
 export const adminListApplications = () => api.get('/admin/applications');
+export const adminReorderApplications = (expected: number[], order: number[]) =>
+  api.put('/admin/applications/order', { expected, order });
 export const adminCreateApplication = (data: Record<string, unknown>) => api.post('/admin/applications', data);
 export const adminUpdateApplication = (id: number, data: Record<string, unknown>) => api.put(`/admin/applications/${id}`, data);
 export const adminDeleteApplication = (id: number) => api.delete(`/admin/applications/${id}`);
@@ -1084,7 +1104,9 @@ export interface PlatformFormVersion {
   form_id: number;
   version: number;
   status: string;
-  snapshot: Record<string, unknown>;
+  snapshot?: Record<string, unknown>;
+  field_count?: number;
+  layout_count?: number;
   impact_report?: PlatformFormPublishReport | Record<string, unknown>;
   published_by?: number | null;
   published_at?: string | null;
@@ -1277,7 +1299,7 @@ export const downloadFormFile = (formId: number | string, fieldName: string, fil
 export const previewDesignerRules = (formId: number | string, controls: unknown[], data: Record<string, unknown>, maskRecord = false, validateOnly = false) =>
   api.post(`/forms/${formId}/rules/preview`, { controls, data, mask_record: maskRecord, validate_only: validateOnly });
 
-export const restorePlatformFormDraft=(id:number|string)=>api.post(`/forms/${id}/draft/restore`);
+export const restorePlatformFormDraft=(id:number|string, version?:number)=>api.post(`/forms/${id}/draft/restore`, version ? {version} : {});
 
 export const exportPlatformDynamicRecords=(formId:number|string,params:Record<string,unknown>)=>api.get(`/forms/${formId}/records-export`,{params,responseType:'blob'});
 

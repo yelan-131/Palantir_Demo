@@ -10,6 +10,7 @@ import argparse
 import json as json_lib
 import os
 import sys
+import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -38,11 +39,14 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--username", default=os.getenv("SMOKE_USERNAME"))
     parser.add_argument("--password", default=os.getenv("SMOKE_PASSWORD"))
-    parser.add_argument("--tenant-slug", default="smoke-tenant")
-    parser.add_argument("--tenant-domain", default="smoke.local")
+    parser.add_argument("--tenant-slug", default=None, help="default: smoke-<timestamp>")
+    parser.add_argument("--tenant-domain", default=None, help="default: <slug>.local")
     args = parser.parse_args()
     if not args.username or not args.password:
         parser.error("provide --username/--password or SMOKE_USERNAME/SMOKE_PASSWORD")
+    # Tenant slugs and domains are globally unique, so each run needs new ones.
+    args.tenant_slug = args.tenant_slug or f"smoke-{time.strftime('%Y%m%d%H%M%S')}"
+    args.tenant_domain = args.tenant_domain or f"{args.tenant_slug}.local"
 
     base_url = args.base_url.rstrip("/")
     readiness = _request("GET", f"{base_url}/api/v1/system/readiness")
@@ -80,7 +84,7 @@ def main() -> int:
         raise RuntimeError(f"tenant export failed: {exports}")
     print(f"export_id={exports['data']['id']}")
 
-    metrics = _request("GET", f"{base_url}/api/v1/system/metrics")
+    metrics = _request("GET", f"{base_url}/api/v1/system/metrics", headers=headers)
     print(f"requests_total={metrics.get('data', {}).get('requests_total')}")
     return 0
 

@@ -27,6 +27,7 @@ from app.services.applications import (
     delete_application,
     get_tenant_application,
     update_application,
+    replace_application_roles,
 )
 
 router = APIRouter()
@@ -36,6 +37,11 @@ admin_router = APIRouter()
 class BindingUpdate(BaseModel):
     menu_ids: Optional[list[int]] = None
     role_ids: Optional[list[int]] = None
+
+
+class ApplicationOrderUpdate(BaseModel):
+    expected: list[int]
+    order: list[int]
 
 
 DEFAULT_MENUS = [
@@ -551,6 +557,32 @@ async def admin_create_application(body: ApplicationCreate, user: dict = Depends
     return result
 
 
+@admin_router.put("/applications/order")
+async def admin_reorder_applications(body: ApplicationOrderUpdate, user: dict = Depends(require_admin)):
+    async def _query(db):
+        from app.models.relational import Application
+
+        tenant_id = current_tenant_id(user)
+        await lock_tenant_writes(db, tenant_id)
+        apps = (await db.scalars(select(Application).where(Application.tenant_id == tenant_id)
+                                 .order_by(Application.sort_order, Application.id).with_for_update())).all()
+        by_id = {app.id: app for app in apps}
+        if body.expected != list(by_id):
+            raise HTTPException(409, "应用顺序已变化，请刷新后重试")
+        if len(body.order) != len(by_id) or set(body.order) != set(by_id):
+            raise HTTPException(422, "排序必须包含当前租户的全部应用")
+        for position, app_id in enumerate(body.order, start=1):
+            by_id[app_id].sort_order = position
+        await db.commit()
+        await write_audit_log(
+            tenant_id=tenant_id, user_id=current_user_id(user), action="reorder",
+            resource_type="application", old_values={"order": body.expected}, new_values={"order": body.order},
+        )
+        return {"data": [await _application_to_dict(db, by_id[app_id], include_bindings=True) for app_id in body.order]}
+
+    return await safe_db_call(_query)
+
+
 @admin_router.put("/applications/{app_id}")
 async def admin_update_application(app_id: int, body: ApplicationUpdate, user: dict = Depends(require_admin)):
     async def _query(db):
@@ -580,20 +612,17 @@ async def admin_delete_application(app_id: int, user: dict = Depends(require_adm
 @admin_router.put("/applications/{app_id}/bindings")
 async def admin_update_application_bindings(app_id: int, body: BindingUpdate, user: dict = Depends(require_admin)):
     async def _query(db):
-        from app.models.relational import Application, ApplicationMenu, ApplicationRole
+        from app.models.relational import ApplicationMenu
 
         tenant_id = current_tenant_id(user)
-        app = await db.get(Application, app_id)
-        if not app or app.tenant_id != tenant_id:
-            raise HTTPException(404, "Application not found")
+        await lock_tenant_writes(db, tenant_id)
+        app = await get_tenant_application(db, tenant_id, app_id, for_update=True)
         if body.menu_ids is not None:
             await db.execute(delete(ApplicationMenu).where(ApplicationMenu.application_id == app_id, ApplicationMenu.tenant_id == tenant_id))
             for idx, menu_id in enumerate(body.menu_ids):
                 db.add(ApplicationMenu(tenant_id=tenant_id, application_id=app_id, menu_id=menu_id, sort_order=idx, is_default=idx == 0))
         if body.role_ids is not None:
-            await db.execute(delete(ApplicationRole).where(ApplicationRole.application_id == app_id, ApplicationRole.tenant_id == tenant_id))
-            for role_id in body.role_ids:
-                db.add(ApplicationRole(tenant_id=tenant_id, application_id=app_id, role_id=role_id))
+            await replace_application_roles(db, app, body.role_ids)
         await db.commit()
         await db.refresh(app)
         await write_audit_log(

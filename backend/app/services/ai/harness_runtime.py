@@ -212,6 +212,10 @@ class PlatformBridge:
             if self.calls >= int((self.settings.get('safetyPolicy') or {}).get('maxToolSteps', 5)):
                 return {'status': 'blocked', 'message': '已达到本轮工具次数上限'}
             self.calls += 1
+            item = build_agent_item(type='tool_call', tool=canvas_tool, status='running')
+            self.items.append(item)
+            if self.event_sink:
+                await self.event_sink('item.updated', item)
             try:
                 command = component_page_controls.tool_arguments(canvas_tool, arguments)
             except ValueError as exc:
@@ -311,6 +315,18 @@ class PlatformBridge:
             if not validation.valid:
                 return {"status": "validation_failed", "message": validation.summary(),
                         "issues": [issue.as_dict() for issue in validation.errors]}
+            if tool.name == 'forms.publish':
+                from fastapi import HTTPException
+                from app.core.db import db_session
+                from app.services.form_versions import preview_form_publish
+
+                try:
+                    async with db_session() as session:
+                        report = (await preview_form_publish(arguments['form_id'], session, self.user))['data']
+                except HTTPException as error:
+                    return {'status': 'validation_failed', 'message': str(error.detail)}
+                if report['blocking_count']:
+                    return {'status': 'validation_failed', 'message': '表单发布检查未通过', 'report': report}
             if tool.name in APPLICATION_MENU_REQUESTS or tool.name in PAGE_WRITE_REQUESTS:
                 from fastapi import HTTPException
                 from pydantic import ValidationError
@@ -405,6 +421,7 @@ def harness_options(settings: dict[str, Any], user: dict[str, Any], *, token: st
         '编辑或交付表单前先定位真实应用和表单，优先复用明确匹配的对象。多个合理候选请用户选。查询成功且查无匹配时，按用户要求准备新建。'
         '已打开的表单或草稿可用于明确指向当前对象的请求。明确要求独立新建时先检查同名候选，再用独立名称或编码。'
         '网页支持时优先用 ui.form_designer 搭建草稿。无匹配能力或关键业务信息缺失时如实说明。'
+        'forms.create_form_definition 只保存草稿。发布或挂载需先取得已保存表单的真实 ID，再另行确认。'
         + '填写已有表单记录使用 forms.create_dynamic_record_draft。'
         '修改已有记录先读取定位原记录，再调用 forms.update_record，只传需改字段；不得用新增记录代替修改。'
         '工具返回403时停止该操作，不换表单编码或猜ID重试；补充ID不能提升权限，不建议以此绕过授权。'

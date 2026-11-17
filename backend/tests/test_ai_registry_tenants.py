@@ -98,7 +98,7 @@ async def test_registry_and_dsh_isolate_same_name_imports(monkeypatch, tmp_path)
         with use_agent_registry(registry):
             await asyncio.sleep(0)
             stage_native_skills(root, user, settings, {}, allow_form_designer=False)
-        assert (root / f"{name}.md").read_text(encoding="utf-8").endswith(f"TENANT_BODY_{index}")
+        assert (root / name / "SKILL.md").read_text(encoding="utf-8").endswith(f"TENANT_BODY_{index}")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await asyncio.gather(verify(0, client), verify(1, client))

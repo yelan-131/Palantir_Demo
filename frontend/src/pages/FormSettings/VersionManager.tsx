@@ -2,7 +2,7 @@ import './designer-dialog.css';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Empty, Input, Modal, Segmented, Spin, Tag } from 'antd';
 import { ArrowRightOutlined, CheckCircleOutlined, FileTextOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UndoOutlined } from '@ant-design/icons';
-import { listPlatformFormVersions, type PlatformForm, type PlatformFormVersion } from '@/services/api';
+import { getPlatformFormVersion, listPlatformFormVersions, type PlatformForm, type PlatformFormVersion } from '@/services/api';
 import { compareVersions, filterVersions, formatVersionTime, getVersionFields, sortVersions } from './versionUtils';
 import './version-manager.css';
 
@@ -20,7 +20,7 @@ interface Props {
   onEdit: () => void;
   onSave: () => Promise<boolean>;
   onPublish: () => Promise<boolean>;
-  onRestore: () => Promise<boolean>;
+  onRestore: (version?: number) => Promise<boolean>;
 }
 
 export default function VersionManager(props: Props) {
@@ -33,7 +33,9 @@ export default function VersionManager(props: Props) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState('fields');
-  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState<number | null>(null);
+  const [details, setDetails] = useState<Record<number, PlatformFormVersion>>({});
+  const [detailError, setDetailError] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const request = useRef(0);
   const actionLock = useRef(false);
@@ -43,7 +45,8 @@ export default function VersionManager(props: Props) {
     setSelected(null);
     setQuery('');
     setActionError('');
-    setConfirmRestore(false);
+    setConfirmRestore(null);
+    setDetails({});
   }, [open, form?.id]);
 
   useEffect(() => {
@@ -63,16 +66,34 @@ export default function VersionManager(props: Props) {
   }, [open, form?.id, refreshKey]);
 
   const latest = versions.find(item => ['published', 'active'].includes(item.status));
-  const selectedVersion = versions.find(item => item.version === selected);
   const selectedIndex = versions.findIndex(item => item.version === selected);
   const previous = selectedIndex >= 0 ? versions[selectedIndex + 1] : undefined;
+  const selectedVersion = selected == null ? undefined : details[selected] ?? versions.find(item => item.version === selected);
+  const previousVersion = previous ? details[previous.version] ?? previous : undefined;
+
+  useEffect(() => {
+    if (!open || !form?.id || selected == null) return;
+    const needed = [selected, previous?.version].filter((version): version is number => version != null && !details[version]?.snapshot);
+    if (!needed.length) return;
+    let cancelled = false;
+    setDetailError('');
+    Promise.all(needed.map(version => getPlatformFormVersion(form.id, version).then(response => response.data?.data))).then(rows => {
+      if (cancelled) return;
+      setDetails(current => {
+        const next = { ...current };
+        rows.forEach(row => { if (row) next[row.version] = row; });
+        return next;
+      });
+    }).catch(() => { if (!cancelled) setDetailError('版本快照加载失败，请重试。'); });
+    return () => { cancelled = true; };
+  }, [open, form?.id, selected, previous?.version, details]);
   const pending = hasUnsavedChanges || draftStatus === 'draft' || !latest;
   const unavailable = busy || Boolean(action);
   const cannotPersist = unavailable || Boolean(loadError);
   const status = hasUnsavedChanges ? '未保存' : loading || error ? '已保存' : pending ? '待发布' : '已同步';
   const filtered = filterVersions(versions, query);
-  const fields = selectedVersion ? getVersionFields(selectedVersion.snapshot) : [];
-  const changes = selectedVersion ? compareVersions(selectedVersion.snapshot, previous?.snapshot) : null;
+  const fields = selectedVersion?.snapshot ? getVersionFields(selectedVersion.snapshot) : [];
+  const changes = selectedVersion?.snapshot ? compareVersions(selectedVersion.snapshot, previousVersion?.snapshot) : null;
   const hasRecordedChecks = Boolean(selectedVersion && Array.isArray(selectedVersion.impact_report?.items));
   const reportItems = selectedVersion && Array.isArray(selectedVersion.impact_report?.items)
     ? selectedVersion.impact_report.items as Array<{ level?: string; label?: string; type?: string; detail?: string }>
@@ -84,10 +105,10 @@ export default function VersionManager(props: Props) {
     setAction(kind);
     setActionError('');
     try {
-      const ok = await (kind === 'save' ? props.onSave() : kind === 'publish' ? props.onPublish() : props.onRestore());
+      const ok = await (kind === 'save' ? props.onSave() : kind === 'publish' ? props.onPublish() : props.onRestore(confirmRestore ?? undefined));
       if (!ok) { setActionError(kind === 'save' ? '保存未完成，当前修改仍保留在编辑器中。' : kind === 'publish' ? '发布检查未完成，当前修改仍保留，请重试。' : '未能重置草稿，请重试。'); return; }
       if (kind === 'publish') props.onClose();
-      if (kind === 'restore') { setConfirmRestore(false); setRefreshKey(key => key + 1); }
+      if (kind === 'restore') { setConfirmRestore(null); setDetails({}); setRefreshKey(key => key + 1); }
     } catch {
       setActionError('操作未完成，请检查网络后重试。');
     } finally {
@@ -114,7 +135,7 @@ export default function VersionManager(props: Props) {
             </div>
           </div>
           {latest && !loading && !error && <div className="vm-draft-foot"><span><CheckCircleOutlined /> 线上版本 v{latest.version} · {formatVersionTime(latest.published_at)}</span>
-            <Button type="text" icon={<UndoOutlined />} disabled={unavailable || (!pending && !loadError)} onClick={() => setConfirmRestore(true)}>用线上配置重置草稿</Button></div>}
+            <Button type="text" icon={<UndoOutlined />} disabled={unavailable || (!pending && !loadError)} onClick={() => setConfirmRestore(latest.version)}>用线上配置重置草稿</Button></div>}
         </section>
         {(loadError || actionError) && <Alert type="error" showIcon message={loadError || actionError} />}
 
@@ -133,7 +154,9 @@ export default function VersionManager(props: Props) {
         </section>
 
         {selectedVersion && !loading && !error && <section className="vm-detail">
-          <div className="vm-detail-head"><div><span className="vm-section-eyebrow">只读快照</span><h3>v{selectedVersion.version} <span>发布详情</span></h3><p>{formatVersionTime(selectedVersion.published_at)}</p></div><Button type="text" onClick={() => setSelected(null)}>收起详情</Button></div>
+          <div className="vm-detail-head"><div><span className="vm-section-eyebrow">只读快照</span><h3>v{selectedVersion.version} <span>发布详情</span></h3><p>{formatVersionTime(selectedVersion.published_at)}</p></div><Button icon={<UndoOutlined />} disabled={unavailable || !selectedVersion.snapshot} onClick={() => setConfirmRestore(selectedVersion.version)}>恢复到草稿</Button><Button type="text" onClick={() => setSelected(null)}>收起详情</Button></div>
+          {detailError && <Alert type="error" showIcon message={detailError} />}
+          {!selectedVersion.snapshot && !detailError && <div className="vm-feedback"><Spin /><span>正在读取这一版配置</span></div>}
           <Segmented block value={detailTab} onChange={value => setDetailTab(String(value))} options={[{ label: `表单字段 · ${fields.length}`, value: 'fields' }, { label: '版本变更', value: 'changes' }, { label: '发布时检查', value: 'checks' }]} />
           {detailTab === 'fields' && <div className="vm-field-table">
             <div className="vm-field-header"><span>字段名称</span><span>字段标识</span><span>类型</span><span>必填</span></div>
@@ -149,9 +172,9 @@ export default function VersionManager(props: Props) {
         </section>}
       </div>
     </Drawer>
-    <Modal className="form-designer-dialog" centered open={confirmRestore} title="用线上配置重置草稿？" okText="确认重置草稿" cancelText="继续保留草稿" confirmLoading={action === 'restore'} okButtonProps={{ danger: true, disabled: busy }} cancelButtonProps={{ disabled: action === 'restore' }} closable={action !== 'restore'} maskClosable={false} onCancel={() => setConfirmRestore(false)} onOk={() => runAction('restore')}>
-      <p>将使用线上版本 v{latest?.version} 的表单布局、数据视图、权限及流程关联配置覆盖当前设计草稿，同时恢复字段默认值。</p>
-      <p>{hasUnsavedChanges ? '当前未保存的修改也会被替换。' : '当前已保存但未发布的配置会被替换。'}重置后可继续编辑，再发布为新版本。</p>
+    <Modal className="form-designer-dialog" centered open={confirmRestore != null} title={`将 v${confirmRestore ?? ''} 恢复到草稿？`} okText="确认恢复草稿" cancelText="继续保留草稿" confirmLoading={action === 'restore'} okButtonProps={{ danger: true, disabled: busy }} cancelButtonProps={{ disabled: action === 'restore' }} closable={action !== 'restore'} maskClosable={false} onCancel={() => setConfirmRestore(null)} onOk={() => runAction('restore')}>
+      <p>将把 v{confirmRestore} 的字段、布局、列表、权限和分析配置写回草稿。这一版之后新增、且快照里没有的字段会保留。</p>
+      <p>{hasUnsavedChanges ? '当前未保存的修改也会被替换。' : '当前已保存但未发布的配置会被替换。'}恢复后可继续编辑，再发布为下一个版本。</p>
       <Alert type="info" showIcon message="线上页面与业务数据保持不变" />
       {actionError && <Alert type="error" message={actionError} style={{ marginTop: 12 }} />}
     </Modal>

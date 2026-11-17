@@ -9,9 +9,10 @@ from app.services.record_domains import prepare_domain_create, validate_domain_u
 
 import json
 import copy
+import hashlib
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form as FormParam
@@ -664,21 +665,57 @@ async def create_form(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
+    try:
+        return await _create_form(body, db, user)
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def _create_form(body: FormCreate, db: AsyncSession, user: dict):
     from app.models.relational import Application, ApplicationForm, Form, FormAction, FormLayout
 
     tenant_id = current_tenant_id(user)
     _validate_form_code(body.code)
+    draft = body.designer_draft
+    config = dict(body.config)
+    receipt = None
+    if draft:
+        from app.services.field_uniqueness import lock
+        await lock(db, tenant_id)
+        payload = json.dumps(body.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        receipt = {"id": draft.draft_id, "digest": hashlib.sha256(payload.encode()).hexdigest()}
+        config.update(
+            formLayout=draft.layout,
+            viewConfigDraft=draft.view,
+            viewConfigMeta={
+                "draftVersion": 1, "publishedVersion": 0,
+                "draftSavedAt": datetime.now(timezone.utc).isoformat(), "status": "draft",
+            },
+        )
+        for key in ("viewConfig", "publishedSchemaVersion", "publishedAt"):
+            config.pop(key, None)
+    # The retry marker is issued by the server only after a complete save.
+    config.pop("_designerDraftReceipt", None)
     storage_mode = body.storage_mode
     table_name = body.table_name
     if storage_mode == "dynamic" and not table_name:
         storage_mode = "physical_table"
-        table_name = _physical_table_name_for_form(tenant_id, body.code, body.config)
+        table_name = _physical_table_name_for_form(tenant_id, body.code, config)
     if table_name:
         _validate_physical_table_name(tenant_id, table_name)
 
     existing = await db.scalar(select(Form).where(Form.code == body.code, Form.tenant_id == tenant_id))
     if existing:
-        raise HTTPException(409, "Form code already exists")
+        if receipt and existing.owner_id == current_user_id(user):
+            saved = (existing.config or {}).get("_designerDraftReceipt")
+            if receipt == saved:
+                result = _form_payload(existing)
+                await db.rollback()
+                return {"data": result}
+            if isinstance(saved, dict) and receipt["id"] == saved.get("id"):
+                raise HTTPException(409, "该草稿已保存，请打开已保存的表单继续编辑")
+        raise HTTPException(409, "该表单编码已被其他表单占用" if draft else "Form code already exists")
 
     if body.application_id is not None:
         app = await db.get(Application, body.application_id)
@@ -693,19 +730,43 @@ async def create_form(
         model_id=body.model_id,
         table_name=table_name,
         storage_mode=storage_mode,
-        status=body.status,
+        status="draft" if draft else body.status,
         owner_id=_uid(user),
-        config=body.config,
+        config=config,
     )
     db.add(form)
     await db.flush()
-    await _ensure_physical_form_table(db, form, [])
+    if draft:
+        from app.services.form_fields import add_form_fields
+        from app.services.workflow_definitions import stage_workflow_definition
+
+        await add_form_fields(
+            form.id, [field.model_dump() for field in draft.fields], db, user, defer_commit=True,
+        )
+        workflow = draft.workflow.model_copy(update={
+            "status": "draft",
+            "config": {
+                **(draft.workflow.config or {}),
+                "formId": form.id, "formCode": form.code, "formName": form.name,
+                "savedAt": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+        definition = await stage_workflow_definition(db, workflow, user)
+        form.config = {**config, "workflowDesigner": {"draftWorkflowId": definition.id},
+                       "_designerDraftReceipt": receipt}
+        db.add(FormLayout(
+            tenant_id=tenant_id, form_id=form.id, layout_type="view",
+            config={"draft": draft.view, "meta": config["viewConfigMeta"]},
+        ))
+    else:
+        await _ensure_physical_form_table(db, form, [])
 
     if body.application_id is not None:
         db.add(ApplicationForm(tenant_id=tenant_id, application_id=body.application_id, form_id=form.id))
 
     db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="list", config={"columns": []}))
-    db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form", config={"sections": []}))
+    db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form",
+                      config=draft.layout if draft else {"sections": []}))
     for idx, (key, label) in enumerate([("create", "Create"), ("edit", "Edit"), ("delete", "Delete"), ("export", "Export")]):
         db.add(FormAction(tenant_id=tenant_id, form_id=form.id, action_key=key, label=label, sort_order=idx))
 
@@ -929,10 +990,14 @@ async def publish_form(
     return await operation(form_id=form_id, db=db, user=user)
 
 
+class FormDraftRestore(BaseModel):
+    version: Optional[int] = Field(default=None, gt=0)
+
+
 @router.post('/{form_id}/draft/restore')
-async def restore_form_draft(form_id:int, db:AsyncSession=Depends(get_db),user:dict=Depends(require_admin)):
+async def restore_form_draft(form_id:int, body: FormDraftRestore | None = None, db:AsyncSession=Depends(get_db),user:dict=Depends(require_admin)):
     from app.services.form_versions import restore_form_draft as operation
-    return await operation(form_id=form_id, db=db, user=user)
+    return await operation(form_id=form_id, db=db, user=user, version_number=None if body is None else body.version)
 
 
 @router.get("/{form_id}/versions")

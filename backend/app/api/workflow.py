@@ -7,6 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from app.services.workflow_definitions import WorkflowDefCreate, snapshot_definition as _snapshot_definition, stage_workflow_definition
 
 router = APIRouter()
 
@@ -16,15 +17,6 @@ from app.core.permissions import evaluate_form_permission
 
 
 # ── Schemas ───────────────────────────────────────────────
-
-class WorkflowDefCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    config: Optional[dict] = None
-    form_config: Optional[dict] = None
-    status: Optional[str] = None
-    steps: Optional[list] = None  # [{name, type, assignee_role, condition_config}]
-
 
 class WorkflowStartRequest(BaseModel):
     title: str
@@ -97,32 +89,6 @@ def _is_last_step(steps: list[dict], current_step: int) -> bool:
         if steps[i].get("type") not in ("end",):
             return False
     return True
-
-
-def _snapshot_definition(db, wf_def, *, published_by: Optional[int] = None) -> None:
-    """Persist an immutable snapshot of the definition at its current version.
-
-    Instances pin this snapshot at start so later edits to the definition can
-    never reshape the steps of in-flight instances.
-    """
-    from app.models.relational import WorkflowDefVersion
-
-    config_text = wf_def.config if isinstance(wf_def.config, str) else json.dumps(wf_def.config or {}, ensure_ascii=False)
-    form_config_text = (
-        wf_def.form_config
-        if isinstance(wf_def.form_config, str) or wf_def.form_config is None
-        else json.dumps(wf_def.form_config, ensure_ascii=False)
-    )
-    db.add(WorkflowDefVersion(
-        tenant_id=wf_def.tenant_id,
-        workflow_id=wf_def.id,
-        version=int(wf_def.version or 1),
-        config=config_text,
-        form_config=form_config_text,
-        status=wf_def.status or "draft",
-        published_by=published_by,
-        published_at=datetime.now(),
-    ))
 
 
 async def _instance_config(db, wf_def, workflow_version: Optional[int]) -> dict:
@@ -224,27 +190,8 @@ async def get_definition(def_id: int, user: dict = Depends(get_current_user)):
 async def create_definition(body: WorkflowDefCreate, user: dict = Depends(require_admin)):
     """创建工作流定义（管理员）."""
     async def _query(db):
-        from app.models.relational import WorkflowDef
         tenant_id = current_tenant_id(user)
-        config_data = body.config or {"nodes": [], "edges": []}
-        # If body.steps is provided, embed steps into config for execution
-        if body.steps:
-            config_data["steps"] = body.steps
-        if (body.status or 'draft') in STARTABLE_DEFINITION_STATUSES:
-            from app.services.workflow_routing import validate_graph
-            validate_graph(config_data)
-
-        d = WorkflowDef(
-            tenant_id=tenant_id,
-            name=body.name, description=body.description,
-            config=json.dumps(config_data, ensure_ascii=False),
-            form_config=json.dumps(body.form_config or {"fields": []}, ensure_ascii=False),
-            status=body.status or "draft",
-            version=1,
-        )
-        db.add(d)
-        await db.flush()
-        _snapshot_definition(db, d, published_by=current_user_id(user))
+        d = await stage_workflow_definition(db, body, user)
         await db.commit()
         await db.refresh(d)
         await write_audit_log(

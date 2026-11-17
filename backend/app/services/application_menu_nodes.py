@@ -173,8 +173,22 @@ async def _create_application_menu_node(application_id, body, db, user, *, defer
         raise HTTPException(404, "Form not found")
     await validate_parent(db, app, body.parent_id)
 
-    values = body.model_dump()
-    await _set_menu_page_target(db, user, values)
+    values = body.model_dump(exclude={"create_page"})
+    if body.create_page:
+        if body.page_code is not None or body.form_id is not None or body.route_path is not None or body.node_type == "group":
+            raise HTTPException(422, "新建页面的菜单不能同时指定其他入口")
+        if body.default_entry:
+            raise HTTPException(422, "请先发布页面，再设为应用默认入口")
+        from app.services.component_page_editor import PageDefinition, create_page_draft
+
+        title = body.title.strip()
+        if not 1 <= len(title) <= 100:
+            raise HTTPException(422, "菜单名称须为 1 至 100 个字符")
+        page = await create_page_draft(db, user, PageDefinition(title=title))
+        values.pop("page_code")
+        values.update(title=title, node_type="page", route_path=f"/pages/{page.code}")
+    else:
+        await _set_menu_page_target(db, user, values)
     values["config"] = _normalized_menu_node_config(values.get("config"))
     if values.get("form_id") and not values.get("route_path"):
         form_config = form.config or {}

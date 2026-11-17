@@ -14,6 +14,8 @@ down_revision = "0002_audit_log"
 
 
 def upgrade() -> None:
+    if "rules" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "rules",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

@@ -1,5 +1,5 @@
 import EffectiveHarnessPreview from './EffectiveHarnessPreview';
-import RegistryField, { RegistryReadOnly } from './RegistryFacts';
+import { SkillDetails, ToolDetails, registryRisks } from './RegistryDetails';
 import SkillInstructions from './SkillInstructions';
 import useAISettingsNotification from './useAISettingsNotification';
 import SettingsTabs from '@/components/SettingsTabs';
@@ -72,6 +72,8 @@ import {
 } from '../../services/api';
 import { formatServerDateTime } from '../../utils/dateTime';
 import './ai-settings.css';
+import './account.css';
+import '../../components/AiChatWidget/aiPanels.css';
 import AISettingsWorkspace, { AISettingsSaveActions } from './AISettingsWorkspace';
 import { getSkillDisplayDescription, getSkillDisplayTitle, getToolHelp, toolAvailability, toolEffects } from './aiRegistryHelp';
 
@@ -760,9 +762,6 @@ export function AIPlatformPanelV2() {
     }
   };
   const selectedSkill = skillEditor.index === null ? undefined : registrySkills[skillEditor.index];
-  const associatedSkillTools = [...new Set<string>(
-    [selectedSkill?.default_tool, ...(selectedSkill?.allowed_tools ?? [])].filter(Boolean),
-  )];
   const initializeSkillForm = useCallback((instance: typeof skillForm | null) => {
     if (instance && skillEditor.imported) {
       instance.setFieldsValue({
@@ -936,17 +935,22 @@ export function AIPlatformPanelV2() {
     setConnectionResult(null);
   };
   const saveActions = <AISettingsSaveActions loaded={loaded} dirty={dirty} saving={saving} testing={testing} loadError={loadError} onSave={handleSaveToBackend} onReset={resetDraft} />;
-  const selectRegistryItem = (kind: 'skills' | 'tools', name: string) => {
+  const openRegistryDetail = (kind: 'skills' | 'tools', name: string) => {
+    const rows = kind === 'skills' ? registrySkills : registryTools;
+    const index = rows.findIndex((row: RegistryTableRecord) => row.name === name);
+    if (index < 0) return;
     setRegistrySelection(previous => ({ ...previous, [kind]: name }));
+    const openEditor = kind === 'skills' ? openSkillEditor : openToolEditor;
+    openEditor(index, true);
   };
   const registryRow = (kind: 'skills' | 'tools', name: string) => ({
     tabIndex: 0,
     'aria-selected': registrySelection[kind] === name,
-    onClick: () => selectRegistryItem(kind, name),
+    onClick: () => openRegistryDetail(kind, name),
     onKeyDown: (event: React.KeyboardEvent<HTMLTableRowElement>) => {
       if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
       event.preventDefault();
-      selectRegistryItem(kind, name);
+      openRegistryDetail(kind, name);
     },
   });
   const registryActions = (kind: 'skills' | 'tools') => {
@@ -1034,11 +1038,10 @@ export function AIPlatformPanelV2() {
               { title: '状态', dataIndex: 'enabled', width: 88, render: (value) => <Tag color={value === false ? 'default' : 'green'}>{value === false ? '已停用' : '已启用'}</Tag> },
               {
                 title: '名称', dataIndex: 'name', ellipsis: true,
-                render: (name, record, index) => (
-                  <button type="button" className="ai-registry-link" title={name} onClick={event => {
+                render: (name, record) => (
+                  <button type="button" className="ai-registry-link" title={name} aria-haspopup="dialog" onClick={event => {
                     event.stopPropagation();
-                    selectRegistryItem('skills', name);
-                    openSkillEditor(index, true);
+                    openRegistryDetail('skills', name);
                   }}>{getSkillDisplayTitle(name, record.title)}</button>
                 ),
               },
@@ -1062,11 +1065,10 @@ export function AIPlatformPanelV2() {
               { title: '状态', width: 88, render: (_, tool) => <Tag color={toolAvailability(tool) === '已接入' ? 'green' : 'default'}>{toolAvailability(tool)}</Tag> },
               {
                 title: '名称', dataIndex: 'name', ellipsis: true,
-                render: (name, record, index) => (
-                  <button type="button" className="ai-registry-link" title={name} onClick={event => {
+                render: (name, record) => (
+                  <button type="button" className="ai-registry-link" title={name} aria-haspopup="dialog" onClick={event => {
                     event.stopPropagation();
-                    selectRegistryItem('tools', name);
-                    openToolEditor(index, true);
+                    openRegistryDetail('tools', name);
                   }}>{getToolHelp(name)?.title || record.title || name}</button>
                 ),
               },
@@ -1292,7 +1294,7 @@ export function AIPlatformPanelV2() {
       </Modal>
       <Modal
         title={skillEditor.readOnly && selectedSkill ? (
-          <div className="ai-skill-title">
+          <div className="ai-registry-detail-title">
             <span>{getSkillDisplayTitle(selectedSkill.name, selectedSkill.title)}</span>
             <span className="ai-registry-status" data-active={selectedSkill.enabled !== false}>
               {selectedSkill.enabled === false ? '已停用' : '已启用'}
@@ -1306,7 +1308,7 @@ export function AIPlatformPanelV2() {
         destroyOnHidden
         width={800}
         centered
-        className="ai-registry-dialog ai-skill-dialog"
+        className={`ai-registry-dialog ai-skill-dialog${skillEditor.readOnly ? ' ai-registry-detail' : ''}`}
         okText="保存技能"
         footer={skillEditor.readOnly ? (
           <Space>
@@ -1315,7 +1317,10 @@ export function AIPlatformPanelV2() {
           </Space>
         ) : undefined}
       >
-        {skillEditor.open && <RegistryReadOnly.Provider value={Boolean(skillEditor.readOnly)}>
+        {skillEditor.open && (skillEditor.readOnly ? selectedSkill && (
+          <SkillDetails key={selectedSkill.name} skill={selectedSkill} tools={toolsByName}
+            capabilities={aiCapabilityOptions} domains={aiDomainOptions} recordInfo={registryRecordInfo(selectedSkill)} />
+        ) : (
           <Form ref={initializeSkillForm} form={skillForm} layout="vertical" clearOnDestroy
             initialValues={selectedSkill ?? {
               enabled: false, description: '', risk_level: 'medium', allowed_tools: [], default_tool: null,
@@ -1327,12 +1332,12 @@ export function AIPlatformPanelV2() {
               }
             }}
           >
-            <div className={`ai-skill-document${skillEditor.readOnly ? ' is-readonly' : ''}`}>
+            <div className="ai-skill-document">
               <section className="ai-skill-frontmatter" aria-labelledby="ai-skill-metadata">
                 <div className="ai-skill-steps-heading">
                   <h3 id="ai-skill-metadata">技能元数据</h3>
                 </div>
-                <RegistryField name="name" format="code" label={<code>name</code>} rules={[
+                <Form.Item name="name" label={<code>name</code>} rules={[
                   { required: true, whitespace: true, message: '请输入技能名称' },
                   {
                     validator: (_, value) => !value || value === selectedSkill?.name || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64
@@ -1346,103 +1351,73 @@ export function AIPlatformPanelV2() {
                   },
                 ]}>
                   <Input placeholder="analyze-form-records" disabled={Boolean(selectedSkill)} />
-                </RegistryField>
-                <RegistryField name="description" label={<code>description</code>} rules={[
+                </Form.Item>
+                <Form.Item name="description" label={<code>description</code>} rules={[
                   { required: true, whitespace: true, message: '请说明技能的用途和适用场景' },
                   { max: 1024, message: '技能描述最多 1024 个字符' },
                 ]}>
-                  <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} placeholder="说明技能能做什么，以及何时使用" />
-                </RegistryField>
+                  <Input.TextArea autoFocus={Boolean(selectedSkill)} autoSize={{ minRows: 2, maxRows: 6 }} placeholder="说明技能能做什么，以及何时使用" />
+                </Form.Item>
               </section>
               <section className="ai-skill-steps" aria-labelledby="ai-skill-steps">
                 <div className="ai-skill-steps-heading">
                   <h3 id="ai-skill-steps">技能正文</h3>
-                  {!skillEditor.readOnly && <span>Markdown</span>}
+                  <span>Markdown</span>
                 </div>
                 <Form.Item name="instructions" noStyle>
-                  <SkillInstructions key={selectedSkill?.name ?? ''} name={selectedSkill?.name} readOnly={skillEditor.readOnly} />
+                  <SkillInstructions key={selectedSkill?.name ?? ''} name={selectedSkill?.name} />
                 </Form.Item>
               </section>
-              <details className="ai-skill-advanced" key={String(skillEditor.readOnly)}>
+              <details className="ai-skill-advanced">
                 <summary>平台配置</summary>
                 <section className="ai-registry-dialog-section">
-                  <RegistryField name="title" label="显示名称" extra="用于技能列表和详情标题，可填写中文。">
+                  <Form.Item name="title" label="显示名称" extra="用于技能列表和详情标题，可填写中文。">
                     <Input placeholder="留空时使用技能名称" />
-                  </RegistryField>
+                  </Form.Item>
                 </section>
-                {skillEditor.readOnly ? (
-                  <section className="ai-registry-dialog-section ai-skill-tools" aria-labelledby="ai-skill-tools">
-                    <h3 id="ai-skill-tools">平台工具映射</h3>
-                    {associatedSkillTools.length === 0 ? <p>未配置</p> : (
-                      <ul>{associatedSkillTools.map(name => {
-                        const tool = toolsByName.get(name);
-                        const help = getToolHelp(name);
-                        return (
-                          <li key={name}>
-                            <div className="ai-registry-related-title">
-                              <strong>{help?.title || tool?.title || name}</strong>
-                              <Space size={8}>
-                                {name === selectedSkill.default_tool && <Tag color="blue" title="动作未指定工具时使用">默认</Tag>}
-                                <span>{toolAvailability(tool)}</span>
-                              </Space>
-                            </div>
-                            <code>{name}</code>
-                            <div>{help?.purpose || tool?.description}</div>
-                          </li>
-                        );
-                      })}</ul>
-                    )}
-                  </section>
-                ) : (
                 <section className="ai-registry-dialog-section" aria-labelledby="ai-skill-tools">
                   <h3 id="ai-skill-tools">平台工具映射（可选）</h3>
-                  <RegistryField name="allowed_tools" label="依赖工具" extra="用于技能启用校验。实际调用仍按平台权限和执行策略检查。">
+                  <Form.Item name="allowed_tools" label="依赖工具" extra="用于技能启用校验。实际调用仍按平台权限和执行策略检查。">
                     <Select mode="multiple" showSearch options={registryToolOptions} />
-                  </RegistryField>
+                  </Form.Item>
                   <Form.Item noStyle dependencies={['allowed_tools']}>
                     {({ getFieldValue }) => {
                       const allowed: string[] = getFieldValue('allowed_tools') ?? [];
                       const current = getFieldValue('default_tool');
                       const options = registryToolOptions.filter(option => allowed.includes(option.value) || option.value === current);
                       return (
-                        <RegistryField name="default_tool" label="默认工具" extra="动作未指定工具时使用。">
+                        <Form.Item name="default_tool" label="默认工具" extra="动作未指定工具时使用。">
                           <Select allowClear showSearch options={options} />
-                        </RegistryField>
+                        </Form.Item>
                       );
                     }}
                   </Form.Item>
                 </section>
-                )}
                 <section className="ai-registry-dialog-section">
                   <h4>平台执行策略</h4>
                   <Row gutter={12}>
                     <Col xs={24} sm={12}>
-                      <RegistryField name="risk_level" label="风险等级">
-                        <Select options={[
-                          { label: '低', value: 'low' },
-                          { label: '中', value: 'medium' },
-                          { label: '高', value: 'high' },
-                          { label: '严重', value: 'critical' },
-                        ]} />
-                      </RegistryField>
+                      <Form.Item name="risk_level" label="风险等级">
+                        <Select options={registryRisks} />
+                      </Form.Item>
                     </Col>
                     <Col xs={24} sm={12}>
-                      <RegistryField name="permission_capability" label="所需能力">
+                      <Form.Item name="permission_capability" label="所需能力">
                         <Select allowClear options={aiCapabilityOptions} />
-                      </RegistryField>
+                      </Form.Item>
                     </Col>
                   </Row>
                   <Row gutter={12}>
                     <Col xs={24} sm={12}>
-                      <RegistryField name="domain" label="业务域">
+                      <Form.Item name="domain" label="业务域">
                         <Select allowClear options={aiDomainOptions} />
-                      </RegistryField>
+                      </Form.Item>
                     </Col>
-                    {!skillEditor.readOnly && <Col xs={24} sm={12}>
-                      <RegistryField name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
                         <Switch />
-                      </RegistryField>
-                    </Col>}
+                      </Form.Item>
+                    </Col>
                   </Row>
                   <p>工具调用按平台权限和执行规则检查，写入操作需确认。</p>
                 </section>
@@ -1450,10 +1425,17 @@ export function AIPlatformPanelV2() {
               </details>
             </div>
           </Form>
-        </RegistryReadOnly.Provider>}
+        ))}
       </Modal>
       <Modal
-        title={toolEditor.readOnly ? '工具详情' : toolEditor.index === null ? '添加工具' : '编辑工具'}
+        title={toolEditor.readOnly && selectedTool ? (
+          <div className="ai-registry-detail-title">
+            <span>{getToolHelp(selectedTool.name)?.title || selectedTool.title || selectedTool.name}</span>
+            <span className="ai-registry-status" data-active={toolAvailability(selectedTool) === '已接入'}>
+              {toolAvailability(selectedTool)}
+            </span>
+          </div>
+        ) : toolEditor.index === null ? '添加工具' : '编辑工具'}
         open={toolEditor.open}
         onOk={saveTool}
         confirmLoading={registrySaving}
@@ -1461,7 +1443,7 @@ export function AIPlatformPanelV2() {
         destroyOnHidden
         width={760}
         centered
-        className="ai-registry-dialog"
+        className={`ai-registry-dialog${toolEditor.readOnly ? ' ai-registry-detail' : ''}`}
         okText="保存工具"
         footer={toolEditor.readOnly ? (
           <Space>
@@ -1470,7 +1452,10 @@ export function AIPlatformPanelV2() {
           </Space>
         ) : undefined}
       >
-        {toolEditor.open && <RegistryReadOnly.Provider value={Boolean(toolEditor.readOnly)}>
+        {toolEditor.open && (toolEditor.readOnly ? selectedTool && (
+          <ToolDetails key={selectedTool.name} tool={selectedTool}
+            capabilities={aiCapabilityOptions} recordInfo={registryRecordInfo(selectedTool)} />
+        ) : (
           <Form ref={initializeToolForm} form={toolForm} layout="vertical" clearOnDestroy initialValues={{
             handler_key: 'not_implemented', side_effect: 'read', risk_level: 'low',
             permission_check: 'qa', dry_run_supported: true, audit_required: false,
@@ -1483,30 +1468,30 @@ export function AIPlatformPanelV2() {
               <h3 id="ai-tool-metadata">工具定义</h3>
               <Row gutter={16}>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="name" format="code" label="工具标识" rules={[{ required: true }]}>
+                  <Form.Item name="name" label="工具标识" rules={[{ required: true }]}>
                     <Input readOnly={isCanvasTool} placeholder="forms.query_records" />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="title" label="显示名称" rules={[{ required: true }]}>
-                    <Input />
-                  </RegistryField>
+                  <Form.Item name="title" label="显示名称" rules={[{ required: true }]}>
+                    <Input autoFocus={Boolean(selectedTool)} />
+                  </Form.Item>
                 </Col>
               </Row>
-              <RegistryField name="description" format="description" label="描述">
+              <Form.Item name="description" label="描述">
                 <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} />
-              </RegistryField>
+              </Form.Item>
             </section>
             <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-policy">
               <h3 id="ai-tool-policy">平台执行策略</h3>
               <Row gutter={12}>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="handler_key" label="业务处理器" rules={[{ required: true }]}>
+                  <Form.Item name="handler_key" label="业务处理器" rules={[{ required: true }]}>
                     <Select disabled={isCanvasTool} showSearch options={registryHandlerOptions.filter(option => isCanvasTool || !option.value.startsWith('ui.component_page.'))} />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="side_effect" label="操作类型">
+                  <Form.Item name="side_effect" label="操作类型">
                     <Select disabled={isCanvasTool} options={[
                       { label: '读取', value: 'read' },
                       { label: '草稿写入', value: 'draft_write' },
@@ -1515,62 +1500,49 @@ export function AIPlatformPanelV2() {
                       { label: '流程操作', value: 'workflow_action' },
                       { label: '外部写入', value: 'external_write' },
                     ]} />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
               </Row>
               <Row gutter={12}>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="risk_level" label="风险等级">
-                    <Select options={[
-                      { label: '低', value: 'low' },
-                      { label: '中', value: 'medium' },
-                      { label: '高', value: 'high' },
-                      { label: '严重', value: 'critical' },
-                    ]} />
-                  </RegistryField>
+                  <Form.Item name="risk_level" label="风险等级">
+                    <Select options={registryRisks} />
+                  </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="permission_check" label="所需能力">
+                  <Form.Item name="permission_check" label="所需能力">
                     <Select disabled={isCanvasTool} allowClear options={aiCapabilityOptions} />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
               </Row>
               <Row gutter={12}>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="dry_run_supported" label="支持预演" valuePropName="checked">
+                  <Form.Item name="dry_run_supported" label="支持预演" valuePropName="checked">
                     <Switch />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
                 <Col xs={24} sm={12}>
-                  <RegistryField name="audit_required" label="必须审计" valuePropName="checked">
+                  <Form.Item name="audit_required" label="必须审计" valuePropName="checked">
                     <Switch />
-                  </RegistryField>
+                  </Form.Item>
                 </Col>
               </Row>
-              <RegistryField name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
+              <Form.Item name="enabled" label="启用" valuePropName="checked" getValueProps={value => ({ checked: value !== false })}>
                 <Switch />
-              </RegistryField>
+              </Form.Item>
             </section>
             <section className="ai-registry-dialog-section" aria-labelledby="ai-tool-schema">
               <h3 id="ai-tool-schema">输入与输出</h3>
-              <RegistryField name="input_schema_json" format="json" label={<span>输入结构 <code>inputSchema</code></span>}>
+              <Form.Item name="input_schema_json" label={<span>输入结构 <code>inputSchema</code></span>}>
                 <Input.TextArea readOnly={hasPlatformInputSchema} rows={6} />
-              </RegistryField>
-              <RegistryField name="output_schema_json" format="json" label={<span>输出结构 <code>outputSchema</code></span>}>
+              </Form.Item>
+              <Form.Item name="output_schema_json" label={<span>输出结构 <code>outputSchema</code></span>}>
                 <Input.TextArea rows={6} />
-              </RegistryField>
+              </Form.Item>
             </section>
             {selectedTool && registryRecordInfo(selectedTool)}
           </Form>
-        </RegistryReadOnly.Provider>}
-        {toolEditor.open && selectedTool && (() => {
-          const availability = toolAvailability(selectedTool);
-          return <section className="ai-registry-help" aria-label="工具使用说明">
-            <span className="ai-registry-status" data-active={availability === '已接入'}>{availability}</span>
-            {isCanvasTool && <p>在业务页面的 AI 助手中使用。改动显示在画布草稿，确认后可手动保存。</p>}
-            {availability === '待接入' && <p>当前 AI 无法调用此工具</p>}
-          </section>;
-        })()}
+        ))}
       </Modal>
     </div>
   );

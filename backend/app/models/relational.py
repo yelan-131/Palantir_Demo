@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Index,
+    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -704,6 +705,7 @@ class Application(TimestampMixin, Base):
     default_route: Mapped[str] = mapped_column(String(200), default="/")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(50), default="published")
+    code_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     menus: Mapped[list["ApplicationMenu"]] = relationship(back_populates="application", cascade="all, delete-orphan")
@@ -1616,7 +1618,7 @@ class AIConversation(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
-    conversation_id: Mapped[str] = mapped_column(String(100), index=True)
+    conversation_id: Mapped[str] = mapped_column(String(100), index=True, unique=True)
     user_id: Mapped[str] = mapped_column(String(100), index=True)
     page: Mapped[str] = mapped_column(String(100), default="knowledge-center")
     document_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
@@ -1649,7 +1651,7 @@ class AIAgentRun(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False, default=1, index=True)
-    run_id: Mapped[str] = mapped_column(String(100), index=True)
+    run_id: Mapped[str] = mapped_column(String(100), index=True, unique=True)
     conversation_id: Mapped[str] = mapped_column(String(100), ForeignKey("ai_conversations.conversation_id"), index=True)
     user_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     assistant_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

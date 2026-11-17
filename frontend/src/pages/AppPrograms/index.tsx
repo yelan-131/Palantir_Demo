@@ -30,6 +30,7 @@ import {
 } from '@/utils/viewConfig';
 import { formatServerShortDateTime, parseServerDate } from '@/utils/dateTime';
 import './style.css';
+import '../Workflow/workflow.css';
 
 const { RangePicker } = DatePicker;
 

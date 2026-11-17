@@ -3,7 +3,7 @@ import hashlib
 import json
 from fastapi import HTTPException
 from sqlalchemy import select, update
-from app.models.relational import Application, ApplicationMenuNode
+from app.models.relational import Application, ApplicationMenuNode, ComponentPage
 
 
 async def lock_application(db, tenant_id, application_id):
@@ -53,6 +53,8 @@ async def validate_parent(db, app, parent_id, node_id=None):
 async def set_application_default(db, app, route):
     """The application route is authoritative; mark at most one matching menu."""
     nodes = await menu_nodes(db, app)
+    if any(node.node_type == "page" and node.route_path == route for node in nodes):
+        await require_published_menu_page(db, app, route)
     matched = False
     for node in sorted(nodes, key=lambda item: (item.sort_order, item.id)):
         node.default_entry = bool(not matched and route != "/" and node.visible and node.route_path == route)
@@ -65,6 +67,8 @@ async def sync_menu_default(db, app, node, was_default=False):
         if not node.route_path:
             raise HTTPException(422, "默认入口必须指向可打开的页面")
         route = node.route_path
+        if node.node_type == "page":
+            await require_published_menu_page(db, app, route)
         # Preserve the explicitly chosen entry when multiple menus share a route.
         nodes = await menu_nodes(db, app)
         for other in nodes:
@@ -77,14 +81,25 @@ async def sync_menu_default(db, app, node, was_default=False):
         node.default_entry = False
 
 
+async def require_published_menu_page(db, app, route):
+    page_id = await db.scalar(select(ComponentPage.id).where(
+        ComponentPage.tenant_id == app.tenant_id,
+        ComponentPage.code == route.removeprefix("/pages/"),
+        ComponentPage.published_version > 0,
+    ))
+    if page_id is None:
+        raise HTTPException(422, "请先发布页面，再设为应用默认入口")
+
+
 def edit_token(values):
     return hashlib.sha256(json.dumps(values, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
 
 
-def application_edit_token(app):
-    return edit_token({key: getattr(app, key) for key in (
+def application_edit_token(app, role_ids):
+    values = {key: getattr(app, key) for key in (
         "id", "name", "code", "description", "icon", "default_route", "sort_order", "status", "is_pinned",
-    )})
+    )}
+    return edit_token({**values, "role_ids": role_ids})
 
 
 def check_edit_token(expected, actual):

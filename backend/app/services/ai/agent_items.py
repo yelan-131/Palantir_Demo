@@ -14,6 +14,7 @@ AgentItemType = Literal[
     "plan",
     "tool_call",
     "tool_result",
+    "page_action",
     "confirmation",
     "validation",
     "audit",

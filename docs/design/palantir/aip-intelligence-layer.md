@@ -64,7 +64,7 @@
 backend/app/services/ai/
   client.py          # 大模型供应商适配。已实现：client.py、providers.py
   orchestrator.py    # 意图识别、工具路由、动作计划。已实现：orchestrator.py、intent_router.py、planner.py；运行时由 harness_runtime.py 承载
-  prompts.py         # 领域提示词。未按此文件实现：0.3.22 删除了旧版提示词模块，技能说明放在 skill_instructions/*.md
+  prompts.py         # 领域提示词。未按此文件实现：0.3.22 删除了旧版提示词模块，技能说明放在 business_skills/*/SKILL.md
   tools.py           # 业务工具注册表。已实现：tool_registry.py、tool_handlers.py、tool_executor.py，定义在 assets/tools.json
   policies.py        # 风险等级、确认策略、权限策略。已实现：policies.py、permission_resolver.py、confirmations.py
   schemas.py         # 结构化输入输出。已实现：schemas.py

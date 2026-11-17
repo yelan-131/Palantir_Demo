@@ -110,7 +110,7 @@ MCP 中的工具名是别名：逻辑名中的点换成下划线，再加上逻�
 
 技能是给模型的操作说明。环境变量 `AI_HARNESS_NATIVE_SKILLS` 决定投放方式，默认 `true`。
 
-- 原生技能（默认）：每次运行前，`harness_skills.stage_native_skills` 在 Harness 主目录下创建临时目录，把当前用户可用的技能写成带 frontmatter 的 Markdown 文件（`name`、`description`、`disable-model-invocation`、`user-invocable`），由 SDK 的技能插件加载。旧式技能名（带点）转换为短横线形式的别名，冲突时加哈希后缀。用户没有表单设计器权限时不投放表单搭建技能。运行结束后临时目录被删除。
+- 原生技能（默认）：每次运行前，`harness_skills.stage_native_skills` 把当前用户可用的技能写到临时目录中的 `<技能名>/SKILL.md`，由 SDK 的技能插件加载。旧式技能名（带点）转换为短横线形式的别名，冲突时加哈希后缀。仅对于非默认的调用开关，临时文件附加相应的 Harness 兼容字段。用户没有表单设计器权限时不投放表单搭建技能。运行结束后临时目录被删除。
 - 平台读取：设置 `AI_HARNESS_NATIVE_SKILLS=false` 时不叠加技能补丁，改为在系统提示词中列出技能目录，模型通过 `platform.skills.read` 按名称读取说明。
 
 哪些技能可见、版本号与摘要的规则见[契约第 5、6 节](skill-contract.md#5-技能)。

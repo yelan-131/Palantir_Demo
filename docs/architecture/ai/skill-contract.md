@@ -118,7 +118,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `name`、`title`、`description` | 名称、标题、说明 |
-| `instructions` | 技能正文，最多 30000 个字符；为空时使用代码中打包的正文 |
+| `instructions` | 技能正文，最多 30000 个字符；为空时读取内置 `SKILL.md` 的 Markdown 正文 |
 | `source_markdown` | 从 SKILL.md 导入时保留的原文 |
 | `model_invocable`、`user_invocable` | 模型能否自动使用、用户能否主动调用 |
 | `capability_level` | `qa`、`assisted`、`agentic`，用于界面分类 |
@@ -128,22 +128,22 @@
 
 技能目录对用户的可见性：知识中心对话不提供技能；其余情况下，技能需要有正文（数据库正文或打包正文），并且按它的 `permission_capability`、`domain`、`risk_level` 通过角色 AI 策略判定。
 
-导入 SKILL.md（`POST /ai/agent-registry/parse-skill`，`skill_import.parse_skill_markdown`）要求文件以 YAML 元数据开头，包含 `name`（1–64 个小写字母、数字或单连字符）和 `description`（1–1024 个字符），可选 `disable-model-invocation`、`user-invocable`，正文最多 30000 个字符。
+导入 `SKILL.md`（`POST /ai/agent-registry/parse-skill`，`skill_import.parse_skill_markdown`）接受单个 Markdown 文件。YAML 元数据须包含 `name`（1–64 个小写字母、数字或单连字符）和 `description`（1–1024 个字符）。兼容已有文档的 `disable-model-invocation`、`user-invocable` 开关。导入原文仍会保存，有效的 `license`、`compatibility` 与 `metadata` 会保留到 Harness 的技能文件。导入的 `allowed-tools` 不改变平台工具权限。
 
 ### 5.2 内置技能与版本
 
-内置 18 个技能。技能目录和 `platform.skills.read` 返回的版本号由代码决定（`skill_loader.SKILL_FILES`），与数据库行的 `version` 列无关：
+内置 18 个技能，位于 `backend/app/services/ai/business_skills/<技能名>/SKILL.md`，按 [Agent Skills 格式规范](https://agentskills.io/specification) 编写。目录名与 YAML 的 `name` 一致。内部注册表 ID 仍由 `metadata.manufoundry-registry-id` 对应，技能目录和 `platform.skills.read` 返回包的 `metadata.version`，与数据库行的 `version` 列无关。
 
 | 技能 | 版本 | 打包正文 |
 | --- | --- | --- |
-| `low_code.create_form_definition` | 1.1.0 | `services/ai/form_design_skill.md` |
-| `low_code.manage_component_page` | 1.0.0 | `services/ai/skill_instructions/low_code.manage_component_page.md` |
-| `analysis.manage_dashboard` | 1.1.0 | `skill_instructions/analysis.manage_dashboard.md` |
-| `analysis.query_dashboard` | 1.1.0 | `skill_instructions/analysis.query_dashboard.md` |
-| `low_code.publish_form_to_menu` | 1.1.0 | `skill_instructions/low_code.publish_form_to_menu.md` |
-| 其余 13 个 | 1.0.0 | `skill_instructions/<技能名>.md` |
+| `low_code.create_form_definition` | 1.1.0 | `low-code-create-form-definition/SKILL.md` |
+| `low_code.manage_component_page` | 1.0.0 | `low-code-manage-component-page/SKILL.md` |
+| `analysis.manage_dashboard` | 1.1.0 | `analysis-manage-dashboard/SKILL.md` |
+| `analysis.query_dashboard` | 1.1.0 | `analysis-query-dashboard/SKILL.md` |
+| `low_code.publish_form_to_menu` | 1.1.0 | `low-code-publish-form-to-menu/SKILL.md` |
+| 其余 13 个 | 1.0.0 | `<技能名>/SKILL.md` |
 
-其余 13 个是：`knowledge.answer_question`、`knowledge.ingest_for_rag`、`knowledge.intake_document_ontology`、`quality.create_capa_draft`、`maintenance.create_work_order_draft`、`supply.create_purchase_request_draft`、`material.create_material_application_draft`、`analysis.analyze_form_records`、`forms.create_record_draft`、`low_code.suggest_model_or_page`、`low_code.add_form_field`、`workflow.submit_after_confirmation`、`low_code.inspect_form`（`REGISTRY_INSTRUCTION_NAMES`）。这 13 个的打包正文只在原生技能模式下使用；在 `platform.skills.read` 模式下，只有上表前 5 个以及数据库中填写了正文的技能可读。
+其余 13 个是：`knowledge.answer_question`、`knowledge.ingest_for_rag`、`knowledge.intake_document_ontology`、`quality.create_capa_draft`、`maintenance.create_work_order_draft`、`supply.create_purchase_request_draft`、`material.create_material_application_draft`、`analysis.analyze_form_records`、`forms.create_record_draft`、`low_code.suggest_model_or_page`、`low_code.add_form_field`、`workflow.submit_after_confirmation`、`low_code.inspect_form`（`NATIVE_ONLY_SKILLS`）。这 13 个的打包正文只在原生技能模式下使用；在 `platform.skills.read` 模式下，只有上表前 5 个以及数据库中填写了正文的技能可读。
 
 其中 `knowledge.ingest_for_rag`、`knowledge.intake_document_ontology`、`workflow.submit_after_confirmation` 的默认工具是未实现的工具。内置注册表中它们默认启用，可能出现在技能目录中，但无法完成实际操作；停用后再次启用会被第 2.3 节的规则拒绝。
 

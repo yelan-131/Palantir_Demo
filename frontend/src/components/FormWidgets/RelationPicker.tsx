@@ -1,16 +1,17 @@
 import FieldProtection, {type FieldPolicy} from '@/components/FieldProtection';
+import type { FieldA11yProps } from './FieldControl';
 import { useEffect, useState } from 'react';
 import { Select, Spin } from 'antd';
 import { getFieldOptions, getFormReferenceOptions, previewFormReferenceOptions, type OptionSearchRequest } from '@/services/api';
 
-interface Props extends FieldPolicy {
+interface Props extends FieldPolicy, FieldA11yProps {
   allowClear?: boolean; showSearch?: boolean; modelName: string; labelField?: string;
   value?: number|string; onChange?: (val: number | string | undefined) => void;
   placeholder?: string; disabled?: boolean; draftControls?: unknown[];
   formId?: number; fieldName?: string; contextData?: Record<string, unknown>; id?: string;
 }
 type Option = { label: string; value: number|string };
-export default function RelationPicker({allowClear=true, showSearch=true, copyMode, copyText, modelName, labelField='name', value, onChange, placeholder, disabled, formId, fieldName, contextData, draftControls, id}: Props) {
+export default function RelationPicker({allowClear=true, showSearch=true, copyMode, copyText, modelName, labelField='name', value, onChange, placeholder, disabled, formId, fieldName, contextData, draftControls, id, 'aria-required':ariaRequired, 'aria-invalid':ariaInvalid, 'aria-describedby':ariaDescribedBy}: Props) {
   const [options,setOptions]=useState<Option[]>([]), [selectedOption,setSelectedOption]=useState<Option>();
   const [loading,setLoading]=useState(false), [error,setError]=useState('');
   const [retry,setRetry]=useState(0);
@@ -43,7 +44,7 @@ export default function RelationPicker({allowClear=true, showSearch=true, copyMo
   },[value,fingerprint,draftFingerprint,formId,fieldName]);
   const displayed=selectedOption&&!options.some(item=>String(item.value)===String(selectedOption.value))?[selectedOption,...options]:options;
   return <FieldProtection copyMode={copyMode} copyText={copyText}><Select
-    id={id} aria-label={placeholder} value={value==null?undefined:displayed.find(item=>String(item.value)===String(value))?.value??value}
+    id={id} aria-required={ariaRequired} aria-invalid={ariaInvalid} aria-describedby={ariaDescribedBy} aria-label={placeholder} value={value==null?undefined:displayed.find(item=>String(item.value)===String(value))?.value??value}
     onChange={onChange} options={displayed} loading={loading} placeholder={placeholder||`请选择${modelName}`} disabled={disabled}
     showSearch={showSearch} allowClear={allowClear} onSearch={remote?setInput:undefined}
     filterOption={remote?false:(input,option)=>(option?.label??'').toLowerCase().includes(input.toLowerCase())}

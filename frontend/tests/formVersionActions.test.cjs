@@ -21,6 +21,7 @@ function harness(analysis = false) {
   const savedWorkflow = { ...form, config: { workflow: true } };
   const ctx = {
     lastSavedForm: { current: null },
+    aiFormDraft: undefined, platformForm: form,
     flowLoadError: '', isPersistingFlow: false, isAnalysisDesigner: analysis,
     storedViewConfig: {}, analyticsDesign: {}, layoutControls: [], baseConfig: { fields: [] }, console: { error() {} },
     message: { error: value => calls.push(['error', value]), success: () => calls.push(['success']) },

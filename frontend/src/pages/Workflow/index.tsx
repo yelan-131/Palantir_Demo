@@ -18,6 +18,7 @@ import { displayWorkflowValue } from './fieldDisplay';
 import { APPROVAL_NOTIFICATIONS_CHANGED } from '@/components/NotificationCenter';
 import { WORKFLOW_VIEWS, normalizedWorkflowView as normalizedView } from '@/config/navigation';
 import { formatServerDateTime } from '@/utils/dateTime';
+import './workflow.css';
 
 export type WorkflowTab = 'draft' | 'pending' | 'running' | 'done' | 'returned' | 'rejected';
 type WorkflowViewTab = 'pending' | 'initiated' | 'processed';

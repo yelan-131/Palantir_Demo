@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.services.applications import ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application
+from app.services.applications import ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application, validate_application_code_change
 from app.core.principal import ensure_admin
 from app.models.relational import ApplicationForm, ApplicationMenuNode
 from app.services.field_uniqueness import lock
@@ -162,7 +162,7 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
 
     if prepare:
         if "code" in changes:
-            await ensure_application_code_available(session, tenant_id, changes["code"], application_id=app.id)
+            await validate_application_code_change(session, app, changes["code"])
         return {
             **values,
             "_application_snapshot": _snapshot_digest(snapshot),

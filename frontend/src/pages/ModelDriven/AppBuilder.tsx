@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
 import { getSemanticPageContract } from '@/services/api';
+import '../SystemAdmin/semanticCenter.css';
 
 type FieldContract = {
   name: string;

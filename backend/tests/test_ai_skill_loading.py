@@ -6,8 +6,62 @@ from app.services.ai import skill_loader, harness_runtime as mod
 from app.services.ai.skill_import import parse_skill_markdown
 from app.services.ai.skills import SkillDefinition
 from app.services.ai.settings import merge_ai_settings
+from app.services.ai.harness_skills import stage_native_skills
 
 USER = {'tenant_id': 1, 'sub': 'skill-test', 'is_admin': True, 'roles': ['admin']}
+
+
+def test_bundled_skills_are_standard_packages():
+    from app.services.ai.agent_registry import load_seed_registry
+    from app.services.ai.skill_import import split_skill_markdown
+
+    skills, _ = load_seed_registry()
+    for name in skill_loader.BUNDLED_SKILLS:
+        package_name = name.replace('.', '-').replace('_', '-')
+        path = skill_loader.BUNDLE_ROOT / package_name / 'SKILL.md'
+        document = path.read_text(encoding='utf-8')
+        parsed = parse_skill_markdown(document)
+        metadata, _ = split_skill_markdown(document)
+        assert parsed['name'] == path.parent.name
+        assert parsed['description'] == skills[name]['description']
+        assert parsed['instructions'].strip()
+        assert set(metadata) <= {'name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools'}
+        assert metadata['metadata']['manufoundry-registry-id'] == name
+        assert all(isinstance(value, str) for value in metadata['metadata'].values())
+
+
+@pytest.mark.asyncio
+async def test_registry_details_return_the_original_bundled_document():
+    from app.api.ai_assistant import get_registry_skill_instructions
+
+    name = skill_loader.FORM_SKILL
+    package = skill_loader.BUNDLE_ROOT / 'low-code-create-form-definition' / 'SKILL.md'
+    result = await get_registry_skill_instructions(name, user=USER)
+    assert result['data']['source_markdown'] == package.read_text(encoding='utf-8')
+    assert result['data']['package_name'] == package.parent.name
+    assert result['data']['version'] == '1.1.0'
+    assert result['data']['instructions'] == skill_loader.read_registered_skill_instructions(name)
+    custom = await get_registry_skill_instructions('tenant-defined-skill', user=USER)
+    assert all(value is None for value in custom['data'].values())
+
+
+def test_imported_metadata_survives_standard_runtime_projection(tmp_path, monkeypatch):
+    from app.services.ai import harness_skills
+    from app.services.ai.skill_import import split_skill_markdown
+
+    imported = parse_skill_markdown(
+        '---\nname: sample-review\ndescription: Test source\nlicense: MIT\n'
+        'compatibility: Requires a connected platform\nmetadata:\n  version: "2.0"\n'
+        'allowed-tools: Bash\n---\nReview the evidence.'
+    )
+    skill = SkillDefinition(**imported, title='Sample review', capability_level='qa')
+    monkeypatch.setattr(harness_skills, 'skill_registry', lambda: {skill.name: skill})
+    stage_native_skills(tmp_path, USER, merge_ai_settings({}), {}, allow_form_designer=False)
+    path = tmp_path / skill.name / 'SKILL.md'
+    metadata, body = split_skill_markdown(path.read_text(encoding='utf-8'))
+    assert metadata == {'name': skill.name, 'description': skill.description, 'license': 'MIT',
+                        'compatibility': 'Requires a connected platform', 'metadata': {'version': '2.0'}}
+    assert body.strip() == 'Review the evidence.'
 
 
 def test_imported_skill_can_be_read_without_tool_mapping(monkeypatch):

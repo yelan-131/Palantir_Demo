@@ -8,10 +8,12 @@ from sqlalchemy import select
 
 from app.core.db import db_session
 from app.models.relational import Form, FormField
+from .agent_items import build_agent_item
 from .policies import decide_ai_permission
 from .policies import action_is_forbidden
 from .permission_resolver import PermissionResolver, PermissionDecision, build_default_rules, load_permission_rules
 from .form_menu_tools import FormMenuTarget, resolve_menu_target
+from .settings import mask_sensitive_text
 
 TOOL = 'ui.form_designer'
 
@@ -275,17 +277,69 @@ def designer_permission_error(user, settings):
     return None
 
 
+PAGE_ACTION_TITLES = {
+    'draft_new': '搭建表单草稿',
+    'add_field': '新增字段',
+    'set_field_properties': '调整字段属性',
+    'review': '复核表单草稿',
+    'open': '打开表单设计器',
+    'select_field': '选中字段',
+    'preview': '打开表单预览',
+    'inspect_layout': '读取表单布局',
+    'configure_layout': '调整表单布局',
+    'inspect': '读取页面组件',
+    'apply': '更新页面组件',
+}
+
+
+def _validate_page_receipt(command, receipt):
+    if not receipt.get('ok') or command['type'] != 'form_designer':
+        return receipt
+    draft = command.get('draft')
+    state = receipt.get('state') or {}
+    if command['action'] == 'draft_new':
+        expected = {field['field_name'] for field in draft['fields']}
+        actual = {field.get('field_name') for field in state.get('fields', [])}
+        if state.get('draft_id') != command['draft_id'] or actual != expected or not state.get('review_ready'):
+            return {**receipt, 'ok': False, 'error': '设计器回执未确认全部字段已加入草稿，请在当前画布检查字段后继续。'}
+    operations = (draft or command).get('layout_operations')
+    if command['action'] in {'draft_new', 'configure_layout'} and operations and state.get('layout_operation_count') != len(operations):
+        return {**receipt, 'ok': False, 'error': '设计器未确认全部布局操作，请核对当前画布。'}
+    return receipt
+
+
 async def dispatch_page_action(bridge, command):
+    action_id = command['id']
+    title = PAGE_ACTION_TITLES[command['action']]
+    field = (command.get('field') or {}).get('label') or command.get('field_name')
+    if field:
+        title += f'「{mask_sensitive_text(field)[:80]}」'
+    item = build_agent_item(type='page_action', item_id=action_id, title=title, status='running')
+
+    async def finish(status, summary=''):
+        result = {**item, 'status': status, 'summary': summary}
+        bridge.items.append(result)
+        await bridge.event_sink('item.updated', result)
+
     future = asyncio.get_running_loop().create_future()
-    bridge.page_actions[command['id']] = future
+    bridge.page_actions[action_id] = future
     try:
+        await bridge.event_sink('item.created', item)
         await bridge.event_sink('ui.action', command)
-        return await asyncio.wait_for(future, timeout=20)
-    except asyncio.TimeoutError:
-        await bridge.event_sink('ui.action.cancel', {'id': command['id']})
-        raise
+        try:
+            receipt = await asyncio.wait_for(future, timeout=20)
+        except asyncio.TimeoutError:
+            await bridge.event_sink('ui.action.cancel', {'id': action_id})
+            await finish('timeout', '等待画布回执超时，请检查当前草稿。')
+            raise
+        receipt = _validate_page_receipt(command, receipt)
+        if receipt.get('ok'):
+            await finish('completed')
+        else:
+            await finish('failed', mask_sensitive_text(receipt.get('error') or '画布操作失败')[:240])
+        return receipt
     finally:
-        bridge.page_actions.pop(command['id'], None)
+        bridge.page_actions.pop(action_id, None)
 
 
 async def call_page_control(bridge, arguments):
@@ -362,15 +416,7 @@ async def call_page_control(bridge, arguments):
         return await dispatch_page_action(bridge, command)
 
     try:
-        if request.action == 'draft_new':
-            result = await dispatch(action)
-            if result.get('ok'):
-                state = result.get('state') or {}
-                expected = {field.field_name for field in request.draft.fields}
-                actual = {field.get('field_name') for field in state.get('fields', [])}
-                if state.get('draft_id') != action['draft_id'] or actual != expected or not state.get('review_ready'):
-                    result = {'ok': False, 'state': state, 'error': '设计器回执未确认全部字段已加入草稿，请在当前画布检查字段后继续。'}
-        elif request.action == 'configure_fields':
+        if request.action == 'configure_fields':
             result = {'ok': True}
             for change in request.changes:
                 command = {'id': uuid.uuid4().hex, 'type': 'form_designer', 'form_id': 0, 'draft_id': request.draft_id}
@@ -390,10 +436,6 @@ async def call_page_control(bridge, arguments):
             if result.get('ok') and request.draft_id and request.action in {'add_field', 'set_field_properties'}:
                 result = await dispatch({'id': uuid.uuid4().hex, 'type': 'form_designer', 'form_id': 0,
                     'draft_id': request.draft_id, 'action': 'review'})
-        if result.get('ok') and request.action in {'draft_new', 'configure_layout'}:
-            operations = request.draft.layout_operations if request.draft else request.layout_operations
-            if operations and (result.get('state') or {}).get('layout_operation_count') != len(operations):
-                result = {'ok': False, 'state': result.get('state'), 'error': '设计器未确认全部布局操作，请核对当前画布。'}
         if result.get('ok'):
             bridge.configuration_failure = None
             if action.get('draft_id') or request.action in {'inspect_layout', 'configure_layout'}:

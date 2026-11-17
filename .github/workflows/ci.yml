@@ -75,6 +75,8 @@ jobs:
       POSTGRES_USER: manufoundry
       POSTGRES_PASSWORD: ci-postgres-password
       POSTGRES_DB: manufoundry_ci
+      # Migration 0010 refuses to create the admin account without it.
+      PALANTIR_SEED_ADMIN_PASSWORD: ci-disposable-admin-password
     defaults:
       run:
         working-directory: backend
@@ -95,6 +97,8 @@ jobs:
           psql -d manufoundry_ci -c "CREATE DATABASE assembly_verify_ci"
       - name: Run PostgreSQL-only tests
         env:
+          # tests/conftest.py defaults to SQLite; physical form tables pick SQL by backend.
+          DATABASE_BACKEND: postgresql
           RECORD_TEST_DATABASE_URL: postgresql+asyncpg://manufoundry:ci-postgres-password@localhost:5432/record_service_verify_ci
           ASSEMBLY_TEST_DATABASE_URL: postgresql+asyncpg://manufoundry:ci-postgres-password@localhost:5432/assembly_verify_ci
         run: >-
@@ -105,7 +109,7 @@ jobs:
           tests/test_settings_concurrency.py
 
   frontend:
-    name: Frontend type check and build
+    name: Frontend unit tests, type check and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -119,4 +123,5 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: node --test tests/*.test.cjs
       - run: npm run build

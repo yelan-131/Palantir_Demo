@@ -21,9 +21,18 @@ pytestmark = pytest.mark.usefixtures("legacy_model_driven_demo")
 
 # ── Helpers ────────────────────────────────────────────────
 
+_LOOP: asyncio.AbstractEventLoop | None = None
+
+
 def _run(coro):
-    """Run an async coroutine synchronously in tests."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async coroutine synchronously in tests.
+
+    Earlier tests in the same process may call ``asyncio.run``, which clears
+    the current event loop, so this module keeps its own loop."""
+    global _LOOP
+    if _LOOP is None or _LOOP.is_closed():
+        _LOOP = asyncio.new_event_loop()
+    return _LOOP.run_until_complete(coro)
 
 
 # ── Unit tests: condition evaluation ───────────────────────

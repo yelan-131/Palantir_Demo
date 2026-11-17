@@ -64,6 +64,36 @@ test('HTTP failures propagate without reporting a successful answer', async () =
   assert.equal(events.length, 0);
 });
 
+test('a chat connection that ends during a tool call rejects without a result', async () => {
+  const frames = [
+    'event: run.accepted\ndata: {"status":"accepted"}\n\n',
+    'event: item.created\ndata: {"type":"tool_call","status":"running"}\n\n',
+  ];
+  const api = loadApi(async () => ({ ok: true, body: { getReader: () => ({
+    read: async () => frames.length
+      ? { done: false, value: new TextEncoder().encode(frames.shift()) }
+      : { done: true },
+  }) } }));
+  const events = [];
+  await assert.rejects(api.streamAgentChat({ message: 'test' }, event => events.push(event)), /连接已中断/);
+  assert.deepEqual(events.map(event => event.event), ['run.accepted', 'item.created']);
+});
+
+test('a backend run failure is delivered even if there is no answer', async () => {
+  const frame = new TextEncoder().encode('event: run.failed\ndata: {"detail":"权限不足"}\n\n');
+  const api = loadApi(async () => ({ ok: true, body: { getReader: () => {
+    let sent = false;
+    return { read: async () => {
+      if (sent) return { done: true };
+      sent = true;
+      return { done: false, value: frame };
+    } };
+  } } }));
+  const events = [];
+  await api.streamAgentChat({ message: 'test' }, event => events.push(event));
+  assert.equal(events[0].data.detail, '权限不足');
+});
+
 test('a confirmation stream ending before its result triggers durable status recovery', async () => {
   const api = loadApi(async () => ({ ok: true, body: { getReader: () => ({ read: async () => ({ done: true }) }) } }));
   await assert.rejects(api.streamConfirmAgentRun('run-1', { confirmed: true }, () => {}), /连接已中断/);

@@ -1,5 +1,6 @@
 """Real database contracts across HTTP routes, shared services, and AI tools."""
 from contextlib import asynccontextmanager
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -7,7 +8,7 @@ from sqlalchemy import func, inspect, select, text
 
 from tests.test_record_service import environment
 from app.api import forms
-from app.models.relational import Form, FormField, FormLayout
+from app.models.relational import Application, ApplicationMenuNode, Form, FormField, FormLayout, FormVersion, WorkflowDef, WorkflowDefVersion
 from app.services import form_fields, form_versions, form_layouts
 from app.services.ai.low_code_tools import execute_add_form_field, execute_create_form_definition
 from app.services.ai.form_configuration_tools import execute_form_configuration_tool
@@ -25,6 +26,8 @@ def local_audit(monkeypatch):
         pass
     # Audit storage has its own connection in production. Keep these tests isolated.
     monkeypatch.setattr(form_fields, 'write_audit_log', audit)
+    monkeypatch.setattr(form_versions, 'write_audit_log', audit)
+    monkeypatch.setattr(forms, 'write_audit_log', audit)
     monkeypatch.setattr('app.services.ai.low_code_tools.write_audit_log', audit)
 
 
@@ -137,18 +140,33 @@ async def test_services_and_tools_enforce_admin_and_tenant_boundaries(environmen
 @pytest.mark.asyncio
 async def test_ai_creation_uses_shared_field_schema_and_storage(environment):
     db, _, _, user, _ = environment
-    result = await execute_create_form_definition(db, user={**user, 'is_admin': True}, payload={
-        'form': {'code': 'ai_shared_contract', 'name': 'Shared contract'},
+    user['is_admin'] = True
+    app = Application(tenant_id=user['tenant_id'], code='ai_draft_app', name='Draft app', status='published')
+    db.add(app)
+    await db.flush()
+    result = await execute_create_form_definition(db, user=user, payload={
+        'form': {'code': 'ai_shared_contract', 'name': 'Shared contract',
+                 'status': 'published', 'application_id': app.id},
+        'menu': {'create': True},
         'fields': [{'field_name': 'quantity', 'label': 'Quantity', 'field_type': 'int',
             'default_value': '2', 'validation': {'custom': True}}]})
     form_id = result['form']['id']
     created = await db.get(Form, form_id)
     try:
+        assert result['form']['status'] == created.status == 'draft'
+        assert result['route_path'] == f'/form-settings/{form_id}?tab=form&legacy=1'
+        assert result['application_binding']['application_id'] == app.id
+        assert await db.scalar(select(FormVersion.id).where(FormVersion.form_id == form_id)) is None
+        assert await db.scalar(select(ApplicationMenuNode.id).where(ApplicationMenuNode.form_id == form_id)) is None
+        assert created.config['viewConfigMeta']['publishedVersion'] == 0
         field = await db.scalar(select(FormField).where(FormField.form_id == form_id))
         assert field.field_type == 'integer' and field.default_value == '2'
         assert field.validation == {'custom': True}
         columns = await column_names(db, created.table_name)
         assert 'quantity' in columns
+        published = await form_versions.publish_form(form_id, db, user)
+        assert published['data']['version'] == 1
+        assert created.status == 'published'
     finally:
         # This test creates a physical table outside the shared fixture schema.
         # Remove it before the next fixture rebuilds the referenced users table.
@@ -156,6 +174,71 @@ async def test_ai_creation_uses_shared_field_schema_and_storage(environment):
         assert table_name == 't1_business_ai_shared_contract'
         await db.rollback()
         await db.execute(text('DROP TABLE IF EXISTS t1_business_ai_shared_contract'))
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_initial_designer_save_rolls_back_and_retries_with_the_same_code(environment, monkeypatch):
+    db, factory, _, user, client = environment
+    from app.services import workflow_definitions
+
+    user['is_admin'] = True
+    original = workflow_definitions.stage_workflow_definition
+
+    async def fail_after_workflow_insert(*args):
+        await original(*args)
+        raise HTTPException(503, 'Interrupted initial save')
+
+    code = 'atomic_designer_contract'
+    table_name = f't1_business_{code}'
+    request = {
+        'name': 'Atomic draft', 'code': code, 'storage_mode': 'dynamic',
+        'designer_draft': {
+            'draft_id': 'a' * 32,
+            'fields': [{'field_name': 'quantity', 'label': 'Quantity', 'field_type': 'integer', 'default_value': '2'}],
+            'layout': {'sections': [{'fields': [{'fieldName': 'quantity'}]}]},
+            'view': {'table': {'columns': [{'fieldName': 'quantity'}]}},
+            'workflow': {'name': 'Atomic draft workflow', 'config': {'nodes': [], 'edges': []}},
+        },
+    }
+    monkeypatch.setattr(workflow_definitions, 'stage_workflow_definition', fail_after_workflow_insert)
+    failed = await client.post('/forms', json=request)
+    assert failed.status_code == 503, failed.text
+    async with factory() as session:
+        assert await session.scalar(select(Form.id).where(Form.code == code)) is None
+        assert await session.scalar(select(WorkflowDef.id).where(WorkflowDef.name == 'Atomic draft workflow')) is None
+        connection = await session.connection()
+        assert not await connection.run_sync(lambda sync: inspect(sync).has_table(table_name))
+
+    monkeypatch.setattr(workflow_definitions, 'stage_workflow_definition', original)
+    try:
+        saved = await client.post('/forms', json=request)
+        assert saved.status_code == 200, saved.text
+        form = saved.json()['data']
+        assert form['status'] == 'draft'
+        retried = await client.post('/forms', json=request)
+        assert retried.status_code == 200 and retried.json()['data']['id'] == form['id']
+        duplicate = await client.post('/forms', json={
+            **request, 'designer_draft': {**request['designer_draft'], 'draft_id': 'b' * 32},
+        })
+        assert duplicate.status_code == 409
+        async with factory() as session:
+            field = await session.scalar(select(FormField).where(FormField.form_id == form['id']))
+            assert field.field_name == 'quantity' and field.default_value == '2'
+            layouts = {row.layout_type: row.config for row in await session.scalars(
+                select(FormLayout).where(FormLayout.form_id == form['id']))}
+            assert layouts['form'] == request['designer_draft']['layout']
+            assert layouts['view']['draft'] == request['designer_draft']['view']
+            definitions = list(await session.scalars(select(WorkflowDef).where(WorkflowDef.name == 'Atomic draft workflow')))
+            assert len(definitions) == 1
+            workflow = definitions[0]
+            assert workflow.id == form['config']['workflowDesigner']['draftWorkflowId']
+            assert workflow.status == 'draft' and json.loads(workflow.config)['formId'] == form['id']
+            assert await session.scalar(select(WorkflowDefVersion.id).where(WorkflowDefVersion.workflow_id == workflow.id))
+            assert await session.scalar(select(FormVersion.id).where(FormVersion.form_id == form['id'])) is None
+    finally:
+        await db.rollback()
+        await db.execute(text('DROP TABLE IF EXISTS t1_business_atomic_designer_contract'))
         await db.commit()
 
 

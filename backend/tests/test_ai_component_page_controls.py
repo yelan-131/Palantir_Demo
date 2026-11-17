@@ -21,11 +21,12 @@ def test_component_tool_rejects_writes_to_storage_and_invalid_edits(arguments):
 
 @pytest.mark.asyncio
 async def test_component_tool_targets_current_browser_page_and_waits_for_receipt():
-    bridge = SimpleNamespace(user={'is_admin': True}, settings={}, page_actions={},
+    bridge = SimpleNamespace(user={'is_admin': True}, settings={}, page_actions={}, items=[],
                              context={'componentPageContext': {'code': 'inspection'}, 'pageControlsSupported': True})
 
     async def sink(event, action):
-        assert event == 'ui.action'
+        if event != 'ui.action':
+            return
         assert action['page_code'] == 'inspection'
         assert action['operations'][0]['appearance'] == {'showTitle': False}
         bridge.page_actions[action['id']].set_result({'ok': True, 'state': {'saved': False}})
@@ -36,10 +37,14 @@ async def test_component_tool_targets_current_browser_page_and_waits_for_receipt
     ]})
     assert result['status'] == 'completed'
     assert result['result']['saved'] is False
+    assert [call.args[0] for call in bridge.event_sink.await_args_list] == [
+        'item.created', 'ui.action', 'item.updated',
+    ]
+    assert bridge.items[0]['title'] == '更新页面组件'
     assert not bridge.page_actions
     bridge.user = {'is_admin': False}
     assert (await mod.call_component_page(bridge, {'action': 'inspect'}))['status'] == 'blocked'
-    assert bridge.event_sink.await_count == 1
+    assert bridge.event_sink.await_count == 3
 
 
 @pytest.mark.asyncio

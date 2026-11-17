@@ -56,8 +56,8 @@ from app.services.ai.settings import (
     settings_to_provider_config as _settings_to_provider_config,
 )
 from app.services.ai.skills import list_skills
-from app.services.ai.skill_import import parse_skill_markdown
-from app.services.ai.skill_loader import read_registered_skill_instructions
+from app.services.ai.skill_import import parse_skill_markdown, split_skill_markdown
+from app.services.ai.skill_loader import bundled_skill_source
 from app.services.ai.tenant_context import require_tenant_id
 from app.services.ai.tool_executor import agent_tool_executor
 from app.services.ai.tool_registry import list_tools
@@ -1730,7 +1730,14 @@ async def get_agent_registry(user: dict = Depends(require_admin)):
 @router.get("/agent-registry/skill-instructions/{name}")
 async def get_registry_skill_instructions(name: str, user: dict = Depends(require_admin)):
     current_tenant_id(user)
-    return {"data": {"instructions": read_registered_skill_instructions(name)}}
+    source = bundled_skill_source(name)
+    if source is None:
+        return {"data": {"instructions": None, "source_markdown": None, "package_name": None, "version": None}}
+    metadata, instructions = split_skill_markdown(source)
+    return {"data": {
+        "instructions": instructions, "source_markdown": source,
+        "package_name": metadata["name"], "version": metadata.get("metadata", {}).get("version"),
+    }}
 
 
 @router.post("/agent-registry/parse-skill")

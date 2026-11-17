@@ -64,28 +64,92 @@ async def publish_form(form_id: int, db: AsyncSession, user: dict, *, defer_comm
     return {'data': _form_version_payload(version)}
 
 
-async def restore_form_draft(form_id: int, db: AsyncSession, user: dict):
-    ensure_admin(user)
-    from app.models.relational import Form, FormField
-    form = await db.get(Form, form_id)
-    if not form or form.tenant_id != current_tenant_id(user):
-        raise HTTPException(404, 'Form not found')
-    version = await _latest_form_version(db, form.tenant_id, form_id)
-    if not version:
-        raise HTTPException(409, '当前没有可恢复的已发布版本')
-    config = copy.deepcopy(((version.snapshot or {}).get('form') or {}).get('config') or {})
+def _form_version_summary(version) -> dict:
+    snapshot = version.snapshot or {}
+    fields = snapshot.get('fields') if isinstance(snapshot.get('fields'), list) else []
+    layouts = snapshot.get('layouts') if isinstance(snapshot.get('layouts'), list) else []
+    return {
+        'id': version.id,
+        'tenant_id': getattr(version, 'tenant_id', None),
+        'form_id': version.form_id,
+        'version': version.version,
+        'status': version.status,
+        'field_count': len(fields),
+        'layout_count': len(layouts),
+        'published_by': version.published_by,
+        'published_at': version.published_at.isoformat() if version.published_at else None,
+        'created_at': version.created_at.isoformat() if version.created_at else None,
+        'updated_at': version.updated_at.isoformat() if version.updated_at else None,
+    }
+
+
+_FIELD_RESTORE = ('label', 'field_type', 'required', 'visible_in_list', 'visible_in_form', 'searchable', 'sortable', 'archived', 'default_value', 'enum_values', 'validation', 'ui_config', 'sort_order')
+
+
+def _published_config_as_draft(snapshot: dict) -> dict:
+    config = copy.deepcopy(((snapshot or {}).get('form') or {}).get('config') or {})
     config['viewConfigDraft'] = copy.deepcopy(config.get('viewConfig') or {})
     config['permissionDesignDraft'] = copy.deepcopy(config.get('permissionDesign') or {'roles': {}})
     if 'analyticsDesign' in config:
         config['analyticsDesignDraft'] = copy.deepcopy(config['analyticsDesign'])
-    meta = config.get('workflowDesigner') or {}
+    meta = dict(config.get('workflowDesigner') or {})
     meta.pop('draftWorkflowId', None)
     config['workflowDesigner'] = meta
-    for payload in (version.snapshot or {}).get('fields', []):
-        field = await db.get(FormField, payload.get('id')) if payload.get('id') else None
-        if field and field.form_id == form_id and (field.tenant_id == form.tenant_id):
-            field.default_value = payload.get('default_value')
-    form.config = config
+    return config
+
+
+async def _restore_fields(db, form, snapshot: dict):
+    from app.models.relational import FormField
+    from sqlalchemy import select
+    current = (await db.scalars(select(FormField).where(FormField.form_id == form.id, FormField.tenant_id == form.tenant_id))).all()
+    by_id = {field.id: field for field in current}
+    by_name = {field.field_name: field for field in current}
+    for payload in snapshot.get('fields') or []:
+        if not isinstance(payload, dict) or not payload.get('field_name'):
+            continue
+        field = by_id.get(payload.get('id')) or by_name.get(payload['field_name'])
+        if field is None:
+            field = FormField(tenant_id=form.tenant_id, form_id=form.id, field_name=str(payload['field_name']), label=str(payload.get('label') or payload['field_name']))
+            db.add(field)
+            by_name[field.field_name] = field
+        for key in _FIELD_RESTORE:
+            if key in payload:
+                setattr(field, key, payload[key])
+
+
+async def _restore_layouts(db, form, snapshot: dict):
+    from app.models.relational import FormLayout
+    from sqlalchemy import select
+    current = (await db.scalars(select(FormLayout).where(FormLayout.form_id == form.id, FormLayout.tenant_id == form.tenant_id))).all()
+    by_type = {layout.layout_type: layout for layout in current}
+    for payload in snapshot.get('layouts') or []:
+        if not isinstance(payload, dict) or not payload.get('layout_type'):
+            continue
+        layout = by_type.get(payload['layout_type'])
+        if layout is None:
+            layout = FormLayout(tenant_id=form.tenant_id, form_id=form.id, layout_type=str(payload['layout_type']), config=payload.get('config') or {})
+            db.add(layout)
+            by_type[layout.layout_type] = layout
+        else:
+            layout.config = payload.get('config') or {}
+
+
+async def restore_form_draft(form_id: int, db: AsyncSession, user: dict, version_number: int | None = None):
+    ensure_admin(user)
+    from app.models.relational import Form, FormVersion
+    form = await db.get(Form, form_id)
+    if not form or form.tenant_id != current_tenant_id(user):
+        raise HTTPException(404, 'Form not found')
+    if version_number is None:
+        version = await _latest_form_version(db, form.tenant_id, form_id)
+    else:
+        version = await db.scalar(select(FormVersion).where(FormVersion.form_id == form_id, FormVersion.tenant_id == form.tenant_id, FormVersion.version == version_number, FormVersion.status.in_(['published', 'active'])))
+    if not version:
+        raise HTTPException(409 if version_number is None else 404, '当前没有可恢复的已发布版本' if version_number is None else 'Form version not found')
+    snapshot = version.snapshot or {}
+    await _restore_fields(db, form, snapshot)
+    await _restore_layouts(db, form, snapshot)
+    form.config = _published_config_as_draft(snapshot)
     await db.commit()
     await db.refresh(form)
     return {'data': _form_payload(form)}
@@ -99,7 +163,7 @@ async def list_form_versions(form_id: int, db: AsyncSession, user: dict):
         raise HTTPException(404, 'Form not found')
     await _ensure_form_permission(db, user, form_id, 'view')
     versions = (await db.execute(select(FormVersion).where(FormVersion.form_id == form_id, FormVersion.tenant_id == tenant_id).order_by(FormVersion.version.desc(), FormVersion.id.desc()))).scalars().all()
-    return {'data': [_form_version_payload(version) for version in versions]}
+    return {'data': [_form_version_summary(version) for version in versions]}
 
 
 async def get_form_version(form_id: int, version_number: int, db: AsyncSession, user: dict):

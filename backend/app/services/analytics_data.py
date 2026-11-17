@@ -42,6 +42,11 @@ def read_filters(value, nested=False):
 async def load_data(db, tenant_id, form, design, *, user, filters=None, widget_filters=None, limit=500, resolve_shared=True, widget_record_queries=None):
     """Use the same row, statistics and field boundary for every dashboard view."""
     filters, widget_filters = read_filters(filters), read_filters(widget_filters, True)
+    if not widget_record_queries:
+        from app.services.plain_aggregates import load_plain
+        plain = await load_plain(db, tenant_id, form, design, user=user, filters=filters, widget_filters=widget_filters, limit=limit, resolve_shared=resolve_shared)
+        if plain is not None:
+            return plain
     shared_errors = []
     widget_rows, widget_query_errors = {}, {}
     if resolve_shared:

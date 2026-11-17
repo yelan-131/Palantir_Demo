@@ -1,0 +1,320 @@
+.account-drawer-head {
+  margin-bottom: 18px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.account-drawer-head h4 {
+  margin: 0 0 4px !important;
+}
+
+.account-center-page {
+  height: calc(100vh / var(--app-ui-scale) - 64px - (var(--density-content-pad) * 2));
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.account-center-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.account-center-head h3 {
+  margin: 0 0 4px;
+}
+
+.account-center-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.account-center-tabs > .ant-tabs-content-holder,
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+}
+
+.account-center-tabs > .ant-tabs-content-holder {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-center-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-profile-subtabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.account-profile-subtabs > .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.account-profile-subtabs > .ant-tabs-content-holder,
+.account-profile-subtabs > .ant-tabs-content-holder > .ant-tabs-content,
+.account-profile-subtabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+}
+
+.account-profile-subtabs > .ant-tabs-content-holder {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.account-profile-subtabs > .ant-tabs-content-holder > .ant-tabs-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.account-profile-subtabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
+  display: flex;
+  flex-direction: column;
+}
+
+.closed-loop-config-center {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.closed-loop-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.closed-loop-hero h4,
+.closed-loop-metrics h3 {
+  margin: 0;
+}
+
+.closed-loop-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: #2f5f73;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.closed-loop-metrics .ant-card {
+  height: 100%;
+  border-radius: 8px;
+}
+
+.closed-loop-workbench {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.72fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 520px;
+}
+
+.closed-loop-left,
+.closed-loop-right,
+.closed-loop-canvas-panel,
+.closed-loop-governance {
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.closed-loop-left,
+.closed-loop-right {
+  min-width: 0;
+  padding: 14px;
+  overflow: auto;
+}
+
+.closed-loop-domain-item {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: var(--mf-panel-soft);
+  color: var(--mf-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.closed-loop-domain-item:hover {
+  border-color: #8fb7c4;
+  background: #f4f9fb;
+}
+
+.closed-loop-domain-item span,
+.closed-loop-domain-item small {
+  display: block;
+}
+
+.closed-loop-domain-item span {
+  font-weight: 800;
+}
+
+.closed-loop-domain-item small {
+  margin-top: 4px;
+  color: #5d6972;
+  line-height: 18px;
+}
+
+.closed-loop-canvas-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.closed-loop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--mf-border);
+}
+
+.closed-loop-toolbar > .ant-space {
+  min-width: 0;
+}
+
+.closed-loop-toolbar .ant-segmented {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.closed-loop-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 430px;
+  background:
+    linear-gradient(var(--mf-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mf-border) 1px, transparent 1px),
+    var(--mf-panel-soft);
+  background-size: 28px 28px;
+}
+
+.closed-loop-canvas .ant-empty {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  height: 120px;
+}
+
+.closed-loop-right .ant-divider {
+  margin: 10px 0 12px;
+}
+
+.closed-loop-tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.closed-loop-governance .ant-card-body {
+  padding-top: 8px;
+}
+
+@media (max-width: 1280px) {
+  .closed-loop-workbench {
+    grid-template-columns: 220px minmax(360px, 1fr);
+  }
+
+  .closed-loop-right {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .closed-loop-hero,
+  .closed-loop-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .closed-loop-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .closed-loop-canvas {
+    min-height: 380px;
+  }
+}
+
+.account-center-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.account-panel-card {
+  height: 100%;
+  border-radius: 8px;
+}
+
+.account-switch-list {
+  width: 100%;
+}
+
+.account-switch-list span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #273640;
+}
+
+.account-admin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.account-section-title h4 {
+  margin: 0 0 2px;
+}

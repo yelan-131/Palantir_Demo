@@ -47,11 +47,6 @@ async def environment(request, tmp_path):
         if external_url:
             await connection.execute(text('DROP TABLE IF EXISTS t1_business_contract'))
             await connection.run_sync(lambda conn: Base.metadata.drop_all(conn, tables=schema_tables))
-            # Migration 0015 creates this legacy unique index separately from
-            # ORM metadata; its conversation foreign key depends on it.
-            await connection.run_sync(relational.Tenant.__table__.create)
-            await connection.run_sync(relational.AIConversation.__table__.create)
-            await connection.execute(text('CREATE UNIQUE INDEX ix_ai_conversations_legacy_id ON ai_conversations (conversation_id)'))
         await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=schema_tables))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as db:

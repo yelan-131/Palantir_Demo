@@ -1,6 +1,7 @@
 """Assembly actions against isolated storage, with a fresh session per request."""
 import os
 from unittest.mock import AsyncMock
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 import pytest
@@ -36,6 +37,11 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
     engine = create_async_engine(external_url or f'sqlite+aiosqlite:///{tmp_path / "assembly.db"}')
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
+        if external_url:
+            # The disposable verification database is shared with the other
+            # assembly tests; physical form tables also reference users.
+            await connection.execute(text('DROP SCHEMA public CASCADE'))
+            await connection.execute(text('CREATE SCHEMA public'))
         await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=tables))
     async with sessions() as db:
         db.add(Tenant(id=1, name='isolated', slug='isolated'))
@@ -175,7 +181,6 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 # limit cannot silently invalidate already stored values.
                 from app.models.relational import Form as StoredForm
                 from app.services.form_engine.naming import _physical_column_name
-                from sqlalchemy import text
                 async with sessions() as data_db:
                     stored_form = await data_db.get(StoredForm, fid)
                     table_name = stored_form.table_name

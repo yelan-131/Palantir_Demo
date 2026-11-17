@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Input } from 'antd';
-import KnowledgeReader from '../../components/KnowledgeReader';
 import { getAIRegistrySkillInstructions } from '../../services/api';
 
-export default function SkillInstructions({ name, readOnly, value, onChange }: {
+export default function SkillInstructions({ name, value, onChange }: {
   name?: string;
-  readOnly?: boolean;
   value?: string | null;
   onChange?: (value: string) => void;
 }) {
@@ -33,8 +31,6 @@ export default function SkillInstructions({ name, readOnly, value, onChange }: {
     <div className="ai-skill-instructions">
       {loading || (failed && value == null) ? (
         <p role="status">{loading ? '正在读取执行步骤…' : '执行步骤读取失败，请重新打开技能。'}</p>
-      ) : readOnly ? (
-        source ? <KnowledgeReader source={source} /> : <p>暂无执行步骤。</p>
       ) : (
         <Input.TextArea
           aria-label="执行步骤 Markdown"

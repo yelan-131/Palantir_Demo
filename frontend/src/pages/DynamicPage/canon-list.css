@@ -1,0 +1,474 @@
+/* Business lists and their filters in every mode: the standalone page, component-page widgets,
+   header portals and drill-down drawers all carry .mf-canon.
+   Shell-wide overrides read --mf-* tokens, so the scope remaps them to canon values;
+   the doubled scope class outranks `.tech-white-shell .app-content` rules that use literals. */
+.mf-canon {
+  --mf-text: var(--canon-text);
+  --mf-muted: var(--canon-muted);
+  --mf-border: var(--canon-border);
+  --mf-border-strong: var(--canon-border-strong);
+  --mf-rail: var(--canon-canvas);
+  --mf-panel: var(--canon-surface);
+  --mf-panel-soft: var(--canon-canvas);
+  --mf-hover: var(--canon-hover);
+  --mf-selected: var(--canon-selected-soft);
+  --mf-primary: var(--canon-primary);
+  --mf-primary-strong: var(--canon-primary);
+  --mf-focus: var(--canon-focus);
+  --mf-control-radius: var(--canon-radius-control);
+  --mf-panel-radius: var(--canon-radius-panel);
+  --mf-font-body: var(--canon-font-body);
+  --mf-font-compact: var(--canon-font-body);
+  --mf-font-auxiliary: var(--canon-font-caption);
+  color: var(--canon-text);
+  font-size: var(--canon-font-body);
+  line-height: 20px;
+  caret-color: var(--canon-primary);
+}
+/* The standalone page is its own scroll container so the sticky table header tracks it. */
+.mf-canon.mf-list-standalone {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  background: var(--canon-canvas);
+  scrollbar-color: var(--canon-border-strong) transparent;
+  scrollbar-width: thin;
+}
+.mf-canon.mf-list-page > .ant-alert,
+.mf-canon.mf-list-filters-only > .ant-alert { margin-bottom: 12px; }
+.mf-canon.mf-canon-portal {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.mf-canon ::selection {
+  background: var(--canon-selected);
+  color: var(--canon-text);
+}
+.mf-canon :is(.mf-link-btn, .mf-list-primary-link, .mf-row-actions .ant-btn):focus-visible {
+  outline: 2px solid var(--canon-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.mf-canon .mf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mf-canon .mf-muted { color: var(--canon-muted); }
+
+/* Page header */
+.mf-canon .mf-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+.mf-canon .mf-list-head-inline {
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.mf-canon .mf-list-heading { min-width: 0; }
+.mf-canon .mf-list-heading h1 {
+  margin: 0;
+  color: var(--canon-text);
+  font-size: var(--canon-font-title);
+  font-weight: 600;
+  line-height: 30px;
+  overflow-wrap: anywhere;
+}
+.mf-canon .mf-list-heading p {
+  max-width: 72ch;
+  margin: 4px 0 0;
+  color: var(--canon-muted);
+}
+.mf-canon .mf-list-actions,
+.mf-canon .mf-list-actions-desktop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mf-canon .mf-list-actions-mobile { display: none; }
+.mf-canon.mf-canon .ant-btn:not(.ant-btn-circle):not(.ant-btn-round) { border-radius: var(--canon-radius-control); }
+.mf-canon.mf-canon .ant-btn.ant-btn-compact-first-item:not(.ant-btn-compact-last-item):not(.ant-btn-circle) { border-start-end-radius: 0; border-end-end-radius: 0; }
+.mf-canon.mf-canon .ant-btn.ant-btn-compact-last-item:not(.ant-btn-compact-first-item):not(.ant-btn-circle) { border-start-start-radius: 0; border-end-start-radius: 0; }
+.mf-canon.mf-canon.mf-canon .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) {
+  border-color: var(--canon-primary);
+  background: var(--canon-primary);
+}
+.mf-canon.mf-canon.mf-canon .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover {
+  border-color: var(--canon-primary-hover);
+  background: var(--canon-primary-hover);
+}
+.mf-canon.mf-canon .form-workspace-entry { margin: 0; }
+.mf-canon.mf-canon.mf-canon .form-workspace-entry .ant-btn {
+  height: 32px;
+  border-color: var(--canon-border);
+  background: var(--canon-surface);
+  color: var(--canon-text);
+  font-size: var(--canon-font-body);
+}
+.mf-canon.mf-canon.mf-canon .form-workspace-entry .ant-btn:not(:disabled):hover {
+  border-color: var(--canon-border-strong);
+  background: var(--canon-hover);
+  color: var(--canon-text);
+}
+.mf-canon.mf-canon.mf-canon .form-workspace-entry .ant-dropdown-trigger { width: 32px; }
+
+/* Filter card: one row while it fits, wrapping by field, one column on phones. */
+.mf-canon .mf-list-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--canon-border);
+  border-radius: var(--canon-radius-panel);
+  background: var(--canon-surface);
+}
+/* --mf-filter-columns caps the column count; tracks drop below 176px only by losing columns. */
+.mf-canon .mf-list-filter-fields {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: repeat(auto-fit, minmax(max(176px, calc((100% - (var(--mf-filter-columns, 4) - 1) * 16px) / var(--mf-filter-columns, 4))), 1fr));
+  gap: 12px 16px;
+  min-width: 0;
+}
+/* Inside a widget frame the filter is part of the frame's surface, not a card of its own. */
+.mf-canon .mf-list-filter.mf-list-filter-bare {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.mf-canon .mf-list-filter-hint {
+  margin: 0 0 12px;
+  color: var(--canon-muted);
+  font-size: var(--canon-font-caption);
+}
+.mf-canon .mf-list-filter-fields > .ant-form-item {
+  min-width: 0;
+  margin: 0;
+}
+.mf-canon .mf-list-filter .ant-form-item-row {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+.mf-canon .mf-list-filter .ant-form-item-label {
+  flex: none;
+  min-width: 4em;
+  max-width: 7em;
+  text-align: left;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mf-canon .mf-list-filter .ant-form-item-label > label {
+  height: 32px;
+  color: var(--canon-text);
+  font-size: var(--canon-font-body);
+}
+.mf-canon .mf-list-filter .ant-form-item-control { flex: 1 1 auto; min-width: 0; }
+.mf-canon .mf-list-filter .mf-list-filter-actions { flex: none; margin: 0 0 0 auto; }
+.mf-canon .mf-filter-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Unconfigured layout: a 220px keyword, then as many 160px+ fields as fit — three at 1440. */
+.mf-canon .mf-list-filter.mf-list-filter-row { column-gap: 16px; }
+.mf-canon .mf-list-filter-row .mf-list-filter-fields { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.mf-canon .mf-list-filter-row .mf-list-filter-fields:has(> .mf-filter-keyword) { grid-template-columns: 220px repeat(auto-fill, minmax(160px, 1fr)); }
+@media (min-width: 601px) {
+  .mf-canon .mf-filter-toggle-mobile { display: none; }
+  .mf-canon .mf-list-filter-actions-toggle:not(:has(.mf-filter-toggle-desktop)) { display: none; }
+}
+
+/* Table card */
+.mf-canon .mf-list-card {
+  border: 1px solid var(--canon-border);
+  border-radius: var(--canon-radius-panel);
+  background: var(--canon-surface);
+  overflow: clip;
+}
+.mf-canon .mf-list-card.mf-list-empty { padding: 32px 16px; }
+.mf-canon .mf-list-views {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--canon-border);
+}
+.mf-canon .mf-list-tabs { flex: 1 1 auto; min-width: 0; }
+.mf-canon .mf-list-tabs > .ant-tabs-nav { height: 44px; margin: 0; }
+.mf-canon .mf-list-tabs > .ant-tabs-nav::before { border-bottom: 0; }
+.mf-canon .mf-list-tabs .ant-tabs-tab { padding: 0; }
+.mf-canon .mf-list-tabs .ant-tabs-tab + .ant-tabs-tab { margin-inline-start: 28px; }
+.mf-canon .mf-list-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { font-weight: 500; }
+.mf-canon.mf-canon.mf-canon .ant-tabs-tab { background: transparent; }
+.mf-canon.mf-canon.mf-canon .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--canon-primary); }
+.mf-canon.mf-canon.mf-canon .ant-tabs-ink-bar { background: var(--canon-primary-hover); }
+.mf-canon .mf-tab-label,
+.mf-canon .mf-list-view-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mf-canon .mf-list-view-current {
+  margin-bottom: -1px;
+  border-bottom: 2px solid var(--canon-primary-hover);
+  color: var(--canon-primary);
+  font-weight: 500;
+}
+.mf-canon .mf-count {
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--canon-fill);
+  color: var(--canon-muted);
+  font-size: var(--canon-font-caption);
+  font-weight: 400;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.mf-canon :is(.mf-list-view-current, .ant-tabs-tab-active) .mf-count {
+  background: var(--canon-selected);
+  color: var(--canon-primary);
+}
+.mf-canon .mf-list-status {
+  align-self: center;
+  color: var(--canon-muted);
+  font-size: var(--canon-font-caption);
+}
+.mf-canon.mf-canon .mf-list-views .mf-list-refresh {
+  flex: none;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: -8px;
+  color: var(--canon-muted);
+}
+.mf-canon.mf-canon .mf-list-views .mf-list-refresh:not(:disabled):hover {
+  background: var(--canon-hover);
+  color: var(--canon-text);
+}
+.mf-canon .mf-empty-mark { color: var(--canon-muted); }
+.mf-canon .mf-list-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--canon-border);
+  background: var(--canon-selected-soft);
+  font-variant-numeric: tabular-nums;
+}
+.mf-canon .mf-list-bulk strong { font-weight: 500; }
+.mf-canon .mf-list-bulk-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--canon-border);
+}
+.mf-canon .mf-link-btn.mf-link-btn-danger,
+.mf-canon .mf-link-btn.mf-link-btn-danger:hover { color: var(--canon-danger); }
+.mf-canon .mf-link-btn:disabled {
+  color: var(--canon-muted);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+.mf-canon .mf-link-btn,
+.mf-canon .mf-list-primary-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--canon-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.mf-canon .mf-link-btn:hover,
+.mf-canon .mf-list-primary-link:hover {
+  color: var(--canon-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.mf-canon .mf-list-primary-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mf-canon .mf-list-table .ant-table {
+  border-radius: 0;
+  background: transparent;
+}
+.mf-canon .mf-list-table .ant-table-container,
+.mf-canon .mf-list-table .ant-table-container table > thead > tr:first-child > *:first-child,
+.mf-canon .mf-list-table .ant-table-container table > thead > tr:first-child > *:last-child { border-radius: 0; }
+.mf-canon.mf-canon .mf-list-table .ant-table :is(th, td) {
+  font-size: var(--canon-font-body);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.mf-canon.mf-canon.mf-canon .mf-list-table .ant-table-thead > tr > th {
+  height: 40px;
+  padding-block: 0;
+  border-color: var(--canon-border) !important;
+  background: var(--canon-canvas);
+  color: var(--canon-muted);
+  font-weight: 500;
+}
+.mf-canon.mf-canon .mf-list-table .ant-table-thead > tr > th.ant-table-column-has-sorters:hover { background: var(--canon-hover); }
+.mf-canon.mf-canon .mf-list-table .ant-table-thead > tr > th::before { display: none; }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr > td {
+  height: var(--canon-row-height);
+  padding-block: 0;
+  border-color: var(--canon-border-soft);
+}
+.mf-canon.mf-canon .mf-list-table.ant-table-wrapper .ant-table-small .ant-table-tbody > tr > td { height: 40px; }
+.mf-canon.mf-canon .mf-list-table :is(.ant-table-thead > tr > th, .ant-table-tbody > tr.ant-table-row > td):first-child { padding-inline-start: 16px; }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr > td.ant-table-column-sort { background: transparent; }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr > td:is(.ant-table-cell-fix-left, .ant-table-cell-fix-right) { background: var(--canon-surface); }
+/* Pinned columns separate with a hairline, not antd's scroll shadow. */
+.mf-canon.mf-canon .mf-list-table :is(.ant-table-cell-fix-left-last, .ant-table-cell-fix-right-first)::after,
+.mf-canon.mf-canon .mf-list-table .ant-table-container::before,
+.mf-canon.mf-canon .mf-list-table .ant-table-container::after { box-shadow: none !important; }
+/* antd's ::after sits just outside the pinned cell, so the inner edge of the pseudo-element touches it. */
+.mf-canon.mf-canon .mf-list-table .ant-table-ping-left .ant-table-cell-fix-left-last::after { border-inline-start: 1px solid var(--canon-border); }
+.mf-canon.mf-canon .mf-list-table .ant-table-ping-right .ant-table-cell-fix-right-first::after { border-inline-end: 1px solid var(--canon-border); }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr:hover > td,
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr > td.ant-table-cell-row-hover { background: var(--canon-hover); }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr.ant-table-row-selected > td { background: var(--canon-selected-soft) !important; }
+.mf-canon.mf-canon .mf-list-table .ant-table-tbody > tr.ant-table-row-selected:hover > td { background: var(--canon-selected) !important; }
+.mf-canon .mf-list-table-clickable .ant-table-tbody > tr.ant-table-row { cursor: pointer; }
+.mf-canon .mf-list-table .ant-table-cell-ellipsis > [data-copy-mode] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mf-canon .mf-list-table .ant-table-placeholder .ant-table-cell { height: auto; }
+
+.mf-canon .mf-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.mf-canon .mf-status::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--canon-neutral-dot);
+  content: "";
+}
+.mf-canon .mf-status-success::before { background: var(--canon-success-dot); }
+.mf-canon .mf-status-warning::before { background: var(--canon-warning-dot); }
+.mf-canon .mf-status-danger::before { background: var(--canon-danger); }
+.mf-canon .mf-status-primary::before { background: var(--canon-primary-hover); }
+.mf-canon .mf-pill {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: var(--canon-font-caption);
+  line-height: 22px;
+  white-space: nowrap;
+}
+.mf-canon .mf-pill-success { background: var(--canon-success-bg); color: var(--canon-success); }
+.mf-canon .mf-pill-primary { background: var(--canon-selected); color: var(--canon-primary); }
+.mf-canon .mf-pill-neutral { background: var(--canon-fill); color: var(--canon-muted); }
+.mf-canon .mf-pill-danger { background: var(--canon-danger-bg); color: var(--canon-danger); }
+.mf-canon .mf-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mf-canon.mf-canon .mf-row-actions .ant-btn {
+  height: 28px;
+  padding: 0 2px;
+}
+
+.mf-canon .mf-list-table .ant-table-pagination.ant-pagination {
+  align-items: center;
+  min-height: 52px;
+  margin: 0;
+  padding: 10px 16px;
+  font-variant-numeric: tabular-nums;
+}
+.mf-canon .mf-list-table .ant-pagination-total-text {
+  margin-inline-end: auto;
+  color: var(--canon-muted);
+}
+.mf-canon .mf-list-table .ant-pagination :is(.ant-pagination-item, .ant-pagination-prev .ant-pagination-item-link, .ant-pagination-next .ant-pagination-item-link) {
+  border: 1px solid var(--canon-border);
+  border-radius: var(--canon-radius-control);
+  background: var(--canon-surface);
+}
+.mf-canon .mf-list-table .ant-pagination .ant-pagination-item-active {
+  border-color: var(--canon-primary-hover);
+  font-weight: 500;
+}
+.mf-canon .mf-list-table .ant-pagination .ant-pagination-item-active a { color: var(--canon-primary); }
+
+/* Tablet and touch: targets stay at least 40px. */
+@media (pointer: coarse) {
+  .mf-canon.mf-canon .mf-list-actions .ant-btn,
+  .mf-canon.mf-canon .mf-list-filter .ant-btn,
+  .mf-canon.mf-canon-portal .component-header-keyword .ant-input-affix-wrapper,
+  .mf-canon .mf-list-filter :is(.ant-input-affix-wrapper, .ant-input, .ant-picker, .ant-input-number, .ant-select-selector) { min-height: 40px; }
+  .mf-canon.mf-canon .mf-row-actions .ant-btn { height: 40px; }
+}
+
+@media (max-width: 600px) {
+  .mf-canon.mf-list-standalone { padding: 16px 12px 20px; }
+  .mf-canon .mf-list-head { align-items: stretch; flex-direction: column; }
+  /* One row of actions: the primary action fills it, everything else sits behind 更多. */
+  .mf-canon .mf-list-actions-desktop { display: none; }
+  .mf-canon .mf-list-actions-mobile {
+    display: flex;
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .mf-canon .mf-list-actions-mobile > .ant-btn-primary { flex: 1 1 auto; }
+  .mf-canon.mf-canon .mf-list-actions-mobile .ant-btn { min-height: 40px; }
+  .mf-canon.mf-canon .mf-list-actions-mobile .mf-list-more { flex: none; width: 40px; }
+  .mf-canon .mf-list-filter { flex-direction: column; align-items: stretch; padding: 12px; }
+  .mf-canon .mf-list-filter-fields,
+  .mf-canon .mf-list-filter-row .mf-list-filter-fields,
+  .mf-canon .mf-list-filter-row .mf-list-filter-fields:has(> .mf-filter-keyword) { grid-template-columns: minmax(0, 1fr); flex: none; }
+  /* The first viewport keeps the keyword; the remaining conditions open from 筛选 (n). */
+  .mf-canon .mf-list-filter:not(.is-expanded) .mf-filter-lead { display: none; }
+  .mf-canon .mf-filter-toggle-desktop { display: none; }
+  .mf-canon .mf-list-filter .mf-filter-buttons { width: 100%; }
+  .mf-canon .mf-list-filter .mf-filter-buttons > .ant-btn { flex: 1 1 0; min-height: 40px; }
+  .mf-canon .mf-list-filter .mf-filter-buttons > .ant-space { flex: 2 1 0; }
+  .mf-canon .mf-list-table .ant-table-sticky-scroll { display: none; }
+  .mf-canon.mf-canon .mf-list-table :is(.ant-table-cell-fix-left, .mf-cell-approval) { position: static !important; }
+  .mf-canon .mf-list-filter.mf-list-filter-bare { padding: 0; }
+  .mf-canon .mf-list-filter .ant-form-item-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .mf-canon .mf-list-filter .ant-form-item-label { max-width: none; }
+  .mf-canon .mf-list-filter .ant-form-item-label > label { height: 20px; }
+  .mf-canon .mf-list-filter .mf-list-filter-actions { margin: 0; }
+  .mf-canon .mf-list-filter .mf-list-filter-actions .ant-space { display: flex; }
+  .mf-canon .mf-list-filter .mf-list-filter-actions .ant-space-item { flex: 1 1 0; }
+  .mf-canon .mf-list-filter .mf-list-filter-actions .ant-btn { width: 100%; min-height: 40px; }
+  .mf-canon .mf-list-views { padding: 0 12px; }
+  .mf-canon .mf-list-table .ant-pagination-total-text { flex-basis: 100%; }
+}

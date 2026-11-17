@@ -3,6 +3,7 @@ import AppMenuManagement from './AppMenuManagement';
 import IdentityAccessManagement from './IdentityAccessManagement';
 import ReferenceDataManagement from './ReferenceDataManagement';
 import SemanticAssetCenter from './SemanticAssetCenter';
+import './adminDirectory.css';
 
 export default function SystemAdmin() {
   return (

@@ -14,6 +14,8 @@ down_revision = "0001_initial"
 
 
 def upgrade() -> None:
+    if "audit_logs" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "audit_logs",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

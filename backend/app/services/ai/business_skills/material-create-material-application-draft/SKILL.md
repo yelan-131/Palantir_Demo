@@ -1,0 +1,18 @@
+---
+name: material-create-material-application-draft
+description: "根据物料标识、数量和用途起草物料申请。适用于领用或申领物料前，先整理一份待复核的记录。"
+compatibility: 需要连接 ManuFoundry，并由平台提供有权使用的业务工具。
+metadata:
+  version: "1.0.0"
+  manufoundry-registry-id: "material.create_material_application_draft"
+---
+
+# 起草物料申请
+
+1. 确认目标为已有的物料申请表单及其编码，收集物料标识、规格、数量、单位和用途。可用 `knowledge.search` 核对物料或申请规范。库存工具当前未接入。
+2. 将已知值映射到表单字段，用 `forms.create_dynamic_record_draft` 准备确认卡，供用户核对物料和数量。
+3. 确认后按表单权限和规则保存草稿。根据工具回执报告状态，领料和提交审批需后续单独处理。
+
+## 使用示例
+
+> 为新增的 M8 螺栓起草一条物料申请。

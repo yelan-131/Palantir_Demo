@@ -211,7 +211,7 @@ export function makeWorkflowFormConfig(config: DesignerConfig) {
   };
 }
 
-export function makeWorkflowConfigPayload(flowConfig: FlowDesignerConfig, form: PlatformForm, config: DesignerConfig) {
+export function makeWorkflowConfigPayload(flowConfig: FlowDesignerConfig, form: { id?: number; code: string }, config: DesignerConfig) {
   return {
     ...flowConfig,
     nodes: flowConfig.nodes.map((node) => ({ ...node, fieldPermissions: normalizeNodeFieldPermissions(node.fieldPermissions), assigneeRules: node.assigneeRules?.map((rule) => ({
@@ -221,7 +221,7 @@ export function makeWorkflowConfigPayload(flowConfig: FlowDesignerConfig, form: 
     formId: form.id,
     formCode: form.code,
     formName: config.name,
-    savedAt: new Date().toISOString(),
+    ...(form.id ? { savedAt: new Date().toISOString() } : {}),
     fieldPermissions: Object.fromEntries(
       flowConfig.nodes.map((node) => [node.id, normalizeNodeFieldPermissions(node.fieldPermissions)]),
     ),

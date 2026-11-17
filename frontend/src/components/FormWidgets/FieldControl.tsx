@@ -6,18 +6,21 @@ import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs';
 import { downloadFormFile, uploadFormFile, listPlatformDynamicRecords } from '@/services/api';
 import { enumOptions, matchesOptionSearch, fileAccept, normalizeText, type ControlSettings } from '@/utils/formControls';
-export interface WidgetProps extends FieldPolicy { value?: any; onChange?: (value: any) => void; type: string; settings?: ControlSettings; options?: unknown; disabled?: boolean; placeholder?: string; formId?: number|string; fieldName?: string; recordId?: number; preview?: boolean; label?: string; }
-function FieldWidget({value,onChange,type,settings={},options,disabled,placeholder,formId,fieldName,recordId,preview,label}:WidgetProps) {
+/** Injected by Form.Item; must reach the focusable element so `<label for>` and required/error state resolve. */
+export interface FieldA11yProps { id?: string; 'aria-required'?: boolean|'true'|'false'; 'aria-invalid'?: boolean|'true'|'false'; 'aria-describedby'?: string; }
+export interface WidgetProps extends FieldPolicy, FieldA11yProps { value?: any; onChange?: (value: any) => void; type: string; settings?: ControlSettings; options?: unknown; disabled?: boolean; placeholder?: string; formId?: number|string; fieldName?: string; recordId?: number; preview?: boolean; label?: string; }
+function FieldWidget({value,onChange,type,settings={},options,disabled,placeholder,formId,fieldName,recordId,preview,label,id,'aria-required':ariaRequired,'aria-invalid':ariaInvalid,'aria-describedby':ariaDescribedBy}:WidgetProps) {
+  const a11y={id,'aria-required':ariaRequired,'aria-invalid':ariaInvalid,'aria-describedby':ariaDescribedBy};
   const filesRef=useRef<any[]>([]); filesRef.current=Array.isArray(value)?value:[];
   const [relatedPage,setRelatedPage]=useState(1);const [relatedTotal,setRelatedTotal]=useState(0);
   useEffect(()=>setRelatedPage(1),[settings.sourceFormId]);
   const [related,setRelated]=useState<any[]>([]);const [loading,setLoading]=useState(false);
   useEffect(()=>{if(type!=='readonly-table'||!settings.sourceFormId)return;let cancelled=false;setLoading(true);setRelated([]);listPlatformDynamicRecords(settings.sourceFormId,{page:relatedPage,page_size:10}).then(response=>{const data=response.data?.data;const rows=Array.isArray(data)?data:data?.items||response.data?.items||[];if(!cancelled){setRelated(rows.map((row:any)=>row.data||row));setRelatedTotal(Number(response.data?.total??rows.length));}}).catch(()=>{if(!cancelled)message.error('关联表数据加载失败，请检查访问权限');}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[type,settings.sourceFormId,relatedPage]);
-  const props={disabled,placeholder,'aria-label':label};
+  const props={disabled,placeholder,'aria-label':label,...a11y};
   if(type==='number')return <InputNumber {...props} value={value} onChange={onChange} min={settings.min} max={settings.max} precision={settings.precision} suffix={settings.unit} style={{width:'100%'}} formatter={settings.thousandSeparator?(val=>String(val??'').replace(/\B(?=(\d{3})+(?!\d))/g,',')):undefined} parser={val=>Number(String(val||'').replace(/,/g,''))} />;
   if(type==='select') {
     const choices=enumOptions(options);const multiple=settings.selectionMode==='multiple'||settings.displayMode==='tags';
-    if(settings.displayMode==='radio'&&!multiple)return <Radio.Group aria-label={label} disabled={disabled} value={value} options={choices} onChange={event=>onChange?.(event.target.value)} />;
+    if(settings.displayMode==='radio'&&!multiple)return <Radio.Group {...a11y} aria-label={label} disabled={disabled} value={value} options={choices} onChange={event=>onChange?.(event.target.value)} />;
     const selected = Array.isArray(value) ? value : [];
     const atLimit = multiple && settings.maxSelections !== undefined && selected.length >= settings.maxSelections;
     const limitedChoices = choices.map(option => ({ ...option, disabled: atLimit && !selected.includes(option.value) }));
@@ -25,16 +28,16 @@ function FieldWidget({value,onChange,type,settings={},options,disabled,placehold
       if (multiple && settings.maxSelections !== undefined && Array.isArray(next) && next.length > settings.maxSelections) { message.warning(`最多选择 ${settings.maxSelections} 项`); return; }
       onChange?.(next);
     };
-    if(multiple&&settings.displayMode==='radio')return <Checkbox.Group aria-label={label} disabled={disabled} value={selected} options={limitedChoices} onChange={changeSelection} />;
+    if(multiple&&settings.displayMode==='radio')return <Checkbox.Group {...a11y} aria-label={label} disabled={disabled} value={selected} options={limitedChoices} onChange={changeSelection} />;
     const maxTagCount = !multiple || settings.tagCollapse === 'none' ? undefined : settings.tagCollapse === 'responsive' ? 'responsive' as const : settings.tagCollapse === 'fixed' ? settings.maxVisibleTags ?? 3 : undefined;
     return <Select {...props} value={value} onChange={changeSelection} options={limitedChoices} mode={multiple?(settings.allowCreateOption?'tags':'multiple'):undefined} maxTagCount={maxTagCount} maxTagPlaceholder={omitted => <Tooltip title={omitted.map(item => item.label).join('、')}><span aria-label={`另有 ${omitted.length} 项`}>+{omitted.length} 项</span></Tooltip>} showSearch={settings.displayMode==='search'||Boolean(multiple&&settings.allowCreateOption)} filterOption={(input, option) => matchesOptionSearch(option?.label, input, settings.search?.match)} allowClear={settings.allowClear!==false} style={{width:'100%'}} />;
   }
   if(type==='datetime') {
     const disabledDate=settings.disablePast?(date:dayjs.Dayjs)=>date.isBefore(dayjs().startOf('day')):undefined;
-    if(settings.dateMode==='range')return <DatePicker.RangePicker disabled={disabled} aria-label={label} value={Array.isArray(value)?value.map(item=>item?dayjs(item):null) as any:null} onChange={dates=>onChange?.(dates?.map(item=>item?.format('YYYY-MM-DD'))??null)} disabledDate={disabledDate} style={{width:'100%'}} />;
+    if(settings.dateMode==='range')return <DatePicker.RangePicker {...a11y} disabled={disabled} aria-label={label} value={Array.isArray(value)?value.map(item=>item?dayjs(item):null) as any:null} onChange={dates=>onChange?.(dates?.map(item=>item?.format('YYYY-MM-DD'))??null)} disabledDate={disabledDate} style={{width:'100%'}} />;
     return <DatePicker {...props} value={value?dayjs(value):null} showTime={settings.dateMode!=='date'} onChange={date=>onChange?.(date?.format(settings.dateMode==='date'?'YYYY-MM-DD':'YYYY-MM-DDTHH:mm:ss')??null)} disabledDate={disabledDate} style={{width:'100%'}} />;
   }
-  if(type==='switch')return <Switch aria-label={label} disabled={disabled} checked={Boolean(value)} onChange={onChange} checkedChildren={settings.checkedText||'是'} unCheckedChildren={settings.uncheckedText||'否'} />;
+  if(type==='switch')return <Switch {...a11y} aria-label={label} disabled={disabled} checked={Boolean(value)} onChange={onChange} checkedChildren={settings.checkedText||'是'} unCheckedChildren={settings.uncheckedText||'否'} />;
   if(type==='upload') {
     const files=Array.isArray(value)?value:[];
     return <Upload disabled={disabled} accept={fileAccept(settings.fileTypes)} multiple maxCount={settings.maxFiles||5} fileList={files.map((file:any)=>({...file,uid:file.id,name:file.name,status:file.uploading?'uploading':'done'}))}
@@ -59,5 +62,5 @@ function FieldWidget({value,onChange,type,settings={},options,disabled,placehold
 }
 
 export default function FieldControl(props:WidgetProps){
-  return <FieldProtection copyMode={props.copyMode} copyText={props.copyText}>{props.masked?<Input aria-label={props.label} value={String(props.value??'')} readOnly disabled placeholder="已脱敏，原值保留"/>:<FieldWidget {...props}/>}</FieldProtection>;
+  return <FieldProtection copyMode={props.copyMode} copyText={props.copyText}>{props.masked?<Input id={props.id} aria-label={props.label} value={String(props.value??'')} readOnly disabled placeholder="已脱敏，原值保留"/>:<FieldWidget {...props}/>}</FieldProtection>;
 }

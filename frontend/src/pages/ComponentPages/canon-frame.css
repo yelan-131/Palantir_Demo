@@ -1,0 +1,83 @@
+/* Canon frame for record-list and record-filter widgets. WidgetFrame sets the --widget-* values
+   from canon variables; these rules own typography, header layout and the embedded list surface. */
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  min-height: 48px;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-header[data-divider="true"] {
+  padding-bottom: 12px;
+  border-bottom-color: var(--canon-border-soft);
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-title {
+  color: var(--canon-text);
+  font-size: var(--canon-font-section);
+  font-weight: 600;
+  line-height: 24px;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-description {
+  color: var(--canon-muted);
+  font-size: var(--canon-font-caption);
+  line-height: 20px;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-actions {
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .ant-btn {
+  height: 32px;
+  min-width: 0;
+  padding-inline: 15px;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .ant-btn.ant-btn-icon-only {
+  width: 32px;
+  padding-inline: 0;
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .component-header-keyword {
+  width: clamp(160px, 18vw, 240px);
+}
+.tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .component-header-keyword .ant-input-affix-wrapper {
+  min-height: 32px;
+  padding-block: 4px;
+}
+.mf-canon-frame .component-filter-schemes-runtime > .ant-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+.mf-canon-frame .component-filter-schemes-runtime > .ant-tabs > .ant-tabs-nav::before { border-bottom-color: var(--canon-border-soft); }
+
+/* The frame is the card: the list drops its own border and runs edge to edge like the standalone table card. */
+.mf-canon-frame .mf-list-embedded .mf-list-card {
+  margin: 0 -16px -16px;
+  border: 0;
+  border-top: 1px solid var(--canon-border);
+  border-radius: 0;
+  background: transparent;
+}
+/* With nothing above the list, the header divider already separates it; avoid a double rule. */
+.mf-canon-frame:has(> .component-frame-header[data-divider="true"]:not([hidden])) > .component-frame-content > .form-workspace:first-child .mf-list-embedded > .mf-list-card:first-child {
+  margin-top: -16px;
+  border-top: 0;
+}
+
+/* A page whose only component is a list fills the viewport and keeps pagination at the frame's foot.
+   Phones skip this: the page scrolls as one column instead of nesting a scroller in the card. */
+@media (min-width: 601px) {
+  .component-page-fill-list .mf-canon-frame :is(.form-workspace-runtime, .mf-list-embedded, .mf-list-card,
+    .mf-list-table, .mf-list-table > .ant-spin-nested-loading, .mf-list-table .ant-spin-container) {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .component-page-fill-list .mf-canon-frame .mf-list-table .ant-spin-container > .ant-table { flex: 1 0 auto; }
+}
+
+@media (max-width: 600px) {
+  .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-actions { flex: 1 1 100%; margin-left: 0; }
+  .mf-canon-frame .component-list-header-actions,
+  .mf-canon-frame .component-list-header-actions > .mf-canon-portal { display: flex; width: 100%; }
+  .mf-canon-frame .component-frame-actions .ant-space,
+  .mf-canon-frame .component-frame-actions .ant-space-item:has(.component-list-header-actions) { width: 100%; }
+  .mf-canon-frame .component-list-header-actions .mf-list-actions { flex: 1 1 auto; }
+  .tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .ant-btn { height: 40px; }
+  .tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .ant-btn.ant-btn-icon-only { width: 40px; }
+  .tech-white-shell .app-content .component-page .mf-canon-frame .component-list-header-actions .component-header-keyword { width: 100%; }
+}

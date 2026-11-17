@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id, current_user_id
 from app.core.permissions import get_user_role_ids, allowed_form_fields
 from app.models.relational import ComponentPage, ComponentPageVersion, OrgUnit, UserOrgMembership
-from app.services.records import runtime_fields, change_audit, authorized_records
+from app.services.records import runtime_fields, change_audit
 from app.services.analytics_data import load_data
 from app.services.component_page_definitions import PageDefinition, analytics_design, bound_host, check_audience, check_host, find_page, published, source_definitions, source_form, validate_draft_sources, validate_publish
 
@@ -193,15 +193,12 @@ async def runtime_source_data(db, user, page, definition, filters, widget_filter
         raise HTTPException(422, '筛选字段未配置或筛选值过长')
     form = await source_form(db, user, definition)
     if not any(w.type in {'metric', 'chart'} for w in definition.widgets):
-        records = await authorized_records(db, user, form, decorate=False)
         fields = await runtime_fields(db, form)
         visible = await allowed_form_fields(user, form.id, 'view', fields, db)
         if set(definition.filterFields) - visible:
             raise HTTPException(403, '无权查看页面筛选字段')
-        options = {field: sorted({str(record['data'][field]) for record in records
-                                 if record['data'].get(field) is not None})[:500]
-                   for field in definition.filterFields}
-        return {'filterOptions': options, 'errors': []}
+        from app.services.plain_aggregates import distinct_values
+        return {'filterOptions': await distinct_values(db, user, form, list(definition.filterFields)), 'errors': []}
     return await load_data(db, page.tenant_id, form, analytics_design(definition), user=user, filters=filters, widget_filters=widget_filters, widget_record_queries=record_queries)
 
 
@@ -251,7 +248,7 @@ def linked_record_queries(definition, filter_queries, chart_values):
     return {target: {'ready': all(q['ready'] for q in queries), 'search': ' '.join(q['search'] for q in queries if q['search']), 'filters': [c for q in queries for c in q['filters']]} for target, queries in result.items()}
 
 
-async def create_page(*, definition: PageDefinition, db: AsyncSession, user):
+async def create_page_draft(db, user, definition: PageDefinition):
     await validate_draft_sources(db, user, definition)
     page = ComponentPage(tenant_id=current_tenant_id(user), code=f'page-{uuid4().hex[:12]}',
                          draft=definition.model_dump(), revision=1, published_version=0)
@@ -259,6 +256,11 @@ async def create_page(*, definition: PageDefinition, db: AsyncSession, user):
     await db.flush()
     await change_audit(db, tenant_id=page.tenant_id, user_id=current_user_id(user), action='create',
                        resource_type='component_page', resource_id=page.id, new_values=page.draft)
+    return page
+
+
+async def create_page(*, definition: PageDefinition, db: AsyncSession, user):
+    page = await create_page_draft(db, user, definition)
     await db.commit()
     return await editor_payload(db, page)
 

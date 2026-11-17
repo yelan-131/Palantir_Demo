@@ -30,6 +30,7 @@ import { useAiWorkbench } from './context';
 import type { BrowserPageAction, PageAction } from './pageControls';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
+import './aiPanels.css';
 import { ChatComposer } from './ChatComposer';
 import type { ChatAttachment } from './ChatComposer';
 import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
@@ -58,11 +59,12 @@ interface AgentProcessStep {
 
 interface AgentTraceItem {
   id: string;
-  kind: 'note' | 'tool' | 'result';
+  kind: 'note' | 'tool' | 'result' | 'page';
   content: string;
   status?: string;
   tool?: string;
   stepId?: string;
+  pageTitle?: string;
   resultCount?: number;
   source?: 'dsh';
 }
@@ -524,6 +526,7 @@ function traceNoteFromStep(step: Record<string, unknown>): string | undefined {
 function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceItem[] | undefined {
   const trace = (items || [])
     .map((step, index) => {
+      if (step.type === 'page_action') return createTraceItem('item.updated', step);
       const tool = stringifyStepValue(step.tool);
       if (['tool_call', 'tool_result'].includes(String(step.type || '')) && tool) {
         const completed = String(step.type || '') === 'tool_result';
@@ -548,17 +551,40 @@ function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceIt
   return trace.length ? trace : undefined;
 }
 
+const traceStatusLabels: Record<string, string> = {
+  active: '执行中',
+  running: '执行中',
+  completed: '已完成',
+  waiting_confirmation: '待确认',
+  validation_failed: '参数校验失败',
+  blocked: '操作受阻',
+  failed: '执行失败',
+  error: '执行失败',
+  timeout: '执行超时',
+  cancelled: '已取消',
+  interrupted: '未收到结果',
+  stopped: '已停止',
+};
+
 function getTraceToolText(data: Record<string, unknown>, completed: boolean): string {
   const tool = stringifyStepValue(data.tool) || '工具';
   const resultCount = data.result_count !== undefined ? ` · 结果 ${data.result_count}` : '';
   const summary = data.summary ? ` · ${stringifyStepValue(data.summary)}` : '';
   const status = String(data.status || '');
-  const label = status === 'validation_failed' ? '参数校验失败'
-    : status === 'blocked' ? '操作受阻'
-    : ['failed', 'error'].includes(status) ? '执行失败' : '已完成';
+  const label = traceStatusLabels[status || 'completed'] || '已收到结果';
   return completed
     ? `${tool} ${label}${resultCount}${summary}`
     : `调用 ${tool}`;
+}
+
+function getPageTraceText(title: string, status: string, summary?: string): string {
+  return [title, traceStatusLabels[status], summary].filter(Boolean).join(' · ');
+}
+
+function finishPendingPageTrace(trace: AgentTraceItem[] | undefined, status: 'interrupted' | 'stopped') {
+  return trace?.map(item => item.kind === 'page' && item.status === 'running'
+    ? { ...item, status, content: getPageTraceText(item.pageTitle || '画布操作', status) }
+    : item);
 }
 
 function appendAgentTraceItem(
@@ -607,6 +633,19 @@ function createTraceItem(event: string, data: Record<string, unknown>): AgentTra
   }
   if (event === 'item.created' || event === 'item.updated') {
     const type = String(data.type || '');
+    if (type === 'page_action') {
+      const stepId = `page-action-${String(data.item_id || data.id)}`;
+      const pageTitle = stringifyStepValue(data.title) || '画布操作';
+      const status = String(data.status || 'running');
+      return {
+        id: stepId,
+        stepId,
+        kind: 'page',
+        status,
+        pageTitle,
+        content: getPageTraceText(pageTitle, status, stringifyStepValue(data.summary)),
+      };
+    }
     if (!['tool_call', 'tool_result', 'confirmation', 'validation', 'error'].includes(type)) return undefined;
     const tool = stringifyStepValue(data.tool);
     const completed = type !== 'tool_call';
@@ -841,10 +880,11 @@ function getConfirmationToken(payload?: Record<string, unknown>): string | undef
 function getExecutionResult(result: Record<string, unknown>): AgentExecutionResult {
   const routePath = typeof result.route_path === 'string' ? result.route_path : '';
   if (routePath) {
+    const savedDraft = asRecord(result.form).status === 'draft';
     return {
       kind: 'form_definition',
-      title: result.menu_id ? '表单已挂载到应用菜单' : '表单已创建',
-      detail: routePath,
+      title: savedDraft ? '表单草稿已保存' : result.menu_id ? '表单已挂载到应用菜单' : '表单已创建',
+      detail: savedDraft ? '发布需要单独确认' : routePath,
       href: routePath,
     };
   }
@@ -906,6 +946,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [renamingSessionId, setRenamingSessionId] = useState<string>();
   const [renamingTitle, setRenamingTitle] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
 
   const pageContext = useMemo(
     () => buildPageContext(location.pathname, pageTitle, location.search),
@@ -916,6 +957,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const intro = '我是独立 AI 工作区。你可以直接聊天；当你问到当前页面、表单、数据、知识文档或业务分析时，我会按需读取相关上下文。';
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0];
   const messages = activeSession?.messages || [];
+  const latestTrace = messages[messages.length - 1]?.trace;
 
   useEffect(() => {
     if (!enabled || sessions.length) return;
@@ -987,6 +1029,12 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length, open, sending, nativeDraftReview?.draftId, designerContext?.review_ready]);
+
+  useEffect(() => {
+    if (sending && followLatest.current && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [latestTrace, sending]);
 
   useEffect(() => {
     document.body.classList.toggle('ai-workbench-open', open && enabled);
@@ -1231,6 +1279,8 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     };
     const pending = [...messages, userMessage, assistantPlaceholder];
     const sessionId = activeSession.id;
+    const pageActionIds = new Set<string>();
+    let accepted = false;
     setSessionMessages(sessionId, pending);
     setInput('');
     setSending(true);
@@ -1256,6 +1306,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         }
         if (event === 'ui.action') {
           const action = data as unknown as BrowserPageAction;
+          pageActionIds.add(action.id);
           if (action.type === 'form_designer' && action.draft_id) setNativeDraftReview(previous => previous?.draftId === action.draft_id ? previous : {
             sessionId, draftId: action.draft_id!, menuTarget: action.draft?.menu_target,
           });
@@ -1272,6 +1323,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           return;
         }
         if (event === 'run.accepted') {
+          accepted = true;
           updateSessionMessage(sessionId, assistantMessageId, (message) => ({
             ...message,
             steps: [{
@@ -1347,23 +1399,34 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
             content: '',
             fullContent: errorContent,
             typing: true,
+            trace: finishPendingPageTrace(message.trace, 'interrupted'),
             source: 'Agent 事件流',
           }));
         }
       }, controller.signal);
     } catch {
       if (controller.signal.aborted) {
-        updateSessionMessage(sessionId, assistantMessageId, (message) => ({ ...message, content: message.fullContent || message.content || '已停止本次执行。', fullContent: undefined, typing: false, trace: message.trace?.map(item => item.status === 'active' ? { ...item, status: 'failed', content: `${item.content}（已停止）` } : item), source: '执行已停止' }));
+        updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+          ...message,
+          content: '已停止本次执行。',
+          fullContent: undefined,
+          typing: false,
+          trace: finishPendingPageTrace(message.trace, 'stopped'),
+        }));
         return;
       }
+      const interrupted = accepted
+        ? `连接已中断，未收到本轮结果。${pageActionIds.size ? '请先检查当前草稿，再重试。' : '请重试。'}`
+        : generateUnavailableReply().content;
       updateSessionMessage(sessionId, assistantMessageId, (message) => ({
         ...message,
-        content: '',
-        fullContent: generateUnavailableReply().content,
-        typing: true,
-        source: '无法连接后端 AI 事件流',
+        content: interrupted,
+        fullContent: undefined,
+        typing: false,
+        trace: finishPendingPageTrace(message.trace, 'interrupted'),
       }));
     } finally {
+      for (const actionId of pageActionIds) finishPageAction(actionId);
       if (streamController.current === controller) streamController.current = null;
       setSending(false);
     }
@@ -1550,7 +1613,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
 
   const chatWorkbench = (
           <div className="ai-workbench-chat">
-          <div className="ai-chat-body" ref={bodyRef}>
+          <div className="ai-chat-body" ref={bodyRef} onScroll={(event) => {
+            const body = event.currentTarget;
+            followLatest.current = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+          }}>
             {messages.map((message) => {
               const hasContent = Boolean(message.content.trim());
               const isTypingAssistant = message.role === 'assistant' && Boolean(message.typing);
@@ -1561,20 +1627,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const actionStateReview = message.role === 'assistant' ? getActionStateReview(message.actionState) : undefined;
               const traceItems = message.trace || [];
               const hasDshTrace = traceItems.some((item) => item.source === 'dsh');
-              const toolCalls = traceItems.filter((item) => item.kind === 'tool').length;
-              const toolResults = traceItems.filter((item) => item.kind === 'result').length;
-              const activeRun = sending && message.id === messages[messages.length - 1]?.id;
-              const completedToolCount = activeRun ? toolResults : Math.max(toolCalls, toolResults);
-              const runningToolCount = activeRun ? Math.max(0, toolCalls - toolResults) : 0;
-              const toolTraceCount = completedToolCount + runningToolCount;
-              const toolSummary = runningToolCount
-                ? `正在运行 ${runningToolCount} 个工具`
-                : toolTraceCount
-                  ? `已运行 ${completedToolCount} 个工具`
-                  : '';
-              const traceSummary = hasDshTrace
-                ? ['DSh 执行轨迹', toolSummary].filter(Boolean).join(' · ')
-                : toolSummary || '执行过程';
+              const activeRun = (sending && message.id === messages[messages.length - 1]?.id)
+                || Boolean(confirmingRunId && confirmingRunId === message.runId);
+              const traceSummary = activeRun ? '执行过程 · 执行中'
+                : message.requiresConfirmation ? '执行过程 · 待确认' : '执行过程';
 
               return (
               <div className={`ai-chat-message ${message.role}`} key={message.id}>
@@ -1582,9 +1638,9 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                   {message.role === 'assistant' && traceItems.length ? (
                     <details className="ai-agent-trace" open={activeRun || hasDshTrace || isPendingAssistant}>
                       <summary>{traceSummary}</summary>
-                      <div className="ai-agent-trace-list">
+                      <div className="ai-agent-trace-list" role="log" aria-label="执行步骤" aria-relevant="additions text">
                         {traceItems.map((item) => (
-                          <div className={`ai-agent-trace-item ${item.kind}`} key={item.id}>
+                          <div className={`ai-agent-trace-item ${item.kind}`} data-status={item.status} key={item.id}>
                             <span className="ai-agent-trace-marker" />
                             <div>
                               {item.kind === 'tool' ? <small>工具调用</small> : null}
@@ -1677,7 +1733,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                   <small>{review.formCode}</small>
                                 </div>
                                 <Tag color={review.menuEnabled ? 'blue' : 'default'}>
-                                  {review.menuEnabled ? `菜单：${review.menuTitle}` : '不创建菜单入口'}
+                                  {review.menuEnabled ? `待挂载：${review.menuTitle}` : '保存为草稿'}
                                 </Tag>
                               </div>
                               {message.requiresConfirmation && message.runId && action.payload?._harness_tool === 'forms.create_form_definition' ? (
@@ -1698,7 +1754,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                 />
                               ) : null}
                               <div className="ai-confirm-review-meta">
-                                <span>字段 {review.fieldCount}</span>
+                                <span>字段 {review.fieldCount} · 发布需单独确认</span>
                                 <span>{review.description}</span>
                               </div>
                               <div className="ai-confirm-field-list">
@@ -1745,7 +1801,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                       loading={confirmingRunId === message.runId}
                                       onClick={() => { void confirmAgentAction(message); }}
                                     >
-                                      确认写入
+                                      确认保存草稿
                                     </Button>
                                   </div>
                                 </div>

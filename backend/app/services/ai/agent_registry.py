@@ -113,10 +113,15 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
 
 
 def load_seed_registry() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    from .skill_loader import BUNDLED_SKILLS, bundled_skill_package
+
     skills = _load_registry_seed("skills.json")
     tools = _load_registry_seed("tools.json")
     if not skills or not tools:
         raise AgentRegistryError("Agent registry seed is missing. Run the Agent registry seed before starting Runtime.")
+    for name in BUNDLED_SKILLS & skills.keys():
+        metadata, _ = bundled_skill_package(name)
+        skills[name]["description"] = metadata["description"]
     return validate_registry_payload(skills, {**tools, **registry_definitions(), **application_menu_definitions(), **page_definitions()})
 
 

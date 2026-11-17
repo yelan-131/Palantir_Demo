@@ -971,8 +971,11 @@ async def test_page_version_history_returns_whole_published_pages_only(pages_env
     assert response.status_code == 200, response.text
     items = response.json()['items']
     assert [item['version'] for item in items] == [2, 1]
-    assert items[1]['definition'] == first
-    assert items[0]['definition'] == page['definition']
+    assert 'definition' not in items[0]
+    assert items[0]['title'] == page['definition']['title']
+    assert items[0]['widgetCount'] == len(page['definition']['widgets'])
+    assert (await client.get(f'/pages/{code}/versions/1')).json()['definition'] == first
+    assert (await client.get(f'/pages/{code}/versions/2')).json()['definition'] == page['definition']
     assert all(item['publishedAt'] for item in items)
     assert (await client.get(f'/pages/{code}/editor')).json() == before
     user['is_admin'] = False
@@ -1417,6 +1420,44 @@ async def test_menu_page_target_rejects_drafts_and_obeys_page_audience(environme
     visible = await client.get(runtime_path)
     assert visible.status_code == 200, visible.text
     assert [item['route_path'] for item in visible.json()['data']] == [saved['route_path']]
+
+@pytest.mark.asyncio
+async def test_new_menu_creates_a_page_draft_and_appears_after_publication(pages_environment, monkeypatch):
+    from app.api import applications
+    from app.models.relational import Application
+
+    db, _, user, client = pages_environment
+    user['is_admin'] = True
+    client._transport.app.include_router(applications.router, prefix='/applications')
+
+    async def query_fixture_database(query):
+        return await query(db)
+
+    monkeypatch.setattr(applications, 'safe_db_call', query_fixture_database)
+    app = Application(tenant_id=1, name='测试应用', code='draft-menu-app', status='published')
+    db.add(app)
+    await db.commit()
+    path = f'/forms/applications/{app.id}/menu-nodes'
+    parent = (await client.post(path, json={'title': '分组', 'node_type': 'group'})).json()['data']
+    response = await client.post(path, json={'title': '巡检', 'create_page': True, 'parent_id': parent['id']})
+    assert response.status_code == 200, response.text
+    entry = response.json()['data']
+    assert entry['parent_id'] == parent['id']
+    code = entry['page_code']
+    editor = (await client.get(f'/pages/{code}/editor')).json()
+    assert editor['definition']['title'] == '巡检'
+    assert editor['publishedVersion'] == 0
+    assert (await client.put(f'{path}/{entry["id"]}', json={'default_entry': True})).status_code == 422
+    runtime = f'/applications/{app.id}/menus'
+    [group] = (await client.get(runtime)).json()['data']
+    assert not group.get('children')
+    response = await client.post(f'/pages/{code}/publish', json={
+        'definition': editor['definition'], 'expectedRevision': editor['revision'],
+    })
+    assert response.status_code == 200, response.text
+    [group] = (await client.get(runtime)).json()['data']
+    assert [item['route_path'] for item in group['children']] == [entry['route_path']]
+
 
 @pytest.mark.asyncio
 async def test_workspace_canvas_uses_versioned_server_page(pages_environment):
