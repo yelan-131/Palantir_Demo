@@ -1,304 +1,196 @@
-# Deployment
+# 部署
 
-Last updated: 2026-06-15
+更新日期：2026-11-17（对应代码版本 0.3.22 草稿）
 
-This document reflects the current repository files and the project deployment convention.
+本文按仓库中的 `docker/` 目录、两个 Dockerfile、`frontend/nginx.conf` 和 `AGENTS.md` 的部署约定编写。客户私有化部署（预构建镜像、离线包、Windows 脚本）见[私有化部署](private-deployment.md)。
 
-## Local Development Startup
+## 1. 本地开发
 
-Use separate terminals for backend and frontend when working without Docker.
-
-Backend:
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-Frontend:
-
-```powershell
-cd frontend
-npm run dev -- --host 127.0.0.1 --port 3000
-```
-
-If the local sandbox blocks Vite dependency pre-bundling, serve the existing
-production build with the lightweight local proxy:
-
-```powershell
-cd frontend
-node local-static-server.mjs
-```
-
-Local verification:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/system/readiness
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/release/current
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/productization/readiness
-Invoke-WebRequest http://127.0.0.1:3000
-```
-
-The frontend reads `frontend/.env.local`; the current local proxy target is
-`http://127.0.0.1:8000`.
-
-## Production Server
-
-| Item | Value |
-| --- | --- |
-| SSH target | `root@111.229.172.100` |
-| Server project path | `/root/Palantir_Demo` |
-| Frontend public port | `80` |
-| Frontend container port | `80` |
-| Backend port | `8000`, bound to `127.0.0.1` on the server |
-| Backend health endpoint | `http://111.229.172.100/health` (proxied by frontend nginx) |
-
-## Compose Files
-
-Use these files together for production-style deployment:
+不使用 Docker 时，后端和前端分别启动，详见[后端开发指南](../development/backend.md)和[前端开发指南](../development/frontend.md)：
 
 ```bash
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+# 终端 1
+cd backend && python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# 终端 2
+cd frontend && npm run dev -- --host 127.0.0.1 --port 3000
 ```
 
-Do not use `docker/docker-compose.prod-full.yml`; that file is not present in the current repository.
+Windows 下可用 `scripts/start-local-dev.cmd`、`run-backend-local.cmd`、`run-frontend-local.cmd`。Vite 依赖预构建在受限环境下失败时，可先 `npm run build`，再运行 `node local-static-server.mjs` 提供静态页面并代理 `/api`。
 
-For customer/private deployments, prefer the image-based release compose file:
+本地检查：
 
 ```bash
-docker compose --env-file .env -f docker/docker-compose.release.yml up -d
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/api/v1/system/readiness
+curl -fsS http://127.0.0.1:8000/api/v1/release/current
+curl -fsS http://127.0.0.1:8000/api/v1/productization/readiness
+curl -I http://127.0.0.1:3000
 ```
 
-The release compose file does not build from source on the deployment host.
-It pulls `palantir-demo-backend:${IMAGE_TAG}` and
-`palantir-demo-frontend:${IMAGE_TAG}` from the configured image registry.
-See [Private Deployment](private-deployment.md).
+## 2. Compose 文件
 
-## Runtime Modes
+| 文件 | 用途 | 用法 |
+| --- | --- | --- |
+| `docker/docker-compose.yml` | 开发：后端 `Dockerfile.dev`（热重载）、前端 `Dockerfile.dev`（Vite），挂载源码 | 单独使用 |
+| `docker/docker-compose.prod.yml` | 生产覆盖层：改用生产 Dockerfile，去掉源码挂载，端口收紧 | 与上一个文件叠加 |
+| `docker/docker-compose.release.yml` | 私有化部署：从镜像仓库拉取预构建镜像，不在主机上构建 | 单独使用，配合 `.env` |
+| `docker/docker-compose.external-sources.yml` | 6 个演示外部系统库（MES、ERP、QMS、WMS、SCM、CRM 的 PostgreSQL，端口 15432–15437） | 按需单独启动 |
 
-Demo/local mode:
+当前生产服务器使用开发文件加生产覆盖层：
 
-```env
-APP_MODE=demo
-DEMO_AUTH_OPTIONAL=true
+```bash
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build --remove-orphans
 ```
 
-Demo mode may use mock fallbacks, seeded demo data, and SQLite fallback for local bootstrap.
+## 3. 服务与端口
 
-Production mode:
+| 服务 | 容器名 | 镜像或构建 | 开发端口 | 生产覆盖层与 release 端口 |
+| --- | --- | --- | --- | --- |
+| `frontend` | `manufoundry-frontend` | `frontend/Dockerfile`（Node 20 构建，nginx 提供静态文件） | `3000` | `80`，对外 |
+| `backend` | `manufoundry-backend` | `backend/Dockerfile`（Python 3.11） | `8000` | `127.0.0.1:8000` |
+| `postgres` | `manufoundry-postgres` | `postgres:16-alpine` | `5432` | `127.0.0.1:5432` |
+| `neo4j` | `manufoundry-neo4j` | `neo4j:5-community`（带 APOC） | `7474`、`7687` | 仅绑定 `127.0.0.1` |
+
+- 对外只有 80 端口。前端 nginx 把 `/api/` 转发到 `http://backend:8000/api/`，把 `/health` 转发到 `http://backend:8000/health`，其余路径回退到 `index.html`。
+- 后端镜像构建时会检查 `deepseek-harness-sdk` 与 `deepseek-harness-runtime-bin` 都是 `0.2.1rc2`，版本不符则构建失败。
+- 表单附件保存在数据卷 `form_files`（挂载到 `/data/form_files`）。PostgreSQL 与 Neo4j 数据分别在 `postgres_data`、`neo4j_data`。
+- 生产覆盖层沿用 `docker-compose.yml` 中固定的 PostgreSQL 与 Neo4j 密码（这两个端口只绑定本机回环地址）；release 文件则要求在 `.env` 中提供 `POSTGRES_PASSWORD`、`NEO4J_PASSWORD`。
+- 0.3.22 起不再包含 Redis。从旧版本升级的服务器上会残留 `manufoundry-redis` 容器，`up -d --remove-orphans` 会移除它，之后可按需删除 `redis_data` 数据卷。
+
+## 4. 运行模式
+
+生产覆盖层为后端设置：
 
 ```env
 APP_MODE=production
+DATABASE_BACKEND=postgresql
 DEMO_AUTH_OPTIONAL=false
-SECRET_KEY=<strong-random-secret-at-least-32-chars>
-AI_PROVIDER=glm
-AI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+SECRET_KEY=${SECRET_KEY}          # 必须在服务器 .env 中提供，否则 compose 直接报错
+APP_PUBLIC_URL=${APP_PUBLIC_URL:-http://111.229.172.100}
+SMTP_HOST=${SMTP_HOST:-localhost}
 ```
 
-Production mode is fail-fast:
+生产模式下后端启动时会检查：`SECRET_KEY` 不是默认值且不少于 32 位、`DEMO_AUTH_OPTIONAL` 不是 `true`、`CORS_ORIGINS` 不含 `*`、已配置 `SMTP_HOST`、没有使用 SQLite。任一项不满足都会拒绝启动。此外 `/docs`、`/redoc`、`/openapi.json` 关闭，`/api/v1/system/metrics` 需要管理员令牌。
 
-- unsafe/default `SECRET_KEY` stops startup
-- `DEMO_AUTH_OPTIONAL=true` stops startup
-- missing PostgreSQL/`asyncpg` or SQLite fallback stops startup
-- core low-code APIs must return explicit errors instead of silently switching to demo data
+AI 模型的地址与密钥既可以用环境变量提供，也可以由管理员在“AI 与平台设置”中保存（加密存储，优先于环境变量）。
 
-## Service Layout
+## 5. 生产服务器
 
-| Service | Image/build | Host port | Container port | Notes |
-| --- | --- | --- | --- | --- |
-| `frontend` | `frontend/Dockerfile` | `80` | `80` | nginx static frontend and `/api/` reverse proxy |
-| `backend` | `backend/Dockerfile` | `8000` (`127.0.0.1` only in production and release compose) | `8000` | FastAPI |
-| `postgres` | `postgres:16-alpine` | `5432` (`127.0.0.1` only in production and release compose) | `5432` | relational database |
-| `neo4j` | `neo4j:5-community` | `7474`, `7687` (`127.0.0.1` only in production and release compose) | `7474`, `7687` | graph database |
-
-Redis was removed in 0.3.22. A server upgraded from an earlier version still has a `manufoundry-redis` container; remove it with `docker compose ... up -d --remove-orphans` (or `docker rm -f manufoundry-redis`). The `redis_data` volume can then be deleted.
-
-The production overlay switches backend/frontend Dockerfiles, removes source mounts, runs backend without reload, maps the frontend to `80:80`, and binds backend and data-service ports to the server loopback interface. Public traffic reaches the backend only through frontend nginx (`/api/` and `/health`). With `APP_MODE=production`, `/docs`, `/redoc` and `/openapi.json` are disabled, and `/api/v1/system/metrics` requires an administrator token.
-
-## Update Server Flow
-
-When the user asks to update or sync the server, use this flow:
-
-1. Commit and push local changes to GitHub.
-2. SSH to the server as `root@111.229.172.100` using the configured private key.
-3. Update `/root/Palantir_Demo` from GitHub.
-4. Preserve unrelated server-local deployment files unless the user explicitly asks to overwrite them.
-5. Rebuild and restart affected Docker Compose services.
-6. Verify the public frontend and backend health endpoint.
-
-## Automatic CD
-
-The workflow files described in this section (`.github/workflows/ci.yml` and `.github/workflows/deploy.yml`) are not present in the repository as of 2026-11-17; deployments currently follow the manual flow above.
-
-Planned behavior: production deployment is automated by `.github/workflows/deploy.yml`.
-
-Triggers:
-
-- automatically after `.github/workflows/ci.yml` succeeds for a push to `master`
-- manually through GitHub Actions `workflow_dispatch`
-
-Required GitHub Secrets:
-
-| Secret | Value |
+| 项 | 值 |
 | --- | --- |
-| `PROD_SSH_HOST` | `111.229.172.100` |
-| `PROD_SSH_USER` | `root` |
-| `PROD_SSH_KEY` | Private key allowed to SSH into the production server |
-| `PROD_PROJECT_DIR` | `/root/Palantir_Demo` |
-| `PROD_GHCR_USERNAME` | Optional GHCR user for private image pulls |
-| `PROD_GHCR_TOKEN` | Optional GHCR token for private image pulls |
+| SSH | `root@111.229.172.100`，使用已配置的私钥 |
+| 项目目录 | `/root/Palantir_Demo` |
+| 对外入口 | `http://111.229.172.100`（80 端口） |
+| 后端 | 仅服务器本机可访问 `http://127.0.0.1:8000` |
+| 服务器配置 | `/root/Palantir_Demo/.env`，只保存在服务器上，不提交到仓库 |
 
-Deployment behavior:
+仓库中没有自动部署（CD）流程，更新服务器都是按下面的步骤手动完成。
 
-1. SSH into the production server.
-2. Enter `PROD_PROJECT_DIR`.
-3. Fetch and fast-forward `origin/master`.
-4. Set `IMAGE_TAG=<version>-<short-sha>` in the server `.env`.
-5. Pull and restart services with `docker/docker-compose.release.yml`.
-6. Run `alembic upgrade head` inside `manufoundry-backend`.
-7. Verify Docker Compose service state and public HTTP endpoints.
+## 6. 更新服务器
 
-The workflow does not overwrite the server-local `.env` file. Production secrets and runtime-only settings remain managed on the server.
+用户要求“更新服务器”“同步到服务器”时按以下流程执行（与 `AGENTS.md` 一致）：
 
-If deployment fails, use the rollback commands below. Automatic rollback is intentionally not enabled in the first version, because failed migrations or data issues should be inspected before moving the server to another commit.
+1. 在本地提交并推送到 GitHub。
+2. 登录服务器：`ssh -i <私钥文件> root@111.229.172.100`。
+3. 更新代码，保留服务器本地的部署文件（如 `.env`），除非用户明确要求覆盖：
 
-## Commands
+   ```bash
+   cd /root/Palantir_Demo
+   git status --short          # 先确认服务器本地改动
+   git pull --ff-only
+   ```
 
-SSH:
+4. 重新构建并重启：
+
+   ```bash
+   docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build --remove-orphans
+   ```
+
+5. 执行迁移（本次更新包含新迁移时必须执行）：
+
+   ```bash
+   docker exec manufoundry-backend alembic upgrade head
+   docker exec manufoundry-backend alembic current
+   ```
+
+6. 如果本次更新改了 `data/agent_registry/` 中的技能或工具定义，需要运行对应的注册或升级脚本，否则已有数据库不会变化（见[后端开发指南](../development/backend.md#8-ai-相关约定)）。
+7. 按第 8 节验证。只有看到验证结果后，才能说部署成功。
+
+## 7. 数据库初始化与演示数据
+
+**空库迁移。** 迁移 `0010_seed_super_admin` 在没有 `admin` 账号时会创建它，并要求环境变量 `PALANTIR_SEED_ADMIN_PASSWORD`，未设置会报错退出。只在部署环境中临时提供，不要提交或写进文档：
 
 ```bash
-ssh -i "claudecode.pem" root@111.229.172.100
+docker exec -e PALANTIR_SEED_ADMIN_PASSWORD='<管理员初始密码>' manufoundry-backend alembic upgrade head
 ```
 
-Update repository:
+这类变量只在创建账号时使用，不会修改已有账号的密码。
+
+**演示数据脚本。** `scripts/seed_data.py` 和 `scripts/reseed_business_data.py` 在仓库根目录，依赖同级的 `backend/` 和 `data/seed/`。后端镜像只包含 `backend/` 目录，所以不能直接在 `manufoundry-backend` 容器里运行这两个脚本。可以用后端镜像临时挂载整个仓库来运行：
 
 ```bash
 cd /root/Palantir_Demo
-git pull
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml \
+  run --rm -v "$PWD:/repo" -w /repo backend python scripts/reseed_business_data.py
 ```
 
-Rebuild and restart:
+使用前注意：
 
-```bash
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
-```
+- `reseed_business_data.py` 会先 `TRUNCATE ... CASCADE` 清空 16 张制造业主数据表，再从 `data/seed/` 重新导入。
+- `seed_data.py` 会把 `admin` 的密码重置为 `admin123`，并创建密码为 `123456` 的演示账号。**不要在对外开放的服务器上运行。**
+- 上面的 `compose run` 命令是根据目录结构给出的，执行前请先在测试环境确认。
 
-Run migrations:
+## 8. 验证
 
-```bash
-docker exec manufoundry-backend alembic upgrade head
-```
-
-For a clean install where migrations must create the initial `admin` account,
-set `PALANTIR_SEED_ADMIN_PASSWORD` only in the deployment environment before
-running Alembic. Do not commit or document the value; seed password variables
-are create-only and do not rotate existing user password hashes.
-
-Current migration head includes SaaS hardening, ontology center persistence,
-physical form tables, data quality rules, AI Agent items/registry tables, form
-code sequences, ontology mapping layouts, and workflow definition version
-snapshots up through `0037_workflow_def_versions.py`. Run migrations before
-verifying tenant management, form publishing, Knowledge Center chat, Agent
-drafts, dynamic form records, semantic mappings, application menus, and
-workflow approvals.
-
-Seed data when needed:
-
-```bash
-docker exec -w /app manufoundry-backend bash -c 'PYTHONPATH=/app python scripts/seed_data.py'
-```
-
-Reload the large manufacturing demo dataset after replacing server data:
-
-```bash
-docker exec -w /app manufoundry-backend bash -c 'PYTHONPATH=/app python scripts/reseed_business_data.py'
-```
-
-Check service status:
-
-```bash
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
-```
-
-Check logs:
-
-```bash
-docker logs -f manufoundry-backend --tail 100
-docker logs -f manufoundry-frontend --tail 100
-```
-
-Pre-deploy verification from a clean working tree should include:
-
-```bash
-cd backend
-python -m pytest
-
-cd ../frontend
-npm run type-check
-npm run build
-```
-
-At minimum, run the ready-path guard before promoting a productization change:
-
-```bash
-cd backend
-python -m pytest tests/test_ready_path_smoke.py tests/test_productization_boundaries.py
-```
-
-## Verification
-
-Frontend:
+在本地或服务器上执行：
 
 ```bash
 curl -I http://111.229.172.100
-```
-
-Backend:
-
-```bash
-curl -fsS http://111.229.172.100/health
+curl -fsS http://111.229.172.100/health                       # 期望 {"status":"healthy"}
 curl -fsS http://111.229.172.100/api/v1/system/readiness
 curl -fsS http://111.229.172.100/api/v1/release/current
 curl -fsS http://111.229.172.100/api/v1/productization/readiness
 ```
 
-Port `8000` is not reachable from the public network. On the server, the backend can still be checked directly with `curl -fsS http://127.0.0.1:8000/health`. Business endpoints such as `/api/v1/dashboard/programs/*` require a bearer token.
-
-Authenticated SaaS smoke checks can be run with explicit credentials or environment variables:
+服务器本机还可以检查 `curl -fsS http://127.0.0.1:8000/health`、`docker compose ... ps` 和日志：
 
 ```bash
-SMOKE_USERNAME=<admin-user> SMOKE_PASSWORD=<admin-password> python scripts/production_smoke.py --base-url http://111.229.172.100
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
+docker logs --tail 100 manufoundry-backend
+docker logs --tail 100 manufoundry-frontend
 ```
 
-Do not hard-code production administrator credentials in workflow files or repository-tracked scripts.
+其他业务接口都需要登录令牌。
 
-Expected backend response:
+**SaaS 冒烟脚本。** `scripts/production_smoke.py` 依次检查就绪状态、用平台管理员登录、**真实创建**一个租户并发起一次租户导出，最后带令牌读取运行指标。租户 slug 默认为 `smoke-<时间戳>`，域名为 `<slug>.local`，每次运行都不同；用完后在平台租户管理中处理这些租户。账号通过参数或环境变量提供，不要写进脚本：
 
-```json
-{"status":"healthy"}
+```bash
+SMOKE_USERNAME=<平台管理员> SMOKE_PASSWORD=<密码> \
+  python scripts/production_smoke.py --base-url http://111.229.172.100
 ```
 
-Swagger is disabled when `APP_MODE=production`. Use a local demo-mode backend at `http://127.0.0.1:8000/docs`.
+**部署前诊断。** `scripts/doctor.py` 检查 `.env` 和 release compose 配置，`--skip-runtime` 时只做静态检查：
 
-## Rollback
+```bash
+python scripts/doctor.py --env .env --compose docker/docker-compose.release.yml --skip-runtime
+```
 
-If the new deployment fails:
+## 9. 回滚
 
 ```bash
 cd /root/Palantir_Demo
 git log --oneline -5
-git checkout <previous-good-commit>
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+git checkout <上一个正常的提交>
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
 curl -fsS http://111.229.172.100/health
 ```
 
-Return to the normal branch after the incident is resolved.
+- 回滚代码不会回滚数据库迁移。迁移一般只新增表或列，旧代码通常仍可运行；如需 `alembic downgrade`，先检查对应迁移的 `downgrade` 实现和数据影响，并备份数据库。
+- 问题处理完后切回正常分支，避免服务器停留在游离提交上。
 
-## Known Deployment Notes
+## 10. 部署注意事项
 
-- `frontend/nginx.conf` is the active nginx config.
-- `/api/` is proxied from frontend nginx to `http://backend:8000/api/`, and `/health` to `http://backend:8000/health`.
-- The backend has `GET /health` outside `/api/v1`.
-- Production should set `DEMO_AUTH_OPTIONAL=false` and a real `SECRET_KEY`.
-- The default CORS origins are local development origins; production should use explicit production origins.
+- 生效的 nginx 配置是 `frontend/nginx.conf`。
+- 后端的 `/health` 在 `/api/v1` 之外，只表示进程存活；数据库和迁移状态看 `/api/v1/system/readiness`。
+- 生产环境的 `CORS_ORIGINS` 应列出实际访问域名，不能用 `*`。
+- 不要在仓库文件、脚本或工作流中写入生产管理员账号密码。

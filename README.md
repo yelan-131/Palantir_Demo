@@ -1,221 +1,91 @@
-# ManuFoundry / Palantir Demo
+# ManuFoundry
 
-Current development version: 0.3.22 (draft, updated 2026-11-17).
+当前开发版本：0.3.22 草稿（2026-11-17 更新），见[发布说明草稿](docs/releases/release-0.3.22.md)。
+最新已发布版本：[0.3.21 — AI 技能、应用页面与数据中心](docs/releases/release-0.3.21.md)，2026-11-14 发布。
+版本编号与发布流程见[版本策略](docs/operations/version-policy.md)，历次版本见[文档索引](docs/README.md#6-发布说明历史)。
 
-Draft notes: [0.3.22 — 业务列表内置筛选与接口鉴权加固](docs/operations/release-0.3.22.md).
+ManuFoundry 是面向制造业的低代码数据工作台原型。用户可以搭建应用、表单、页面和菜单，在其中录入和审批业务数据，并结合知识库、对象图谱和 AI 助手完成查询与配置。项目仍在开发中，用于演示和产品探索，不建议直接用于商业生产。
 
-Latest published release: [0.3.21 — AI 技能、应用页面与数据中心](docs/operations/release-0.3.21.md), released 2026-11-14.
+## 功能
 
-Version numbering and release lifecycle: [project version policy](docs/operations/version-policy.md).
+- **应用与页面**：应用库、应用菜单树、组件画布（业务列表、筛选、指标、图表），页面与表单分别发布。
+- **业务表单**：字段、布局、视图页签、默认值、计算、校验、编码规则、导入与附件；数据可存为 JSON 或物理表；发布后生成版本快照。
+- **流程审批**：条件路由、会签、自动下发、统一待办；实例启动时固定流程版本。
+- **分析看板**：数据集、共享指标库、可编辑看板与版本历史。
+- **数据中心**：外部数据源、元数据扫描、数据管道、本体对象与映射、知识库（文档解析、分块检索、实体抽取）。
+- **制造业演示模块**：运营总览、设备维护、质量分析与影响图谱、供应链风险。
+- **身份与租户**：多租户、组织、角色、资源与字段级权限、会话管理、MFA、OIDC 单点登录、租户导出。
+- **AI 助手**：基于 DeepSeek Harness，通过平台工具查询数据、生成表单与页面配置；写操作需要用户确认后才执行。
 
-ManuFoundry is a manufacturing low-code data workspace prototype. It combines configurable applications, forms, menus, identity access, knowledge assets, graph exploration, quality impact analysis, and an evolving AI Agent layer for assisted business configuration.
+## 技术栈
 
-This repository is still in active development and is intended for demo and product exploration work, not direct commercial production use.
-
-## What Is Included
-
-- Login, account center, identity access, organization, role, permission, and tenant-oriented administration flows.
-- System administration for users, roles, permissions, organizations, applications, menus, semantic assets, and reference data.
-- Low-code form configuration for fields, layouts, views, actions, publish states, menu nodes, and dynamic records.
-- Manufacturing demo data for factories, workshops, production lines, equipment, sensors, work orders, quality inspection, suppliers, materials, customers, and orders.
-- Knowledge asset ingestion for documents, spreadsheets, PDFs, Markdown content, chunks, extraction tasks, and persisted entity or relation results.
-- Ontology and graph exploration, including quality event impact analysis and relationship traversal.
-- Business workspaces for production, predictive maintenance, quality analytics, supply chain risk, reports, rules, workflows, notifications, and templates.
-- AI assistant APIs, provider abstraction, prompt/tool scaffolding, knowledge context, and low-code action guidance.
-- AI Agent work in progress, inspired by OpenClaw and Harness Agent style architecture: model invocation boundaries, task planning drafts, tool calls, knowledge context, action review, and safety policies.
-
-## 0.3.18 Focus
-
-- AI configuration cards, editable proposals, bounded recovery, native designer controls, and expanded form design tools.
-- Released on 2026-10-28; see the release notes for validation results and remaining limitations.
-
-See [0.3.18 release notes](docs/operations/release-0.3.18.md).
-
-## 0.3.17 Focus
-
-- Conditional workflow routing with pinned execution paths, node field visibility, and stale approval protection.
-- Account, tenant, session, application menu, and historical workflow access checks.
-- JSON/multiselect defaults, publish preview cache recovery, and workflow field presentation fixes.
-- Request-scoped authorization input reuse, batched approval histories, and fewer repeated reads/calculations for lists, inboxes, and draft saves.
-- Opt-in SQL tracing, query-budget regression tests, and local profiling/load-test tools.
-- Business form guides and multi-user acceptance scripts; based on changes after `e931766`.
-
-See [docs/operations/release-0.3.17.md](docs/operations/release-0.3.17.md) for scope, limits, and validation results.
-
-## 0.3.16 Focus
-
-- Unified component canvas with business lists, filters, metrics, charts, interactions, and independent page drafts/publication.
-- Data center workspaces and shared knowledge browsing.
-- Shared form configuration services for API and AI tools, structured static options, and multiselect validation.
-- Based on changes after `d6e4cd9`; see the 0.3.16 release notes for validation results and deployment status.
-- Deployment requires the `0039_component_pages` database migration; component pages currently use one business source per page.
-
-See [docs/operations/release-0.3.16.md](docs/operations/release-0.3.16.md) for scope and validation status.
-
-## 0.3.15 Fix
-
-- Fix business forms failing to render on HTTP origins when the import modal initializes.
-- Use cryptographically random UUIDs compatible with both HTTP and HTTPS for imports, attachments and designer identities.
-- See [release verification](docs/operations/release-0.3.15.md).
-
-## 0.3.14 Focus
-
-- Analytics workspace with datasets, metrics, editable dashboards, previews, publication, and version history.
-- Tenant-scoped shared metric library with versioning, references, and publication impact analysis.
-- Form imports, attachments, defaults, calculations, uniqueness, field protection, and designer version management.
-- Workspace and administration navigation updates; recorded from local changes after `c96a46a` on 2026-10-23.
-- Deployment includes a database migration and persistent attachment storage; see release notes for verification status.
-
-See [docs/operations/release-0.3.14.md](docs/operations/release-0.3.14.md) for scope and validation status.
-
-## 0.3.13 Focus
-
-- Harness SDK/runtime 0.2.1rc2, effective parameter previews, execution progress, and confirmation recovery.
-- Shared form rules for visibility, required and read-only states, reference backfill, calculations, and write validation.
-- AI updates to existing records, UTF-8 byte limits, and application assembly improvements.
-- Release metadata, update popup and deployment follow the existing version workflow.
-
-See [docs/operations/release-0.3.13.md](docs/operations/release-0.3.13.md) for scope and validation status.
-
-## 0.3.12 Focus
-
-- Model service catalogs, model assignments by task, credential storage, and AI settings.
-- Form view tabs with audience controls, conditional encoding, and grouped approvals.
-- Application assembly persistence, form copying, workspace preferences, and shared page presentation.
-- Release history and update popup follow the existing version manifest workflow.
-
-See [docs/operations/release-0.3.12.md](docs/operations/release-0.3.12.md) for scope and validation status.
-
-## 0.3.11 Focus
-
-- Unified business record access for UI, AI, dashboards, and workflows.
-- Official DeepSeek Harness SDK/runtime with request-scoped platform MCP tools.
-- Improved AI configuration, model connection tests, permissions, and confirmation handling.
-- Updated account center and login presentation.
-
-See [docs/operations/release-0.3.11.md](docs/operations/release-0.3.11.md) for deployment scope and validation.
-
-## 0.3.10 Focus
-
-- Unified workspace navigation, themes, global search, login presentation, and responsive layouts.
-- Added alert center and independent material application APIs and pages.
-- Added form approval settings, application lifecycle handling, and approval notifications.
-- Improved the workflow inbox, source record navigation, and approval identity boundaries.
-- Release history and update popup now include the current release entry.
-
-See [docs/operations/release-0.3.10.md](docs/operations/release-0.3.10.md) for deployment scope and verification.
-
-## 0.3.9 Focus
-
-- Workflow definitions now snapshot each version into `workflow_def_versions`, so running instances are protected from later definition edits.
-- Workflow instances pin `workflow_version` when they start, including instances launched by form record creation.
-- Workflow definition create/update/delete routes require administrator access, while approval actions use the authenticated token identity.
-- Workflow notifications, read markers, cancellation, approval, and legacy `act` behavior have tighter user-scope checks.
-- Workflow tests now exercise the database-backed path for version pinning, countersign, terminal-state protection, notification scope, and permissions.
-
-See [docs/operations/release-0.3.9.md](docs/operations/release-0.3.9.md) for the detailed release notes.
-
-## Tech Stack
-
-| Layer | Technology |
+| 层 | 技术 |
 | --- | --- |
-| Frontend | React 18, TypeScript, Vite, Ant Design, ECharts, Cytoscape, ReactFlow, Zustand |
-| Backend | FastAPI, SQLAlchemy 2, Alembic, Pydantic |
-| Databases | PostgreSQL, SQLite fallback |
-| Graph | Neo4j 5 Community |
-| Deployment | Docker Compose |
-| Tests | pytest, TypeScript checks, Vite production build |
+| 前端 | React 18、TypeScript 5.7、Vite 6、React Router 7、Ant Design 5、Zustand、ECharts、Cytoscape、React Flow |
+| 后端 | Python 3.11、FastAPI、SQLAlchemy 2（异步）、Alembic、Pydantic 2 |
+| 数据 | PostgreSQL 16（本地可用 SQLite），Neo4j 5（可选） |
+| AI | `deepseek-harness-sdk` / `deepseek-harness-runtime-bin` 0.2.1rc2 |
+| 部署 | Docker Compose，nginx 提供前端并代理 `/api/` |
+| 测试 | pytest、Node 内置测试运行器、TypeScript 检查；GitHub Actions CI |
 
-## Repository Layout
+## 目录
 
 ```text
-backend/      FastAPI app, models, migrations, services, and tests
-frontend/     React workspace UI
-data/         Seed data and demo knowledge assets
-docker/       Docker Compose, Dockerfiles, and nginx configuration
-docs/         Architecture, operations, release, and testing notes
-scripts/      Local development, deployment, smoke, and helper scripts
-.agent/       Agent contracts, skills, and tool notes
+backend/    FastAPI 应用、模型、迁移、服务、测试和验收脚本
+frontend/   React 工作台界面与前端单元测试
+data/       种子数据、AI 技能与工具注册表、演示知识资产、行业模板
+docker/     Docker Compose 文件
+docs/       架构、开发、运维、业务文档与发布说明
+scripts/    种子数据、版本发布、部署诊断、冒烟测试、文档生成等脚本
+.agent/     Agent 契约与技能、工具说明
 ```
 
-## Local Development
+## 快速开始
 
-Backend:
+最快的方式是用 SQLite 启动后端，但这种方式没有登录账号。需要能登录的完整环境，请按[后端开发指南](docs/development/backend.md#22-方式二postgresql与服务器一致)使用 PostgreSQL。
 
 ```bash
+# 数据库（仓库根目录）
+docker compose -f docker/docker-compose.yml up -d postgres neo4j
+
+# 后端
 cd backend
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+export PALANTIR_SEED_ADMIN_PASSWORD='<本地管理员密码>'
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
-Frontend:
-
-```bash
+# 前端（另一个终端）
 cd frontend
 npm install
 npm run dev
 ```
 
-Default local URLs:
+| 地址 | 用途 |
+| --- | --- |
+| `http://localhost:3000` | 前端，开发服务器把 `/api` 代理到 8000 端口 |
+| `http://localhost:8000/docs` | 接口文档（仅演示模式） |
+| `http://localhost:8000/health` | 后端健康检查 |
 
-- Frontend: `http://localhost:3000`
-- Backend docs: `http://localhost:8000/docs`
-- Backend health: `http://localhost:8000/health`
+**账号。** 迁移只会用 `PALANTIR_SEED_ADMIN_PASSWORD` 创建 `admin`，仓库中没有默认密码。本地如需演示账号和制造业演示数据，可在仓库根目录运行 `python scripts/seed_data.py`；它会把 `admin` 密码设为 `admin123`，并创建密码为 `123456` 的演示账号，只能用于本地演示，不要在对外环境运行。
 
-Default demo account:
+也可以用 Docker 启动整套开发环境：`docker compose -f docker/docker-compose.yml up -d --build`。
 
-- Username: `admin`
-- Password: `admin123`
-
-## Docker Development
-
-```bash
-docker compose -f docker/docker-compose.yml up -d --build
-```
-
-Development ports:
-
-- Frontend: `http://localhost:3000`
-- Backend: `http://localhost:8000`
-- PostgreSQL: `localhost:5432`
-- Neo4j Browser: `http://localhost:7474`
-
-Production-style local run:
+## 验证
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
+cd backend && python -m pytest
+cd frontend && node --test tests/*.test.cjs && npm run type-check && npm run build
+python scripts/docs/generate_api_reference.py --check    # 检查 API 参考是否与路由一致
 ```
 
-The production-style frontend is exposed on host port `80`. The backend and data services bind to `127.0.0.1` only; public backend traffic goes through the frontend nginx proxy (`/api/` and `/health`).
+CI（`.github/workflows/ci.yml`）在推送和 Pull Request 时运行后端测试、空库迁移与 PostgreSQL 并发测试、前端单元测试和构建，详见[测试说明](docs/operations/testing.md)。
 
-## Verification
+## 部署
 
-Backend focused tests:
+生产服务器使用 `docker/docker-compose.yml` 加 `docker/docker-compose.prod.yml`，对外只开放 80 端口，后端与数据库只绑定本机。更新流程、迁移、验证与回滚见[部署](docs/operations/deployment.md)；客户私有化部署见[私有化部署](docs/operations/private-deployment.md)。仓库中没有自动部署流程。
 
-```bash
-cd backend
-python -m pytest tests/test_ai_agent_services.py tests/test_ai_knowledge_api.py tests/test_ai_low_code_agent.py
-```
+## 文档
 
-Frontend build:
-
-```bash
-cd frontend
-npm run build
-```
-
-Production smoke test:
-
-```bash
-python scripts/production_smoke.py --base-url http://111.229.172.100
-```
-
-## Deployment Notes
-
-Operational notes live in:
-
-- [docs/operations/deployment.md](docs/operations/deployment.md)
-- [docs/operations/private-deployment.md](docs/operations/private-deployment.md)
-- [docs/operations/testing.md](docs/operations/testing.md)
-
-The configured demo server uses `/root/Palantir_Demo` and Docker Compose. The public frontend listens on host port `80`.
+从[文档索引](docs/README.md)开始阅读。常用入口：[架构总览](docs/architecture/overview.md)、[代码框架](docs/architecture/current-framework.md)、[数据模型](docs/architecture/data-model.md)、[API 参考](docs/development/api-reference.md)、[后端开发](docs/development/backend.md)、[前端开发](docs/development/frontend.md)。

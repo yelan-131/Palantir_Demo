@@ -21,7 +21,7 @@
 
 ## 操作方式
 
-统一使用 `scripts/bump_release.py`，同步根目录和后端发布清单、后端 APP_VERSION、前端 package/lock；另行维护 README、文档索引及 `release-X.Y.Z.md`。
+统一使用 `scripts/bump_release.py`，同步根目录和后端发布清单、后端 APP_VERSION、前端 package/lock；另行维护 README、文档索引及 `docs/releases/release-X.Y.Z.md`。
 
 新建日常版本示例：
 
@@ -45,4 +45,4 @@ backend/.venv/bin/python scripts/bump_release.py 0.3.19 --status published --rel
 
 - 每次检查两个清单内容、前后端版本号、历史唯一性，以及新增范围和实际验证是否一致。
 - 发布脚本测试：`cd backend && .venv/bin/python -m pytest tests/test_bump_release.py -q`。
-- 脚本已约束正常升版入口；直接手改文件仍可绕过，当前没有仓库 CI 或分支保护强制拦截。代码评审应核对清单和版本说明；接入 CI 后再将一致性检查设为合并必需项。
+- 脚本已约束正常升版入口；直接手改文件仍可绕过。仓库 CI（`.github/workflows/ci.yml`）只测试升版脚本本身，不检查仓库中各版本文件是否一致，也没有分支保护强制拦截。代码评审应核对清单和版本说明；后续可在 CI 中加入一致性检查并设为合并必需项。

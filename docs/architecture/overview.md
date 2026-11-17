@@ -1,323 +1,207 @@
-# ManuFoundry Architecture Overview
+# 系统架构总览
 
-Last updated: 2026-10-26
+更新日期：2026-11-17（对应代码版本 0.3.22 草稿）
 
-This is the current high-level architecture document. It describes what the codebase implements now, and it separates that from Palantir-inspired reference direction.
+本文描述代码当前已经实现的架构。各模块的详细现状在 `docs/architecture/` 的子目录中；借鉴 Palantir 的产品方向等设计与规划放在 `docs/design/`，不代表已实现。
+需要按目录查找代码时，请看[代码框架](current-framework.md)。
 
-## 1. Product Positioning
+## 1. 产品定位
 
-ManuFoundry is a manufacturing low-code analytics workbench. It borrows three important Palantir-style ideas and adapts them to manufacturing:
+ManuFoundry 是面向制造业的低代码数据工作区原型，目前用于演示和产品探索，不建议直接用于商业生产。主要能力：
 
-- **Ontology-first**: business objects such as equipment, work orders, inspections, suppliers, and materials should be understood through a shared semantic model.
-- **Operational applications**: users work in role-oriented applications instead of raw tables or disconnected dashboards.
-- **Data-to-action loop**: data, graph context, rules, workflows, notifications, and AI assistance should help users move from insight to action.
+- 业务人员在“业务工作台”中进入应用，查询和录入业务数据，处理审批待办。
+- 配置人员在“应用配置”中搭建应用菜单、业务表单（字段、布局、规则、权限、审批）和组件页面（列表、筛选、指标、图表）。
+- 数据人员在“数据中心”中接入外部数据库，管理数据资产、对象关系和知识库。
+- 管理员在“后台设置”中管理组织、身份、权限、AI 服务和审计日志。
+- AI 助手可以回答问题、读取业务数据，并在用户确认后代为执行配置或业务写入。
 
-This project is a prototype, not a full Palantir clone. The current system implements a usable workbench shell, manufacturing APIs, SaaS tenant foundations, low-code form metadata/version persistence, workflow/rules/reporting modules, AI-assisted low-code planning, and several Palantir-inspired design documents.
+工程形态是**模块化单体**：一个 React 单页应用加一个 FastAPI 后端，所有业务模块在同一进程内共享数据库。页面接口和 AI 工具是同一组业务服务的两个入口，没有拆分独立部署的微服务。
 
-The current implementation is a **modular monolith**: one React frontend and
-one FastAPI backend, with business modules sharing database infrastructure.
-Frontend pages and AI tools are separate entry points into shared business
-services. The recent form refactor strengthens this boundary; it does not
-introduce separately deployed microservices.
+## 2. 技术栈
 
-## 2. Current Technology Stack
-
-| Layer | Current stack |
+| 层 | 技术（版本以 `package.json`、`requirements.txt` 为准） |
 | --- | --- |
-| Frontend | React 18, TypeScript 5.7, Vite 6, Ant Design 5, Ant Design Pro Components, Zustand |
-| Visualization | ECharts, Cytoscape.js, cytoscape-dagre, ReactFlow |
-| Backend | FastAPI 0.115, Uvicorn 0.34, Python 3.11, Pydantic 2, SQLAlchemy 2, Alembic |
-| Relational database | PostgreSQL 16 in Docker; SQLite fallback for local/demo bootstrap |
-| Graph database | Neo4j 5 community |
-| Analytics libraries | pandas, numpy, scipy, scikit-learn |
-| AI execution | Official DeepSeek Harness SDK/runtime; platform-owned MCP bridge, tool registry, permissions, confirmations, and audit |
-| Optional libraries | Prophet, Celery, LangChain remain commented dependencies rather than the active Agent runtime |
-| Deployment | Docker Compose development stack plus production overlay |
+| 前端 | React 18、TypeScript 5.7、Vite 6、React Router 7、Ant Design 5、Ant Design Pro Components、Zustand、axios |
+| 可视化 | ECharts、Cytoscape（含 dagre 布局）、React Flow |
+| 后端 | Python 3.11、FastAPI 0.115、Uvicorn 0.34、Pydantic 2、pydantic-settings |
+| 数据访问 | SQLAlchemy 2（异步）、Alembic、asyncpg、psycopg2、aiosqlite |
+| 关系数据库 | PostgreSQL 16（Compose 与生产）；SQLite 仅在显式设置 `DATABASE_BACKEND=sqlite` 时用于本地和测试 |
+| 图数据库 | Neo4j 5 Community（可选，不可用时图谱功能降级） |
+| 分析与文档处理 | pandas、numpy、scipy、scikit-learn、openpyxl、pypdf、PyMuPDF、RapidOCR（onnxruntime） |
+| AI 运行时 | `deepseek-harness-sdk` 与 `deepseek-harness-runtime-bin`，固定为 0.2.1rc2 |
+| 鉴权 | python-jose（JWT）、passlib + bcrypt |
+| 部署 | Docker Compose；前端镜像为 nginx 静态站点并反向代理 `/api/` |
 
-## 3. System Context
+`requirements.txt` 中 Prophet、Celery、LangChain 仍是注释状态，没有接入。0.3.22 已移除未使用的 Redis。
+
+## 3. 系统上下文
 
 ```mermaid
 flowchart TB
-  User["User"] --> FE["React workbench<br/>Designer / business pages / dashboards"]
-  User --> Assistant["AI assistant"]
-  FE --> HTTP["FastAPI HTTP adapters"]
-  Assistant --> Agent["Harness Agent runtime<br/>Model calls / planning / context"]
-  Agent --> Boundary["Platform tool boundary<br/>Registry / permission / confirmation / audit"]
-  Boundary --> Tools["Whitelisted tool adapters"]
-  HTTP --> Services["Shared business services"]
-  Tools --> Services
-  Services --> Config["Form configuration<br/>Fields / layouts / rules / versions"]
-  Services --> Records["Record service<br/>Authorization / reads / writes"]
-  Services --> Business["Workflow / analytics / knowledge / graph modules"]
-  Records --> Engine["Shared form storage engine"]
-  Config --> DB["Relational database<br/>Metadata / versions / runtime state"]
-  Engine --> JSON["dynamic_records.data<br/>JSON / JSONB"]
-  Engine --> Physical["Form-managed business tables"]
-  Business --> DB
-  Business --> Graph["Neo4j"]
-  Business --> Files["Knowledge and attachment files"]
+  User["用户（浏览器）"] --> Nginx["前端 nginx<br/>静态资源 + /api/ 与 /health 反向代理"]
+  Nginx --> API["FastAPI 路由层<br/>app/api/*"]
+  API --> Services["业务服务层<br/>app/services/*"]
+  API --> AIAPI["AI 接口<br/>/api/v1/ai"]
+  AIAPI --> Harness["DeepSeek Harness 运行时<br/>模型调用 / 规划 / 上下文压缩"]
+  Harness -->|"请求级 MCP 桥<br/>/api/v1/ai/harness/mcp"| Envelope["平台工具边界<br/>注册表 / 权限 / 确认 / 审计"]
+  Envelope --> Services
+  Services --> Records["业务记录服务<br/>services/records.py"]
+  Records --> Engine["表单存储引擎<br/>services/form_engine"]
+  Engine --> JSONStore["dynamic_records.data<br/>JSON / JSONB"]
+  Engine --> Physical["表单物理表<br/>business_* / t{租户}_business_*"]
+  Services --> DB[("PostgreSQL<br/>元数据、版本、业务数据、运行状态")]
+  Services --> Graph[("Neo4j<br/>可选")]
+  Services --> Files[("文件存储<br/>表单附件 / 知识资产")]
+  Harness --> LLM["外部模型服务<br/>DeepSeek / GLM / OpenAI 兼容接口"]
 ```
 
-The diagram describes the service direction for the refactored form paths.
-Some legacy route-owned helpers remain; see the current boundaries below.
-PostgreSQL is the Compose relational database; SQLite is an explicitly selected
-local/test alternative, not a second production database. There is no cache or
-message broker; Redis was removed from Compose in 0.3.22 because no code used it.
+系统没有缓存服务和消息队列。后端启动时在进程内启动两个后台循环（见 `backend/app/main.py` 的 `lifespan`）：
 
-## 4. Frontend Architecture
+- AI 记忆过期清理任务，每小时一次；`memory.purge_expired` 目前为空操作，实际不删除条目。
+- 流程自动下发处理器，每 5 秒用 `FOR UPDATE SKIP LOCKED` 领取最多 20 个待下发的流程实例，把字段映射发送到站内表单、API 或 Webhook。
 
-The frontend is a protected React single-page application.
+## 4. 前端
 
-Main responsibilities:
+前端是需要登录的单页应用，入口在 `frontend/src/App.tsx`。未登录时只能访问 `/login`。
+导航分为五个区域（`frontend/src/config/navigation.ts`）：
 
-- Login and token restoration through `frontend/src/stores/authStore.ts`.
-- Global shell in `frontend/src/App.tsx`.
-- Workspace home route at `/`.
-- Top application switcher.
-- Application-specific side menu.
-- Dynamic business pages under `/program/:programId`.
-- Model/form-driven pages under `/dynamic/:slug`.
-- System administration under `/system-admin`.
-- Floating AI chat widget using `/api/v1/ai`.
-- Centralized API client in `frontend/src/services/api.ts`.
+| 区域 | 入口 | 内容 |
+| --- | --- | --- |
+| 业务工作台 | `/`、`/workflow`、`/scheduler`，以及各应用菜单指向的页面 | 我的工作台、流程与待办、日常任务、应用内业务页面 |
+| 应用配置 | `/studio/*`、`/form-settings/:formId` | 应用与菜单、业务数据（表单）、页面设计、模板中心 |
+| 数据中心 | `/data-center/*` | 数据接入、数据资产、基础数据、对象与关系、知识库 |
+| 后台设置 | `/admin/*`（仅管理员） | 组织身份与权限、AI 与平台设置、审计日志，以及分析追溯和配置迁移等高级工具 |
+| 插件与扩展 | `/plugins` | 扩展入口 |
 
-Important frontend routes:
+应用菜单里的业务页面通过 `/dynamic/:slug` 或 `/program/:programId` 打开。页面入口会先请求 `GET /api/v1/pages/forms/{slug}/binding`：如果该表单已经启用组件页面，就渲染已发布的组件页面；否则回退到旧的动态记录页或程序页。
+右下角的 AI 助手浮窗在整个工作区内可用。详细说明见[前端开发指南](../development/frontend.md)。
 
-| Route | Purpose |
-| --- | --- |
-| `/login` | Login page |
-| `/` | Workspace home |
-| `/dashboard` | Production overview |
-| `/maintenance` | Predictive maintenance |
-| `/quality` | Quality analysis |
-| `/supply-chain` | Supply chain risk |
-| `/data-sources` | Data source management |
-| `/ontology` | Ontology page |
-| `/graph` | Graph explorer |
-| `/pipeline` | Pipeline page |
-| `/reports` | Report center |
-| `/workflow` | Workflow center |
-| `/templates` | Template marketplace |
-| `/rules` | Rule engine |
-| `/system-admin` | System administration |
-| `/program/:programId` | Application program page |
-| `/dynamic/:slug` | Dynamic model/form page |
+## 5. 后端分层
 
-## 5. Backend Architecture
+```text
+app/main.py        创建应用、中间件、系统接口，在 /api/v1 下挂载全部路由
+app/api/           HTTP 适配层：参数解析、依赖注入（鉴权、数据库会话）、响应格式
+app/services/      业务服务：表单、记录、流程、页面、分析、知识、AI 等
+app/core/          横切能力：数据库会话、JWT、权限判定、身份上下文、审计、日志、标识符校验
+app/models/        SQLAlchemy 模型（relational.py）与 Neo4j 标签和关系类型（graph_models.py）
+```
 
-The backend is a FastAPI application mounted around `/api/v1`.
+依赖方向固定为 `api → services → core/models`。`core`、`models`、`services` 不得导入 `app.api`，由 `backend/tests/test_layering.py` 强制检查。部分路由模块为兼容旧调用方会再导出服务层的函数，新代码应直接调用服务层。
 
-System endpoints:
+鉴权分三层：
 
-- `GET /`
-- `GET /health`
-- `GET /api/v1/system/readiness`
-- `GET /api/v1/system/metrics`
-- `GET /api/v1/release/current`
+1. 路由依赖：除公开接口外，所有接口都依赖 `get_current_user`，由 `backend/tests/test_route_auth_coverage.py` 保证；管理接口再叠加 `require_admin` 或 `require_platform_admin`。
+2. 服务层：业务记录读写按表单权限、数据范围、行条件和字段规则过滤；流程审批校验当前节点的审批人；发布与配置写入再次校验管理员身份。
+3. 租户隔离：业务表都带 `tenant_id`，服务层查询按当前用户的租户过滤；平台级操作只允许租户 1 的管理员。
 
-Main API modules:
+## 6. 关键运行流程
 
-| Area | Prefix |
-| --- | --- |
-| Auth | `/api/v1/auth` |
-| Admin | `/api/v1/admin` |
-| Applications | `/api/v1/applications` |
-| Forms platform | `/api/v1/forms` |
-| Workflow | `/api/v1/workflow` |
-| Data sources | `/api/v1/data-sources` |
-| Ontology | `/api/v1/ontology` |
-| Graph | `/api/v1/graph` |
-| Pipelines | `/api/v1/pipelines` |
-| Semantic assets | `/api/v1/semantic-assets` |
-| Knowledge base | `/api/v1/knowledge` |
-| Analytics | `/api/v1/analytics` |
-| Maintenance | `/api/v1/maintenance` |
-| Quality | `/api/v1/quality` |
-| Supply chain | `/api/v1/supply-chain` |
-| AI assistant | `/api/v1/ai` |
-| Dashboard | `/api/v1/dashboard` |
-| Reports | `/api/v1/reports` |
-| Model-driven | `/api/v1/model-driven` |
-| Rules | `/api/v1/rules` |
-| Notifications | `/api/v1/notifications` |
-| Templates | `/api/v1/templates` |
-| Config import/export | `/api/v1/config` |
-| Scheduler | `/api/v1/scheduler` |
-| Search | `/api/v1/search` |
-| AI builder | `/api/v1/ai-builder` |
-| Productization | `/api/v1/productization` |
-| Platform tenant operations | `/api/v1/platform` |
-| Current tenant profile | `/api/v1/tenant` |
-| Release metadata | `/api/v1/release` |
-
-## 6. Data And Persistence
-
-The persistence layer has four main groups:
-
-1. **Core manufacturing data**
-   - Factories, workshops, production lines, equipment, sensors, work orders, inspections, defects, suppliers, materials, customers, and related seed data.
-   - Modeled through SQLAlchemy models and seed JSON files.
-
-2. **Low-code platform metadata**
-   - Applications, application menus, roles.
-   - Forms platform tables introduced by migration `0006_platform_forms.py`, versioned by `0021_form_versions.py`, seeded into production-like application assemblies by `0024_seed_application_assembly.py`, and extended with menu-node config by `0026_menu_node_config.py`.
-   - Records support dynamic JSON/JSONB storage and form-managed physical tables.
-     Migration `0029_form_physical_tables.py` supports physical storage; both
-     adapters use the shared record boundary and published field resolution.
-
-3. **SaaS tenant and identity operations**
-   - Tenants, tenant domains, invites, redacted exports, password reset tokens, sessions, password history, and OIDC state rows.
-   - Tenant isolation is progressively applied across low-code, workflow, reports, notifications, rules, scheduler, knowledge, and AI runtime rows.
-
-4. **Knowledge and AI runtime observability**
-   - Knowledge documents, chunks, ingestion jobs, extraction jobs, and object links have relational persistence for the current MVP.
-   - Knowledge Agent conversations, messages, runs, tool calls, and memory rows
-     are stored in the relational database through migration
-     `0015_ai_agent_runtime.py`.
-   - General `/api/v1/ai` conversations and memory APIs now have persisted runtime surfaces, while low-code writes remain admin-only and confirmation-gated.
-
-Forms platform tables:
-
-| Table | Purpose |
-| --- | --- |
-| `forms` | Form/business object definition |
-| `form_versions` | Immutable published form snapshots |
-| `application_forms` | Application-form binding |
-| `application_menu_nodes` | Application-specific menu tree |
-| `form_fields` | Field metadata |
-| `form_layouts` | List/detail/edit layout metadata |
-| `form_actions` | Configurable action buttons |
-| `form_permissions` | Role/action/field permission metadata |
-| `dynamic_records` | JSON/JSONB records for dynamic forms |
-| `workflow_bindings` | Bind form actions to workflow definitions |
-
-## 7. Runtime Data Flow
+### 6.1 打开应用中的业务页面
 
 ```mermaid
 sequenceDiagram
-  participant U as User
-  participant FE as React Frontend
+  participant U as 用户
+  participant FE as 前端
   participant API as FastAPI
-  participant S as Shared record service
-  participant DB as PostgreSQL/SQLite
-  participant G as Neo4j
+  participant S as 服务层
+  participant DB as 数据库
 
-  U->>FE: Open application
-  FE->>API: GET /api/v1/applications
-  API->>DB: Load applications
-  API-->>FE: Applications
-  FE->>API: GET /api/v1/applications/{id}/menus
-  API->>DB: Load application menu nodes
-  API-->>FE: Menu tree
-  FE->>API: GET /api/v1/forms/{form_id}/records
-  API->>S: List records as authenticated user
-  S->>DB: Resolve published fields and read selected storage adapter
-  DB-->>S: Stored rows
-  S-->>API: Authorized records and visible fields
-  API-->>FE: Record list
-  FE->>API: POST /api/v1/graph/query
-  API->>G: Read-only graph query
-  G-->>API: Graph result
-  API-->>FE: Graph result
+  U->>FE: 进入应用
+  FE->>API: GET /applications
+  API->>S: 按角色和发布状态过滤可见应用
+  FE->>API: GET /applications/{id}/menus
+  API->>S: 过滤未发布目标和无权限的菜单
+  U->>FE: 点击菜单 /dynamic/{slug}
+  FE->>API: GET /pages/forms/{slug}/binding
+  alt 已启用组件页面
+    FE->>API: GET /pages/{code}，POST /pages/{code}/data
+  else 未启用组件页面
+    FE->>API: GET /forms/{id}，GET /forms/{id}/records
+  end
+  API->>S: records.py：表单权限、数据范围、字段投影
+  S->>DB: 按表单存储方式读取 JSON 记录或物理表
+  S-->>FE: 仅返回有权查看的记录和字段
 ```
 
-### Shared form services and AI tools
+### 6.2 表单的配置与发布
 
-Configuration and runtime have separate responsibilities:
+表单的配置和运行是分开的：
 
-- Configuration services own fields, layouts, designer settings, impact checks,
-  publication snapshots, and version reads.
-- `services/records.py` owns business record access, tenant/row/field permissions,
-  validation, encoding, and the choice of storage adapter.
-- Workflow and lifecycle services govern submission, approval, and state changes;
-  analytics consumers use authorized record access.
-- `services/form_runtime.py` resolves the latest published field snapshot when
-  present, falling back to metadata only for unversioned forms. Saving a design
-  draft does not automatically publish its layout and interaction changes.
+- 设计期：字段、布局、规则、权限、审批设置保存在 `forms`、`form_fields`、`form_layouts`、`form_permissions` 等表和 `forms.config` 中，可随时修改草稿。
+- 发布：`POST /forms/{form_id}/publish` 先做影响检查和规则校验，再在 `form_versions` 中写入不可变快照。
+- 运行期：`services/form_runtime.py` 优先使用最新发布快照中的字段；没有发布版本的表单才使用草稿元数据。保存草稿不会改变运行中的页面。
 
-HTTP routes keep dependency injection and response compatibility. AI handlers
-translate tool payloads into service calls. The Agent runtime can propose a
-write, but platform permissions and confirmation remain backend responsibilities.
-Tools are thin adapters, not a second implementation of business validation.
+组件页面（`component_pages`）有独立的草稿、发布和版本历史（`component_page_versions`），与表单发布互不影响；页面中的组件仍按来源表单的权限读取数据。
 
-The completed refactor shares field creation across UI and AI, routes AI
-business-form initial publication through the designer publication service, and
-extracts version, layout, and rule-preview operations. Five configuration read
-tools are registered under `low_code.inspect_form`. See
-[Form Management](form-management.md) for module ownership and
-[Low-Code Platform](low-code-platform.md) for call flows and enablement details.
+### 6.3 AI 执行写操作
 
-## 8. Palantir Architecture Mapping
+1. 前端调用流式接口 `POST /ai/agent/stream`，后端创建 Agent 运行记录（`ai_agent_runs`）并启动 Harness 运行时。`POST /ai/agent-runs` 是不写数据库的旧接口。
+2. 运行时通过请求级 MCP 桥调用平台工具。工具清单来自数据库中按租户管理的技能和工具注册表。
+3. 工具调用先校验当前用户权限、工具是否启用和参数。读工具经 `services/ai/tool_envelope.py` 直接执行；写工具在调用时只登记为待确认动作，生成确认卡片。全局执行模式 `agentMode` 默认为 `draft`，此时除记录草稿和画布工具外的写工具都不可用，需要管理员在 AI 设置中改为 `confirm`。
+4. 用户在前端确认后调用 `POST /ai/agent-runs/{run_id}/confirm`（或其流式版本），后端用条件更新把运行状态从 `waiting_confirmation` 抢占为执行中以防重复执行，再调用与页面相同的业务服务完成写入并记录审计。详见 [AI 概览](ai/README.md)和[技能与工具契约](ai/skill-contract.md)。
 
-| Palantir-inspired idea | ManuFoundry implementation |
+AI 工具只是业务服务的薄适配层，不另写一套业务校验。
+
+## 7. 数据与存储
+
+| 存储 | 内容 |
 | --- | --- |
-| Foundry Ontology | Ontology APIs, Neo4j graph, semantic asset APIs, manufacturing data model |
-| Foundry Workshop / operational apps | Application switcher, application-specific menus, `/program/:programId`, workspace shell |
-| Foundry Pipeline Builder | Data source management, pipeline APIs, scheduler APIs |
-| Object actions | Form actions, rules engine, workflow bindings, notifications |
-| Operational decision apps | Dashboard, maintenance, quality, supply-chain, workflow, reports |
-| AIP-style assistance | Floating AI widget, `/api/v1/ai`, persisted conversations/memories, skill/tool registry, confirmation-token scaffold, AI builder suggestions, admin-gated low-code planning tools, local `/api/v1/knowledge` evidence retrieval, persisted knowledge Agent chat runtime |
-| Gotham-style command UI | Event/risk workbench reference docs, notification center, graph impact/trace endpoints |
+| 关系数据库 | 99 张 ORM 表：制造业主数据、低代码平台元数据、业务记录、流程、身份与租户、知识库、AI 运行记录等，详见[数据模型](data-model.md) |
+| 表单物理表 | 使用物理存储的表单在发布前由存储引擎建表或加列，表名形如 `business_<编码>`，新建表单带租户前缀 `t<租户ID>_business_<编码>` |
+| Neo4j | 由种子数据或同步接口构建的制造业对象图（工厂、产线、设备、物料、订单、缺陷等），用于图谱探索、影响分析和追溯 |
+| 文件 | 表单附件写入 `FORM_FILE_STORAGE_DIR`（默认 `/data/form_files`，生产使用 `form_files` 卷）；知识资产写入 `KNOWLEDGE_STORAGE_DIR` |
 
-The important architectural lesson is not a visual copy of Palantir. The lesson is the **object-centric operating model**: users act on meaningful business objects, not disconnected screens.
+数据库结构变更只通过 Alembic 迁移完成（当前最新为 `0044_component_page_ai_tools`）。SQLite 模式由 `app/database.py` 的 `init_db()` 直接建表并补齐旧库缺失的列。
 
-## 9. Deployment Architecture
+## 8. 运行模式
 
-Development stack:
+| 配置 | 演示模式 `APP_MODE=demo` | 生产模式 `APP_MODE=production` |
+| --- | --- | --- |
+| 数据库 | PostgreSQL，或显式选择 SQLite | 只能用 PostgreSQL，选择 SQLite 会启动失败 |
+| `SECRET_KEY` | 可使用默认值 | 必须是 32 位以上的非默认值，否则启动失败 |
+| `CORS_ORIGINS` | 可包含 `*` | 必须是明确的来源 |
+| `SMTP_HOST` | 可为空 | 必填 |
+| `DEMO_AUTH_OPTIONAL` | 不影响鉴权，所有受保护接口都要求令牌 | 必须为 `false`，否则启动失败 |
+| 接口文档 | 开放 `/docs`、`/redoc` | 关闭 |
 
-```bash
-docker compose -f docker/docker-compose.yml up -d --build
-```
+`GET /api/v1/system/readiness` 会汇总数据库、迁移版本、SMTP、存储目录和上述生产配置的检查结果。
 
-Production-style stack:
+## 9. 部署形态
 
-```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
-```
+| 场景 | Compose 文件 | 说明 |
+| --- | --- | --- |
+| 本地开发 | `docker/docker-compose.yml` | 后端热重载、Vite 热更新、源码挂载；所有端口对外开放 |
+| 演示服务器 | 再叠加 `docker/docker-compose.prod.yml` | 生产镜像；前端 `80:80`；后端、PostgreSQL、Neo4j 只绑定 `127.0.0.1` |
+| 私有化部署 | `docker/docker-compose.release.yml` | 拉取预构建镜像，不在部署机上构建 |
+| 外部数据源演示 | `docker/docker-compose.external-sources.yml` | 6 个独立的 PostgreSQL，模拟 MES、ERP、QMS、WMS、SCM、CRM |
 
-Production overlay behavior:
+详见[部署说明](../operations/deployment.md)和[私有化部署](../operations/private-deployment.md)。
 
-- Backend uses `backend/Dockerfile`.
-- Frontend uses `frontend/Dockerfile`.
-- Frontend serves static assets through nginx.
-- Frontend host port `80` maps to container port `80`.
-- Backend host port `8000` maps to container port `8000`.
-- Source mounts are removed in production overlay.
-- `DEMO_AUTH_OPTIONAL=false` in production overlay.
+## 10. 当前边界
 
-## 10. Current Boundaries
+已实现但有限制：
 
-Implemented now:
+- 知识检索没有语义能力：已入库文档按文本 SHA-256 摘要生成的 16 维伪向量计算余弦分，再加上英文词面匹配分；中文查询的词面分为 0，排序基本随机。没有接入向量数据库和外部向量模型。详见[知识库](knowledge/knowledge-base.md)。
+- 带行条件的记录查询按每批 200 行扫描并在分页前鉴权，大数据量下还需要把权限条件下推到 SQL。
+- 后台任务运行在 Web 进程内，没有独立的任务队列。
+- 新增的 AI 工具定义写在种子文件中，已有数据库的注册表需要运行对应的注册脚本才会生效（见 `scripts/register_*`、`backend/scripts/upgrade_*`）。
+- 旧版 `/model-driven/*` 元模型接口与新的表单平台并存。
 
-- Workbench shell, app switcher, dynamic menus, workspace, system admin surfaces.
-- Backend APIs for applications, forms platform, workflow, rules, reports, notifications, scheduler, search, templates, AI builder.
-- Local knowledge base APIs with persistent document/chunk/runtime rows, upload simulation, Markdown, cards, directories, binding candidates, OCR workflow metadata, TF-IDF retrieval, and persisted knowledge Agent conversations.
-- Productization readiness contract under `/api/v1/productization/readiness`.
-- Forms metadata, published versions, JSON and physical-table record storage, shared UI/AI field and publication services, and database-seeded application assembly menus.
-- Tenant operation APIs under `/api/v1/platform`, public tenant profile under `/api/v1/tenant/profile/public`, and system/release status endpoints.
-- Docker development and production-style compose files.
-- Backend test coverage across security, workflow, rules, notifications, forms, config import/export, templates, scheduler/search/AI builder, graph safety, and model-driven safety.
+尚未实现：
 
-Remaining consolidation work:
+- 时序数据库（`sensor_readings` 是普通关系表）。
+- Prometheus、Grafana 等监控体系（`/api/v1/system/metrics` 只是进程内计数）。
+- Kubernetes 部署、自动持续部署（仓库中只有持续集成 `.github/workflows/ci.yml`）。
+- 浏览器端到端测试。
 
-- `FormSettings/index.tsx` still hosts the designer page composition, but module-level
-  types, options, field/encoding/workflow helpers, analytics designers, and publish
-  checks now live in sibling modules under `frontend/src/pages/FormSettings/`.
-  Further extraction of the remaining page-local render helpers is optional.
-- New AI tool definitions are present in seed/fallback files. Existing persisted
-  registries need the normal registry import/update flow before those tools are
-  available. A local code change is not a production deployment.
+## 11. 与 Palantir 概念的对应
 
-Layering note: `app/core`, `app/models`, and `app/services` must not import
-`app.api`. Route modules may re-export service helpers for compatibility; new
-callers should prefer the service modules. `backend/tests/test_layering.py`
-enforces the lower-layer ban.
+| 概念 | 本项目中的实现 |
+| --- | --- |
+| Ontology（本体） | 语义资产与本体对象、关系、映射（`/semantic-assets`），Neo4j 对象图，制造业数据模型 |
+| Workshop（业务应用） | 应用、应用菜单、组件页面、业务表单 |
+| 数据集成 | 数据源接入、元数据扫描、同步任务、数据管道 |
+| Actions（对象操作） | 表单动作、规则触发器、流程绑定与自动下发、通知 |
+| AIP（AI 辅助） | Harness 运行时、平台工具边界、确认卡片、知识检索 |
 
-Reference/planned:
-
-- External orchestration alternatives such as LangChain; the current Agent already uses Harness.
-- Celery or another real async job worker.
-- TimescaleDB-specific time-series storage.
-- Prometheus/Grafana observability stack.
-- Kubernetes/Helm deployment.
-- Full Gotham-style command center UX.
+参考设计见 [Palantir 平台关系图](../design/palantir/relationship-map.md)等文档。

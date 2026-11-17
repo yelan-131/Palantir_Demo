@@ -1,225 +1,159 @@
-# Frontend Development Guide
+# 前端开发指南
 
-Last updated: 2026-05-29
+更新日期：2026-11-17（对应代码版本 0.3.22 草稿）
 
-Source of truth: `frontend/src/App.tsx`, `frontend/src/services/api.ts`,
-`frontend/src/config/menus.ts`, and `frontend/package.json`.
+以代码为准：`frontend/src/App.tsx`（路由与外壳）、`frontend/src/config/navigation.ts`（导航）、`frontend/src/services/api.ts`（接口封装）、`frontend/package.json`（依赖与命令）。
+目录说明见[代码框架](../architecture/current-framework.md#3-前端-frontendsrc)。
 
-This document describes the current React application. Older wording that
-described future-only low-code pages has been folded into the current platform
-forms implementation.
+## 1. 技术栈
 
-## Stack
-
-| Area | Current code |
+| 方面 | 使用 |
 | --- | --- |
-| Framework | React 18.3, TypeScript 5.7, Vite 6 |
-| Router | `react-router-dom` 7 |
-| UI | Ant Design 5, `@ant-design/pro-components`, `@ant-design/icons`, lucide |
-| State | Zustand auth store |
-| HTTP | axios client in `src/services/api.ts` |
-| Charts and graph | ECharts, Cytoscape, React Flow |
+| 框架与构建 | React 18、TypeScript 5.7、Vite 6 |
+| 路由 | React Router 7 |
+| 组件库 | Ant Design 5、`@ant-design/pro-components`、`@ant-design/icons`，中文语言包 |
+| 状态 | Zustand（仅登录状态），其余为组件内状态与 Context |
+| 请求 | axios，统一实例在 `src/services/api.ts` |
+| 图表与图 | ECharts（`echarts-for-react`）、Cytoscape（dagre 布局）、React Flow（流程设计器） |
 
-Commands:
+路径别名 `@` 指向 `src/`。
+
+## 2. 命令
 
 ```bash
 cd frontend
-npm install
-npm run dev
-npm run type-check
-npm run build
+npm ci                          # 按 package-lock.json 安装依赖
+npm run dev                     # 开发服务器，端口 3000
+npm run type-check              # tsc -b --noEmit
+npm run build                   # tsc -b && vite build，输出到 dist/
+npm run preview                 # 预览构建产物
+node --test tests/*.test.cjs    # 单元测试（需先安装依赖）
 ```
 
-The development server listens on port `3000`. Requests under `/api` are
-proxied to `VITE_API_PROXY_TARGET`, defaulting to `http://localhost:8000`.
-When the local sandbox blocks Vite dependency pre-bundling, use
-`node local-static-server.mjs` to serve `frontend/dist` with a lightweight
-`/api` proxy to `127.0.0.1:8000`.
+开发服务器把 `/api` 代理到 `VITE_API_PROXY_TARGET`，默认 `http://localhost:8000`。`docker/docker-compose.yml` 中的前端容器把它设为 `http://backend:8000`。
+如果本地环境无法运行 Vite 开发服务器，可以先 `npm run build`，再用 `node local-static-server.mjs` 托管 `dist/` 并把 `/api` 转发到 `127.0.0.1:8000`。
 
-## Application Shell
+环境变量：
 
-`App.tsx` owns the authenticated shell:
-
-- Login route: `/login`.
-- Authenticated entry: `/*`, otherwise redirected to `/login`.
-- Workspace home: `/`.
-- Floating AI assistant is available in the shell; `/ai-assistant` redirects to
-  `/`.
-- Header includes application switching, global search, notification polling,
-  account access, and admin/workflow shortcuts.
-- Route rendering is wrapped in `Suspense` and an error boundary.
-
-Current routes:
-
-| Route | Page |
-| --- | --- |
-| `/` | Workspace |
-| `/dashboard` | Dashboard |
-| `/data-sources` | Data source management |
-| `/ontology` | Ontology |
-| `/graph` | Graph explorer |
-| `/pipeline` | Data pipeline |
-| `/maintenance` | Predictive maintenance |
-| `/quality` | Quality management |
-| `/supply-chain` | Supply chain |
-| `/account-center` | Account center |
-| `/reports` | Report center |
-| `/dynamic/:slug` | Dynamic platform form page |
-| `/program/:programId` | Application/program assembly |
-| `/form-settings/:formId` | Form settings |
-| `/system-admin` | System administration |
-| `/workflow` | Workflow center |
-| `/templates` | Template market |
-| `/rules` | Rule engine |
-
-## Menus And Applications
-
-There are two menu sources:
-
-1. Static business/admin metadata in `src/config/menus.ts`.
-2. Database-backed application menus from `/api/v1/applications/{id}/menus`
-   and `/api/v1/forms/applications/{id}/menu-nodes`.
-
-Runtime menus prefer the backend response. Local/static menus remain as a
-fallback for demo resilience and legacy pages.
-
-Application assembly is now database-seeded for the default tenant through
-`0024_seed_application_assembly.py`. The frontend should continue to tolerate
-legacy/static menu fallbacks, but production-like flows should prefer
-`/api/v1/applications/{id}/menus` and `/api/v1/forms/applications/{id}/menu-nodes`.
-
-`SystemAdmin/AppMenuManagement.tsx` should treat backend application, role, and
-platform form APIs as the source of truth. It no longer derives extra form rows
-from ontology objects or shows synthetic field/metric previews when the backend
-does not provide real form metadata.
-
-Menu-node permission/configuration data travels through `ApplicationMenuNode.config`.
-Frontend menu editors can configure custom rules, but runtime authorization is
-still enforced by `/api/v1/applications/{id}/menus`.
-
-Generated `/program/:programId` pages still own their layout in
-`src/pages/AppPrograms/index.tsx`, but production-facing rows and metrics should
-come from `/api/v1/dashboard/programs/{program_id}` when available.
-
-Account Center now separates the semantic/knowledge workbench into four
-admin-facing sections:
-
-| Section key | Label | Main component |
+| 变量 | 作用 | 默认 |
 | --- | --- | --- |
-| `data-assets` | Data Assets Center | `SemanticAssetCenter view="data"` |
-| `ontology-modeling` | Ontology Modeling Center | `SemanticAssetCenter view="ontology"` |
-| `knowledge` | Knowledge Center | `KnowledgeCenter` |
-| `knowledge-graph` | Knowledge Graph Center | `SemanticAssetCenter view="graph-assets"` |
+| `VITE_API_PROXY_TARGET` | 开发服务器的后端代理地址（仅 `vite.config.ts` 使用） | `http://localhost:8000` |
+| `VITE_API_BASE_URL` | axios 基础路径 | `/api/v1` |
+| `VITE_PUBLIC_PRODUCT_NAME` | 未取得租户信息时显示的产品名 | `ManuFoundry` |
+| `VITE_PUBLIC_ASSISTANT_NAME` | 未取得租户信息时显示的助手名 | `<产品名> AI` |
 
-Legacy query sections `palantir-config` and `data-ontology` are normalized to
-`data-assets` for compatibility.
+## 3. 应用外壳
 
-System Admin also includes `ReferenceDataManagement.tsx` under the
-`reference-data` tab. This page manages local dictionaries and master-data
-examples in `localStorage` (`mf_reference_data_admin`) for form-design demos; it
-is not a backend persisted reference-data service yet.
+`App.tsx` 中：
 
-When adding a fixed product page, update:
+- 未登录时只渲染 `/login`，其他路径都跳转到登录页；启动时 `authStore.restore()` 用 `/auth/me` 校验本地令牌。
+- 登录后渲染外壳：左侧应用栏（`ShellNavigation`）、上下文菜单（应用菜单或设置中心菜单）、页头（页面标题、全局搜索、版本记录、通知中心）、内容区和 AI 助手浮窗。
+- 登录后首次进入 `/` 时，会自动打开应用库中的第一个应用（置顶应用优先）的默认入口；点击左侧“首页”则停留在我的工作台。当前应用 ID 保存在 `localStorage` 的 `mf_current_app_id`。
+- 通过书签或搜索结果打开某个业务页面时，外壳会查找该页面所属的应用并自动切换。
+- 页面路由都是懒加载，外层包了加载骨架和错误边界。
+- 有新版本且用户未确认时，在首页页头显示版本提示，确认记录保存在 `mf_acknowledged_release`。
 
-1. `src/pages/<PageName>/index.tsx`.
-2. Lazy import and `<Route>` in `App.tsx`.
-3. `src/config/menus.ts` for menu metadata and breadcrumb labels.
-4. `src/services/api.ts` if new backend calls are needed.
+## 4. 路由
 
-When adding a configurable business page, prefer the platform forms route:
+### 4.1 主要路由
 
-1. Create or bind a form through `/api/v1/forms`.
-2. Configure fields, layouts, actions, permissions, and workflow bindings.
-3. Attach it to an application menu node.
-4. Let `/dynamic/:slug` render the form and store records in
-   `dynamic_records`.
+| 路由 | 页面 |
+| --- | --- |
+| `/login` | 登录 |
+| `/` | 我的工作台 |
+| `/workflow` | 流程与待办（待审批、我发起的、我已处理的） |
+| `/scheduler` | 日常任务 |
+| `/more` | 应用中心 |
+| `/plugins` | 插件与扩展 |
+| `/account-center` | 账号与安全、工作偏好（`?tab=preferences`） |
+| `/dynamic/:slug` | 业务表单页面（见 4.3） |
+| `/program/:programId` | 程序页（见 4.3）；`/program/alert-center` 固定为告警中心 |
+| `/program/material-application` | 料号申请 |
+| `/pages/:code` | 组件页面 |
+| `/form-settings/:formId` | 表单设计器 |
+| `/studio/*`、`/data-center/*`、`/admin/*` | 由 `pages/NavigationArea` 按路径分发，见 4.2 |
 
-## API Client
+### 4.2 配置、数据与后台入口
 
-All frontend API calls should go through `src/services/api.ts`.
+入口清单定义在 `config/navigation.ts` 的 `NAVIGATION_ENTRIES`，`adminOnly` 的入口只对管理员显示（后端仍会单独校验）。
 
-- Default base URL: `/api/v1`.
-- Override: `VITE_API_BASE_URL`.
-- Request interceptor reads `mf_token` from `localStorage` and sends
-  `Authorization: Bearer <token>`.
-- Response interceptor clears local auth and redirects to `/login` on `401`.
+| 路由 | 名称 | 页面组件 |
+| --- | --- | --- |
+| `/studio/applications` | 应用与菜单 | `SystemAdmin/AppMenuManagement` |
+| `/studio/business-data` | 业务数据 | `SystemAdmin/AppMenuManagement`（业务数据模式，`?form=` 定位表单） |
+| `/studio/page-design` | 页面设计 | `ComponentPages/PageDesignWorkspace` |
+| `/studio/templates` | 模板中心 | `TemplateMarket` |
+| `/data-center/sources` | 数据接入（含同步与管道页签） | `DataCenterWorkspace workspace="sources"` |
+| `/data-center/assets` | 数据资产（含实体浏览视图） | `DataCenterWorkspace workspace="assets"` |
+| `/data-center/reference` | 基础数据 | `SystemAdmin/ReferenceDataManagement` |
+| `/data-center/objects` | 对象与关系（含图谱视图） | `DataCenterWorkspace workspace="objects"` |
+| `/data-center/knowledge` | 知识库 | `SystemAdmin/SemanticAssetCenter` 的 `KnowledgeCenter` |
+| `/admin/identity` | 组织、身份与权限 | `SystemAdmin/IdentityAccessManagement` |
+| `/admin/ai` | AI 与平台设置 | `AccountCenter` 的 `AIPlatformPanelV2` |
+| `/admin/audit` | 审计与日志 | `AccountCenter` 的 `AuditPanel` |
+| `/admin/quality-impact` | 质量影响与时间线（实验） | `QualityImpact` |
+| `/admin/entity-timeline`、`/admin/graph-tools`、`/admin/model-tools`、`/admin/ai-builder`、`/admin/config-transfer`、`/admin/readiness` | 高级工具 | `BackendSettings` 的对应分区 |
 
-Implemented client groups include:
+`/admin/sources`、`/admin/assets` 等后台旧入口与对应的 `/data-center/*` 渲染相同内容。
 
-- Auth, dashboard, data sources, ontology, graph, pipelines.
-- Analytics, maintenance, quality, supply chain, reports.
-- Applications and application admin APIs.
-- Platform tenant APIs and current tenant profile APIs.
-- Platform forms: forms, fields, layouts, actions, permissions, workflow
-  bindings, publish versions, runtime permission summaries, dynamic records, and
-  application menu nodes.
-- Workflow, notifications, templates, rules, scheduler, search.
-- Knowledge base: spaces, sources, documents, upload simulation, ingestion jobs,
-  Markdown, chunks, cards, related evidence, binding candidates, OCR workflow
-  metadata, directories, local RAG search, and persisted knowledge Agent
-  conversations/messages.
-- AI platform settings, conversation/memory/draft APIs, low-code Agent actions,
-  generic draft confirmation/cancel flows, GLM-compatible defaults, and provider
-  testing.
-- Release metadata from `/api/v1/release/current`.
-- Productization readiness is consumed by backend tests today; add a frontend
-  service wrapper only when a page needs to render it.
+### 4.3 业务页面的解析
 
-The knowledge base API is currently a local MVP backed by persisted
-document/chunk/runtime rows plus seeded/demo catalog data and TF-IDF retrieval
-on the backend. It is not yet connected to an external vector database or
-embedding service.
+`/dynamic/:slug` 和 `/program/:programId` 都由 `pages/ComponentPages/FormPageEntry.tsx` 处理：
 
-## Ready Path Smoke Guard
+1. 请求 `GET /pages/forms/{slug}/binding`。
+2. 表单已启用组件页面且有页面编码：渲染 `ComponentPages`。如果是管理员且页面尚未创建，会先调用 `POST /pages/forms/{id}/binding` 创建空白页面并填充原有内容。
+3. 已启用但页面未发布：显示“此表单的页面尚未发布”。
+4. 未启用组件页面：`/dynamic/*` 回退到 `DynamicPage`，`/program/*` 回退到 `AppPrograms`。
+5. 地址带 `?view=records` 时，直接显示该表单的记录列表。
 
-`src/config/readyPathSmoke.ts` is a compile-time/runtime guard for the first
-SaaS path routes and menu keys:
+### 4.4 旧地址重定向
 
-- required routes: `/`, `/account-center`, `/system-admin`, `/workflow`,
-  `/reports`;
-- required business menu routes: `/`, `/dashboard`, `/maintenance`, `/quality`,
-  `/supply-chain`;
-- each route must have a breadcrumb entry in `BREADCRUMB_MAP`.
+| 旧地址 | 跳转到 |
+| --- | --- |
+| `/dashboard`、`/maintenance`、`/quality`、`/supply-chain` | `/program/production-overview`、`/program/device-health`、`/program/quality-overview`、`/program/supply-overview` |
+| `/ai-assistant` | `/`（AI 助手改为浮窗） |
+| `/reports`、`/rules`、`/system-admin` 等 | 见 `config/navigation.ts` 的 `LEGACY_ROUTES` |
+| `/pages`、`/pages/new` | `/studio/page-design` |
+| 其他未知路径 | `/` |
 
-Keep this file aligned with the productization ready path and route/menu
-metadata. It is intentionally small and should fail loudly if a required route
-is renamed without updating navigation metadata.
+旧的账号中心分区（`/account-center?section=...`）由 `LEGACY_ACCOUNT_SECTIONS` 映射到新入口。
 
-## Auth And Permissions
+## 5. 应用菜单
 
-`src/stores/authStore.ts` stores:
+运行时菜单来自 `GET /api/v1/applications/{id}/menus`。后端已经按发布状态和权限过滤，前端只再隐藏 `is_visible=false` 的节点，并把料号申请从应用菜单中移到流程中心。
+配置菜单使用 `/api/v1/forms/applications/{id}/menu-nodes` 和 `/menu-order`，界面在“应用与菜单”中。
+`config/menus.ts`、`config/appAssemblyMenus.ts` 是旧的静态菜单与本地兜底数据，不是运行时菜单的来源。
 
-- `mf_token`
-- `mf_user`
-- derived `isAuthenticated`
+## 6. 接口调用与登录状态
 
-The current frontend permission model is role-based and menu-oriented. The
-backend has richer role, permission, form-permission, and audit-log tables; UI
-surface should treat those as the long-term authority when adding new
-administrative workflows.
+- 统一使用 `src/services/api.ts` 导出的 axios 实例和封装函数，基础路径 `/api/v1`，超时 30 秒，`withCredentials: true`。
+- 请求拦截器从 `localStorage` 读取 `mf_token`，加上 `Authorization: Bearer <token>`。
+- 响应拦截器遇到 `401` 时清除 `mf_token`、`mf_user` 并跳转 `/login`。
+- `authStore` 保存 `token`、`user`、`isAuthenticated`；`user.is_admin` 只用于决定显示哪些入口，真正的权限由后端判断。
+- 告警、表单审批、料号申请有独立的封装文件（`services/alerts.ts`、`formApprovals.ts`、`materialApplications.ts`）。
 
-## UI Conventions
+## 7. AI 助手
 
-- Use Ant Design components for forms, tables, modals, cards, tabs, and
-  notifications.
-- Keep reusable API calls out of page components.
-- Use explicit `rowKey="id"` for tables.
-- Prefer backend pagination/search for large lists.
-- For platform forms, field metadata lives in `form_fields`; do not hard-code
-  dynamic form schemas in page components.
-- For actions with side effects, surface success/failure via Ant Design
-  `message` or `notification`.
+- 浮窗组件在 `components/AiChatWidget/`，可在工作偏好中隐藏。
+- 浮窗会把当前页面标题和所在应用作为上下文发给后端。
+- `AiPageActionRouter`（`pageControls.tsx`）接收 AI 发出的页面操作（例如在设计器中准备字段、调整属性），执行后通过 `POST /ai/page-actions/{action_id}/result` 回报结果。最终的创建或发布仍由用户点击确认。
 
-## Verification
+## 8. 开发约定
 
-Run before merging frontend changes:
+- 新的业务页面优先用平台能力搭建：在“业务数据”中建表单并发布，在“页面设计”中组合组件，在“应用与菜单”中挂载，不要为单个业务新写固定页面。
+- 确实需要新增固定页面时：在 `src/pages/<名称>/` 新建页面；在 `App.tsx` 中懒加载并注册路由，或者加入 `navigation.ts` 的 `NAVIGATION_ENTRIES` 并在 `NavigationArea` 中分发；需要的接口加到 `services/api.ts`。
+- 表单字段的结构来自后端的表单定义，不要在页面中硬编码字段。
+- 可复用的纯逻辑放在 `src/utils/` 并补充 `tests/*.test.cjs`。测试用 `typescript` 把源文件即时转译后在 `node:vm` 中执行，不依赖浏览器。
+- 写操作的结果用 Ant Design 的 `message` 或 `notification` 提示。表格指定 `rowKey`，大列表使用后端分页和搜索。
+- 界面设计规范见仓库根目录的 `DESIGN.md` 和 [UI 系统说明](../archive/ui-system-2026-11-10.md)。
+
+## 9. 提交前检查
 
 ```bash
 cd frontend
 npm run type-check
+node --test tests/*.test.cjs
 npm run build
 ```
 
-For route or shell changes, also open the app in a browser and verify login,
-application switching, route navigation, notifications, search, and the floating
-AI assistant.
+涉及外壳、路由或菜单的改动，还需要在浏览器中检查：登录、切换应用、菜单跳转、旧地址重定向、通知、全局搜索和 AI 助手浮窗。
