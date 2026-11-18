@@ -706,6 +706,7 @@ class Application(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(50), default="published")
     code_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    access_groups: Mapped[Optional[list[dict]]] = mapped_column(JSON(none_as_null=True), nullable=True)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     menus: Mapped[list["ApplicationMenu"]] = relationship(back_populates="application", cascade="all, delete-orphan")

@@ -994,6 +994,10 @@ export const validateRule = (id: number) => api.post(`/rules/${id}/validate`);
 
 // Template Marketplace (Phase 4)
 export const listTemplates = () => api.get('/templates');
+export const listApplicationTemplates = () => api.get('/templates/applications');
+export const saveApplicationTemplate = (appId: number) => api.post(`/templates/applications/${appId}`);
+export const instantiateApplicationTemplate = (templateId: number) =>
+  api.post<{ data: { id: number; name: string } }>(`/templates/applications/${templateId}/instantiate`);
 export const getTemplate = (id: number) => api.get(`/templates/${id}`);
 export const instantiateTemplate = (id: number, data?: Record<string, unknown>) =>
   api.post(`/templates/${id}/instantiate`, data || {});
@@ -1171,12 +1175,10 @@ export const updatePlatformForm = (id: number | string, data: Record<string, unk
   api.put(`/forms/${id}`, data);
 export const deletePlatformForm = (id: number | string) =>
   api.delete(`/forms/${id}`);
-export const previewPlatformFormPublish = (id: number | string) =>
-  api.get(`/forms/${id}/publish/preview`);
 export const copyPlatformForm = (id: number | string, data: { name: string; code: string }) =>
   api.post(`/forms/${id}/copy`, data);
-export const publishPlatformForm = (id: number | string) =>
-  api.post(`/forms/${id}/publish`);
+export const publishPlatformForm = (id: number | string, workflowDraftId?: number) =>
+  api.post<{ data: PlatformFormVersion }>(`/forms/${id}/publish`, workflowDraftId ? { workflow_draft_id: workflowDraftId } : undefined);
 export const listPlatformFormVersions = (id: number | string) =>
   api.get(`/forms/${id}/versions`);
 export const getPlatformFormVersion = (id: number | string, version: number | string) =>
@@ -1268,6 +1270,12 @@ export const savePlatformMenuOrder = (applicationId: number, expected: MenuOrder
   api.put(`/forms/applications/${applicationId}/menu-order`, { expected, nodes });
 export const createPlatformMenuNode = (applicationId: number | string, data: Record<string, unknown>) =>
   api.post(`/forms/applications/${applicationId}/menu-nodes`, data);
+export const pastePlatformMenuNodes = (applicationId: number, sourceApplicationId: number, nodeIds: number[], parentId: number | null) =>
+  api.post<{ data: PlatformMenuNode[]; root_ids: number[] }>(`/forms/applications/${applicationId}/menu-nodes/paste`, {
+    source_application_id: sourceApplicationId,
+    node_ids: nodeIds,
+    parent_id: parentId,
+  });
 export const updatePlatformMenuNode = (
   applicationId: number | string,
   nodeId: number | string,

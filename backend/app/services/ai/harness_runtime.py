@@ -23,8 +23,9 @@ from typing import Any
 from weakref import WeakValueDictionary
 from zoneinfo import ZoneInfo
 
-from .application_menu_registry import REQUESTS as APPLICATION_MENU_REQUESTS, execute_application_menu_tool
+from .application_menu_registry import WRITE_REQUESTS as APPLICATION_MENU_REQUESTS, execute_application_menu_tool
 from .component_page_tools import PAGE_WRITE_REQUESTS, execute_page_tool
+from .workflow_design_tools import WRITE_TOOLS as WORKFLOW_DESIGN_WRITES, execute_workflow_design_tool
 from .agent_definition import load_agent_system_prompt, use_agent_registry
 from .agent_items import build_agent_item, from_legacy_step
 from .policies import decide_ai_permission, decide_tool_permission
@@ -327,14 +328,18 @@ class PlatformBridge:
                     return {'status': 'validation_failed', 'message': str(error.detail)}
                 if report['blocking_count']:
                     return {'status': 'validation_failed', 'message': '表单发布检查未通过', 'report': report}
-            if tool.name in APPLICATION_MENU_REQUESTS or tool.name in PAGE_WRITE_REQUESTS:
+            configuration_writers = {
+                **dict.fromkeys(APPLICATION_MENU_REQUESTS, execute_application_menu_tool),
+                **dict.fromkeys(PAGE_WRITE_REQUESTS, execute_page_tool),
+                **dict.fromkeys(WORKFLOW_DESIGN_WRITES, execute_workflow_design_tool),
+            }
+            if (execute := configuration_writers.get(tool.name)) is not None:
                 from fastapi import HTTPException
                 from pydantic import ValidationError
                 from app.core.db import db_session
 
                 try:
                     async with db_session() as session:
-                        execute = execute_page_tool if tool.name in PAGE_WRITE_REQUESTS else execute_application_menu_tool
                         arguments = await execute(
                             tool.name, session, user=self.user, payload=arguments, prepare=True,
                         )

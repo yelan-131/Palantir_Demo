@@ -9,6 +9,20 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../s
 const plain = value => JSON.parse(JSON.stringify(value));
 const {moveWidget, listFilters, retainFilters} = context.exports;
 
+test('business data design selects the matching editable component and prefers its record list', () => {
+ const {businessDataComponent} = context.exports;
+ const definition = {sourceFormId:6, widgets:[
+   {id:'unrelated',type:'record-list',dataBinding:{formId:2}},
+   {id:'filter',type:'record-filter'},
+   {id:'metric',type:'metric'},
+   {id:'records',type:'record-list'},
+ ]};
+ assert.equal(businessDataComponent(definition,6)?.id,'records');
+ assert.equal(businessDataComponent(definition,2)?.id,'unrelated');
+ assert.equal(businessDataComponent(definition,9),undefined);
+ assert.equal(businessDataComponent(definition,9,true)?.id,'unrelated');
+});
+
 test('dragging preserves component identities and configuration without mutating the saved page', () => {
   const page = {widgets: [{id:'list',width:24},{id:'chart',dimension:'status'},{id:'metric',aggregate:'sum',measure:'qty'}]};
   const next = moveWidget(page, 'metric', 'list');

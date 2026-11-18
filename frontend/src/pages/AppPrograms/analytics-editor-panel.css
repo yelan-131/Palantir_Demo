@@ -293,7 +293,7 @@
 .analytics-dependent-options > summary:focus-visible { outline:2px solid var(--mf-primary);outline-offset:-2px; }
 .analytics-dependent-options:not([open]) > :not(summary) { display:none!important; }
 /* Reserve enough room for parameter names and their help affordance. */
-.analytics-editor-form-inspector { --property-label-width:92px; }
+.analytics-editor-form-inspector { --property-label-width:var(--property-inspector-compact-label-width); }
 .analytics-editor-form-inspector .property-inspector-row,
 .analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { grid-template-columns:var(--property-label-width) minmax(0,1fr); }
 /* One alignment and heading hierarchy for every standard settings panel. */

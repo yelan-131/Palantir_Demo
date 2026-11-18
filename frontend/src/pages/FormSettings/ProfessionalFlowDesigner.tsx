@@ -2,13 +2,14 @@ import {getPlatformForm, listPlatformForms, type PlatformForm, type PlatformForm
 import {PropertyGroup, PropertyRow} from '@/components/PropertyInspector';
 import {createPortal} from 'react-dom';
 import './designer-dialog.css';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ApartmentOutlined,
   ApiOutlined,
   BranchesOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   DeploymentUnitOutlined,
@@ -19,21 +20,32 @@ import {
   LinkOutlined,
   MailOutlined,
   PartitionOutlined,
+  SnippetsOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
   ShareAltOutlined,
   StopOutlined,
+  TagOutlined,
   ThunderboltOutlined,
   UserOutlined,
   UserSwitchOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { Button, Input, InputNumber, Modal, Select, Switch, Tag, Typography } from 'antd';
+import { Button, Dropdown, Input, InputNumber, Modal, Select, Switch, Tag, Typography, message } from 'antd';
+import { FlowAnnotationProperties } from './FlowAnnotationProperties';
+import {
+  DEFAULT_FLOW_ANNOTATION_COLOR, getFlowAnnotationFrames, getFlowAnnotationTitleSpace, getFlowMarqueeItems,
+  readFlowAnnotations, resizeFlowAnnotation, translateAnnotationRoutes, type FlowAnnotation, type FlowAnnotationSize,
+} from './flowAnnotations';
+import { getFlowEdgeRoute, getFlowSegmentDrag, insertFlowWaypoint, type FlowPortSide, type FlowRoutePoint } from './flowEdgeRoute';
+import { FLOW_NODE_GRID, FLOW_NODE_SIZE, snapFlowAxis, snapFlowNode, type FlowNodeSnap } from './flowNodeSnap';
+import { cloneFlowSelection, copyFlowSelection, type FlowClipboard } from './flowClipboard';
 
-type FlowPortSide = 'top' | 'right' | 'bottom' | 'left';
-type Selection = { type: 'canvas' } | { type: 'node'; id: string } | { type: 'nodes'; ids: string[] } | { type: 'edge'; id: string };
+type Selection = { type: 'canvas' } | { type: 'node'; id: string } | { type: 'multiple'; nodeIds: string[]; annotationIds: string[] }
+  | { type: 'edge'; id: string } | { type: 'annotation'; id: string };
+type RouteDragPreview = { waypoints: FlowRoutePoint[]; snap: FlowNodeSnap };
 type NodeCategory = 'event' | 'task' | 'gateway' | 'subprocess' | 'data' | 'boundary';
 type ApprovalMode = 'single' | 'orSign' | 'countersign';
 type AssigneeSource = 'fixed' | 'role' | 'departmentOwner' | 'initiatorManager' | 'field';
@@ -63,6 +75,12 @@ export interface FlowDesignerField {
   required?: boolean;
 }
 
+export interface FlowCcRecipient {
+  id: string;
+  type: 'user' | 'role';
+  value?: string;
+}
+
 export interface FlowDesignerNode {
   id: string;
   type: string;
@@ -75,6 +93,7 @@ export interface FlowDesignerNode {
   assigneeSource?: AssigneeSource;
   assigneeValue?: string;
   assigneeRules?: FlowAssigneeRule[];
+  ccRecipients?: FlowCcRecipient[];
   approvalMode?: ApprovalMode;
   slaHours?: number;
   notificationEnabled?: boolean;
@@ -99,6 +118,7 @@ export interface FlowDesignerEdge {
   priority: number;
   isDefault?: boolean;
   routeY?: number;
+  waypoints?: FlowRoutePoint[];
 }
 
 export interface FlowDesignerConfig {
@@ -107,7 +127,8 @@ export interface FlowDesignerConfig {
   version: string;
   nodes: FlowDesignerNode[];
   edges: FlowDesignerEdge[];
-  triggerBindings: Array<{ action: string; workflowId?: number; enabled: boolean; label: string }>;
+  annotations?: FlowAnnotation[];
+  triggerBindings: Array<{ action: string; workflowId?: number; enabled: boolean; label: string; startNodeId?: string }>;
   stateMapping: {
     statusField: string;
     currentNodeField: string;
@@ -136,11 +157,14 @@ interface NodeDefinition {
   bpmnType: string;
 }
 
-const NODE_WIDTH = 216;
-const NODE_HEIGHT = 48;
-const SNAP_GRID = 24;
-const SNAP_ORIGIN_X = 32;
-const SNAP_ORIGIN_Y = 82;
+const { width: NODE_WIDTH, height: NODE_HEIGHT } = FLOW_NODE_SIZE;
+const { step: SNAP_GRID, x: SNAP_ORIGIN_X, y: SNAP_ORIGIN_Y } = FLOW_NODE_GRID;
+const annotationResizeKeys: Partial<Record<string, FlowRoutePoint>> = {
+  ArrowLeft: { x: -SNAP_GRID, y: 0 },
+  ArrowRight: { x: SNAP_GRID, y: 0 },
+  ArrowUp: { x: 0, y: -SNAP_GRID },
+  ArrowDown: { x: 0, y: SNAP_GRID },
+};
 const DEFAULT_NODE_START_Y = 140;
 const DEFAULT_NODE_GAP_Y = SNAP_GRID * 4;
 const DEFAULT_STACK_NODE_IDS = ['start-1', 'task-1', 'task-2', 'end-1'];
@@ -238,6 +262,11 @@ const approvalModeOptions = [
   { value: 'countersign', label: '会签' },
 ];
 
+const ccRecipientTypeOptions = [
+  { value: 'user', label: '用户' },
+  { value: 'role', label: '角色' },
+];
+
 const edgeConditionOperatorOptions = [
   { value: 'eq', label: '等于' },
   { value: 'ne', label: '不等于' },
@@ -280,29 +309,22 @@ function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function snapValue(value: number, origin = 0, grid = SNAP_GRID) {
-  return Math.round((value - origin) / grid) * grid + origin;
-}
-
-function clampPoint(x: number, y: number, canvas: HTMLDivElement) {
-  const maxX = Math.max(SNAP_ORIGIN_X, canvas.offsetWidth - NODE_WIDTH - 24);
-  const maxY = Math.max(SNAP_ORIGIN_Y, canvas.offsetHeight - NODE_HEIGHT - 24);
+function getNodeBounds(canvas: HTMLDivElement) {
   return {
-    x: Math.min(Math.max(SNAP_ORIGIN_X, x), maxX),
-    y: Math.min(Math.max(SNAP_ORIGIN_Y, y), maxY),
+    min: { x: SNAP_ORIGIN_X, y: SNAP_ORIGIN_Y },
+    max: {
+      x: Math.max(SNAP_ORIGIN_X, canvas.offsetWidth - NODE_WIDTH - 24),
+      y: Math.max(SNAP_ORIGIN_Y, canvas.offsetHeight - NODE_HEIGHT - 24),
+    },
   };
 }
 
 function snapNodePosition(x: number, y: number, canvas: HTMLDivElement) {
-  return clampPoint(
-    snapValue(x, SNAP_ORIGIN_X),
-    snapValue(y, SNAP_ORIGIN_Y),
-    canvas,
-  );
+  return snapFlowNode({ x, y }, getNodeBounds(canvas)).point;
 }
 
-function getCenteredNodeX(canvas: HTMLDivElement) {
-  return Math.max(SNAP_ORIGIN_X, Math.round((canvas.offsetWidth - NODE_WIDTH) / 2));
+function getCenteredNodeX(width: number) {
+  return Math.max(SNAP_ORIGIN_X, Math.round((width - NODE_WIDTH) / 2));
 }
 
 function isDefaultVerticalStack(nodes: FlowDesignerNode[]) {
@@ -339,11 +361,19 @@ function cloneFlowConfig(config: FlowDesignerConfig): FlowDesignerConfig {
     ...config,
     nodes: config.nodes.map((node) => ({
       ...node,
+      ccRecipients: node.ccRecipients?.map((recipient) => ({ ...recipient })),
       fieldPermissions: node.fieldPermissions
         ? Object.fromEntries(Object.entries(node.fieldPermissions).map(([key, value]) => [key, { ...value }]))
         : undefined,
     })),
     edges: config.edges.map((edge) => ({ ...edge })),
+    annotations: config.annotations?.map((annotation) => ({
+      ...annotation,
+      nodeIds: [...annotation.nodeIds],
+      size: annotation.size && { ...annotation.size },
+      titleStyle: annotation.titleStyle && { ...annotation.titleStyle },
+      frameStyle: annotation.frameStyle && { ...annotation.frameStyle },
+    })),
     triggerBindings: config.triggerBindings.map((binding) => ({ ...binding })),
     stateMapping: { ...config.stateMapping },
     advancedModeConfig: { ...config.advancedModeConfig },
@@ -404,7 +434,7 @@ export function createDefaultFlowConfig(params: {
   const startDef = nodeGroups[0].items[0];
   const endDef = nodeGroups[0].items[1];
   const taskDef = nodeGroups[1].items[0];
-  const labels = params.steps.length >= 2 ? params.steps : ['提交', '审批', '归档'];
+  const labels = params.steps.length >= 2 ? params.steps : ['提交', params.steps[0] || '审批', '归档'];
   const nodes = labels.map((label, index) => {
     const definition = index === 0 ? startDef : index === labels.length - 1 ? endDef : taskDef;
     return { ...createNode(definition, params.fields, index), id: `flow-${index}`, label };
@@ -428,7 +458,6 @@ export function createDefaultFlowConfig(params: {
     edges,
     triggerBindings: [
       { action: 'submit', label: '提交表单', enabled: true },
-      { action: 'approve', label: '审批通过', enabled: false },
     ],
     stateMapping: {
       statusField: 'workflow_status',
@@ -443,14 +472,49 @@ export function createDefaultFlowConfig(params: {
   };
 }
 
+export function workflowTriggerStartId(binding: FlowDesignerConfig['triggerBindings'][number], startNodes: FlowDesignerNode[]) {
+  if (!binding.enabled) return undefined;
+  if (startNodes.length === 1) return startNodes[0].id;
+  return startNodes.find((node) => node.id === binding.startNodeId)?.id;
+}
+
+export function preserveWorkflowStartBindings(previous: FlowDesignerConfig, next: FlowDesignerConfig) {
+  if (next.nodes === previous.nodes) return next;
+  const oldStarts = previous.nodes.filter((node) => node.type === 'startEvent');
+  const newStarts = next.nodes.filter((node) => node.type === 'startEvent');
+  if (oldStarts.length !== 1 || newStarts.length <= 1 || !newStarts.some((node) => node.id === oldStarts[0].id)) return next;
+  return {
+    ...next,
+    triggerBindings: next.triggerBindings.map((binding) => binding.enabled && !newStarts.some((node) => node.id === binding.startNodeId)
+      ? { ...binding, startNodeId: oldStarts[0].id } : binding),
+  };
+}
+
+export function setWorkflowStartTrigger(config: FlowDesignerConfig, action: string, startId: string, enabled: boolean) {
+  const starts = config.nodes.filter((node) => node.type === 'startEvent');
+  if (!starts.some((node) => node.id === startId)) return config.triggerBindings;
+  return config.triggerBindings.map((binding) => {
+    if (binding.action !== action || (!enabled && workflowTriggerStartId(binding, starts) !== startId)) return binding;
+    return { ...binding, enabled, startNodeId: enabled ? startId : undefined };
+  });
+}
+
 export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesignerValidationItem[] {
   const startNodes = config.nodes.filter((node) => node.type === 'startEvent');
   const endNodes = config.nodes.filter((node) => node.type === 'endEvent');
   const nodeIds = new Set(config.nodes.map((node) => node.id));
   const connectedNodeIds = new Set<string>();
+  const outgoing = new Map<string, FlowDesignerEdge[]>();
+  const incoming = new Map<string, string[]>();
   config.edges.forEach((edge) => {
     connectedNodeIds.add(edge.source);
     connectedNodeIds.add(edge.target);
+    const routes = outgoing.get(edge.source) ?? [];
+    routes.push(edge);
+    outgoing.set(edge.source, routes);
+    const predecessors = incoming.get(edge.target) ?? [];
+    predecessors.push(edge.source);
+    incoming.set(edge.target, predecessors);
   });
   const orphanNodes = config.nodes.filter((node) => node.executable && node.type !== 'startEvent' && node.type !== 'endEvent' && !connectedNodeIds.has(node.id));
   const incompleteApprovals = config.nodes.filter((node) => approvalTaskTypes.has(node.type) && (
@@ -458,18 +522,34 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
       ? node.assigneeRules.some((rule) => !['departmentOwner', 'initiatorManager'].includes(rule.type) && !String(rule.value || '').trim())
       : !(node.assigneeSource && node.assigneeValue)
   ));
+  const incompleteCc = config.nodes.filter((node) => node.type === 'ccTask' && (
+    !node.ccRecipients?.length || node.ccRecipients.some((recipient) =>
+      !['user', 'role'].includes(recipient.type) || !recipient.value?.trim())
+  ));
   const incompleteGateways = config.nodes.filter((node) => node.type === 'exclusiveGateway').filter((node) => {
-    const outgoing = config.edges.filter((edge) => edge.source === node.id);
-    return outgoing.length < 2 || outgoing.every((edge) => !edge.condition && !edge.isDefault);
+    const routes = outgoing.get(node.id) ?? [];
+    return routes.length < 2 || routes.every((edge) => !edge.condition && !edge.isDefault);
   });
   const hasParallelGateway = config.nodes.some((node) => ['parallelGateway', 'joinGateway'].includes(node.type));
   const invalidEdges = config.edges.filter((edge) => !nodeIds.has(edge.source) || !nodeIds.has(edge.target));
   const enabledTriggers = config.triggerBindings.filter((binding) => binding.enabled);
+  const reachable = new Set<string>();
+  const pending = endNodes.map((node) => node.id);
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (reachable.has(id) || !nodeIds.has(id)) continue;
+    reachable.add(id);
+    for (const source of incoming.get(id) ?? []) pending.push(source);
+  }
+  const startsWithoutEnd = startNodes.filter((node) => !reachable.has(node.id));
+  const unassignedTriggers = startNodes.length > 1
+    ? enabledTriggers.filter((binding) => !startNodes.some((node) => node.id === binding.startNodeId))
+    : [];
   const issues: FlowDesignerValidationItem[] = [
     {
-      level: startNodes.length === 1 ? 'suggestion' : 'error',
+      level: startNodes.length ? 'suggestion' : 'error',
       title: '开始事件',
-      detail: startNodes.length === 1 ? '流程包含唯一开始事件。' : `当前有 ${startNodes.length} 个开始事件，需要且只能保留一个。`,
+      detail: startNodes.length ? `流程包含 ${startNodes.length} 个开始事件。` : '流程至少需要一个开始事件。',
     },
     {
       level: endNodes.length >= 1 ? 'suggestion' : 'error',
@@ -502,12 +582,32 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
       detail: invalidEdges.length ? `存在 ${invalidEdges.length} 条连接了无效节点的连线。` : '连线均连接有效节点。',
     },
     {
-      level: enabledTriggers.length ? 'suggestion' : 'error',
+      level: enabledTriggers.length && !unassignedTriggers.length ? 'suggestion' : 'error',
       title: '触发绑定',
-      detail: enabledTriggers.length ? `已启用 ${enabledTriggers.length} 个表单触发动作。` : '至少需要启用一个表单触发动作。',
+      detail: unassignedTriggers.length
+        ? `请选择开始节点，在「触发动作」中绑定 ${unassignedTriggers.map((binding) => binding.label || binding.action).join('、')}。`
+        : enabledTriggers.length ? `已启用 ${enabledTriggers.length} 个表单触发动作。` : '至少需要启用一个表单触发动作。',
     },
   ];
+  if (incompleteCc.length) {
+    issues.push({ level: 'error', title: '抄送对象', detail: `请为以下抄送任务配置收件人：${incompleteCc.map((node) => node.label).join('、')}。` });
+  }
+  if (endNodes.length && startsWithoutEnd.length) {
+    issues.push({ level: 'error', title: '起止路径', detail: `请为以下开始事件连接至少一个结束事件：${startsWithoutEnd.map((node) => node.label).join('、')}。` });
+  }
   return issues;
+}
+
+export function getRemovableFlowNodeIds(config: FlowDesignerConfig, selectedIds: string[]) {
+  const removable = new Set(selectedIds);
+  const preferredStarts = new Set(config.triggerBindings.filter((binding) => binding.enabled).map((binding) => binding.startNodeId));
+  for (const type of ['startEvent', 'endEvent']) {
+    const events = config.nodes.filter((node) => node.type === type);
+    if (!events.length || events.some((node) => !removable.has(node.id))) continue;
+    const retained = type === 'startEvent' ? events.find((node) => preferredStarts.has(node.id)) ?? events[0] : events[0];
+    removable.delete(retained.id);
+  }
+  return removable;
 }
 
 function getPortPoint(node: FlowDesignerNode, side: FlowPortSide) {
@@ -518,50 +618,6 @@ function getPortPoint(node: FlowDesignerNode, side: FlowPortSide) {
     left: { x: node.x, y: node.y + NODE_HEIGHT / 2 },
   };
   return points[side];
-}
-
-function getPortVector(side: FlowPortSide) {
-  const vectors: Record<FlowPortSide, { x: number; y: number }> = {
-    top: { x: 0, y: -1 },
-    right: { x: 1, y: 0 },
-    bottom: { x: 0, y: 1 },
-    left: { x: -1, y: 0 },
-  };
-  return vectors[side];
-}
-
-function clampRouteY(value: number, canvas?: HTMLDivElement | null) {
-  const maxY = canvas ? canvas.offsetHeight - 32 : 1600;
-  return Math.min(Math.max(SNAP_ORIGIN_Y, value), maxY);
-}
-
-function orthogonalRoute(
-  start: { x: number; y: number },
-  fromSide: FlowPortSide,
-  end: { x: number; y: number },
-  toSide: FlowPortSide,
-  routeY?: number,
-) {
-  const fromVector = getPortVector(fromSide);
-  const toVector = getPortVector(toSide);
-  const offset = 34;
-  const startLead = { x: start.x + fromVector.x * offset, y: start.y + fromVector.y * offset };
-  const endLead = { x: end.x + toVector.x * offset, y: end.y + toVector.y * offset };
-  const midY = routeY ?? (startLead.y + endLead.y) / 2;
-  const handleX = (startLead.x + endLead.x) / 2;
-  return {
-    d: `M ${start.x} ${start.y} L ${startLead.x} ${startLead.y} L ${startLead.x} ${midY} L ${endLead.x} ${midY} L ${endLead.x} ${endLead.y} L ${end.x} ${end.y}`,
-    handle: { x: handleX, y: midY },
-    midY,
-  };
-}
-
-function orthogonalPath(start: { x: number; y: number }, fromSide: FlowPortSide, end: { x: number; y: number }, toSide: FlowPortSide) {
-  return orthogonalRoute(start, fromSide, end, toSide).d;
-}
-
-function connectorRoute(from: FlowDesignerNode, fromSide: FlowPortSide, to: FlowDesignerNode, toSide: FlowPortSide, routeY?: number) {
-  return orthogonalRoute(getPortPoint(from, fromSide), fromSide, getPortPoint(to, toSide), toSide, routeY);
 }
 
 function previewTargetSide(fromSide: FlowPortSide, start: { x: number; y: number }, end: { x: number; y: number }): FlowPortSide {
@@ -625,20 +681,52 @@ export default function ProfessionalFlowDesigner({
   const [pendingPort, setPendingPort] = useState<{ nodeId: string; side: FlowPortSide } | null>(null);
   const [isPaletteDragOver, setPaletteDragOver] = useState(false);
   const [palettePreview, setPalettePreview] = useState<{ label: string; x: number; y: number; inside: boolean } | null>(null);
-  const [dragPreview, setDragPreview] = useState<{ x: number; y: number } | null>(null);
+  const [dragPreview, setDragPreview] = useState<FlowNodeSnap | null>(null);
+  const [annotationResize, setAnnotationResize] = useState<{ id: string; size: FlowAnnotationSize } | null>(null);
   const [connectionPreview, setConnectionPreview] = useState<{ x: number; y: number } | null>(null);
   const [marqueeSelection, setMarqueeSelection] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [activeRouteEdgeId, setActiveRouteEdgeId] = useState<string | null>(null);
+  const [selectedWaypoint, setSelectedWaypoint] = useState<{ edgeId: string; index: number } | null>(null);
+  const [routePreview, setRoutePreview] = useState<RouteDragPreview | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const arrowId = useId();
   const [conditionModalOpen, setConditionModalOpen] = useState(false);
   const [history, setHistory] = useState<FlowDesignerConfig[]>([]);
   const [future, setFuture] = useState<FlowDesignerConfig[]>([]);
-  const [clipboardNode, setClipboardNode] = useState<FlowDesignerNode | null>(null);
+  const [clipboard, setClipboard] = useState<{ graph: FlowClipboard; pasteCount: number } | null>(null);
   const [nodeSearch, setNodeSearch] = useState('');
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const annotationResizeRef = useRef<{
+    id: string;
+    pointerId: number;
+    origin: FlowRoutePoint;
+    size: FlowAnnotationSize;
+    minimum: FlowAnnotationSize;
+    preview: FlowAnnotationSize;
+  } | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const pastedAnnotationRef = useRef<string | null>(null);
   const autoCenteredStackXRef = useRef<number | null>(null);
-  const dragRef = useRef<{ ids: string[]; startX: number; startY: number; scaleX: number; scaleY: number; origins: Record<string, { x: number; y: number }>; snapshot?: FlowDesignerConfig } | null>(null);
-  const routeDragRef = useRef<{ edgeId: string; startY: number; originRouteY: number; scaleY: number; snapshot?: FlowDesignerConfig } | null>(null);
-  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; dragging: boolean } | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    pointerStart: FlowRoutePoint;
+    pointerOrigin: FlowRoutePoint;
+    primary: FlowDesignerNode;
+    clickSelection: Selection;
+    moveInternalRoutes: boolean;
+    ids: Set<string>;
+    neighbors: FlowDesignerNode[];
+    bounds: ReturnType<typeof getNodeBounds>;
+    preview: FlowNodeSnap | null;
+  } | null>(null);
+  const routeDragRef = useRef<{
+    edgeId: string;
+    pointerId: number;
+    pointerStart: FlowRoutePoint;
+    pointerOrigin: FlowRoutePoint;
+    move: (delta: FlowRoutePoint, canvas: HTMLDivElement) => RouteDragPreview | null;
+    preview: RouteDragPreview | null;
+  } | null>(null);
+  const marqueeRef = useRef<{ pointerId: number; startX: number; startY: number; dragging: boolean } | null>(null);
   const palettePointerDragRef = useRef<{
     definition: NodeDefinition;
     startX: number;
@@ -650,6 +738,7 @@ export default function ProfessionalFlowDesigner({
   const suppressPaletteClickRef = useRef(false);
   const suppressCanvasClickRef = useRef(false);
   const validation = useMemo(() => validateFlowDesignerConfig(config), [config]);
+  const startNodes = config.nodes.filter((node) => node.type === 'startEvent');
   const normalizedNodeSearch = nodeSearch.trim().toLowerCase();
   const visibleNodeGroups = useMemo(() => {
     return nodeGroups
@@ -689,16 +778,22 @@ export default function ProfessionalFlowDesigner({
     return()=>{current=false;};
   },[dispatchTargetId]);
   const selectedEdge = selection.type === 'edge' ? config.edges.find((edge) => edge.id === selection.id) : undefined;
-  const selectedNodeIds = selection.type === 'nodes' ? selection.ids : selection.type === 'node' ? [selection.id] : [];
+  const annotations = config.annotations ?? [];
+  const selectedAnnotation = selection.type === 'annotation' ? annotations.find((annotation) => annotation.id === selection.id) : undefined;
+  const selectedAnnotationIds = new Set(selection.type === 'multiple' ? selection.annotationIds : selectedAnnotation ? [selectedAnnotation.id] : []);
+  const selectedNodeIds = selection.type === 'multiple' ? selection.nodeIds : selection.type === 'node' ? [selection.id] : [];
   const selectedNodeIdSet = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+  const canCopySelection = Boolean(selectedNodeIds.length || selectedAnnotationIds.size);
+  const copyLabel = selectedAnnotationIds.size ? (selectedNodeIds.length ? '复制所选项' : '复制注释') : '复制节点';
   const selectedEdgeSourceNode = selectedEdge ? config.nodes.find((node) => node.id === selectedEdge.source) : undefined;
   const isSelectedEdgeFromBranch = selectedEdgeSourceNode?.category === 'gateway';
 
   useEffect(() => {
+    setSelectedWaypoint(null);
     if (selection.type !== 'edge') {
       setConditionModalOpen(false);
     }
-  }, [selection.type]);
+  }, [selectedEdge?.id, selection.type]);
 
   useEffect(() => {
     if (!config.nodes.some((node) => node.type === 'manualTask')) return;
@@ -720,32 +815,47 @@ export default function ProfessionalFlowDesigner({
     });
   }, [config, onChange]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-
-    const recenterDefaultStack = () => {
-      if (!isDefaultVerticalStack(config.nodes) || canvas.offsetWidth <= 0) return;
-      const firstX = config.nodes[0]?.x;
-      const allNodesShareX = config.nodes.every((node) => Math.abs(node.x - firstX) <= 1);
-      if (!allNodesShareX) return;
-      const wasAutoCentered = autoCenteredStackXRef.current !== null && Math.abs(firstX - autoCenteredStackXRef.current) <= 1;
-      const isLegacyDefaultX = LEGACY_STACK_X_VALUES.some((x) => Math.abs(firstX - x) <= 1);
-      if (!wasAutoCentered && !isLegacyDefaultX) return;
-      const centeredX = getCenteredNodeX(canvas);
-      autoCenteredStackXRef.current = centeredX;
-      if (config.nodes.every((node) => Math.abs(node.x - centeredX) <= 1)) return;
-      onChange({
-        ...config,
-        nodes: config.nodes.map((node) => ({ ...node, x: centeredX })),
-      });
-    };
-
-    recenterDefaultStack();
-    const observer = new ResizeObserver(recenterDefaultStack);
-    observer.observe(canvas);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewportWidth(viewport.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
     return () => observer.disconnect();
-  }, [config, onChange]);
+  }, []);
+
+  useLayoutEffect(() => {
+    const id = pastedAnnotationRef.current;
+    const viewport = viewportRef.current;
+    const canvas = canvasRef.current;
+    if (!id || !viewport || !canvas) return;
+    pastedAnnotationRef.current = null;
+    const frame = viewport.querySelector(`[data-flow-annotation-id="${id}"]`);
+    if (!frame) return;
+    const { left, right, width } = frame.getBoundingClientRect();
+    const viewportLeft = viewport.getBoundingClientRect().left;
+    const viewportRight = viewportLeft + viewport.clientWidth;
+    const shift = width >= viewport.clientWidth || left < viewportLeft ? left - viewportLeft : Math.max(0, right - viewportRight);
+    viewport.scrollLeft += shift / getCanvasScale(canvas).scaleX;
+  }, [config.annotations]);
+
+  useEffect(() => {
+    if (!viewportWidth || !isDefaultVerticalStack(config.nodes) || config.edges.some((edge) => edge.waypoints?.length)) return;
+    const firstX = config.nodes[0]?.x;
+    const allNodesShareX = config.nodes.every((node) => Math.abs(node.x - firstX) <= 1);
+    if (!allNodesShareX) return;
+    const wasAutoCentered = autoCenteredStackXRef.current !== null && Math.abs(firstX - autoCenteredStackXRef.current) <= 1;
+    const isLegacyDefaultX = LEGACY_STACK_X_VALUES.some((x) => Math.abs(firstX - x) <= 1);
+    if (!wasAutoCentered && !isLegacyDefaultX) return;
+    const centeredX = getCenteredNodeX(viewportWidth);
+    autoCenteredStackXRef.current = centeredX;
+    if (config.nodes.every((node) => Math.abs(node.x - centeredX) <= 1)) return;
+    onChange({
+      ...config,
+      nodes: config.nodes.map((node) => ({ ...node, x: centeredX })),
+    });
+  }, [config, onChange, viewportWidth]);
 
   const applyConfig = (nextConfig: FlowDesignerConfig, options: { record?: boolean } = {}) => {
     if (options.record !== false) {
@@ -755,12 +865,92 @@ export default function ProfessionalFlowDesigner({
     onChange(nextConfig);
   };
 
-  const patchConfig = (patch: Partial<FlowDesignerConfig>, options?: { record?: boolean }) => applyConfig({ ...config, ...patch }, options);
+  const patchConfig = (patch: Partial<FlowDesignerConfig>, options?: { record?: boolean }) =>
+    applyConfig(preserveWorkflowStartBindings(config, { ...config, ...patch }), options);
   const patchNode = (nodeId: string, patch: Partial<FlowDesignerNode>) => {
     patchConfig({ nodes: config.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)) });
   };
   const patchEdge = (edgeId: string, patch: Partial<FlowDesignerEdge>) => {
     patchConfig({ edges: config.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge)) });
+  };
+  const addAnnotation = () => {
+    const nodeIds = config.nodes.filter((node) => selectedNodeIdSet.has(node.id)).map((node) => node.id);
+    if (!nodeIds.length) return;
+    const annotation: FlowAnnotation = { id: makeId('annotation'), nodeIds, title: '注释', color: DEFAULT_FLOW_ANNOTATION_COLOR };
+    patchConfig({ annotations: [...annotations, annotation] });
+    setSelection({ type: 'annotation', id: annotation.id });
+  };
+  const patchAnnotation = (annotationId: string, patch: Partial<FlowAnnotation>) => {
+    patchConfig({ annotations: annotations.map((annotation) => annotation.id === annotationId ? { ...annotation, ...patch } : annotation) });
+  };
+
+  const startAnnotationResize = (
+    event: React.PointerEvent<HTMLButtonElement>, id: string, bounds: FlowAnnotationSize, minimum: FlowAnnotationSize,
+  ) => {
+    const canvas = canvasRef.current;
+    if (!canvas || event.button !== 0 || pendingPort || annotationResizeRef.current || dragRef.current || routeDragRef.current || marqueeRef.current) return;
+    event.stopPropagation();
+    const size = { width: bounds.width, height: bounds.height };
+    annotationResizeRef.current = {
+      id, pointerId: event.pointerId, origin: clientToCanvasPoint(canvas, event.clientX, event.clientY),
+      size, minimum, preview: size,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveAnnotationResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = annotationResizeRef.current;
+    const canvas = canvasRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !canvas) return;
+    const point = clientToCanvasPoint(canvas, event.clientX, event.clientY);
+    drag.preview = resizeFlowAnnotation(drag.size, { x: point.x - drag.origin.x, y: point.y - drag.origin.y }, drag.minimum);
+    setAnnotationResize({ id: drag.id, size: drag.preview });
+  };
+
+  const stopAnnotationResize = (commit: boolean, pointerId?: number) => {
+    const drag = annotationResizeRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
+    annotationResizeRef.current = null;
+    setAnnotationResize(null);
+    if (commit && (drag.size.width !== drag.preview.width || drag.size.height !== drag.preview.height)) {
+      patchAnnotation(drag.id, { size: drag.preview });
+    }
+  };
+
+  const routeForEdge = (edge: FlowDesignerEdge, waypoints = edge.waypoints, nodes = config.nodes) => {
+    const from = nodes.find((node) => node.id === edge.source);
+    const to = nodes.find((node) => node.id === edge.target);
+    if (!from || !to) return undefined;
+    return getFlowEdgeRoute(getPortPoint(from, edge.sourceSide), edge.sourceSide,
+      getPortPoint(to, edge.targetSide), edge.targetSide, waypoints, edge.routeY);
+  };
+
+  const getRouteSnapTargets = (edgeId: string) => {
+    const targets: Record<keyof FlowRoutePoint, FlowRoutePoint[]> = { x: [], y: [] };
+    for (const other of config.edges) {
+      if (other.id === edgeId) continue;
+      const route = routeForEdge(other);
+      for (const { a, b, length } of route?.segments ?? []) {
+        if (length < 12) continue;
+        const axis = a.x === b.x ? 'x' : 'y';
+        targets[axis].push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      }
+    }
+    return targets;
+  };
+
+  const addWaypoint = (edge: FlowDesignerEdge, point?: FlowRoutePoint) => {
+    const route = routeForEdge(edge);
+    const insertion = route && insertFlowWaypoint(route, point);
+    if (!insertion) return;
+    patchEdge(edge.id, { waypoints: insertion.waypoints, routeY: undefined });
+    setSelectedWaypoint({ edgeId: edge.id, index: insertion.index });
+  };
+
+  const removeWaypoint = (edge: FlowDesignerEdge, index: number) => {
+    const waypoints = edge.waypoints?.filter((_, current) => current !== index);
+    patchEdge(edge.id, { waypoints: waypoints?.length ? waypoints : undefined });
+    setSelectedWaypoint(null);
   };
 
   const addNode = (definition: NodeDefinition, position?: { x: number; y: number }) => {
@@ -787,29 +977,23 @@ export default function ProfessionalFlowDesigner({
     const width = Math.abs(currentX - startX);
     const height = Math.abs(currentY - startY);
     setMarqueeSelection({ x, y, width, height });
-    const selectedIds = config.nodes
-      .filter((node) => {
-        const nodeRight = node.x + NODE_WIDTH;
-        const nodeBottom = node.y + NODE_HEIGHT;
-        const marqueeRight = x + width;
-        const marqueeBottom = y + height;
-        return node.x < marqueeRight && nodeRight > x && node.y < marqueeBottom && nodeBottom > y;
-      })
-      .map((node) => node.id);
-    setSelection(selectedIds.length === 1 ? { type: 'node', id: selectedIds[0] } : selectedIds.length > 1 ? { type: 'nodes', ids: selectedIds } : { type: 'canvas' });
+    const { nodeIds, annotationIds } = getFlowMarqueeItems({ left: x, top: y, width, height }, config.nodes, savedAnnotationFrames);
+    if (annotationIds.length || nodeIds.length > 1) setSelection({ type: 'multiple', nodeIds, annotationIds });
+    else setSelection(nodeIds.length === 1 ? { type: 'node', id: nodeIds[0] } : { type: 'canvas' });
   };
 
   const startMarqueeSelection = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0 || pendingPort || dragRef.current) return;
+    if (event.button !== 0 || pendingPort || dragRef.current || routeDragRef.current || marqueeRef.current || annotationResizeRef.current) return;
     const target = event.target as HTMLElement;
-    if (target.closest('.professional-flow-node, .professional-flow-port, .professional-flow-canvas-toolbar')) return;
+    if (target.closest('.professional-flow-node, .professional-flow-port, .professional-flow-canvas-toolbar, .professional-flow-annotation-title, .professional-flow-annotation-resize')) return;
     if (target.tagName.toLowerCase() === 'path' || target.tagName.toLowerCase() === 'text') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    event.preventDefault();
     const point = clientToCanvasPoint(canvas, event.clientX, event.clientY);
     const startX = point.x;
     const startY = point.y;
-    marqueeRef.current = { startX, startY, currentX: startX, currentY: startY, dragging: false };
+    marqueeRef.current = { pointerId: event.pointerId, startX, startY, dragging: false };
     setSelection({ type: 'canvas' });
     setMarqueeSelection(null);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -818,22 +1002,21 @@ export default function ProfessionalFlowDesigner({
   const moveMarqueeSelection = (event: React.PointerEvent<HTMLElement>) => {
     const marquee = marqueeRef.current;
     const canvas = canvasRef.current;
-    if (!marquee || !canvas) return;
+    if (!marquee || marquee.pointerId !== event.pointerId || !canvas) return;
     const point = clientToCanvasPoint(canvas, event.clientX, event.clientY);
-    marquee.currentX = point.x;
-    marquee.currentY = point.y;
-    const distance = Math.hypot(marquee.currentX - marquee.startX, marquee.currentY - marquee.startY);
+    const distance = Math.hypot(point.x - marquee.startX, point.y - marquee.startY);
     if (distance <= 4 && !marquee.dragging) return;
     marquee.dragging = true;
     suppressCanvasClickRef.current = true;
-    updateMarqueeSelection(marquee.startX, marquee.startY, marquee.currentX, marquee.currentY);
+    updateMarqueeSelection(marquee.startX, marquee.startY, point.x, point.y);
   };
 
-  const stopMarqueeSelection = () => {
+  const stopMarqueeSelection = (pointerId: number) => {
     const marquee = marqueeRef.current;
+    if (!marquee || marquee.pointerId !== pointerId) return;
     marqueeRef.current = null;
     setMarqueeSelection(null);
-    if (!marquee?.dragging) return;
+    if (!marquee.dragging) return;
     window.setTimeout(() => {
       suppressCanvasClickRef.current = false;
     }, 0);
@@ -951,98 +1134,188 @@ export default function ProfessionalFlowDesigner({
     window.addEventListener('mouseup', handleUp);
   };
 
-  const deleteSelected = () => {
-    if (selection.type === 'nodes') {
-      const nodeIds = new Set(selection.ids);
-      patchConfig({
-        nodes: config.nodes.filter((node) => !nodeIds.has(node.id)),
+  const deleteCanvasItems = (selectedIds: string[], annotationIds: ReadonlySet<string>) => {
+    const nodeIds = getRemovableFlowNodeIds(config, selectedIds);
+    if (!nodeIds.size && !annotationIds.size) {
+      if (selectedIds.length) message.warning('流程必须保留至少一个开始事件和一个结束事件');
+      return;
+    }
+    const nodes = nodeIds.size ? config.nodes.filter((node) => !nodeIds.has(node.id)) : config.nodes;
+    const remaining = annotations.filter((annotation) => !annotationIds.has(annotation.id));
+    patchConfig({
+      annotations: readFlowAnnotations(remaining, nodes),
+      ...(nodeIds.size && {
+        nodes,
         edges: config.edges.filter((edge) => !nodeIds.has(edge.source) && !nodeIds.has(edge.target)),
-      });
-      setSelection({ type: 'canvas' });
+        triggerBindings: config.triggerBindings.map((binding) => binding.startNodeId && nodeIds.has(binding.startNodeId)
+          ? { ...binding, startNodeId: undefined } : binding),
+      }),
+    });
+    setSelection({ type: 'canvas' });
+    if (nodeIds.size < selectedIds.length) message.info('已保留必需的起止事件');
+  };
+
+  const deleteSelected = () => {
+    if (selection.type !== 'edge') {
+      deleteCanvasItems(selectedNodeIds, selectedAnnotationIds);
       return;
     }
-    if (selection.type === 'node') {
-      patchConfig({
-        nodes: config.nodes.filter((node) => node.id !== selection.id),
-        edges: config.edges.filter((edge) => edge.source !== selection.id && edge.target !== selection.id),
-      });
-      setSelection({ type: 'canvas' });
-      return;
-    }
-    if (selection.type === 'edge') {
-      patchConfig({ edges: config.edges.filter((edge) => edge.id !== selection.id) });
-      setSelection({ type: 'canvas' });
-    }
+    patchConfig({ edges: config.edges.filter((edge) => edge.id !== selection.id) });
+    setSelection({ type: 'canvas' });
+  };
+
+  const startNodeDrag = (
+    event: React.PointerEvent<HTMLElement>, node: FlowDesignerNode, nodeIds: string[],
+    clickSelection: Selection, movingAnnotations: FlowAnnotation[], keepSelection: boolean,
+  ) => {
+    if (event.button !== 0 || dragRef.current || routeDragRef.current || annotationResizeRef.current || marqueeRef.current || pendingPort) return;
+    const canvas = canvasRef.current;
+    const surface = canvas?.parentElement;
+    if (!canvas || !surface) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const ids = new Set([...nodeIds, ...movingAnnotations.flatMap((annotation) => annotation.nodeIds)]);
+    const movingNodes = config.nodes.filter((item) => ids.has(item.id));
+    const limits = getNodeBounds(canvas);
+    const toolbar = movingAnnotations.length && surface.closest('.professional-flow-canvas')?.querySelector<HTMLElement>('.professional-flow-canvas-toolbar');
+    const annotationMinY = toolbar ? Math.max(...movingAnnotations.map((annotation) => {
+      const topNode = Math.min(...movingNodes.filter((item) => annotation.nodeIds.includes(item.id)).map((item) => item.y));
+      return toolbar.offsetTop + toolbar.offsetHeight + getFlowAnnotationTitleSpace(annotation) + node.y - topNode;
+    })) : -Infinity;
+    // Bound the shared movement so nodes keep their spacing at the edge of the canvas.
+    const bounds = {
+      min: {
+        x: Math.min(node.x, limits.min.x + node.x - Math.min(...movingNodes.map((item) => item.x))),
+        y: Math.min(node.y, Math.max(annotationMinY, limits.min.y + node.y - Math.min(...movingNodes.map((item) => item.y)))),
+      },
+      max: {
+        x: Math.max(node.x, limits.max.x + node.x - Math.max(...movingNodes.map((item) => item.x))),
+        y: Math.max(node.y, limits.max.y + node.y - Math.max(...movingNodes.map((item) => item.y))),
+      },
+    };
+    dragRef.current = {
+      pointerId: event.pointerId,
+      pointerStart: { x: event.clientX, y: event.clientY },
+      pointerOrigin: clientToCanvasPoint(canvas, event.clientX, event.clientY),
+      primary: node,
+      clickSelection,
+      moveInternalRoutes: movingAnnotations.length > 0,
+      ids,
+      neighbors: config.nodes.filter((item) => !ids.has(item.id)),
+      bounds,
+      preview: null,
+    };
+    if (!keepSelection) setSelection(clickSelection);
+    surface.setPointerCapture(event.pointerId);
   };
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>, node: FlowDesignerNode) => {
     if ((event.target as HTMLElement).closest('.professional-flow-port')) return;
-    if (pendingPort) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const { scaleX, scaleY } = getCanvasScale(canvas);
-    const ids = selection.type === 'nodes' && selectedNodeIdSet.has(node.id) ? selection.ids : [node.id];
-    const origins = Object.fromEntries(config.nodes.filter((item) => ids.includes(item.id)).map((item) => [item.id, { x: item.x, y: item.y }]));
-    dragRef.current = { ids, startX: event.clientX, startY: event.clientY, scaleX, scaleY, origins, snapshot: cloneFlowConfig(config) };
-    setDragPreview({ x: node.x, y: node.y });
-    if (!(selection.type === 'nodes' && selectedNodeIdSet.has(node.id))) {
-      setSelection({ type: 'node', id: node.id });
-    }
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const group = selection.type === 'multiple' && selectedNodeIdSet.has(node.id);
+    const movingAnnotations = group ? annotations.filter((annotation) => selectedAnnotationIds.has(annotation.id)) : [];
+    startNodeDrag(event, node, group ? selectedNodeIds : [node.id], { type: 'node', id: node.id }, movingAnnotations, group);
+  };
+
+  const startAnnotationDrag = (event: React.PointerEvent<HTMLDivElement>, annotation: FlowAnnotation) => {
+    if (event.shiftKey || (event.target as HTMLElement).closest('.professional-flow-annotation-resize')) return;
+    const primary = config.nodes.find((node) => annotation.nodeIds.includes(node.id));
+    if (!primary) return;
+    const group = selection.type === 'multiple' && selectedAnnotationIds.has(annotation.id);
+    const movingAnnotations = group ? annotations.filter((item) => selectedAnnotationIds.has(item.id)) : [annotation];
+    startNodeDrag(event, primary, group ? selectedNodeIds : annotation.nodeIds, { type: 'annotation', id: annotation.id }, movingAnnotations, group);
   };
 
   const moveDrag = (event: React.PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     const canvas = canvasRef.current;
-    if (!drag || !canvas) return;
-    const deltaX = (event.clientX - drag.startX) / drag.scaleX;
-    const deltaY = (event.clientY - drag.startY) / drag.scaleY;
-    const primaryOrigin = drag.origins[drag.ids[0]];
-    const next = primaryOrigin ? clampPoint(primaryOrigin.x + deltaX, primaryOrigin.y + deltaY, canvas) : null;
-    const liveDeltaX = next && primaryOrigin ? next.x - primaryOrigin.x : deltaX;
-    const liveDeltaY = next && primaryOrigin ? next.y - primaryOrigin.y : deltaY;
-    if (!next) return;
-    setDragPreview(next);
-    if (pendingPort) {
-      setConnectionPreview(clientToCanvasPoint(canvas, event.clientX, event.clientY));
-    }
-    patchConfig({
-      nodes: config.nodes.map((node) => (drag.ids.includes(node.id) && drag.origins[node.id]
-        ? {
-            ...node,
-            x: clampPoint(drag.origins[node.id].x + liveDeltaX, drag.origins[node.id].y + liveDeltaY, canvas).x,
-            y: clampPoint(drag.origins[node.id].x + liveDeltaX, drag.origins[node.id].y + liveDeltaY, canvas).y,
-          }
-        : node)),
-    }, { record: false });
+    if (!drag || drag.pointerId !== event.pointerId || !canvas) return;
+    if (!drag.preview && Math.hypot(event.clientX - drag.pointerStart.x, event.clientY - drag.pointerStart.y) < 4) return;
+    const pointer = clientToCanvasPoint(canvas, event.clientX, event.clientY);
+    const { scaleX, scaleY } = getCanvasScale(canvas);
+    const proposed = {
+      x: drag.primary.x + pointer.x - drag.pointerOrigin.x,
+      y: drag.primary.y + pointer.y - drag.pointerOrigin.y,
+    };
+    drag.preview = snapFlowNode(proposed, drag.bounds, drag.neighbors, { x: scaleX, y: scaleY });
+    setDragPreview(drag.preview);
   };
 
-  const startRouteDrag = (event: React.PointerEvent<SVGCircleElement>, edge: FlowDesignerEdge, originRouteY: number) => {
+  const startRouteDrag = (
+    event: React.PointerEvent<SVGElement>,
+    edge: FlowDesignerEdge,
+    move: NonNullable<typeof routeDragRef.current>['move'],
+  ) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || event.button !== 0 || pendingPort || dragRef.current || routeDragRef.current || annotationResizeRef.current) return;
     event.preventDefault();
     event.stopPropagation();
-    const { scaleY } = getCanvasScale(canvas);
+    event.currentTarget.focus({ preventScroll: true });
     routeDragRef.current = {
       edgeId: edge.id,
-      startY: event.clientY,
-      originRouteY,
-      scaleY,
-      snapshot: cloneFlowConfig(config),
+      pointerId: event.pointerId,
+      pointerStart: { x: event.clientX, y: event.clientY },
+      pointerOrigin: clientToCanvasPoint(canvas, event.clientX, event.clientY),
+      move,
+      preview: null,
     };
-    setSelection({ type: 'edge', id: edge.id });
-    setActiveRouteEdgeId(edge.id);
     event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const startSegmentDrag = (
+    event: React.PointerEvent<SVGElement>, edge: FlowDesignerEdge, route: ReturnType<typeof getFlowEdgeRoute>, anchor?: FlowRoutePoint,
+  ) => {
+    const canvas = canvasRef.current;
+    if (!canvas || event.button !== 0) return;
+    const segment = getFlowSegmentDrag(route, anchor ?? clientToCanvasPoint(canvas, event.clientX, event.clientY));
+    if (!segment) return;
+    const { axis, origin } = segment;
+    const targets = getRouteSnapTargets(edge.id)[axis];
+    startRouteDrag(event, edge, (delta, surface) => {
+      if (Math.abs(delta[axis]) < 1) return null;
+      const { scaleX, scaleY } = getCanvasScale(surface);
+      const proposed = { ...origin, [axis]: origin[axis] + delta[axis] };
+      const { value, target } = snapFlowAxis(axis, proposed, {
+        min: { x: 8, y: 8 },
+        max: { x: surface.clientWidth - 8, y: surface.clientHeight - 8 },
+      }, targets, axis === 'x' ? scaleX : scaleY);
+      if (value === origin[axis]) return null;
+      const point = { ...origin, [axis]: value };
+      return { waypoints: segment.move(value), snap: { point, alignX: axis === 'x' ? target : undefined, alignY: axis === 'y' ? target : undefined } };
+    });
+    setSelection({ type: 'edge', id: edge.id });
+    setSelectedWaypoint(null);
+  };
+
+  const startWaypointDrag = (event: React.PointerEvent<SVGCircleElement>, edge: FlowDesignerEdge, index: number, origin: FlowRoutePoint) => {
+    if (!edge.waypoints) return;
+    const points = edge.waypoints;
+    const targets = getRouteSnapTargets(edge.id);
+    startRouteDrag(event, edge, (delta, canvas) => {
+      if (Math.hypot(delta.x, delta.y) < 1) return null;
+      const proposed = { x: origin.x + delta.x, y: origin.y + delta.y };
+      const bounds = {
+        min: { x: 8, y: 8 },
+        max: { x: canvas.clientWidth - 8, y: canvas.clientHeight - 8 },
+      };
+      const { scaleX, scaleY } = getCanvasScale(canvas);
+      const x = snapFlowAxis('x', proposed, bounds, targets.x, scaleX);
+      const y = snapFlowAxis('y', proposed, bounds, targets.y, scaleY);
+      const point = { x: x.value, y: y.value };
+      if (point.x === origin.x && point.y === origin.y) return null;
+      return { waypoints: points.map((item, current) => current === index ? point : item), snap: { point, alignX: x.target, alignY: y.target } };
+    });
+    setSelectedWaypoint({ edgeId: edge.id, index });
   };
 
   const moveRouteDrag = (event: React.PointerEvent<HTMLElement>) => {
     const drag = routeDragRef.current;
-    if (!drag) return;
+    const canvas = canvasRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !canvas) return;
+    if (!drag.preview && Math.hypot(event.clientX - drag.pointerStart.x, event.clientY - drag.pointerStart.y) < 4) return;
     event.preventDefault();
-    const nextRouteY = clampRouteY(drag.originRouteY + (event.clientY - drag.startY) / drag.scaleY, canvasRef.current);
-    patchConfig({
-      edges: config.edges.map((edge) => (edge.id === drag.edgeId ? { ...edge, routeY: nextRouteY } : edge)),
-    }, { record: false });
+    const pointer = clientToCanvasPoint(canvas, event.clientX, event.clientY);
+    drag.preview = drag.move({ x: pointer.x - drag.pointerOrigin.x, y: pointer.y - drag.pointerOrigin.y }, canvas);
+    setRoutePreview(drag.preview);
   };
 
   const updateConnectionPreview = (event: React.PointerEvent<HTMLElement>) => {
@@ -1052,34 +1325,42 @@ export default function ProfessionalFlowDesigner({
     setConnectionPreview(clientToCanvasPoint(canvas, event.clientX, event.clientY));
   };
 
-  const stopDrag = () => {
-    const drag = dragRef.current;
-    if (drag?.snapshot) {
-      const didMove = config.nodes.some((node) => {
-        const origin = drag.origins[node.id];
-        return origin && (node.x !== origin.x || node.y !== origin.y);
-      });
-      if (didMove) {
-        const snapshot = drag.snapshot;
-        setHistory((items) => [...items.slice(-29), snapshot]);
-        setFuture([]);
-      }
-    }
-    dragRef.current = null;
-    setDragPreview(null);
+  const moveDragSelection = (drag: NonNullable<typeof dragRef.current>, point: FlowRoutePoint) => {
+    const delta = { x: point.x - drag.primary.x, y: point.y - drag.primary.y };
+    return {
+      nodes: config.nodes.map((node) => drag.ids.has(node.id) ? { ...node, x: node.x + delta.x, y: node.y + delta.y } : node),
+      edges: drag.moveInternalRoutes ? translateAnnotationRoutes(config.edges, drag.ids, delta) : config.edges,
+    };
   };
 
-  const stopRouteDrag = () => {
-    const drag = routeDragRef.current;
-    if (drag?.snapshot) {
-      const current = config.edges.find((edge) => edge.id === drag.edgeId);
-      if (current && current.routeY !== drag.snapshot.edges.find((edge) => edge.id === drag.edgeId)?.routeY) {
-        setHistory((items) => [...items.slice(-29), drag.snapshot as FlowDesignerConfig]);
-        setFuture([]);
-      }
+  const stopDrag = (commit: boolean, pointerId?: number) => {
+    const drag = dragRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
+    dragRef.current = null;
+    setDragPreview(null);
+    if (!commit) return;
+    suppressCanvasClickRef.current = true;
+    window.setTimeout(() => { suppressCanvasClickRef.current = false; }, 0);
+    if (!drag.preview) {
+      setSelection(drag.clickSelection);
+      return;
     }
+    const { point } = drag.preview;
+    if (point.x !== drag.primary.x || point.y !== drag.primary.y) {
+      patchConfig(moveDragSelection(drag, point));
+    }
+  };
+
+  const stopRouteDrag = (commit: boolean, pointerId?: number) => {
+    const drag = routeDragRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
     routeDragRef.current = null;
-    setActiveRouteEdgeId(null);
+    setRoutePreview(null);
+    if (commit && drag.preview) {
+      suppressCanvasClickRef.current = true;
+      window.setTimeout(() => { suppressCanvasClickRef.current = false; }, 0);
+      patchEdge(drag.edgeId, { waypoints: drag.preview.waypoints, routeY: undefined });
+    }
   };
 
   const undo = () => {
@@ -1103,51 +1384,46 @@ export default function ProfessionalFlowDesigner({
   };
 
   const copySelected = () => {
-    if (!selectedNode) return;
-    setClipboardNode(cloneFlowConfig({
-      ...config,
-      nodes: [selectedNode],
-      edges: [],
-    }).nodes[0]);
+    const graph = copyFlowSelection(config, selectedNodeIdSet, selectedAnnotationIds);
+    if (!graph.nodes.length) return;
+    setClipboard({ graph, pasteCount: 0 });
+    const copiedAnnotations = graph.annotations.length ? `、${graph.annotations.length} 个注释` : '';
+    message.success(`已复制 ${graph.nodes.length} 个节点${copiedAnnotations}`);
   };
 
-  const pasteNode = () => {
-    if (!clipboardNode) return;
-    const canvas = canvasRef.current;
-    const point = canvas ? snapNodePosition(clipboardNode.x + SNAP_GRID * 2, clipboardNode.y + SNAP_GRID * 2, canvas) : { x: clipboardNode.x + SNAP_GRID * 2, y: clipboardNode.y + SNAP_GRID * 2 };
-    const pasted: FlowDesignerNode = {
-      ...clipboardNode,
-      id: makeId(clipboardNode.type),
-      label: `${clipboardNode.label} 副本`,
-      x: point.x,
-      y: point.y,
-      fieldPermissions: clipboardNode.fieldPermissions
-        ? Object.fromEntries(Object.entries(clipboardNode.fieldPermissions).map(([key, value]) => [key, { ...value }]))
-        : undefined,
-    };
-    patchConfig({ nodes: [...config.nodes, pasted] });
-    setSelection({ type: 'node', id: pasted.id });
+  const insertCopiedSelection = (graph: FlowClipboard, pasteCount: number) => {
+    const anchor = { x: Math.min(...graph.nodes.map((node) => node.x)), y: Math.min(...graph.nodes.map((node) => node.y)) };
+    const frames = getFlowAnnotationFrames(graph.annotations, graph.nodes);
+    const left = Math.min(anchor.x, ...frames.map(({ bounds }) => bounds.left));
+    const right = Math.max(...graph.nodes.map((node) => node.x + NODE_WIDTH), ...frames.map(({ bounds }) => bounds.left + bounds.width));
+    // Keep copied annotations side by side so neither title sits under the other group's nodes.
+    const offset = (frames.length ? right - left + SNAP_GRID : SNAP_GRID * 2) * pasteCount;
+    const { point } = snapFlowNode({ x: anchor.x + offset, y: anchor.y + offset }, {
+      min: { x: SNAP_ORIGIN_X, y: SNAP_ORIGIN_Y },
+      max: { x: Infinity, y: Infinity },
+    });
+    const pasted = cloneFlowSelection(graph, { x: point.x - anchor.x, y: frames.length ? 0 : point.y - anchor.y }, makeId);
+    const nodeIds = pasted.nodes.map((node) => node.id);
+    const annotationIds = pasted.annotations.map((annotation) => annotation.id);
+    pastedAnnotationRef.current = annotationIds[0] ?? null;
+    patchConfig({
+      nodes: [...config.nodes, ...pasted.nodes],
+      edges: [...config.edges, ...pasted.edges],
+      ...(pasted.annotations.length && { annotations: [...annotations, ...pasted.annotations] }),
+    });
+    setSelection(annotationIds.length || nodeIds.length > 1
+      ? { type: 'multiple', nodeIds, annotationIds }
+      : { type: 'node', id: nodeIds[0] });
+    setClipboard({ graph, pasteCount });
+  };
+
+  const pasteSelection = () => {
+    if (clipboard) insertCopiedSelection(clipboard.graph, clipboard.pasteCount + 1);
   };
 
   const duplicateSelected = () => {
-    if (!selectedNode) return;
-    setClipboardNode(selectedNode);
-    const canvas = canvasRef.current;
-    const point = canvas ? snapNodePosition(selectedNode.x + SNAP_GRID * 2, selectedNode.y + SNAP_GRID * 2, canvas) : { x: selectedNode.x + SNAP_GRID * 2, y: selectedNode.y + SNAP_GRID * 2 };
-    const duplicate: FlowDesignerNode = {
-      ...selectedNode,
-      id: makeId(selectedNode.type),
-      label: `${selectedNode.label} 副本`,
-      x: point.x,
-      y: point.y,
-      fieldPermissions: selectedNode.fieldPermissions
-        ? Object.fromEntries(Object.entries(selectedNode.fieldPermissions).map(([key, value]) => [key, { ...value }]))
-        : undefined,
-    };
-    patchConfig({
-      nodes: [...config.nodes, duplicate],
-    });
-    setSelection({ type: 'node', id: duplicate.id });
+    const graph = copyFlowSelection(config, selectedNodeIdSet, selectedAnnotationIds);
+    if (graph.nodes.length) insertCopiedSelection(graph, 1);
   };
 
   const connectPendingPortTo = (targetNode: FlowDesignerNode, targetSide: FlowPortSide) => {
@@ -1210,29 +1486,32 @@ export default function ProfessionalFlowDesigner({
         redo();
         return;
       }
-      if (command && key === 'c') {
+      if (command && key === 'c' && canCopySelection) {
         event.preventDefault();
         copySelected();
         return;
       }
-      if (command && key === 'v') {
+      if (command && key === 'v' && clipboard) {
         event.preventDefault();
-        pasteNode();
+        pasteSelection();
         return;
       }
-      if (command && key === 'd') {
+      if (command && key === 'd' && canCopySelection) {
         event.preventDefault();
         duplicateSelected();
         return;
       }
       if (key === 'escape') {
+        stopDrag(false);
+        stopRouteDrag(false);
+        stopAnnotationResize(false);
         setPendingPort(null);
         setConnectionPreview(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [clipboardNode, config, future, history, selectedNode, selection]);
+  }, [clipboard, config, future, history, selection]);
 
   useEffect(() => {
     if (!pendingPort) return undefined;
@@ -1258,6 +1537,9 @@ export default function ProfessionalFlowDesigner({
     if (!selectedNode) return null;
     const fieldOptions = fields.map((field) => ({ value: field.key, label: field.name }));
     const selectedNodeTypeLabel = getNodeTypeLabel(selectedNode);
+    const ccRecipients = selectedNode.ccRecipients ?? [];
+    const ccRoleOptions = roleOptions?.length ? roleOptions : roles.map((role) => ({ value: role, label: role }));
+    const patchCcRecipients = (next: FlowCcRecipient[]) => patchNode(selectedNode.id, { ccRecipients: next });
     const assigneeRules = selectedNode.assigneeRules?.length
       ? selectedNode.assigneeRules
       : approvalTaskTypes.has(selectedNode.type) && selectedNode.assigneeSource
@@ -1329,6 +1611,76 @@ export default function ProfessionalFlowDesigner({
           <PropertyRow label="标题"><Input aria-label="节点标题" placeholder="输入节点标题" maxLength={100} value={selectedNode.label} onChange={event=>patchNode(selectedNode.id,{label:event.target.value})}/></PropertyRow>
           <PropertyRow label="业务说明"><Input.TextArea aria-label="节点业务说明" placeholder="说明此节点的业务用途" maxLength={500} autoSize={{minRows:2,maxRows:5}} value={selectedNode.description} onChange={event=>patchNode(selectedNode.id,{description:event.target.value})}/></PropertyRow>
         </PropertyGroup>
+
+        {selectedNode.type === 'startEvent' && (
+          <PropertyGroup title="触发动作" hint="每个动作只绑定一个开始节点。在这里开启已绑定的动作，会将入口切换到当前节点。">
+            {config.triggerBindings.filter((binding) => binding.action !== 'approve' || binding.enabled).map((binding) => {
+              const startId = workflowTriggerStartId(binding, startNodes);
+              const otherStart = startId && startId !== selectedNode.id ? startNodes.find((node) => node.id === startId) : undefined;
+              return (
+                <div className="professional-flow-trigger" key={binding.action}>
+                  <Switch aria-label={`启用${binding.label || binding.action}`}
+                    checked={startId === selectedNode.id}
+                    onChange={(enabled) => patchConfig({
+                      triggerBindings: setWorkflowStartTrigger(config, binding.action, selectedNode.id, enabled),
+                    })}
+                  />
+                  <Input aria-label={`${binding.action} 触发动作名称`}
+                    value={binding.label}
+                    readOnly={Boolean(otherStart)}
+                    onChange={(event) => patchConfig({
+                      triggerBindings: config.triggerBindings.map((item) => item.action === binding.action
+                        ? { ...item, label: event.target.value } : item),
+                    })}
+                  />
+                  <Tag>{binding.action}</Tag>
+                  {otherStart && <small className="professional-flow-trigger-entry">当前入口：{otherStart.label}</small>}
+                </div>
+              );
+            })}
+          </PropertyGroup>
+        )}
+
+        {selectedNode.type === 'ccTask' && (
+          <PropertyGroup title="抄送对象" hint="流程到达此节点时发出站内通知，抄送人无需审批。" actions={ccRecipients.length > 0 && (
+            <Button aria-label="添加抄送对象" title="添加抄送对象" icon={<PlusOutlined />} size="small" type="text"
+              onClick={() => patchCcRecipients([...ccRecipients, { id: makeId('cc'), type: 'user' }])} />
+          )}>
+            {ccRecipients.length === 0 ? (
+              <div className="professional-flow-property-actions">
+                <Button size="small" icon={<PlusOutlined />}
+                  onClick={() => patchCcRecipients([{ id: makeId('cc'), type: 'user' }])}>添加用户或角色</Button>
+              </div>
+            ) : (
+              <>
+                <div className="professional-flow-assignee-head professional-flow-cc-row"><span>类型</span><span>收件人</span><span /></div>
+                <div className="professional-flow-assignee-list">
+                  {ccRecipients.map((recipient, index) => (
+                    <div className="professional-flow-assignee-rule professional-flow-cc-row" key={recipient.id}>
+                      <Select<FlowCcRecipient['type']>
+                        aria-label={`抄送对象 ${index + 1} 的类型`}
+                        value={recipient.type}
+                        options={ccRecipientTypeOptions}
+                        onChange={(type) => patchCcRecipients(ccRecipients.map((item) =>
+                          item.id === recipient.id ? { ...item, type, value: undefined } : item))}
+                      />
+                      <Select showSearch optionFilterProp="label"
+                        aria-label={`抄送对象 ${index + 1} 的收件人`}
+                        placeholder={recipient.type === 'role' ? '选择角色' : '选择用户'}
+                        value={recipient.value}
+                        options={recipient.type === 'role' ? ccRoleOptions : users}
+                        onChange={(value) => patchCcRecipients(ccRecipients.map((item) =>
+                          item.id === recipient.id ? { ...item, value } : item))}
+                      />
+                      <Button aria-label={`删除抄送对象 ${index + 1}`} icon={<DeleteOutlined />} size="small" type="text"
+                        onClick={() => patchCcRecipients(ccRecipients.filter((item) => item.id !== recipient.id))} />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </PropertyGroup>
+        )}
 
         {approvalTaskTypes.has(selectedNode.type) && (
           <PropertyGroup title="处理人规则" actions={<> <Button aria-label="添加处理对象" title="添加处理对象" icon={<PlusOutlined />} size="small" type="text"
@@ -1490,10 +1842,18 @@ export default function ProfessionalFlowDesigner({
               onChange={(checked) => patchEdge(selectedEdge.id, { isDefault: checked })}
             />
           </label>
-          <label>
-            <span>线条排布</span>
-            <Button size="small" disabled={selectedEdge.routeY === undefined} onClick={() => patchEdge(selectedEdge.id, { routeY: undefined })}>重置</Button>
-          </label>
+        </PropertyGroup>
+        <PropertyGroup title="连线路径">
+          <div className="professional-flow-property-actions">
+            <Button size="small" icon={<PlusOutlined />} onClick={() => addWaypoint(selectedEdge)}>添加拐点</Button>
+            <Button size="small" disabled={selectedWaypoint?.edgeId !== selectedEdge.id}
+              onClick={() => selectedWaypoint && removeWaypoint(selectedEdge, selectedWaypoint.index)}>删除拐点</Button>
+            <Button size="small" type="text" disabled={!selectedEdge.waypoints?.length && selectedEdge.routeY === undefined}
+              onClick={() => {
+                patchEdge(selectedEdge.id, { waypoints: undefined, routeY: undefined });
+                setSelectedWaypoint(null);
+              }}>重置</Button>
+          </div>
         </PropertyGroup>
         <Modal
           className="form-designer-dialog"
@@ -1549,25 +1909,10 @@ export default function ProfessionalFlowDesigner({
 
   const renderCanvasProperties = () => (
     <div className="professional-flow-props">
-      <PropertyGroup title="表单触发">
-
-        {config.triggerBindings.map((binding, index) => (
-          <div className="professional-flow-trigger" key={binding.action}>
-            <Switch
-              checked={binding.enabled}
-              onChange={(checked) => patchConfig({
-                triggerBindings: config.triggerBindings.map((item, itemIndex) => (itemIndex === index ? { ...item, enabled: checked } : item)),
-              })}
-            />
-            <Input
-              value={binding.label}
-              onChange={(event) => patchConfig({
-                triggerBindings: config.triggerBindings.map((item, itemIndex) => (itemIndex === index ? { ...item, label: event.target.value } : item)),
-              })}
-            />
-            <Tag>{binding.action}</Tag>
-          </div>
-        ))}
+      <PropertyGroup title="流程属性">
+        <PropertyRow label="流程名称">
+          <Input aria-label="流程名称" value={config.name} readOnly />
+        </PropertyRow>
       </PropertyGroup>
     </div>
   );
@@ -1575,14 +1920,70 @@ export default function ProfessionalFlowDesigner({
   const renderProperties = () => {
     if (selection.type === 'node') return renderNodeProperties();
     if (selection.type === 'edge') return renderEdgeProperties();
+    if (selectedAnnotation) {
+      return <FlowAnnotationProperties annotation={selectedAnnotation} onCopy={copySelected} onDelete={deleteSelected}
+        onChange={(patch) => patchAnnotation(selectedAnnotation.id, patch)} />;
+    }
+    if (selection.type === 'multiple') {
+      const counts = [
+        selection.nodeIds.length && `${selection.nodeIds.length} 个节点`,
+        selection.annotationIds.length && `${selection.annotationIds.length} 个注释`,
+      ].filter(Boolean).join('、');
+      return (
+        <div className="professional-flow-props">
+          <PropertyGroup title={`已选 ${counts}`}>
+            <div className="professional-flow-property-actions">
+              <Button size="small" icon={<CopyOutlined />} onClick={copySelected}>{copyLabel}</Button>
+              {selection.nodeIds.length > 0 && <>
+                <Button size="small" icon={<TagOutlined />} onClick={addAnnotation}>添加注释</Button>
+                <Button danger size="small" icon={<DeleteOutlined />} onClick={() => deleteCanvasItems(selectedNodeIds, new Set())}>
+                  删除所选节点
+                </Button>
+              </>}
+              {selection.annotationIds.length > 0 && <Button danger size="small" icon={<DeleteOutlined />}
+                onClick={() => deleteCanvasItems([], selectedAnnotationIds)}>删除所选注释</Button>}
+            </div>
+          </PropertyGroup>
+        </div>
+      );
+    }
     return renderCanvasProperties();
   };
 
-  const selectedTitle = selection.type === 'nodes' ? `已选 ${selection.ids.length} 个节点` : selectedNode?.label || selectedEdge?.label || config.name;
-  const selectedType = selection.type === 'nodes' ? '多选节点' : selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '画布属性';
+  const selectedTitle = selectedAnnotation ? selectedAnnotation.title || '注释' : selectedNode?.label || selectedEdge?.label || config.name;
+  const selectedType = selectedAnnotation ? '注释属性' : selection.type === 'multiple' ? '多选属性' : selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '画布属性';
+
+  const { nodes: visibleNodes, edges: visibleEdges } =
+    dragPreview && dragRef.current ? moveDragSelection(dragRef.current, dragPreview.point) : config;
+  const savedAnnotationFrames = getFlowAnnotationFrames(annotations, config.nodes);
+  const annotationFrames = (visibleNodes === config.nodes ? savedAnnotationFrames : getFlowAnnotationFrames(annotations, visibleNodes))
+    .map((frame) => annotationResize?.id === frame.annotation.id
+      ? { ...frame, bounds: { ...frame.bounds, ...annotationResize.size } }
+      : frame);
+  const routePoints = config.edges.flatMap((edge) => edge.waypoints ?? []);
+  const graphLeft = Math.min(Infinity, ...config.nodes.map((node) => node.x), ...routePoints.map((point) => point.x),
+    ...savedAnnotationFrames.map(({ bounds }) => bounds.left));
+  const graphRight = Math.max(0, ...config.nodes.map((node) => node.x + NODE_WIDTH + 40), ...routePoints.map((point) => point.x + 24));
+  const graphBottom = Math.max(0, ...config.nodes.map((node) => node.y + NODE_HEIGHT + 40),
+    ...routePoints.map((point) => point.y + 24), ...config.edges.map((edge) => edge.routeY ?? 0));
+  // Keep the graph in view on narrow screens while working in the stored canvas coordinates.
+  const originX = viewportWidth ? Math.max(0, Math.min(graphLeft - 24, graphRight - viewportWidth)) : 0;
+  const canvasRight = Math.max(graphRight, ...annotationFrames.map(({ bounds }) => bounds.left + bounds.width + 24));
+  const canvasBottom = Math.max(graphBottom, ...annotationFrames.map(({ bounds }) => bounds.top + bounds.height + 24));
+  const routeSnap = routePreview?.snap;
+  const canvasMenu = [
+    ...(selectedNodeIds.length ? [{ key: 'annotation', label: '添加注释', icon: <TagOutlined />, onClick: addAnnotation }] : []),
+    ...(canCopySelection ? [{ key: 'copy', label: copyLabel, icon: <CopyOutlined />, onClick: copySelected }] : []),
+    ...(clipboard ? [{
+      key: 'paste', label: clipboard.graph.annotations.length ? '粘贴' : '粘贴节点', icon: <SnippetsOutlined />, onClick: pasteSelection,
+    }] : []),
+  ];
 
   return (
-    <div className={"professional-flow-designer"+(externalInspector?" professional-flow-external-inspector":"")}>
+    <div
+      className={"professional-flow-designer"+(externalInspector?" professional-flow-external-inspector":"")}
+      style={{ '--flow-node-width': `${NODE_WIDTH}px`, '--flow-node-height': `${NODE_HEIGHT}px` } as React.CSSProperties}
+    >
       <aside className="professional-flow-library form-designer-left">
         <div className="professional-flow-panel-head designer-panel-head">
           <strong>节点</strong>
@@ -1674,8 +2075,24 @@ export default function ProfessionalFlowDesigner({
         </div>
       </aside>
 
-      <main
-        className={`professional-flow-canvas ${isPaletteDragOver ? 'professional-flow-canvas-drag-over' : ''}`}
+      <main className={`professional-flow-canvas ${isPaletteDragOver ? 'professional-flow-canvas-drag-over' : ''}`}>
+        <div className="professional-flow-canvas-toolbar">
+          <div className="professional-flow-canvas-title">
+            <Typography.Text strong>{config.name}</Typography.Text>
+          </div>
+          <span className="professional-flow-canvas-meta">{config.nodes.length} 节点 / {config.edges.length} 连线</span>
+        </div>
+        <div className="professional-flow-canvas-scroll" ref={viewportRef}>
+        <Dropdown trigger={['contextMenu']} disabled={!canvasMenu.length || Boolean(pendingPort)}
+          menu={{ items: canvasMenu }}>
+        <div
+        className="professional-flow-canvas-content"
+        style={{
+          minWidth: canvasRight - originX,
+          minHeight: `max(100%, ${canvasBottom}px)`,
+          backgroundSize: `${SNAP_GRID}px ${SNAP_GRID}px`,
+          backgroundPosition: `${SNAP_ORIGIN_X - originX}px ${SNAP_ORIGIN_Y}px`,
+        }}
         onClick={() => {
           if (suppressCanvasClickRef.current) return;
           setSelection({ type: 'canvas' });
@@ -1706,58 +2123,143 @@ export default function ProfessionalFlowDesigner({
           moveMarqueeSelection(event);
           updateConnectionPreview(event);
         }}
-        onPointerUp={() => {
-          stopDrag();
-          stopRouteDrag();
-          stopMarqueeSelection();
+        onPointerUp={(event) => {
+          stopDrag(true, event.pointerId);
+          stopRouteDrag(true, event.pointerId);
+          stopMarqueeSelection(event.pointerId);
         }}
-        onPointerLeave={() => {
-          stopDrag();
-          stopRouteDrag();
-          stopMarqueeSelection();
+        onPointerCancel={(event) => {
+          stopDrag(false, event.pointerId);
+          stopRouteDrag(false, event.pointerId);
+          stopMarqueeSelection(event.pointerId);
         }}
-        ref={canvasRef}
+        onLostPointerCapture={(event) => {
+          if (event.target === event.currentTarget) {
+            stopDrag(false, event.pointerId);
+            stopMarqueeSelection(event.pointerId);
+          }
+        }}
       >
-        <div className="professional-flow-canvas-toolbar" onClick={(event) => event.stopPropagation()}>
-          <div className="professional-flow-canvas-title">
-            <Typography.Text strong>{config.name}</Typography.Text>
-          </div>
-          <span className="professional-flow-canvas-meta">{config.nodes.length} 节点 / {config.edges.length} 连线</span>
-        </div>
+        <div className="professional-flow-canvas-geometry" ref={canvasRef} style={{ left: -originX }}>
+        {annotationFrames.map(({ annotation, bounds, minimum }) => {
+          const { frameStyle, titleStyle } = annotation;
+          const selected = selectedAnnotationIds.has(annotation.id);
+          return (
+            <div key={annotation.id} className="professional-flow-annotation"
+              style={{
+                ...bounds,
+                '--flow-annotation-color': annotation.color,
+                '--flow-annotation-fill': frameStyle?.backgroundColor,
+                '--flow-annotation-opacity': frameStyle?.backgroundOpacity === undefined ? undefined : `${frameStyle.backgroundOpacity}%`,
+                borderColor: frameStyle?.borderColor,
+                borderStyle: frameStyle?.borderStyle,
+                borderWidth: frameStyle?.borderWidth,
+                borderRadius: frameStyle?.borderRadius,
+              } as React.CSSProperties}
+              data-selected={selected}
+              data-flow-annotation-id={annotation.id}
+              onPointerDown={(event) => startAnnotationDrag(event, annotation)}>
+              <button className="professional-flow-annotation-title" type="button" aria-pressed={selected}
+                style={{
+                  color: titleStyle?.color, fontFamily: titleStyle?.fontFamily, fontSize: titleStyle?.fontSize,
+                  fontWeight: titleStyle?.bold === false ? 400 : undefined,
+                  fontStyle: titleStyle?.italic ? 'italic' : undefined,
+                  textDecoration: titleStyle?.underline ? 'underline' : undefined,
+                }}
+                title={annotation.title || '注释'} onClick={(event) => {
+                  event.stopPropagation();
+                  setSelection({ type: 'annotation', id: annotation.id });
+                }}>
+                {annotation.title || '注释'}
+              </button>
+              {selectedAnnotation?.id === annotation.id && <button className="professional-flow-annotation-resize" type="button"
+                aria-label="调整注释框大小" title="拖动或使用方向键调整注释框大小"
+                onPointerDown={(event) => startAnnotationResize(event, annotation.id, bounds, minimum)}
+                onPointerMove={moveAnnotationResize}
+                onPointerUp={(event) => stopAnnotationResize(true, event.pointerId)}
+                onPointerCancel={(event) => stopAnnotationResize(false, event.pointerId)}
+                onLostPointerCapture={(event) => stopAnnotationResize(false, event.pointerId)}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  const delta = annotationResizeKeys[event.key];
+                  if (!delta || annotationResizeRef.current) return;
+                  event.preventDefault();
+                  const size = resizeFlowAnnotation(bounds, delta, minimum);
+                  if (size.width !== bounds.width || size.height !== bounds.height) patchAnnotation(annotation.id, { size });
+                }} />}
+            </div>
+          );
+        })}
         <svg className="professional-flow-edge-layer">
           <defs>
-            <marker id="professional-flow-arrow" markerHeight="8" markerWidth="8" orient="auto" refX="7" refY="4">
-              <path d="M 0 0 L 8 4 L 0 8 z" />
+            <marker id={arrowId} markerUnits="userSpaceOnUse" markerHeight="8" markerWidth="8" orient="auto" refX="12" refY="4">
+              <path className="professional-flow-arrow" d="M 1 1 L 6 4 L 1 7" />
             </marker>
           </defs>
-          {config.edges.map((edge) => {
-            const from = config.nodes.find((node) => node.id === edge.source);
-            const to = config.nodes.find((node) => node.id === edge.target);
-            if (!from || !to) return null;
-            const route = connectorRoute(from, edge.sourceSide, to, edge.targetSide, edge.routeY);
+          {visibleEdges.map((edge) => {
             const isActiveEdge = selection.type === 'edge' && selection.id === edge.id;
+            const drag = routeDragRef.current;
+            const waypoints = routePreview && drag?.edgeId === edge.id ? routePreview.waypoints : edge.waypoints;
+            const route = routeForEdge(edge, waypoints, visibleNodes);
+            if (!route) return null;
+            const selectEdge = (event: React.MouseEvent<SVGElement>) => {
+              event.stopPropagation();
+              setSelection({ type: 'edge', id: edge.id });
+            };
+            const addEdgeWaypoint = (event: React.MouseEvent<SVGElement>, anchor?: FlowRoutePoint) => {
+              event.stopPropagation();
+              if (suppressCanvasClickRef.current) return;
+              const canvas = canvasRef.current;
+              if (canvas) addWaypoint(edge, anchor ?? clientToCanvasPoint(canvas, event.clientX, event.clientY));
+            };
             return (
-              <g key={edge.id}>
+              <g key={edge.id} className={isActiveEdge ? 'professional-flow-edge-active' : undefined}>
+                <path className="professional-flow-edge-line" d={route.d} markerEnd={`url(#${arrowId})`} />
                 <path
-                  className={isActiveEdge ? 'professional-flow-edge-active' : ''}
+                  className="professional-flow-edge-hit"
                   d={route.d}
-                  onClick={(event) => {
-                    event.stopPropagation();
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`编辑连线${edge.label ? `：${edge.label}` : ''}`}
+                  onPointerDown={(event) => startSegmentDrag(event, edge, route)}
+                  onLostPointerCapture={(event) => stopRouteDrag(false, event.pointerId)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
                     setSelection({ type: 'edge', id: edge.id });
                   }}
+                  onClick={selectEdge}
+                  onDoubleClick={(event) => addEdgeWaypoint(event)}
                 />
-                <text x={route.handle.x} y={route.handle.y - 8}>{edge.label}</text>
-                <circle
-                  className={`professional-flow-route-handle ${isActiveEdge || activeRouteEdgeId === edge.id ? 'professional-flow-route-handle-active' : ''}`}
-                  cx={route.handle.x}
-                  cy={route.handle.y}
-                  r={6}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelection({ type: 'edge', id: edge.id });
-                  }}
-                  onPointerDown={(event) => startRouteDrag(event, edge, route.midY)}
-                />
+                {edge.label && <text className="professional-flow-edge-label" x={route.label.x} y={route.label.y}
+                  onPointerDown={(event) => startSegmentDrag(event, edge, route, route.label.anchor)}
+                  onLostPointerCapture={(event) => stopRouteDrag(false, event.pointerId)}
+                  onClick={selectEdge}
+                  onDoubleClick={(event) => addEdgeWaypoint(event, route.label.anchor)}
+                  textAnchor={route.label.vertical ? 'start' : 'middle'}
+                  dominantBaseline={route.label.vertical ? 'central' : undefined}>{edge.label}</text>}
+                {isActiveEdge && waypoints?.map((point, index) => (
+                  <circle
+                    key={index}
+                    className={`professional-flow-route-handle${selectedWaypoint?.edgeId === edge.id && selectedWaypoint.index === index ? ' professional-flow-route-handle-active' : ''}`}
+                    cx={point.x}
+                    cy={point.y}
+                    r={5}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`拐点 ${index + 1}`}
+                    onFocus={() => setSelectedWaypoint({ edgeId: edge.id, index })}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      removeWaypoint(edge, index);
+                    }}
+                    onPointerDown={(event) => startWaypointDrag(event, edge, index, point)}
+                    onLostPointerCapture={(event) => stopRouteDrag(false, event.pointerId)}
+                  />
+                ))}
               </g>
             );
           })}
@@ -1769,7 +2271,7 @@ export default function ProfessionalFlowDesigner({
             return (
               <path
                 className="professional-flow-edge-preview"
-                d={orthogonalPath(start, pendingPort.side, connectionPreview, targetSide)}
+                d={getFlowEdgeRoute(start, pendingPort.side, connectionPreview, targetSide).d}
               />
             );
           })()}
@@ -1785,13 +2287,31 @@ export default function ProfessionalFlowDesigner({
         )}
         {dragPreview && (
           <>
-            <div className="professional-flow-snap-guide-x" style={{ top: dragPreview.y }} />
-            <div className="professional-flow-snap-guide-y" style={{ left: dragPreview.x }} />
-            <div className="professional-flow-position-chip" style={{ left: dragPreview.x, top: dragPreview.y - 28 }}>
-              x {Math.round(dragPreview.x)} / y {Math.round(dragPreview.y)}
+            {dragPreview.alignY && <div className="professional-flow-snap-guide-horizontal" style={{
+              top: dragPreview.point.y + NODE_HEIGHT / 2,
+              left: Math.min(dragPreview.point.x, dragPreview.alignY.x) + NODE_WIDTH / 2,
+              width: Math.abs(dragPreview.point.x - dragPreview.alignY.x),
+            }} />}
+            {dragPreview.alignX && <div className="professional-flow-snap-guide-vertical" style={{
+              left: dragPreview.point.x + NODE_WIDTH / 2,
+              top: Math.min(dragPreview.point.y, dragPreview.alignX.y) + NODE_HEIGHT / 2,
+              height: Math.abs(dragPreview.point.y - dragPreview.alignX.y),
+            }} />}
+            <div className="professional-flow-position-chip" style={{ left: dragPreview.point.x, top: dragPreview.point.y - 12 }}>
+              x {Math.round(dragPreview.point.x)} / y {Math.round(dragPreview.point.y)}
             </div>
           </>
         )}
+        {routeSnap?.alignY && <div className="professional-flow-snap-guide-horizontal" style={{
+          top: routeSnap.point.y,
+          left: Math.min(routeSnap.point.x, routeSnap.alignY.x),
+          width: Math.abs(routeSnap.point.x - routeSnap.alignY.x),
+        }} />}
+        {routeSnap?.alignX && <div className="professional-flow-snap-guide-vertical" style={{
+          left: routeSnap.point.x,
+          top: Math.min(routeSnap.point.y, routeSnap.alignX.y),
+          height: Math.abs(routeSnap.point.y - routeSnap.alignX.y),
+        }} />}
         {marqueeSelection && (
           <div
             className="professional-flow-marquee"
@@ -1803,12 +2323,13 @@ export default function ProfessionalFlowDesigner({
             }}
           />
         )}
-        {config.nodes.map((node) => (
+        {visibleNodes.map((node) => (
           <div
             className={`professional-flow-node professional-flow-node-${node.category} ${selectedNodeIdSet.has(node.id) ? 'professional-flow-node-selected' : ''}`}
             key={node.id}
             onClick={(event) => {
               event.stopPropagation();
+              if (suppressCanvasClickRef.current) return;
               if (pendingPort && pendingPort.nodeId !== node.id) {
                 const canvas = canvasRef.current;
                 if (canvas) {
@@ -1825,7 +2346,7 @@ export default function ProfessionalFlowDesigner({
             <span className="professional-flow-node-icon" title={getNodeTypeLabel(node)}>
               {getNodeIcon(node)}
             </span>
-            <span className="professional-flow-node-copy">
+            <span className="professional-flow-node-copy" title={node.label}>
               <strong>{node.label}</strong>
             </span>
             {portsForNode(node).map((side) => (
@@ -1839,6 +2360,10 @@ export default function ProfessionalFlowDesigner({
             ))}
           </div>
         ))}
+        </div>
+        </div>
+        </Dropdown>
+        </div>
       </main>
 
       {externalInspector?(propertiesTarget?createPortal(<aside className="professional-flow-properties">

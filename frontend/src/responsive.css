@@ -37,12 +37,12 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell .shell-page-heading { flex-wrap: wrap; gap: 12px; }
   .tech-white-shell .app-content .content-surface:has(.form-designer-page) { overflow: auto; min-height: 0; }
   .tech-white-shell .app-content .form-designer-page { min-width: 1084px; min-height: 0; height: 100%; overflow: hidden; }
+  .tech-white-shell .app-content .form-designer-page:has(.form-designer-shell-flow) { min-width: 0; }
   .tech-white-shell .app-content .form-designer-toolbar { flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; }
   .tech-white-shell .app-content .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) { grid-template-columns: 240px minmax(540px,1fr) 280px; overflow: hidden; }
   .tech-white-shell .app-content :is(.form-designer-shell-no-left, .form-designer-shell-permission, .form-designer-shell-flow) { grid-template-columns: minmax(0,1fr); overflow: hidden; }
   .tech-white-shell .app-content .form-designer-right { grid-column: auto; }
   .tech-white-shell .app-content :is(.form-designer-left, .form-designer-right, .form-designer-canvas) { height: 100%; min-height: 0; }
-  .tech-white-shell .app-content .professional-flow-designer { min-width: 1084px; grid-template-columns: 240px minmax(540px,1fr) 280px; }
   .tech-white-shell .app-content .professional-flow-properties { grid-column: auto; }
   .tech-white-shell .app-content .analytics-board-workbench { min-width: 1084px; grid-template-columns: 240px minmax(540px,1fr) 280px; }
   .tech-white-shell .app-content :is(.analytics-board-middle, .analytics-board-right) { grid-column: auto; }
@@ -64,7 +64,7 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell .shell-mobile-menu-toggle { display: inline-flex; grid-column: 1; grid-row: 1; }
   .tech-white-shell .app-header { height: 100px; min-height: 100px; padding: 8px 12px; gap: 4px 8px; grid-template-columns: 32px minmax(0,1fr) max-content; grid-template-rows: 36px 40px; }
   .tech-white-shell .app-header > .shell-page-title { grid-column: 2; grid-row: 1; }
-  .tech-white-shell .shell-page-title :is(.shell-page-crumb, .shell-page-crumb-separator) { display: none; }
+  .tech-white-shell .shell-page-title .shell-page-crumb-item { display: none; }
   .tech-white-shell .shell-header-actions { grid-column: 3; grid-row: 1; }
   .tech-white-shell .shell-inline-search { grid-column: 1 / -1; grid-row: 2; }
   .tech-white-shell .app-content { height: calc(100vh - 100px); padding: 12px; }

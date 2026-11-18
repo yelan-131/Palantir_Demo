@@ -1,0 +1,64 @@
+.template-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.template-card > .ant-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.template-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.template-card-icon {
+  display: grid;
+  flex: 0 0 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 18px;
+}
+
+.template-card-title {
+  min-width: 0;
+  margin: 0;
+  color: var(--mf-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  overflow-wrap: anywhere;
+}
+
+.template-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--mf-muted);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.template-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--mf-border);
+}

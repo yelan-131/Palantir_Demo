@@ -2,7 +2,7 @@ import {flushSync} from 'react-dom';
 import React, {lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useBlocker, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {Alert, Button, Card, Col, Dropdown, Drawer, Modal, Row, Select, Space, Spin, Tooltip, Typography, message} from 'antd';
-import {DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@ant-design/icons';
+import {CheckCircleOutlined, DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@ant-design/icons';
 import StatisticalWidget from './StatisticalWidget';
 import FilterWidget from './FilterWidget';
 import RecordListWidget from './RecordListWidget';
@@ -15,9 +15,8 @@ import {useAiWorkbench} from '@/components/AiChatWidget/context';
 import {applyComponentOperations, componentNames, newComponent, type AddableWidgetType} from './componentOperations';
 import DynamicPage from '../DynamicPage';
 import type {RuntimeAnalyticsData} from '../AppPrograms/analyticsTypes';
-import {mergeListFilters, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget} from './model';
+import {businessDataComponent, mergeListFilters, componentQuery, type FilterContribution, listFilters, moveWidget, pageDataSignature, retainFilters, widgetSourceId, type PageDefinition, type PageState, type PageWidget} from './model';
 import {pagePresentation} from './model';
-import SourceImpactNotice from './SourceImpactNotice';
 import Inspector, {sections, type BusinessTab, type Panel, type WidgetTab} from './Inspector';
 import {buildAnalyticsContextMenu} from '../AppPrograms/AnalyticsContextMenu';
 import '../AppPrograms/analytics-workspace.css';
@@ -49,14 +48,14 @@ function NavigationGuard({enabled,onBlocked}: {enabled: boolean;onBlocked:(value
   return null;
 }
 
-export default function ComponentPages({pageCode, workspace = false, renderWorkspaceWidget}: {pageCode?: string; workspace?: boolean; renderWorkspaceWidget?: (widget: PageWidget) => React.ReactNode} = {}) {
+export default function ComponentPages({pageCode, openEditor = false, businessDataFormId, workspace = false, renderWorkspaceWidget}: {pageCode?: string; openEditor?: boolean; businessDataFormId?: number; workspace?: boolean; renderWorkspaceWidget?: (widget: PageWidget) => React.ReactNode} = {}) {
   const navigate = useNavigate();
   const {code: routeCode} = useParams<{code: string}>();
   const code = pageCode || routeCode;
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
   const {registerComponentPageController, setComponentPageContext} = useAiWorkbench();
   const [searchParams] = useSearchParams();
-  const startInEditor = admin && !pageCode && searchParams.get('edit') === '1';
+  const startInEditor = admin && (openEditor || (!pageCode && searchParams.get('edit') === '1'));
   const accountKey = useAuthStore(state=>state.user?`${state.user.tenant_id}:${state.user.id}:${state.user.is_admin}`:'anonymous');
   const [forms, setForms] = useState<PlatformForm[]>([]);
   const [roles, setRoles] = useState<Array<{id: number; name: string; label?: string}>>([]);
@@ -80,7 +79,6 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const [contextWidgetId, setContextWidgetId] = useState<string>();
   const [sourcePropertiesTarget,setSourcePropertiesTarget] = useState<HTMLDivElement|null>(null);
   const [sourceActionsTarget,setSourceActionsTarget] = useState<HTMLDivElement|null>(null);
-  const [sourceFooterTarget,setSourceFooterTarget] = useState<HTMLDivElement|null>(null);
   const [sourceStatusTarget,setSourceStatusTarget] = useState<HTMLDivElement|null>(null);
   const [sourceEditor, setSourceEditor] = useState<BusinessTab>();
   const sourceInitialTab = useRef<BusinessTab>();
@@ -110,10 +108,15 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
   const globalFields = globalSource?.fields?.filter(field=>!field.archived) || [];
   const globalLabels = Object.fromEntries(globalFields.map(field=>[field.field_name,field.label]));
   const fields = source?.fields?.filter(field => !field.archived) || [];
-  useShellPageTitle(active?.title || '页面与组件');
+  const businessDataTrail = useMemo(() => businessDataFormId === undefined ? undefined : [
+    {label: '设置中心', to: '/account-center'},
+    {label: '应用配置', to: '/studio'},
+    {label: '业务数据', to: `/studio/business-data?form=${businessDataFormId}`},
+  ], [businessDataFormId]);
+  useShellPageTitle(active?.title || '页面与组件', true, businessDataTrail);
 
   useEffect(() => {
-    const identity = JSON.stringify([code,accountKey,startInEditor]);
+    const identity = JSON.stringify([code,accountKey,startInEditor,businessDataFormId]);
     // Fast Refresh reruns effects: keep a loaded session for the same page/user kind.
     // Mark only completed loads, so StrictMode's cancelled first request still retries.
     if(resolvedIdentity.current===identity)return;
@@ -129,12 +132,15 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
           if (current) {
             const openEditor = startInEditor || pagePresentation(response.data, admin, false).startEditing;
             const definition = response.data.definition;
+            const isDashboard = ['analysis', 'analytics', 'dashboard', 'report'].includes(response.data.hostForm?.kind ?? '');
+            const initialWidget = businessDataFormId === undefined ? definition.widgets[0]
+              : businessDataComponent(definition, businessDataFormId, isDashboard);
             resolvedIdentity.current = identity;
             setState(response.data);
             setDraft(definition);
             setEditing(openEditor);
-            setPanel(definition.widgets.length ? 'widget' : startInEditor ? 'add' : 'style');
-            if (startInEditor) setSelected(definition.widgets[0]?.id);
+            setPanel(initialWidget ? 'widget' : startInEditor ? 'add' : 'style');
+            if (startInEditor) setSelected(initialWidget?.id);
           }
         } else {
           const response = await api.get(`/pages/${code}`);
@@ -144,7 +150,7 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
       finally { if (current) setLoading(false); }
     })();
     return () => { current = false; };
-  }, [code, admin, accountKey, startInEditor]);
+  }, [code, admin, accountKey, startInEditor, businessDataFormId]);
 
   useEffect(() => {
     if (!admin) return;
@@ -532,19 +538,15 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
     }catch(failure){message.error(errorText(failure));}finally{setSaving(false);}
   };
   const saveStatus = dirty?'未保存修改':hasUnpublishedDraft?'草稿待发布':'与线上版本一致';
+  const publishLabel = state?.publishedVersion ? '发布新版本' : '创建首个版本';
   const headerStatus = <Tooltip title={saveStatus}><span className={'analytics-save-indicator'+(dirty?' is-dirty':hasUnpublishedDraft?' is-pending':'')} role="status" aria-label={saveStatus} tabIndex={0} /></Tooltip>;
   const headerActions = <div className="analytics-settings-history analytics-settings-history-inline"><Space size={0}>
     <Tooltip title="撤销"><Button type="text" aria-label="撤销" icon={<UndoOutlined />} disabled={!past.length||saving||sourceActive} onClick={undo} /></Tooltip>
     <Tooltip title="重做"><Button type="text" aria-label="重做" icon={<RedoOutlined />} disabled={!future.length||saving||sourceActive} onClick={redo} /></Tooltip>
     <Tooltip title={panel==='widget'?'组件版本管理':'页面版本管理'}><Button type="text" aria-label={panel==='widget'?'组件版本管理':'页面版本管理'} icon={<HistoryOutlined />} loading={historyLoading} disabled={saving||historyLoading||sourceActive||(panel==='widget'&&(!selected||selectedWidget?.type==='record-filter'||(widgetTab!=='basic'&&widgetTab!=='data')))} onClick={()=>void (panel==='widget'?openSectionHistory():openPageHistory())} /></Tooltip>
     <Tooltip title="保存草稿"><Button type="text" aria-label="保存草稿" icon={<SaveOutlined />} loading={saving} disabled={!dirty||saving||sourceActive} onClick={()=>void save(false)} /></Tooltip>
+    <Tooltip title={publishLabel}><Button type="primary" aria-label={publishLabel} icon={<CheckCircleOutlined />} disabled={!publishable||saving||sourceActive} onClick={()=>void checkPublish()} /></Tooltip>
   </Space></div>;
-  const footer = <>
-    <div className="analytics-settings-actions"><div>
-      <Button type="primary" disabled={!publishable||saving||sourceActive} onClick={()=>void checkPublish()}>{state?.publishedVersion?'发布新版本':'创建首个版本'}</Button>
-    </div></div>
-  </>;
-  const sourceImpact=sourceActive&&draft&&sourceId?<SourceImpactNotice definition={draft} sourceId={sourceId} sourceName={source?.name||`数据源 #${sourceId}`} mode={sourceEditor==='flow'?'flow':'form'}/>:undefined;
   return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')+(fillList?' component-page-fill-list':'')}>
     {!sourceActive&&<NavigationGuard enabled={dirty||saving} onBlocked={reportBlocked} />}
     <div className="analytics-workspace-body">
@@ -558,13 +560,13 @@ export default function ComponentPages({pageCode, workspace = false, renderWorks
             ]},
           ],onClick:({key})=>void openContextAction(key),
         }}>{canvas}</Dropdown>:canvas}</div>
-        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings sourceImpact={sourceImpact} formId={String(sourceId)} embedded requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,footer:sourceFooterTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
+        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings formId={String(sourceId)} embedded requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
       </div>
       {editing&&draft&&<div className="analytics-settings-page">
         <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
-          sourceImpact={sourceImpact} sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,footer:setSourceFooterTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} sourceIsBusiness={Boolean(sourceIsBusiness)}
+          sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} sourceIsBusiness={Boolean(sourceIsBusiness)}
           onPanel={setPanel} onTab={changeWidgetTab} onChange={changeDraft} onAdd={add} onSelect={selectWidget}
-          onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} footer={footer} />
+          onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} />
       </div>}
     </div>
     <Modal title="页面版本管理" open={Boolean(pageHistory)} onCancel={()=>setPageHistory(undefined)} footer={<Button onClick={()=>setPageHistory(undefined)}>关闭</Button>} width={640}>

@@ -8,7 +8,7 @@ from sqlalchemy import func, inspect, select, text
 
 from tests.test_record_service import environment
 from app.api import forms
-from app.models.relational import Application, ApplicationMenuNode, Form, FormField, FormLayout, FormVersion, WorkflowDef, WorkflowDefVersion
+from app.models.relational import Application, ApplicationMenuNode, Form, FormField, FormLayout, FormVersion, WorkflowBinding, WorkflowDef, WorkflowDefVersion
 from app.services import form_fields, form_versions, form_layouts
 from app.services.ai.low_code_tools import execute_add_form_field, execute_create_form_definition
 from app.services.ai.form_configuration_tools import execute_form_configuration_tool
@@ -119,6 +119,79 @@ async def test_configuration_tools_use_same_routes_and_dispatch_registry(environ
     result = await execute_form_configuration_tool('forms.evaluate_rules', db, user=user,
         payload={'form_id': 1, 'data': {'title': 'Test'}})
     assert response.status_code == 200 and result == response.json()
+
+
+@pytest.mark.asyncio
+async def test_designer_publish_commits_form_and_workflow_together(environment):
+    from app.services.workflow_definitions import WorkflowDefCreate, stage_workflow_definition
+    from tests.test_record_service import seed
+
+    db, _, form, user, client = environment
+    user['is_admin'] = True
+    existing = await seed(db, 'Existing record')
+    form_id = form.id
+    workflow = await stage_workflow_definition(db, WorkflowDefCreate(name='Approval', config={
+        'formId': form_id,
+        'nodes': [{'id': 'start', 'type': 'start'}, {'id': 'end', 'type': 'end'}],
+        'edges': [{'source': 'start', 'target': 'end'}],
+        'triggerBindings': [{'action': 'update', 'enabled': True, 'label': 'Update'}],
+    }), user)
+    workflow_id = workflow.id
+    form.config = {'workflowDesigner': {'draftWorkflowId': workflow_id}}
+    await db.commit()
+    response = await client.post(f'/forms/{form_id}/publish')
+    assert response.status_code == 200, response.text
+    initial_version = response.json()['data']['version']
+    field = await client.post(f'/forms/{form_id}/fields', json={
+        'field_name': 'organization', 'label': '分发组织', 'required': True,
+    })
+    assert field.status_code == 200, field.text
+    form_url = f'/forms/{form_id}'
+    draft_config = dict(form.config)
+    update = await client.put(form_url, json={'config': {
+        **draft_config, 'formDesignerControls': [{
+            'id': 'status-input', 'fieldKey': 'status', 'controlType': 'text',
+            'rules': {'required': {'enabled': True}},
+        }],
+    }})
+    assert update.status_code == 200, update.text
+
+    request = {'workflow_draft_id': workflow_id}
+    blocked = await client.post(f'/forms/{form_id}/publish', json=request)
+    assert blocked.status_code == 409, blocked.text
+    failures = [item for item in blocked.json()['detail']['report']['items'] if item['level'] == 'blocking']
+    assert [(item['field_name'], item['type']) for item in failures] == [('status', 'required_field_missing')]
+    await db.refresh(workflow)
+    await db.refresh(form)
+    assert workflow.status == 'draft'
+    assert form.config['workflowDesigner'] == {'draftWorkflowId': workflow_id}
+    assert await db.scalar(select(func.count()).select_from(WorkflowBinding)) == 0
+    assert await db.scalar(select(func.count()).select_from(WorkflowDefVersion)) == 1
+    assert await db.scalar(select(func.count()).select_from(FormVersion)) == 1
+
+    update = await client.put(form_url, json={'config': draft_config})
+    assert update.status_code == 200, update.text
+    published = await client.post(f'/forms/{form_id}/publish', json=request)
+    assert published.status_code == 200, published.text
+    result = published.json()['data']
+    assert result['version'] == initial_version + 1
+    assert result['snapshot']['form']['config']['workflowDesigner']['publishedWorkflowId'] == workflow_id
+    binding, = result['snapshot']['workflow_bindings']
+    await db.refresh(workflow)
+    assert workflow.status == 'published'
+    assert binding['workflow_id'] == workflow_id
+    assert binding['config']['workflowVersion'] == workflow.version
+    assert await db.scalar(select(func.count()).select_from(WorkflowDefVersion)) == 2
+    stored = await client.get(f"/forms/{form_id}/records/{existing['id']}")
+    assert stored.status_code == 200, stored.text
+    assert stored.json()['data']['data'].get('organization') is None
+
+    records_url = f'/forms/{form_id}/records'
+    missing = await client.post(records_url, json={'data': {'title': 'New record'}})
+    assert missing.status_code == 422, missing.text
+    assert '分发组织' in missing.json()['detail']
+    valid = await client.post(records_url, json={'data': {'title': 'New record', 'organization': 'A'}})
+    assert valid.status_code == 200, valid.text
 
 
 @pytest.mark.asyncio

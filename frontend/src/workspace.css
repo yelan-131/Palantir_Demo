@@ -4,11 +4,11 @@
   --density-card-pad: 20px;
   --density-content-pad: 24px;
 }
-.tech-white-shell .app-content :is(.assembly-column-card, .assembly-menu-card, .assembly-property-card) .ant-card-body {
+.tech-white-shell .app-content :is(.assembly-column-card, .assembly-property-card) .ant-card-body {
   padding: 12px !important;
 }
 .tech-white-shell .app-content .ant-card,
-.tech-white-shell .app-content :is(.simple-workbench-panel, .config-list-card, .config-editor-card, .assembly-column-card, .assembly-menu-card, .assembly-property-card, .app-program-header) {
+.tech-white-shell .app-content :is(.simple-workbench-panel, .config-list-card, .config-editor-card, .assembly-column-card, .assembly-property-card, .app-program-header) {
   background: var(--mf-panel);
   border-color: var(--mf-border);
   border-radius: var(--mf-panel-radius);

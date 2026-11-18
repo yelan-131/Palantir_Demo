@@ -67,7 +67,7 @@ async def _start_form_workflows(
         managed = str((config or {}).get("domainCode", "")).startswith("form-approval:") or (config or {}).get("domainCode") == "material-application-approval"
         if managed and not snapshot:
             raise HTTPException(409, "审批流程缺少已发布版本，请重新发布配置")
-        steps = _workflow_config_steps(config if isinstance(config, dict) else {}, form_data)
+        steps = _workflow_config_steps(config if isinstance(config, dict) else {}, form_data, trigger_action=trigger_action)
         first_step_index = _find_first_approval_step(steps) if steps else 0
         current_step = steps[first_step_index] if steps and first_step_index < len(steps) else None
         variables = {
@@ -110,9 +110,16 @@ async def _start_form_workflows(
         _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
         title = _workflow_instance_title(form, record_payload, binding.config)
         from app.services.workflow_dispatch import enqueue
-        enqueue(state, steps, 0, first_step_index if any(step.get('type')=='approval' for step in steps) else len(steps))
-        if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps):
-            state.update(current_node='end',current_step=max(0,len(steps)-1))
+        from app.services.workflow_cc import notify_reached
+        has_approval = any(step.get('type') == 'approval' for step in steps)
+        reached_steps = steps[:first_step_index] if has_approval else steps
+        enqueue(state, steps, 0, len(reached_steps))
+        completed = not has_approval and (state.get('dispatch_jobs') or any(
+            step.get('type') == 'notification' and step.get('cc_recipients') for step in reached_steps
+        ))
+        if completed:
+            state.update(current_node='end', current_step=len(steps) - 1)
+            current_step = steps[-1]
         instance = WorkflowInstance(
             tenant_id=tenant_id,
             workflow_id=workflow_def.id,
@@ -121,10 +128,12 @@ async def _start_form_workflows(
             initiator_id=initiator_id,
             form_data=json.dumps(form_data, ensure_ascii=False, default=str),
             workflow_state=json.dumps(state, ensure_ascii=False, default=str),
-            status="approved" if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps) else "pending",
+            status="approved" if completed else "pending",
         )
         db.add(instance)
         await db.flush()
+        await notify_reached(db, instance, state, reached_steps)
+        instance.workflow_state = json.dumps(state, ensure_ascii=False, default=str)
         if current_step and current_step.get("type") == "approval":
             for approver_id in approver_ids:
                 db.add(WorkflowApproval(
@@ -137,7 +146,7 @@ async def _start_form_workflows(
             "instance_id": instance.id,
             "workflow_id": workflow_def.id,
             "status": instance.status,
-            "current_step": first_step_index,
+            "current_step": state['current_step'],
             "current_step_name": current_step.get("name") if current_step else None,
             "approver_ids": approver_ids,
         })

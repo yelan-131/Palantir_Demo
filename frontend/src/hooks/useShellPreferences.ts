@@ -6,6 +6,7 @@ export interface ShellPreferences {
   sidebar: 'expanded' | 'collapsed';
   aiBubbleVisible: boolean;
   appOverrides: Record<string, { label?: string; icon?: string; pinned?: boolean }>;
+  collapsedMenuKeysByApp: Record<string, string[]>;
   home: string;
   language: string;
   theme: string;
@@ -22,6 +23,7 @@ const defaults: ShellPreferences = {
   sidebar: 'expanded',
   aiBubbleVisible: true,
   appOverrides: {},
+  collapsedMenuKeysByApp: {},
   home: 'workspace',
   language: 'zh-CN',
   theme: 'tech-white',
@@ -56,12 +58,19 @@ function normalize(value: unknown): ShellPreferences {
     if (typeof item.pinned === 'boolean') override.pinned = item.pinned;
     if (Object.keys(override).length) appOverrides[key] = override;
   }
+  const collapsedMenuKeysByApp: ShellPreferences['collapsedMenuKeysByApp'] = {};
+  for (const [appId, keys] of Object.entries(record(input.collapsedMenuKeysByApp))) {
+    if (!/^[1-9]\d*$/.test(appId) || !Array.isArray(keys)) continue;
+    const menuKeys = keys.filter((key): key is string => typeof key === 'string' && /^db-[1-9]\d*$/.test(key));
+    if (menuKeys.length) collapsedMenuKeysByApp[appId] = [...new Set(menuKeys)];
+  }
   return {
     density: ['compact', 'standard', 'relaxed'].includes(String(input.density))
       ? input.density as ShellPreferences['density'] : defaults.density,
     sidebar: input.sidebar === 'collapsed' ? 'collapsed' : 'expanded',
     aiBubbleVisible: typeof input.aiBubbleVisible === 'boolean' ? input.aiBubbleVisible : true,
     appOverrides,
+    collapsedMenuKeysByApp,
     home: ['workspace', 'current-app', 'system-admin'].includes(String(input.home))
       ? String(input.home) : defaults.home,
     language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
@@ -124,8 +133,9 @@ export function useShellPreferences() {
     };
   }, [key]);
 
-  const updatePreferences = useCallback((updates: Partial<ShellPreferences>) => {
-    const next = normalize({ ...readPreferences(key), ...updates });
+  const updatePreferences = useCallback((updates: Partial<ShellPreferences> | ((current: ShellPreferences) => Partial<ShellPreferences>)) => {
+    const current = readPreferences(key);
+    const next = normalize({ ...current, ...(typeof updates === 'function' ? updates(current) : updates) });
     cachedPreferences.set(key, next);
     let persisted = true;
     try {

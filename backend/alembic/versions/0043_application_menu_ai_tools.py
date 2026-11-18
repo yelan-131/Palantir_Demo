@@ -12,7 +12,7 @@ depends_on = None
 
 
 def upgrade():
-    install_application_menu_tools(op.get_bind())
+    install_application_menu_tools(op.get_bind(), include_workspace=False)
 
 
 def downgrade():

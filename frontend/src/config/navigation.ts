@@ -28,7 +28,6 @@ export const NAVIGATION_ENTRIES: NavigationEntry[] = [
   { path: '/scheduler', label: '日常任务', area: 'business' },
   { path: '/studio/applications', label: '应用与菜单', area: 'studio', adminOnly: true },
   { path: '/studio/business-data', label: '业务数据', area: 'studio', adminOnly: true },
-  { path: '/studio/page-design', label: '页面设计', area: 'studio', adminOnly: true },
   { path: '/studio/templates', label: '模板中心', area: 'studio' },
   { path: '/plugins', label: '插件与扩展', area: 'plugins' },
   { path: '/data-center/sources', label: '数据接入', area: 'data', group: '数据接入' },
@@ -60,7 +59,8 @@ export const LEGACY_ROUTES: Record<string, string> = {
   '/reports': '/studio', '/studio/reports': '/studio', '/rules': '/studio', '/studio/rules': '/studio', '/templates': '/studio/templates',
   '/data-sources': '/data-center/sources', '/pipeline': '/data-center/pipelines',
   '/ontology': '/data-center/entities', '/graph': '/data-center/graph',
-  '/system-admin': '/studio/applications',
+  '/system-admin': '/studio/applications', '/studio/page-design': '/studio/applications',
+  '/pages': '/studio/applications', '/pages/new': '/studio/applications',
 };
 
 export const LEGACY_ACCOUNT_SECTIONS: Record<string, string> = {
@@ -135,9 +135,14 @@ export function dataCenterDestination(pathname: string, search = ''): string | u
   return destination + (params.size ? `?${params}` : '');
 }
 
+export function businessDataDesignPath(formId: number | string) {
+  return `/studio/business-data/${encodeURIComponent(formId)}/design`;
+}
+
 /** All tabs and legacy URLs highlight their parent workspace. */
 export function settingsDestinationKey(pathname: string, search = '') {
   if (pathname === '/account-center') return new URLSearchParams(search).get('tab') === 'preferences' ? '/account-center?tab=preferences' : '/account-center';
+  if (/^\/studio\/business-data\/[^/]+\/design\/?$/.test(pathname)) return '/studio/business-data';
   if (pathname.startsWith('/form-settings/')) {
     return new URLSearchParams(search).get('source') === 'business-data' ? '/studio/business-data' : '/studio/applications';
   }

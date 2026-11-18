@@ -99,7 +99,7 @@ def application_edit_token(app, role_ids):
     values = {key: getattr(app, key) for key in (
         "id", "name", "code", "description", "icon", "default_route", "sort_order", "status", "is_pinned",
     )}
-    return edit_token({**values, "role_ids": role_ids})
+    return edit_token({**values, "role_ids": role_ids, "access_groups": app.access_groups})
 
 
 def check_edit_token(expected, actual):

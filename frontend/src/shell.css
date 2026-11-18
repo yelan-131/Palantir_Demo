@@ -52,7 +52,9 @@ body:has(.technology-login), body:has(.technology-login) #root { min-width: 0; }
 .shell-workspace-layout { min-width: 0; height: 100%; background: var(--canon-canvas); padding-right: 0 !important; }
 .tech-white-shell .app-header { height: 52px; min-height: 52px; line-height: 20px; background: var(--canon-surface); box-shadow: none; backdrop-filter: none; padding: 0 24px; gap: 12px; display: grid; align-items: center; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px) max-content; }
 .tech-white-shell .app-header > .shell-page-title { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; overflow: hidden; white-space: nowrap; font-size: var(--canon-font-body); line-height: 20px; color: var(--canon-muted); }
-.tech-white-shell .shell-page-title .shell-page-crumb { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.tech-white-shell .shell-page-title .shell-page-crumb-item { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 45%; }
+.tech-white-shell .shell-page-title .shell-page-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: inherit; }
+.tech-white-shell .shell-page-title a.shell-page-crumb:hover { text-decoration: underline; }
 .tech-white-shell .shell-page-title .shell-page-crumb-separator { flex: none; }
 .tech-white-shell .shell-page-title .shell-page-current { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--canon-font-body); line-height: 20px; font-weight: 500; color: var(--canon-text); }
 .shell-header-actions { justify-self: end; }

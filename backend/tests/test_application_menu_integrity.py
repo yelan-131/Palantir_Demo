@@ -1,7 +1,7 @@
 """Assembly actions against isolated storage, with a fresh session per request."""
 import os
 from unittest.mock import AsyncMock
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 
 import pytest
@@ -12,7 +12,7 @@ from app.api import applications, forms, admin
 from app.services import applications as applications_service
 from app.services import form_admin
 from app.api.deps import get_db, get_current_user
-from app.models.relational import Base, Tenant, User
+from app.models.relational import Application, ApplicationForm, Base, Form, Role, RolePermission, Tenant, User
 
 
 @pytest.mark.asyncio
@@ -131,5 +131,71 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
             await request(client,'DELETE',f'{path}/{parent["id"]}')
             nodes = await request(client,'GET',path)
             assert next(row for row in nodes if row['id']==child['id'])['parent_id'] is None
+
+            # A selected group includes its children once, even if the box also covers them.
+            entry = await request(client, 'POST', path, {
+                'title': 'Linked entry', 'node_type': 'form', 'parent_id': child['id'],
+                'route_path': '/dashboard', 'default_entry': True, 'config': {'description': 'Keep binding'},
+            })
+            target = await request(client, 'POST', path, {'title': 'Destination', 'node_type': 'group'})
+            paste_path = f'{path}/paste'
+            before = await request(client, 'GET', path)
+            await request(client, 'POST', paste_path, {'node_ids': [child['id'], foreign['id']]}, expected=409)
+            await request(client, 'POST', paste_path, {'node_ids': [child['id']], 'parent_id': entry['id']}, expected=422)
+            assert await request(client, 'GET', path) == before
+
+            pasted = await request(client, 'POST', paste_path, {
+                'node_ids': [entry['id'], child['id']], 'parent_id': target['id'],
+            })
+            assert len(pasted) == len(before) + 2
+            group_copy = next(row for row in pasted if row['title'] == 'Child 副本')
+            assert group_copy['parent_id'] == target['id']
+            entry_copy = next(row for row in pasted if row['parent_id'] == group_copy['id'])
+            assert entry_copy['title'] == entry['title']
+            assert entry_copy['route_path'] == entry['route_path']
+            assert entry_copy['config'] == entry['config']
+            await assert_default('/dashboard', entry['id'])
+
+            async with sessions() as db:
+                form = Form(tenant_id=1, name='Shared inspection', code='shared-inspection', status='published')
+                role = Role(tenant_id=1, name='inspector', label='Inspector')
+                db.add_all([form, role, Tenant(id=2, name='Foreign tenant', slug='foreign-tenant')])
+                await db.flush()
+                foreign_app = Application(tenant_id=2, name='Foreign app', code='foreign-app')
+                db.add(foreign_app)
+                await db.commit()
+                form_id, role_id, foreign_app_id = form.id, role.id, foreign_app.id
+            form_entry = await request(client, 'POST', path, {
+                'title': 'Inspection', 'form_id': form_id, 'parent_id': child['id'], 'sort_order': 3,
+                'config': {'permission_mode': 'custom', 'role_ids': [role_id]},
+            })
+            source_before = await request(client, 'GET', path)
+            target_path = f'/forms/applications/{b["id"]}/menu-nodes'
+            target_before = await request(client, 'GET', target_path)
+            selection = {'source_application_id': a['id'], 'node_ids': [form_entry['id'], child['id']]}
+            await request(client, 'POST', f'{target_path}/paste', {**selection, 'parent_id': child['id']}, expected=422)
+            await request(client, 'POST', f'{target_path}/paste', {**selection, 'source_application_id': foreign_app_id}, expected=404)
+            assert await request(client, 'GET', target_path) == target_before
+
+            pasted = await request(client, 'POST', f'{target_path}/paste', {**selection, 'parent_id': foreign['id']})
+            assert len(pasted) == len(target_before) + 3
+            copied_group = next(row for row in pasted if row['parent_id'] == foreign['id'])
+            assert copied_group['title'] == child['title']
+            copied_children = sorted((row for row in pasted if row['parent_id'] == copied_group['id']),
+                                     key=lambda row: row['sort_order'])
+            assert [row['title'] for row in copied_children] == [entry['title'], form_entry['title']]
+            copied_form = copied_children[1]
+            assert copied_form['application_id'] == b['id']
+            assert copied_form['form_id'] == form_id and copied_form['route_path'] == form_entry['route_path']
+            assert copied_form['config'] == form_entry['config']
+            assert not any(row['default_entry'] for row in pasted)
+            assert await request(client, 'GET', path) == source_before
+            async with sessions() as db:
+                binding = await db.scalar(select(ApplicationForm).where(
+                    ApplicationForm.application_id == b['id'], ApplicationForm.form_id == form_id,
+                ))
+                assert binding.enabled and binding.tenant_id == 1
+                grant = await db.scalar(select(RolePermission).where(RolePermission.resource_key == f'menu_node:{copied_form["id"]}'))
+                assert grant.role_id == role_id and grant.enabled
     finally:
         await engine.dispose()

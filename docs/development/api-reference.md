@@ -371,6 +371,8 @@ Authorization: Bearer <token>
 | `PUT` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.update_workflow_binding` |
 | `DELETE` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.delete_workflow_binding` |
 
+表单发布接口接受可选的 `workflow_draft_id`。该 ID 必须是当前表单保存的流程草稿；表单版本、流程定义和触发绑定在同一次事务中生效。
+
 ### `graph`（18）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |

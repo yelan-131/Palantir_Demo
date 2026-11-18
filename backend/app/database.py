@@ -115,7 +115,7 @@ async def init_db():
         return
 
     from app.core.agent_registry_schema import ensure_sqlite_tenant_registry_schema
-    from app.core.application_menu_registry_schema import install_application_menu_tools
+    from app.core.application_menu_registry_schema import install_application_menu_tools, install_workflow_design_tools
     from app.core.component_page_registry_schema import install_component_page_tools
     from app.models.relational import Base
     async with _engine.begin() as conn:
@@ -127,9 +127,11 @@ async def init_db():
         await _ensure_sqlite_tenant_onboarding(conn)
         await _ensure_sqlite_business_tenant_columns(conn)
         await _ensure_sqlite_saas_hardening_columns(conn)
+        await _ensure_sqlite_application_columns(conn)
         await conn.run_sync(ensure_sqlite_tenant_registry_schema)
         await conn.run_sync(install_application_menu_tools)
         await conn.run_sync(install_component_page_tools)
+        await conn.run_sync(install_workflow_design_tools)
     logger.info("SQLite schema ensured")
 
     if os.getenv("ENABLE_MANUFACTURING_DEMO_SEED") == "1":
@@ -324,6 +326,20 @@ async def _ensure_sqlite_knowledge_columns(conn) -> None:
     for column_name, definition in link_definitions.items():
         if link_columns and column_name not in link_columns:
             await conn.execute(text(f"ALTER TABLE knowledge_object_links ADD COLUMN {column_name} {definition}"))
+
+
+async def _ensure_sqlite_application_columns(conn) -> None:
+    from sqlalchemy import text
+
+    existing = await conn.execute(text("PRAGMA table_info(applications)"))
+    columns = {row[1] for row in existing}
+    if "code_locked" not in columns:
+        await conn.execute(text("ALTER TABLE applications ADD COLUMN code_locked BOOLEAN NOT NULL DEFAULT 0"))
+        await conn.execute(text(
+            "UPDATE applications SET code_locked = 1 WHERE status IN ('published', 'active', 'disabled')"
+        ))
+    if "access_groups" not in columns:
+        await conn.execute(text("ALTER TABLE applications ADD COLUMN access_groups JSON"))
 
 
 async def _ensure_sqlite_saas_hardening_columns(conn) -> None:

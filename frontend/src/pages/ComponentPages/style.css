@@ -155,7 +155,7 @@
 .component-list-header-actions .ant-btn {height:26px;min-width:26px;padding-inline:6px;}
 
 /* The shared dashboard inspector owns sizing and row hierarchy. */
-.component-page .analytics-settings-page:has(>.analytics-editor-form-inspector) {flex-basis:320px;width:320px;}
+.component-page .analytics-settings-page:has(>.analytics-editor-form-inspector) {flex-basis:var(--property-inspector-panel-width);width:var(--property-inspector-panel-width);border-radius:var(--property-inspector-panel-radius);}
 @media(max-width:800px){.component-page .analytics-settings-page:has(>.analytics-editor-form-inspector){flex-basis:auto;width:100%;}}
 
 .component-business-tabs {display:flex;flex-direction:column;gap:6px;margin:12px 0;}
@@ -182,7 +182,7 @@
 
 /* The source editor renders its controls into the one workspace inspector. */
 .tech-white-shell .app-content .component-page .form-designer-unified .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) {grid-template-columns:208px minmax(0,1fr);}
-.tech-white-shell .app-content .component-page .professional-flow-external-inspector {grid-template-columns:208px minmax(0,1fr);}
+.tech-white-shell .app-content .component-page .professional-flow-external-inspector {grid-template-columns:clamp(124px,24%,208px) minmax(0,1fr);}
 .component-source-properties {min-width:0;}
 .tech-white-shell .app-content .component-source-properties>.form-designer-right {width:100%;min-width:0;max-width:none;height:auto;padding:0;border:0;border-radius:0;background:transparent;overflow:visible;}
 .component-source-properties>.form-designer-right>.property-inspector-header {padding:0 0 10px;margin-bottom:10px;background:transparent;}
@@ -191,8 +191,7 @@
 .component-source-actions .ant-btn {width:24px;height:26px;padding:0;}
 .component-source-properties .designer-props {padding:0;}
 @media(max-width:800px) {
- .tech-white-shell .app-content .component-page .form-designer-unified .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow),
- .tech-white-shell .app-content .component-page .professional-flow-external-inspector {grid-template-columns:150px minmax(0,1fr);}
+ .tech-white-shell .app-content .component-page .form-designer-unified .form-designer-shell:not(.form-designer-shell-no-left):not(.form-designer-shell-data-view):not(.form-designer-shell-permission):not(.form-designer-shell-flow) {grid-template-columns:150px minmax(0,1fr);}
 }
 
 /* Embedded properties share the workspace frame and heading. */
@@ -237,17 +236,6 @@
 .component-source-properties .form-designer-right .designer-props label>span {color:var(--mf-muted);font-weight:500;line-height:1.5;}
 .component-source-properties .form-designer-right .designer-props .property-inspector-group:not([open])>:not(summary) {display:none;}
 
-/* Keep the inspector stationary while the canvas scrolls independently. */
-.component-page .analytics-editor-form-inspector>.analytics-editor-panel-body {
- overflow:hidden auto;
- overscroll-behavior-y:contain;
- scrollbar-gutter:stable;
- scrollbar-color:color-mix(in srgb,var(--mf-muted) 55%,transparent) transparent;
-}
-.component-page .analytics-editor-form-inspector>.analytics-editor-panel-body:focus-visible {
- outline:2px solid var(--mf-primary);
- outline-offset:-2px;
-}
 @media(min-width:801px) {
  .component-page.analytics-workspace-configuring .analytics-workspace-body {height:var(--component-editor-height,calc(100dvh - 112px));min-height:0;align-items:stretch;overflow:hidden;}
  .component-page.analytics-workspace-configuring .component-page-preview {height:100%;min-height:0;overflow:hidden auto;overscroll-behavior:contain;}
@@ -387,8 +375,3 @@
 .component-list-header-actions .component-header-keyword {margin:0;width:clamp(120px,15vw,205px);}
 .component-list-header-actions .component-header-keyword .ant-input-affix-wrapper {min-height:26px;padding-block:1px;}
 .component-page-widget-record-filter > .ant-card-head .ant-card-head-wrapper {flex-wrap:wrap;column-gap:8px;}
-
-/* Leave a clear lane for the fixed assistant beside the editor footer. */
-.tech-white-shell:has(.ai-edge-toggle) .component-page.analytics-workspace-configuring .analytics-editor-panel-footer {
-  padding-inline-end: 60px;
-}

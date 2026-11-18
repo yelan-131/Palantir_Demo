@@ -4,7 +4,7 @@ import {QuestionCircleOutlined} from '@ant-design/icons';
 import './style.css';
 
 export function PropertyInspectorHeader({title, context, titleAccessory, actions, className = ''}: {title:string;context?:string;titleAccessory?:React.ReactNode;actions?:React.ReactNode;className?:string}) {
-  return <header className={`property-inspector-header ${className}`}><div><strong>{title}</strong>{context && <span title={context}>{context}</span>}{titleAccessory}</div>{actions && <div className="property-inspector-header-actions">{actions}</div>}</header>;
+  return <header className={`property-inspector-header ${className}`}><div><strong title={title}>{title}</strong>{context && <span title={context}>{context}</span>}{titleAccessory}</div>{actions && <div className="property-inspector-header-actions">{actions}</div>}</header>;
 }
 
 export function PropertyHelp({children,label='配置说明'}:{children:React.ReactNode;label?:string}) {

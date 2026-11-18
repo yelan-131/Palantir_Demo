@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import applications
 from app.services import applications as applications_service
-from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Role, Tenant
+from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Role, RolePermission, Tenant
+from app.services.application_menu_nodes import _create_application_menu_node, _update_application_menu_node
+from app.services.form_schemas import MenuNodeCreate, MenuNodeUpdate
 from app.services.ai.application_admin_tools import execute_application_tool
 
 
@@ -152,6 +154,93 @@ async def test_application_settings_save_roles_and_validate_tenant(application_d
     saved = await update(role_ids=[1], name="巡检应用", expected_token=cleared["edit_token"])
     assert saved["name"] == "巡检应用"
     assert [role["id"] for role in saved["roles"]] == [1]
+
+
+@pytest.mark.asyncio
+async def test_application_access_groups_save_and_follow_role_bindings(application_db):
+    session, _ = application_db
+    session.add_all([
+        Role(id=1, tenant_id=1, name="viewer", label="查看"),
+        Role(id=2, tenant_id=1, name="editor", label="编辑"),
+        Role(id=3, tenant_id=2, name="viewer", label="其他租户查看"),
+    ])
+    await session.commit()
+    created = (await applications_service.create_application(
+        session, applications.ApplicationCreate(name="巡检", code="access-groups", role_ids=[1]), ADMIN,
+    ))["data"]
+    assert created["access_groups"] == [{"id": "default-access", "name": "默认权限组", "roleIds": [1]}]
+    app = await session.get(Application, created["id"])
+
+    async def update(**values):
+        return (await applications_service.update_application(
+            session, app, applications.ApplicationUpdate(**values), ADMIN,
+        ))["data"]
+
+    groups = [
+        {"id": "default-access", "name": "默认权限组", "roleIds": [1]},
+        {"id": "operators", "name": "操作员", "roleIds": [1, 2]},
+    ]
+    saved = await update(access_groups=groups, expected_token=created["edit_token"])
+    await session.refresh(app)
+    assert app.access_groups == saved["access_groups"] == groups
+    assert [role["id"] for role in saved["roles"]] == [1, 2]
+
+    renamed = await update(access_groups=[{**groups[0], "name": "巡检员"}, groups[1]])
+    assert renamed["edit_token"] != saved["edit_token"]
+    with pytest.raises(HTTPException, match="其他编辑更新"):
+        await update(access_groups=groups, expected_token=saved["edit_token"])
+    with pytest.raises(HTTPException, match="当前租户"):
+        await update(access_groups=[{**groups[0], "roleIds": [3]}])
+    await session.rollback()
+    await session.refresh(app)
+    assert app.access_groups == renamed["access_groups"]
+
+    legacy = await update(role_ids=[2])
+    assert [group["roleIds"] for group in legacy["access_groups"]] == [[], [2]]
+    cleared = await update(access_groups=[])
+    assert cleared["access_groups"] == cleared["roles"] == []
+
+
+@pytest.mark.asyncio
+async def test_menu_permission_groups_save_union_and_restore_visibility(application_db):
+    db, _ = application_db
+    db.add_all([
+        Role(id=1, tenant_id=1, name="viewer", label="查看"),
+        Role(id=2, tenant_id=1, name="editor", label="编辑"),
+        Role(id=3, tenant_id=2, name="viewer", label="其他租户查看"),
+        Application(id=1, tenant_id=1, name="巡检", code="inspection"),
+    ])
+    await db.commit()
+    groups = [
+        {"id": "first", "name": "查看", "roleIds": [1]},
+        {"id": "second", "name": "编辑", "roleIds": [1, 2]},
+    ]
+    created = (await _create_application_menu_node(1, MenuNodeCreate(
+        title="巡检菜单", node_type="group", config={"permission_mode": "custom", "access_groups": groups},
+    ), db, ADMIN))["data"]
+    assert created["config"]["access_groups"] == groups
+    assert created["config"]["role_ids"] == [1, 2]
+
+    async def update(**values):
+        return (await _update_application_menu_node(1, created["id"], MenuNodeUpdate(**values), db, ADMIN))["data"]
+
+    async def grants():
+        rows = (await db.scalars(select(RolePermission).order_by(RolePermission.role_id))).all()
+        return [(row.role_id, row.enabled) for row in rows]
+
+    assert await grants() == [(1, True), (2, True)]
+    assert (await update(visible=False))["config"]["access_groups"] == groups
+    assert await grants() == [(1, False), (2, False)]
+    await update(visible=True)
+    assert await grants() == [(1, True), (2, True)]
+    with pytest.raises(HTTPException, match="当前租户"):
+        await update(config={"permission_mode": "custom", "access_groups": [{**groups[0], "roleIds": [3]}]})
+    await db.rollback()
+    assert await grants() == [(1, True), (2, True)]
+    inherited = await update(config={"permission_mode": "inherit", "access_groups": groups})
+    assert inherited["config"]["permission_mode"] == "inherit"
+    assert "access_groups" not in inherited["config"]
+    assert await grants() == []
 
 
 @pytest.mark.asyncio

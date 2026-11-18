@@ -228,7 +228,7 @@ def test_field_change_compatibility_flags_existing_bad_values():
     assert _field_value_is_compatible(Field("code"), 20260529001) is False
 
 
-def test_publish_preview_blocks_new_required_field_with_existing_records():
+def test_publish_preview_allows_new_required_field_with_existing_records():
     pytest.importorskip("fastapi")
     from app.api.forms import _publish_impact_report
 
@@ -240,11 +240,10 @@ def test_publish_preview_blocks_new_required_field_with_existing_records():
     }
 
     report = _publish_impact_report(None, 1, snapshot, [{"title": "Fix pump"}])
-    blocking = [item for item in report["items"] if item["level"] == "blocking"]
-
-    assert report["blocking_count"] == 1
-    assert blocking[0]["type"] == "new_required_field_missing"
-    assert blocking[0]["field_name"] == "owner"
+    assert report["blocking_count"] == 0
+    owner = next(item for item in report["items"] if item["field_name"] == "owner")
+    assert owner["level"] == "info"
+    assert owner["type"] == "field_added"
 
 
 def test_publish_preview_blocks_incompatible_type_change():

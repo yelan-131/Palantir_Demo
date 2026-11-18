@@ -284,6 +284,19 @@ def _component_page_handler(operation):
 TOOL_HANDLERS.update({name: _component_page_handler(name) for name in PAGE_REQUESTS})
 
 
+from .workflow_design_tools import REQUESTS as WORKFLOW_DESIGN_REQUESTS, execute_workflow_design_tool
+
+
+def _workflow_design_handler(operation):
+    async def handler(payload, context):
+        async with db_session() as session:
+            return await execute_workflow_design_tool(operation, session, user=context.current_user or {}, payload=payload)
+    return handler
+
+
+TOOL_HANDLERS.update({name: _workflow_design_handler(name) for name in WORKFLOW_DESIGN_REQUESTS})
+
+
 def list_tool_handler_keys() -> list[str]:
     return sorted(TOOL_HANDLERS)
 

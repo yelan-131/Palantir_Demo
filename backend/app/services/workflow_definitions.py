@@ -36,13 +36,13 @@ def snapshot_definition(db, definition, *, published_by: int | None = None):
 
 
 async def stage_workflow_definition(db, body: WorkflowDefCreate, user: dict):
-    status = body.status or "draft"
+    status = (body.status or "draft").lower()
     config = dict(body.config or {"nodes": [], "edges": []})
     if body.steps:
         config["steps"] = body.steps
     if status in STARTABLE_DEFINITION_STATUSES:
         from app.services.workflow_routing import validate_graph
-        validate_graph(config)
+        validate_graph(config, require_cc_recipients=True)
     definition = WorkflowDef(
         tenant_id=current_tenant_id(user), name=body.name, description=body.description,
         config=json.dumps(config, ensure_ascii=False),
@@ -53,3 +53,25 @@ async def stage_workflow_definition(db, body: WorkflowDefCreate, user: dict):
     await db.flush()
     snapshot_definition(db, definition, published_by=current_user_id(user))
     return definition
+
+
+def update_workflow_definition(db, definition, body: WorkflowDefCreate, user: dict):
+    definition.name = body.name
+    if body.description is not None:
+        definition.description = body.description
+    if body.config is not None:
+        config = dict(body.config)
+        if body.steps:
+            config["steps"] = body.steps
+        definition.config = json.dumps(config, ensure_ascii=False)
+    if body.form_config is not None:
+        definition.form_config = json.dumps(body.form_config, ensure_ascii=False)
+    if body.status is not None:
+        definition.status = body.status.lower()
+    definition.version = int(definition.version or 1) + 1
+    if str(definition.status or "").lower() in STARTABLE_DEFINITION_STATUSES:
+        from app.services.workflow_routing import validate_graph
+        from app.services.workflow_views import _definition_config
+
+        validate_graph(_definition_config(definition), require_cc_recipients=True)
+    snapshot_definition(db, definition, published_by=current_user_id(user))

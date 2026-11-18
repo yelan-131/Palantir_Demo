@@ -10,10 +10,42 @@ from fastapi import HTTPException
 from app.services.form_rules import matches
 
 
-def validate_graph(config):
-    if config.get('steps') or not config.get('nodes'):
+def _node_kind(node):
+    data = node.get('data')
+    return node.get('type') or (data.get('type') if isinstance(data, dict) else None)
+
+
+def _start_bindings(config, starts):
+    bindings = config.get('triggerBindings') or []
+    if not isinstance(bindings, list) or any(not isinstance(binding, dict) for binding in bindings):
+        raise HTTPException(422, '表单触发必须为对象列表')
+    entries = {}
+    for binding in bindings:
+        if not binding.get('enabled'):
+            continue
+        action, start = binding.get('action'), binding.get('startNodeId')
+        if not isinstance(action, str) or not action or action in entries:
+            raise HTTPException(422, '启用的触发动作必须有唯一标识')
+        if start not in starts:
+            raise HTTPException(422, '有多个开始事件时，请为每个已启用的触发动作选择开始事件')
+        entries[action] = start
+    if not entries:
+        raise HTTPException(422, '有多个开始事件时，请配置至少一个触发入口')
+    return entries
+
+
+def validate_graph(config, *, require_cc_recipients=False):
+    steps = config.get('steps')
+    if steps:
+        if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+            raise HTTPException(422, '流程步骤必须为对象列表')
+        kinds = [step.get('type') for step in steps]
+        if kinds[0] != 'start' or kinds.count('start') != 1:
+            raise HTTPException(422, '线性流程必须以唯一的开始事件为首个步骤')
+        if kinds[-1] != 'end' or kinds.count('end') != 1:
+            raise HTTPException(422, '线性流程必须以结束事件为最后一个步骤')
         return
-    nodes, edges = config['nodes'], config.get('edges') or []
+    nodes, edges = config.get('nodes', []), config.get('edges') or []
     if not isinstance(nodes, list) or not isinstance(edges, list) or any(not isinstance(n, dict) for n in nodes) or any(not isinstance(e, dict) for e in edges):
         raise HTTPException(422, '流程节点和连线必须为对象列表')
     from app.services.workflow_dispatch import validate_actions
@@ -23,11 +55,22 @@ def validate_graph(config):
     ids = [n.get('id') for n in nodes]
     if not all(isinstance(key, str) and key for key in ids) or len(set(ids)) != len(ids):
         raise HTTPException(422, '流程节点标识缺失或重复')
-    if any((n.get('type') or n.get('data', {}).get('type')) in {'parallelGateway', 'joinGateway'} for n in nodes):
+    kinds = {node['id']: _node_kind(node) for node in nodes}
+    if require_cc_recipients:
+        from app.services.workflow_cc import validate_recipients
+        for node in nodes:
+            if kinds[node['id']] == 'ccTask':
+                validate_recipients(node)
+    if any(kind in ('parallelGateway', 'joinGateway') for kind in kinds.values()):
         raise HTTPException(422, '当前运行时尚不支持并行网关；请使用同一节点的多个审批组配置会签或或签')
-    if sum((n.get('type') or n.get('data', {}).get('type')) in {'startEvent', 'start'} for n in nodes) != 1:
-        raise HTTPException(422, '可视流程必须包含唯一开始节点')
+    starts = [key for key, kind in kinds.items() if kind in ('startEvent', 'start')]
+    ends = {key for key, kind in kinds.items() if kind in ('endEvent', 'end')}
+    if not starts:
+        raise HTTPException(422, '可视流程必须包含至少一个开始事件')
+    if not ends:
+        raise HTTPException(422, '可视流程必须包含至少一个结束事件')
     outgoing = {}
+    incoming = {}
     for edge in edges:
         if not isinstance(edge.get('priority', 999), (int, float)):
             raise HTTPException(422, '流程连线优先级必须为数字')
@@ -35,13 +78,27 @@ def validate_graph(config):
         if source not in ids or target not in ids:
             raise HTTPException(422, '流程连线指向不存在的节点')
         outgoing.setdefault(source, []).append(edge)
+        incoming.setdefault(target, []).append(source)
     for node in nodes:
         routes = outgoing.get(node['id'], [])
-        kind = node.get('type', node.get('data', {}).get('type'))
+        kind = kinds[node['id']]
         if len(routes) > 1 and kind != 'exclusiveGateway':
             raise HTTPException(422, '多条分支必须通过条件网关配置')
         if kind == 'exclusiveGateway' and sum(bool(e.get('isDefault')) for e in routes) > 1:
             raise HTTPException(422, '条件网关只能有一条默认路径')
+
+    visited = set()
+    pending = list(ends)
+    while pending:
+        node_id = pending.pop()
+        if node_id in visited:
+            continue
+        visited.add(node_id)
+        pending.extend(incoming.get(node_id, []))
+    if any(start not in visited for start in starts):
+        raise HTTPException(422, '每个开始事件必须连接到至少一个结束事件')
+    if len(starts) > 1:
+        _start_bindings(config, starts)
 
 
 def _condition(edge):
@@ -78,10 +135,18 @@ def _condition(edge):
             'value': value}
 
 
-def route_node_ids(config, data):
+def route_node_ids(config, data, *, trigger_action=None):
     validate_graph(config)
     nodes = {n['id']: n for n in config.get('nodes') or []}
-    current = next((key for key, n in nodes.items() if (n.get('type') or n.get('data', {}).get('type')) in {'startEvent', 'start'}), None)
+    starts = [key for key, node in nodes.items() if _node_kind(node) in ('startEvent', 'start')]
+    current = starts[0] if len(starts) == 1 else None
+    if len(starts) > 1:
+        entries = _start_bindings(config, starts)
+        current = entries.get(trigger_action if trigger_action is not None else 'submit')
+        if current is None and trigger_action is None and len(set(entries.values())) == 1:
+            current = next(iter(entries.values()))
+        if current is None:
+            raise HTTPException(409, '未为当前触发动作配置开始事件')
     path = []
     outgoing = {}
     for edge in config.get('edges') or []:
@@ -90,7 +155,7 @@ def route_node_ids(config, data):
         if current in path:
             raise HTTPException(409, '流程存在循环，无法启动审批')
         path.append(current)
-        if (nodes[current].get('type') or nodes[current].get('data', {}).get('type')) in {'endEvent', 'end'}:
+        if _node_kind(nodes[current]) in ('endEvent', 'end'):
             return path
         routes = sorted(outgoing.get(current, []), key=lambda e: (e.get('priority', 999), str(e.get('id', ''))))
         selected = None

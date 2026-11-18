@@ -21,9 +21,9 @@
 ### 2.1 存储与来源
 
 - 每个租户的定义保存在 `ai_agent_skill_definitions` 和 `ai_agent_tool_definitions` 两张表中，按 `tenant_id` 隔离。初始化标记保存在 `system_settings` 中：租户 1 的键是 `ai.agent_registry`，其他租户是 `ai.agent_registry:{tenant_id}`。
-- 租户既没有初始化标记也没有任何定义行时，使用内置默认值：`data/agent_registry/skills.json`、`tools.json` 种子，再合并平台定义的页面、应用与菜单、组件页面画布工具。
+- 租户既没有初始化标记也没有任何定义行时，使用 `data/agent_registry/skills.json`、`tools.json` 种子，再合并平台定义的页面、应用与菜单、组件画布和流程设计工具。
 - 只含后端的镜像没有 `data/` 目录，使用打包副本 `services/ai/assets/`。修改种子后运行 `scripts/sync_ai_assets.py` 同步副本（同时同步 `.agent/agent.md` 和 `.agent/action-contracts.md`）；当前副本与种子一致。
-- 迁移：`0034_ai_agent_registry_tables` 建表；`0042_agent_registry_tenants` 改为按租户隔离，原来的全局注册表归属租户 1；`0043_application_menu_ai_tools`、`0044_component_page_ai_tools` 把新的内置工具补装到已有注册表。SQLite 模式由 `backend/app/core/agent_registry_schema.py` 等在启动时补齐。
+- `0034_ai_agent_registry_tables` 建表，`0042_agent_registry_tenants` 将注册表改为按租户隔离。后续迁移为已有租户增量安装内置工具，`0049_workflow_design_ai` 安装流程设计技能和四个工具。SQLite 在启动时增量安装。
 - 增量脚本：仓库根目录的 `scripts/register_form_design_tools.py`、`scripts/register_form_menu_tools.py`、`scripts/upgrade_harness_registry.py`，以及 `backend/scripts/upgrade_dashboard_ai_registry.py`。
 
 读取时，停用的工具会被去掉，技能的 `allowed_tools` 和 `default_tool` 中指向停用工具的项也被去掉。已保存的平台内置工具在读取时总是使用当前代码中的参数结构（`_refresh_stored_input_schemas`），避免数据库中的旧结构与处理器不一致。
@@ -68,7 +68,7 @@
 
 ## 4. 工具清单
 
-以下清单与内置注册表一致：`data/agent_registry/tools.json` 中 55 个工具，加上平台定义的 5 个页面工具、11 个应用与菜单工具、5 个画布工具。租户可以停用工具，但不能新增没有处理器的工具。
+工具来自 `data/agent_registry/tools.json` 和平台代码中的内置定义。租户可按需停用已注册的工具。
 
 ### 4.1 只读工具
 
@@ -80,6 +80,7 @@
 | `ai.semantic_plan_low_code_form` | `qa` | 根据描述生成表单规划建议 |
 | `forms.preview_publish`、`forms.list_versions`、`forms.get_version`、`forms.get_layouts`、`forms.evaluate_rules` | `config` | 表单发布检查、版本、布局与规则试算 |
 | `forms.list_actions`、`forms.list_permissions`、`forms.list_workflow_bindings` | `config` | 读取表单动作、权限、流程绑定 |
+| `forms.get_workflow_design`、`forms.validate_workflow_design` | `config` | 读取表单流程和当前版本，校验起止事件、触发入口、审批、抄送、条件分支和注释成员 |
 | `dashboards.preview_source`、`dashboards.get` | `config` | 看板来源预览与编辑配置读取，处理器要求管理员 |
 | `dashboards.query` | `qa` | 查询已发布看板的数据 |
 | `pages.list`、`pages.query` | `qa` | 列出页面、查询已发布页面数据 |
@@ -93,6 +94,7 @@
 | `forms.update_record` | `record_write`，风险高 | 修改已有记录的指定字段 |
 | `forms.create_form_definition`、`forms.add_form_field` | `configuration_write`，风险高 | 新建表单草稿、加字段 |
 | `forms.update_field`、`forms.archive_field`、`forms.save_layout`、`forms.publish`、`forms.restore_draft`、`forms.update_definition`、`forms.copy`、`forms.delete` | 同上 | 表单设计操作，处理器要求管理员 |
+| `forms.save_workflow_draft`、`forms.publish_workflow_draft` | 同上 | 保存完整的流程设计，或发布已复核的流程草稿及当前表单配置。两步分别确认并校验版本 |
 | `forms.create_actions`、`forms.update_actions`、`forms.delete_actions` 及 `_permissions`、`_workflow_bindings` 的对应工具 | 同上 | 表单动作、权限、流程绑定的增改删 |
 | `forms.publish_to_menu` | 同上 | 发布表单（如需要）并挂到应用菜单 |
 | `dashboards.create`、`dashboards.save_draft`、`dashboards.publish` | 同上 | 新建看板草稿（绑定已有业务表单为来源）、保存、发布 |
@@ -132,18 +134,21 @@
 
 ### 5.2 内置技能与版本
 
-内置 18 个技能，位于 `backend/app/services/ai/business_skills/<技能名>/SKILL.md`，按 [Agent Skills 格式规范](https://agentskills.io/specification) 编写。目录名与 YAML 的 `name` 一致。内部注册表 ID 仍由 `metadata.manufoundry-registry-id` 对应，技能目录和 `platform.skills.read` 返回包的 `metadata.version`，与数据库行的 `version` 列无关。
+内置技能位于 `backend/app/services/ai/business_skills/<技能名>/SKILL.md`，按 [Agent Skills 格式规范](https://agentskills.io/specification) 编写。目录名与 YAML 的 `name` 一致。内部注册表 ID 由 `metadata.manufoundry-registry-id` 对应，技能目录和 `platform.skills.read` 返回包的 `metadata.version`。
 
 | 技能 | 版本 | 打包正文 |
 | --- | --- | --- |
 | `low_code.create_form_definition` | 1.1.0 | `low-code-create-form-definition/SKILL.md` |
 | `low_code.manage_component_page` | 1.0.0 | `low-code-manage-component-page/SKILL.md` |
+| `low_code.manage_application` | 1.0.0 | `low-code-manage-application/SKILL.md` |
+| `low_code.manage_workflow_design` | 1.0.0 | `low-code-manage-workflow-design/SKILL.md` |
 | `analysis.manage_dashboard` | 1.1.0 | `analysis-manage-dashboard/SKILL.md` |
 | `analysis.query_dashboard` | 1.1.0 | `analysis-query-dashboard/SKILL.md` |
 | `low_code.publish_form_to_menu` | 1.1.0 | `low-code-publish-form-to-menu/SKILL.md` |
-| 其余 13 个 | 1.0.0 | `<技能名>/SKILL.md` |
+| `workflow.submit_after_confirmation` | 1.0.1 | `workflow-submit-after-confirmation/SKILL.md` |
+| 其余 12 个 | 1.0.0 | `<技能名>/SKILL.md` |
 
-其余 13 个是：`knowledge.answer_question`、`knowledge.ingest_for_rag`、`knowledge.intake_document_ontology`、`quality.create_capa_draft`、`maintenance.create_work_order_draft`、`supply.create_purchase_request_draft`、`material.create_material_application_draft`、`analysis.analyze_form_records`、`forms.create_record_draft`、`low_code.suggest_model_or_page`、`low_code.add_form_field`、`workflow.submit_after_confirmation`、`low_code.inspect_form`（`NATIVE_ONLY_SKILLS`）。这 13 个的打包正文只在原生技能模式下使用；在 `platform.skills.read` 模式下，只有上表前 5 个以及数据库中填写了正文的技能可读。
+`workflow.submit_after_confirmation` 和其余 12 个打包技能属于 `NATIVE_ONLY_SKILLS`。`platform.skills.read` 可读取上表的七个设计和查询技能，以及数据库中填写了正文的技能。
 
 其中 `knowledge.ingest_for_rag`、`knowledge.intake_document_ontology`、`workflow.submit_after_confirmation` 的默认工具是未实现的工具。内置注册表中它们默认启用，可能出现在技能目录中，但无法完成实际操作；停用后再次启用会被第 2.3 节的规则拒绝。
 
@@ -218,7 +223,7 @@
 
 1. `forms.update_record`：先读取原记录，检查字段存在、用户对这些字段有查看和修改权限、填写规则通过，并记下待改字段的原值（`expected_values`）。
 2. 按参数结构校验（`validate_tool_payload`），不通过则把错误返回给模型。
-3. 应用、菜单和页面写工具：用 `prepare=True` 调用处理器，只校验并计算配置快照摘要（`_application_snapshot`、`_menu_snapshot`、`_page_snapshot`），不写入。`forms.publish_to_menu` 同样先准备，检查表单发布状态和菜单位置。
+3. 应用、菜单、页面和流程设计写工具在 `prepare=True` 时只做校验和配置快照摘要。流程设计使用 `_workflow_design_snapshot`，确认执行时会复核草稿版本。`forms.publish_to_menu` 的准备阶段检查表单发布状态和菜单位置。
 4. 把动作加入本轮待确认列表，载荷中带上 `_contract.tool` 和 `_harness_tool`（工具名），相同载荷不重复加入；返回 `waiting_confirmation`，模型据此结束本轮。
 
 ### 8.2 生成确认卡片

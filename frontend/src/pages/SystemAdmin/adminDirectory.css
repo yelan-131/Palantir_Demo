@@ -1392,7 +1392,6 @@
 }
 
 .assembly-column-card,
-.assembly-menu-card,
 .assembly-property-card {
   display: flex;
   flex-direction: column;
@@ -1405,7 +1404,6 @@
 }
 
 .assembly-column-card .ant-card-head,
-.assembly-menu-card .ant-card-head,
 .assembly-property-card .ant-card-head {
   min-height: 44px;
   padding: 0 14px;
@@ -1414,14 +1412,12 @@
 }
 
 .assembly-column-card .ant-card-head-title,
-.assembly-menu-card .ant-card-head-title,
 .assembly-property-card .ant-card-head-title {
   font-size: 14px;
   font-weight: 700;
 }
 
 .assembly-column-card .ant-card-body,
-.assembly-menu-card .ant-card-body,
 .assembly-property-card .ant-card-body {
   flex: 1;
   min-height: 0;
@@ -1560,12 +1556,6 @@
   min-height: 100%;
 }
 
-.assembly-menu-card .ant-tree-node-content-wrapper {
-  min-height: 34px;
-  padding: 5px 8px;
-  border-radius: 5px;
-}
-
 .assembly-menu-title {
   min-width: 220px;
   white-space: nowrap;
@@ -1579,14 +1569,6 @@
   vertical-align: bottom;
 }
 
-.assembly-folder-icon {
-  color: var(--mf-accent);
-}
-
-.assembly-menu-card .ant-tree-node-selected {
-  background: #e5f1f5 !important;
-  outline: 1px solid var(--mf-accent);
-}
 
 .assembly-node-editor {
   display: flex;

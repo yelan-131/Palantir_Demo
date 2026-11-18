@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
-from app.services.workflow_definitions import WorkflowDefCreate, snapshot_definition as _snapshot_definition, stage_workflow_definition
+from app.services.workflow_definitions import WorkflowDefCreate, stage_workflow_definition, update_workflow_definition
 
 router = APIRouter()
 
@@ -212,28 +212,14 @@ async def update_definition(def_id: int, body: WorkflowDefCreate, user: dict = D
     """更新工作流定义（管理员）；每次更新生成新的版本快照，在途实例不受影响."""
     async def _query(db):
         from app.models.relational import WorkflowDef
+        from app.services.field_uniqueness import lock
+
         tenant_id = current_tenant_id(user)
-        d = await db.get(WorkflowDef, def_id)
-        if not d or d.tenant_id != tenant_id:
+        await lock(db, tenant_id)
+        d = await db.scalar(select(WorkflowDef).where(WorkflowDef.id == def_id, WorkflowDef.tenant_id == tenant_id).with_for_update())
+        if d is None:
             return None
-        next_version = int(d.version or 1) + 1
-        d.name = body.name
-        if body.description is not None:
-            d.description = body.description
-        if body.config is not None:
-            config_data = body.config
-            if body.steps:
-                config_data["steps"] = body.steps
-            d.config = json.dumps(config_data, ensure_ascii=False)
-        if body.form_config is not None:
-            d.form_config = json.dumps(body.form_config, ensure_ascii=False)
-        if body.status is not None:
-            d.status = body.status
-        d.version = next_version
-        if d.status in STARTABLE_DEFINITION_STATUSES:
-            from app.services.workflow_routing import validate_graph
-            validate_graph(_definition_config(d))
-        _snapshot_definition(db, d, published_by=current_user_id(user))
+        update_workflow_definition(db, d, body, user)
         await db.commit()
         await write_audit_log(
             tenant_id=tenant_id,
@@ -603,9 +589,16 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
         _set_current_assignees(state, approver_ids, approval_groups=approval_groups)
 
         from app.services.workflow_dispatch import enqueue
-        enqueue(state, steps, 0, first_step_index if any(step.get('type')=='approval' for step in steps) else len(steps))
-        if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps):
-            state.update(current_node='end',current_step=max(0,len(steps)-1))
+        from app.services.workflow_cc import notify_reached
+        has_approval = any(step.get('type') == 'approval' for step in steps)
+        reached_steps = steps[:first_step_index] if has_approval else steps
+        enqueue(state, steps, 0, len(reached_steps))
+        completed = not has_approval and (state.get('dispatch_jobs') or any(
+            step.get('type') == 'notification' and step.get('cc_recipients') for step in reached_steps
+        ))
+        if completed:
+            state.update(current_node='end', current_step=len(steps) - 1)
+            current_step = steps[-1]
         inst = WorkflowInstance(
             tenant_id=tenant_id,
             workflow_id=def_id, title=body.title,
@@ -613,10 +606,12 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
             initiator_id=initiator_id,
             form_data=json.dumps(form_data, ensure_ascii=False),
             workflow_state=json.dumps(state, ensure_ascii=False),
-            status="approved" if state.get('dispatch_jobs') and not any(step.get('type')=='approval' for step in steps) else "pending",
+            status="approved" if completed else "pending",
         )
         db.add(inst)
         await db.flush()
+        await notify_reached(db, inst, state, reached_steps)
+        inst.workflow_state = json.dumps(state, ensure_ascii=False)
 
         if current_step and current_step.get("type") == "approval":
             for approver_id in approver_ids:
@@ -639,7 +634,7 @@ async def start_instance(def_id: int, body: WorkflowStartRequest, user: dict = D
         return {
             "instance_id": inst.id,
             "status": inst.status,
-            "current_step": first_step_index,
+            "current_step": state["current_step"],
             "current_step_name": current_step.get("name") if current_step else None,
         }
 
@@ -844,7 +839,10 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         # Approve: move to next step
         next_step_idx = _find_next_actionable_step(steps, current_step_idx)
         from app.services.workflow_dispatch import enqueue
-        enqueue(state, steps, current_step_idx + 1, next_step_idx if next_step_idx is not None else len(steps))
+        from app.services.workflow_cc import notify_reached
+        stop = next_step_idx if next_step_idx is not None else len(steps)
+        enqueue(state, steps, current_step_idx + 1, stop)
+        await notify_reached(db, inst, state, steps[current_step_idx + 1:stop])
         if next_step_idx is not None:
             next_step = steps[next_step_idx]
             state["current_step"] = next_step_idx

@@ -26,7 +26,6 @@ export type ControlRuleKey =
   | 'copyable'
   | 'optionSort';
 
-export type PublishCheckLevel = 'error' | 'warning' | 'suggestion';
 
 export type EncodingResetCycle = 'none' | 'day' | 'month' | 'year' | 'dependency';
 
@@ -342,12 +341,6 @@ export interface DesignerMeta {
   componentGroups: Array<{ category: string; items: ComponentDefinition[] }>;
   commonControlKeys: string[];
   businessSections?: BusinessSection[];
-}
-
-export interface PublishCheckItem {
-  level: PublishCheckLevel;
-  title: string;
-  detail: string;
 }
 
 export interface WorkflowDesignerMeta {

@@ -1,11 +1,20 @@
 """Shared form fields contracts for HTTP and tool callers."""
 from __future__ import annotations
+from types import SimpleNamespace
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id, current_user_id, ensure_admin
 from app.core.audit import write_audit_log
-from app.services.form_engine import _dynamic_record_field_impact, _ensure_physical_form_table
+from app.services.form_engine import (
+    _dynamic_record_field_impact,
+    _ensure_physical_form_table,
+    _normalize_sql_type,
+    _physical_column_name,
+    _physical_column_type,
+    _physical_table_column_types,
+    _uses_physical_form_table,
+)
 from app.services.form_schemas import (
     FormFieldCreate,
     FormFieldUpdate,
@@ -97,6 +106,15 @@ async def update_form_field(form_id: int, field_id: int, body: FormFieldUpdate, 
     if not field or field.form_id != form_id or field.tenant_id != tenant_id:
         raise HTTPException(404, 'Field not found')
     updates = _normalize_form_field_data(body.dict(exclude_unset=True), current_field_type=field.field_type, current_ui_config=field.ui_config)
+    next_type = updates.get('field_type')
+    if next_type and next_type != field.field_type:
+        form = await db.get(Form, form_id)
+        if form and _uses_physical_form_table(form):
+            column_types = await _physical_table_column_types(db, form.table_name)
+            current_column = column_types.get(_physical_column_name(field.field_name))
+            next_column = _normalize_sql_type(_physical_column_type(SimpleNamespace(field_type=next_type)))
+            if current_column and current_column != next_column:
+                raise HTTPException(409, '新字段类型与现有存储列不兼容，无法直接保存')
     if field.archived and updates.get('archived') is False:
         from app.services.field_limits import DEFAULT_FORM_FIELDS
         await db.execute(select(Form.id).where(Form.id == form_id, Form.tenant_id == tenant_id).with_for_update())

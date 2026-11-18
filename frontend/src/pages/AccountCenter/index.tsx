@@ -4,7 +4,7 @@ import SkillInstructions from './SkillInstructions';
 import useAISettingsNotification from './useAISettingsNotification';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useSearchParams } from 'react-router-dom';
-import { ServiceCatalogPanel, PurposeModelsPanel, NativeCompactionPanel, AIStatusSummary, type TestTarget } from './AIConfigurationPanels';
+import { ServiceCatalogPanel, PurposeModelsPanel, NativeCompactionPanel, type TestTarget } from './AIConfigurationPanels';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
@@ -30,7 +30,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Progress,
   Radio,
@@ -883,7 +882,6 @@ export function AIPlatformPanelV2() {
       const field = error?.errorFields?.[0]?.name?.[0];
       if (['provider', 'baseUrl', 'apiKey', 'modelServices'].includes(field)) setActiveSettingsSection('connection');
       else if (['chatModel', 'reasoningModel', 'visionModel', 'modelAssignments'].includes(field)) setActiveSettingsSection('models');
-      else if (field === 'contextPolicy') setActiveSettingsSection('safety');
       throw error;
     }
     const values = normalizeAISettings(form.getFieldsValue(true));
@@ -1088,27 +1086,7 @@ export function AIPlatformPanelV2() {
     { key: 'connection', children: <ServiceCatalogPanel form={form} values={watchedSettings} onChange={() => { setDirty(true); setConnectionResult(null); }} onTest={handleTestConnection} testing={testing} /> },
     { key: 'models', children: <PurposeModelsPanel values={watchedSettings} onTest={handleTestConnection} testing={testing} /> },
     ...advancedSections.filter(section => section.key === 'agent-registry'),
-    { key: 'safety', children: <div className="ai-settings-safety"><AIStatusSummary items={[{ label: '执行模式', value: ({ off: '关闭', readonly: '只读查询', draft: '仅生成草稿', confirm: '确认后执行' } as Record<string, string>)[watchedSettings.agentMode] || '未配置' }, { label: '会话压缩', value: watchedSettings.harnessPolicy?.compaction?.enabled ? '启用' : '关闭' }, { label: '写入策略', value: '操作前确认' }]} /><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'maxToolSteps']} label="最大工具步数"><Input type="number" min={1} max={20} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={1} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>
-      <Card title="对话上下文" className="settings-section">
-        <div className="ai-execution-controls">
-          <Form.Item
-            name={['contextPolicy', 'maxContextTokens']}
-            label="平台输入预算 · Token"
-            extra="供系统提示、工具和对话共用，也受模型窗口扣除输出上限后的空间限制。"
-            rules={[{ required: true, type: 'integer', min: 1000, max: 200000, message: '请输入 1,000 到 200,000 之间的整数' }]}
-          >
-            <InputNumber min={1000} max={200000} precision={0} step={1024} />
-          </Form.Item>
-          <Form.Item
-            name={['contextPolicy', 'recentMessageLimit']}
-            label="最近消息上限 · 条"
-            extra="输入预算不足时，实际带入的历史消息可能更少。"
-            rules={[{ required: true, type: 'integer', min: 2, max: 50, message: '请输入 2 到 50 之间的整数' }]}
-          >
-            <InputNumber min={2} max={50} precision={0} />
-          </Form.Item>
-        </div>
-      </Card>
+    { key: 'safety', children: <div className="ai-settings-safety"><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={1} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>
       <Card title="安全护栏" className="settings-section">
                   <Form.Item name="domains" label="开放业务范围" extra="仅开放所选范围内的工具；创建表单和查询应用配置需要选择低代码，写入仍须确认并遵守角色权限。">
                     <Select mode="multiple" options={aiDomainOptions} aria-label="开放业务范围" />

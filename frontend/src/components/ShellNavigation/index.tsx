@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ApartmentOutlined, AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, EllipsisOutlined, FolderOutlined, HistoryOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, EllipsisOutlined, FolderOutlined, FormOutlined, HistoryOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
 import { Button, Card, ConfigProvider, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import AccountMenu, { type AccountMenuUser } from '../AccountMenu';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
@@ -18,7 +18,7 @@ export interface ShellApplication {
 }
 
 export const shellIcons: Record<string, React.ReactNode> = {
-  HomeOutlined: <HomeOutlined />, FolderOutlined: <FolderOutlined />,
+  HomeOutlined: <HomeOutlined />, FolderOutlined: <FolderOutlined />, FormOutlined: <FormOutlined />,
   ClockCircleOutlined: <ClockCircleOutlined />, AppstoreOutlined: <AppstoreOutlined />,
   DashboardOutlined: <BarChartOutlined />, DatabaseOutlined: <DatabaseOutlined />,
   ToolOutlined: <ToolOutlined />, SafetyCertificateOutlined: <SafetyCertificateOutlined />,
@@ -110,7 +110,7 @@ export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[];
     <Input.Search aria-label="搜索应用" placeholder="搜索应用名称或用途" value={query} onChange={event => setQuery(event.target.value)} allowClear className="shell-library-search" />
     {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon)}</span><Tag>{app.pinned ? '常用应用' : '业务应用'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '设为常用'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
     <Modal title="自定义应用入口" open={Boolean(editing)} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" destroyOnClose>
-      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.keys(shellIcons).map(value => ({ value, label: <Space>{shellIcon(value)}{({ HomeOutlined: '首页', FolderOutlined: '空间', ClockCircleOutlined: '任务', AppstoreOutlined: '应用', DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量', ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识' } as Record<string, string>)[value]}</Space> }))} /></Form.Item><Form.Item name="pinned" label="在主菜单优先显示" valuePropName="checked"><Switch /></Form.Item></Form>
+      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.keys(shellIcons).map(value => ({ value, label: <Space>{shellIcon(value)}{({ HomeOutlined: '首页', FolderOutlined: '空间', FormOutlined: '表单', ClockCircleOutlined: '任务', AppstoreOutlined: '应用', DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量', ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识' } as Record<string, string>)[value]}</Space> }))} /></Form.Item><Form.Item name="pinned" label="在主菜单优先显示" valuePropName="checked"><Switch /></Form.Item></Form>
       <Typography.Text type="secondary">仅调整你的应用入口显示，业务应用配置与权限仍沿用现有设置。</Typography.Text>
     </Modal>
   </section>;

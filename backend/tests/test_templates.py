@@ -122,3 +122,89 @@ async def test_repository_ships_manufacturing_demo_package():
     packages = {t["package_id"]: t for t in result["data"]}
     assert "manufacturing-demo" in packages
     assert packages["manufacturing-demo"]["config"]["seedData"]["mode"] == "optional"
+
+
+@pytest.mark.asyncio
+async def test_saved_application_template_round_trip_and_tenant_boundary(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.api import templates
+    from app.api.deps import get_current_user, get_db
+    from app.models.relational import Application, ApplicationForm, ApplicationMenuNode, Base, Form, Tenant
+    from app.services import application_templates
+
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with sessions() as db:
+            db.add_all([Tenant(id=1, name='Owner', slug='owner'), Tenant(id=2, name='Other', slug='other')])
+            await db.flush()
+            app = Application(tenant_id=1, name='Inspection', code='inspection', default_route='/dynamic/inspection')
+            form = Form(tenant_id=1, name='Inspection records', code='inspection')
+            db.add_all([app, form])
+            await db.flush()
+            group = ApplicationMenuNode(tenant_id=1, application_id=app.id, node_type='group', title='On site')
+            db.add(group)
+            await db.flush()
+            db.add(ApplicationMenuNode(tenant_id=1, application_id=app.id, parent_id=group.id, node_type='form',
+                                       title='Records', form_id=form.id, route_path=app.default_route, default_entry=True,
+                                       config={'description': 'Daily log', 'permission_mode': 'custom', 'role_ids': [11]}))
+            await db.commit()
+            source_id, form_id, group_id = app.id, form.id, group.id
+
+        actor = {'uid': 1, 'tenant_id': 1, 'is_admin': True}
+
+        async def database():
+            async with sessions() as db:
+                yield db
+
+        api = FastAPI()
+        api.include_router(templates.router, prefix='/templates')
+        api.dependency_overrides[get_db] = database
+        api.dependency_overrides[get_current_user] = lambda: actor
+        monkeypatch.setattr(application_templates, 'write_audit_log', AsyncMock())
+        async with AsyncClient(transport=ASGITransport(app=api), base_url='http://test') as client:
+            path = '/templates/applications'
+            saved = await client.post(f'{path}/{source_id}')
+            assert saved.status_code == 200, saved.text
+            template_id = saved.json()['data']['id']
+            repeated = await client.post(f'{path}/{source_id}')
+            assert repeated.json()['data']['id'] == template_id
+            listed = (await client.get(path)).json()['data']
+            assert len(listed) == 1 and listed[0]['config']['forms'] == [form_id]
+
+            actor['is_admin'] = False
+            assert (await client.get(path)).status_code == 403
+            actor.update(tenant_id=2, is_admin=True)
+            assert (await client.get(path)).json()['data'] == []
+            assert (await client.post(f'{path}/{template_id}/instantiate')).status_code == 404
+            assert (await client.post(f'{path}/{source_id}')).status_code == 404
+            actor['tenant_id'] = 1
+
+            async with sessions() as db:
+                original_group = await db.get(ApplicationMenuNode, group_id)
+                original_group.title = 'Renamed after saving'
+                await db.commit()
+            created = await client.post(f'{path}/{template_id}/instantiate')
+            assert created.status_code == 200, created.text
+            draft_id = created.json()['data']['id']
+
+        async with sessions() as db:
+            draft = await db.get(Application, draft_id)
+            assert draft.id != source_id and draft.status == 'draft' and draft.default_route == '/dynamic/inspection'
+            rows = (await db.scalars(select(ApplicationMenuNode).where(ApplicationMenuNode.application_id == draft_id))).all()
+            parent = next(row for row in rows if row.node_type == 'group')
+            child = next(row for row in rows if row.node_type == 'form')
+            assert parent.title == 'On site' and child.parent_id == parent.id
+            assert child.form_id == form_id and child.default_entry and child.config == {'description': 'Daily log'}
+            binding = await db.scalar(select(ApplicationForm).where(ApplicationForm.application_id == draft_id))
+            assert binding.form_id == form_id and binding.enabled
+    finally:
+        await engine.dispose()

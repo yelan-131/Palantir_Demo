@@ -8,8 +8,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import current_tenant_id, get_current_user, get_db, require_admin
+from app.services import application_templates
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -72,6 +74,21 @@ async def list_templates():
         category = template["category"]
         categories.setdefault(category, []).append(template)
     return {"data": templates, "categories": categories}
+
+
+@router.get("/applications")
+async def list_saved_applications(db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    return {"data": await application_templates.list_application_templates(db, current_tenant_id(user))}
+
+
+@router.post("/applications/{application_id}")
+async def save_application(application_id: int, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    return {"data": await application_templates.save_application_template(db, current_tenant_id(user), application_id)}
+
+
+@router.post("/applications/{template_id}/instantiate")
+async def instantiate_application(template_id: int, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    return {"data": await application_templates.instantiate_application_template(db, current_tenant_id(user), template_id, user)}
 
 
 @router.get("/{template_id}")

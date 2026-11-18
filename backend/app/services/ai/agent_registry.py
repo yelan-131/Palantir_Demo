@@ -17,6 +17,7 @@ from .component_page_tools import PAGE_REQUESTS, registry_definitions as page_de
 from .skills import SkillDefinition
 from .tool_handlers import list_tool_handler_keys
 from .tool_registry import ToolDefinition, _normalize_input_schema
+from .workflow_design_tools import registry_definitions as workflow_design_definitions
 
 
 AGENT_REGISTRY_SETTINGS_KEY = "ai.agent_registry"
@@ -53,9 +54,9 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
     allowed_handlers = set(list_tool_handler_keys())
     baseline_tools = _load_registry_seed("tools.json")
     management_definitions = application_menu_definitions()
-    page_tools = page_definitions()
+    design_tools = {**page_definitions(), **workflow_design_definitions()}
     baseline_tools.update(management_definitions)
-    baseline_tools.update(page_tools)
+    baseline_tools.update(design_tools)
     canvas_definitions = registry_definitions() if TOOL_DETAILS.keys() & tool_map.keys() else {}
 
     for name, payload in tool_map.items():
@@ -69,12 +70,13 @@ def validate_registry_payload(skills: Any, tools: Any) -> tuple[dict[str, dict[s
             for key in ("input_schema", "side_effect", "permission_check", "domain", "audit_required", "dry_run_supported"):
                 if payload.get(key) != management_definitions[name].get(key):
                     raise AgentRegistryError(f"应用与菜单工具 {name} 的 {key} 由平台定义")
-        if name in PAGE_REQUESTS or handler_key in PAGE_REQUESTS:
+        if name in design_tools or handler_key in design_tools:
+            label = "页面工具" if name in PAGE_REQUESTS or handler_key in PAGE_REQUESTS else "流程工具"
             if name != handler_key:
-                raise AgentRegistryError("页面工具必须使用其对应的内置处理器")
+                raise AgentRegistryError(f"{label}必须使用其对应的内置处理器")
             for key in ("input_schema", "side_effect", "permission_check", "domain", "audit_required", "dry_run_supported"):
-                if payload.get(key) != page_tools[name].get(key):
-                    raise AgentRegistryError(f"页面工具 {name} 的 {key} 由平台定义")
+                if payload.get(key) != design_tools[name].get(key):
+                    raise AgentRegistryError(f"{label} {name} 的 {key} 由平台定义")
         if name in TOOL_DETAILS or handler_key in TOOL_DETAILS:
             if name != handler_key:
                 raise AgentRegistryError("画布工具必须使用其对应的内置处理器")
@@ -122,7 +124,9 @@ def load_seed_registry() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str,
     for name in BUNDLED_SKILLS & skills.keys():
         metadata, _ = bundled_skill_package(name)
         skills[name]["description"] = metadata["description"]
-    return validate_registry_payload(skills, {**tools, **registry_definitions(), **application_menu_definitions(), **page_definitions()})
+    return validate_registry_payload(skills, {
+        **tools, **registry_definitions(), **application_menu_definitions(), **page_definitions(), **workflow_design_definitions(),
+    })
 
 
 async def seed_agent_registry_from_files(*, updated_by: str | None = None, tenant_id: int | None = None) -> dict[str, Any]:
@@ -173,12 +177,40 @@ def _tool_definition(row: AIAgentToolDefinition) -> dict[str, Any]:
 
 def _refresh_stored_input_schemas(tools: dict[str, dict[str, Any]]) -> None:
     """Use the current platform schema wherever a stored built-in tool is read."""
-    platform_tools = {**application_menu_definitions(), **page_definitions()}
+    platform_tools = {**application_menu_definitions(), **page_definitions(), **workflow_design_definitions()}
     if TOOL_DETAILS.keys() & tools.keys():
         platform_tools.update(registry_definitions())
     for name in platform_tools.keys() & tools.keys():
         if tools[name]["handler_key"] == name:
             tools[name]["input_schema"] = platform_tools[name]["input_schema"]
+    previous_descriptions = {
+        "applications.create": {"按名称和编码新建草稿应用。可选设置说明、图标、启动页面、排序和置顶。"},
+        "applications.update": {
+            "按应用 ID 修改名称、编码、说明、图标、启动页面、排序或置顶。只传需要修改的字段。",
+            "按应用 ID 修改基本属性、导航或访问权限组。只传需要修改的字段，access_groups 完整替换权限组。",
+        },
+        "menus.update_properties": {
+            "设置菜单样式和访问权限。permission_mode 选择跟随应用或自定义，access_groups 完整替换自定义权限组。",
+        },
+    }
+    for name, descriptions in previous_descriptions.items():
+        if name in tools and tools[name]["handler_key"] == name and tools[name].get("description") in descriptions:
+            tools[name]["description"] = platform_tools[name]["description"]
+    binding_tools = {
+        f"forms.{verb}_workflow_bindings": f"{verb} workflow bindings through the existing form designer with tenant and admin checks."
+        for verb in ("list", "create", "update", "delete")
+    }
+    if binding_tools.keys() & tools.keys():
+        seed = _load_registry_seed("tools.json")
+        for name, old_description in binding_tools.items():
+            if name in tools and tools[name].get("description") == old_description:
+                tools[name]["description"] = seed[name]["description"]
+    query = tools.get("platform.application_settings.query")
+    if query and query.get("input_schema") == {"subject": "applications|menus|routes", "limit": "integer"}:
+        definition = _load_registry_seed("tools.json")["platform.application_settings.query"]
+        query["input_schema"] = definition["input_schema"]
+        if query.get("description") == "查询租户应用。subject=menus 时传 application_id 查询菜单树节点及入口。":
+            query["description"] = definition["description"]
 
 
 def _admin_record(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> dict[str, Any]:

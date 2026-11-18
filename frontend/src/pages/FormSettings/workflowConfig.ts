@@ -4,6 +4,9 @@ import type { ViewConfig } from '@/utils/viewConfig';
 import { buildRuntimeLayout, getControlColumnSpan } from '@/utils/formLayout';
 import { createDefaultFlowConfig, normalizeNodeFieldPermissions } from './ProfessionalFlowDesigner';
 import type { FlowDesignerConfig, FlowDesignerEdge, FlowDesignerNode } from './ProfessionalFlowDesigner';
+import { readFlowAnnotations } from './flowAnnotations';
+import { readFlowWaypoints } from './flowEdgeRoute';
+import { FLOW_NODE_SIZE } from './flowNodeSnap';
 import type { ControlWidth, DesignerConfig, DesignerField, LayoutControl, ViewConfigMeta, WorkflowDesignerMeta } from './designerTypes';
 import { mapDesignerFieldType } from './fieldBusinessType';
 import { designerFieldsToViewFields, getEffectiveControlTypeForControl } from './fieldModel';
@@ -37,6 +40,61 @@ export function shouldShiftLegacyDefaultWorkflow(nodes: FlowDesignerNode[]) {
     && nodes.every((node, index) => node.id === legacyIds[index] && node.x === 420 && node.y === legacyY[index]);
 }
 
+const BOUNDARY_GAP_Y = 96;
+
+function completeBoundaryEvents(nodes: FlowDesignerNode[], edges: FlowDesignerEdge[], fallback: FlowDesignerConfig) {
+  const hasStart = nodes.some((node) => node.type === 'startEvent');
+  const hasEnd = nodes.some((node) => node.type === 'endEvent');
+  if (hasStart && hasEnd) return { nodes, edges };
+
+  const ids = new Set([...nodes.map((node) => node.id), ...edges.map((edge) => edge.id)]);
+  const newId = (base: string) => {
+    let id = base;
+    for (let suffix = 2; ids.has(id); suffix += 1) id = `${base}-${suffix}`;
+    ids.add(id);
+    return id;
+  };
+  const newNodes = [...nodes];
+  const newEdges = [...edges];
+  const connect = (source: string, target: string, label: string, sideBySide = false) => {
+    newEdges.push({
+      id: newId(`${source}-${target}`), source, target, label,
+      sourceSide: sideBySide ? 'left' : 'bottom', targetSide: sideBySide ? 'right' : 'top',
+      priority: newEdges.length + 1, isDefault: true,
+    });
+  };
+
+  if (!hasStart) {
+    const targets = new Set(edges.map((edge) => edge.target));
+    const roots = nodes.filter((node) => node.executable && !targets.has(node.id));
+    const entry = roots.length === 1 ? roots[0] : undefined;
+    const top = Math.min(...nodes.map((node) => node.y));
+    const sideBySide = top < 138;
+    const start = {
+      ...fallback.nodes[0], id: newId('flow-start'), label: '开始',
+      x: sideBySide ? Math.max(...nodes.map((node) => node.x)) + FLOW_NODE_SIZE.width + 24 : entry?.x ?? nodes[0]?.x ?? 360,
+      y: Number.isFinite(top) ? Math.max(82, top - BOUNDARY_GAP_Y) : 140,
+    };
+    newNodes.unshift(start);
+    if (entry) connect(start.id, entry.id, '提交', sideBySide);
+  }
+
+  if (!hasEnd) {
+    const sources = new Set(newEdges.map((edge) => edge.source));
+    const terminals = newNodes.filter((node) => node.executable && !sources.has(node.id));
+    const exit = terminals.length === 1 ? terminals[0] : undefined;
+    const end = {
+      ...fallback.nodes[fallback.nodes.length - 1], id: newId('flow-end'), label: '结束',
+      x: exit?.x ?? newNodes[0].x,
+      y: Math.max(...newNodes.map((node) => node.y)) + BOUNDARY_GAP_Y,
+    };
+    newNodes.push(end);
+    if (exit && exit.type !== 'exclusiveGateway') connect(exit.id, end.id, exit.type === 'startEvent' ? '提交' : '通过');
+  }
+
+  return { nodes: newNodes, edges: newEdges };
+}
+
 export function normalizeProfessionalFlowConfig(
   source: Partial<FlowDesignerConfig> & Record<string, unknown>,
   fallback: FlowDesignerConfig,
@@ -48,11 +106,15 @@ export function normalizeProfessionalFlowConfig(
     if (steps.some((step) => !['start', 'end', 'approval'].includes(step.type))) {
       throw new Error('当前旧流程包含无法转换的节点，请先迁移流程定义');
     }
+    const firstStepY = 140 + (steps.some((step) => step.type === 'start') ? 0 : BOUNDARY_GAP_Y);
     const nodes = steps.map((step, index) => ({
       id: String(step.node_id || `legacy-${index}`),
       type: step.type === 'start' ? 'startEvent' : step.type === 'end' ? 'endEvent' : 'userTask',
-      label: !step.name || /^[?\s]+$/.test(step.name) ? (step.type === 'start' ? '提交' : step.type === 'end' ? '结束' : '审批') : String(step.name), x: 360, y: 140 + index * 120,
+      label: !step.name || /^[?\s]+$/.test(step.name) ? (step.type === 'start' ? '提交' : step.type === 'end' ? '结束' : '审批') : String(step.name),
+      x: 360,
+      y: firstStepY + index * 120,
       approvalMode: step.approval_mode || 'single',
+      fieldPermissions: step.field_permissions,
       assigneeRules: (step.assignee_rules || (step.assignee_role ? [{ type: 'role', value: step.assignee_role }] : [])).flatMap((rule: any, ruleIndex: number) =>
         (Array.isArray(rule.value) ? rule.value : [rule.value]).map((value: unknown, valueIndex: number) => ({
           id: `legacy-${index}-${ruleIndex}-${valueIndex}`, type: rule.type, value: value == null ? undefined : String(value),
@@ -83,6 +145,7 @@ export function normalizeProfessionalFlowConfig(
     parallelGateway: 'bpmn:ParallelGateway',
     joinGateway: 'bpmn:ParallelGateway',
   };
+  const aliases: Record<string, string> = { start: 'startEvent', end: 'endEvent', manualTask: 'userTask' };
   const executableTypes = new Set(['startEvent', 'endEvent', 'userTask', 'serviceTask', 'manualTask', 'ccTask', 'exclusiveGateway', 'parallelGateway', 'joinGateway']);
   const rawNodes = Array.isArray(source.nodes) ? source.nodes : fallback.nodes;
   let nodes = rawNodes
@@ -91,7 +154,7 @@ export function normalizeProfessionalFlowConfig(
       const node = raw as Partial<FlowDesignerNode> & { data?: Record<string, unknown>; assigneeType?: string };
       const fallbackNode = fallback.nodes[index] || fallback.nodes[0];
       const rawType = String(node.type || node.data?.type || fallbackNode?.type || 'userTask');
-      const type = rawType === 'manualTask' ? 'userTask' : rawType;
+      const type = aliases[rawType] || rawType;
       const x = Number(node.x);
       const y = Number(node.y);
       return {
@@ -106,6 +169,10 @@ export function normalizeProfessionalFlowConfig(
         assigneeSource: node.assigneeSource || (node.assigneeType as FlowDesignerNode['assigneeSource']) || fallbackNode?.assigneeSource,
         assigneeValue: node.assigneeValue || fallbackNode?.assigneeValue,
         assigneeRules: node.assigneeRules || fallbackNode?.assigneeRules,
+        ccRecipients: Array.isArray(node.ccRecipients)
+          ? node.ccRecipients.filter((rule) => rule && typeof rule.id === 'string' && ['user', 'role'].includes(rule.type))
+            .map((rule) => ({ ...rule, value: typeof rule.value === 'string' ? rule.value : undefined }))
+          : undefined,
         approvalMode: node.approvalMode || fallbackNode?.approvalMode,
         slaHours: node.slaHours ?? fallbackNode?.slaHours,
         notificationEnabled: node.notificationEnabled ?? fallbackNode?.notificationEnabled,
@@ -120,7 +187,7 @@ export function normalizeProfessionalFlowConfig(
     nodes = nodes.map((node) => ({ ...node, y: node.y + 60 }));
   }
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const rawEdges = Array.isArray(source.edges) ? source.edges : fallback.edges;
+  const rawEdges = Array.isArray(source.edges) ? source.edges : Array.isArray(source.nodes) ? [] : fallback.edges;
   const edges = rawEdges
     .filter(Boolean)
     .map((raw, index) => {
@@ -138,16 +205,18 @@ export function normalizeProfessionalFlowConfig(
         conditionValue: edge.conditionValue,
         priority: Number.isFinite(Number(edge.priority)) ? Number(edge.priority) : index + 1,
         isDefault: Boolean(edge.isDefault),
-        routeY: edge.routeY,
+        routeY: Number.isFinite(edge.routeY) ? edge.routeY : undefined,
+        waypoints: readFlowWaypoints(edge.waypoints),
       } satisfies FlowDesignerEdge;
     })
     .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
   const rawStateMapping = (source.stateMapping || {}) as Partial<FlowDesignerConfig['stateMapping']> & Record<string, unknown>;
+  const graph = completeBoundaryEvents(nodes, edges, fallback);
   return {
     ...fallback,
     ...source,
-    nodes,
-    edges,
+    ...graph,
+    annotations: readFlowAnnotations(source.annotations, graph.nodes),
     triggerBindings: Array.isArray(source.triggerBindings) && source.triggerBindings.length ? source.triggerBindings : fallback.triggerBindings,
     stateMapping: {
       statusField: String(rawStateMapping.statusField || rawStateMapping.processStatus || fallback.stateMapping.statusField),

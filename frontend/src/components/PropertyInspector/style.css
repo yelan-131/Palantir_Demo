@@ -1,3 +1,4 @@
+:root { --property-inspector-panel-width:320px;--property-inspector-panel-radius:10px;--property-inspector-compact-label-width:92px; }
 .property-inspector { --property-label-width:72px;--property-control-height:26px;--property-row-height:34px;--property-group-gap:10px;--property-border:var(--mf-border,#e1e9ee);--property-soft:var(--mf-panel-soft,#f7f9fb);font-size:12px; }
 .property-inspector-header { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;min-height:48px;border-bottom:1px solid var(--property-border);background:var(--mf-surface,#fff);flex-shrink:0; }
 .property-inspector-header>div:first-child { display:flex;align-items:center;gap:10px;min-width:0;flex:1; }
@@ -5,6 +6,14 @@
 .property-inspector-header>div>span { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--mf-muted); }
 .property-inspector-header-actions { display:flex;gap:2px;align-items:center;flex-shrink:0; }
 .property-inspector-header-actions>.ant-btn { width:26px;height:26px;padding:0;color:var(--mf-muted); }
+.property-inspector-header.property-inspector-header-compact { min-height:46px;padding:10px 12px;border-bottom:0; }
+.property-inspector-header-compact .property-inspector-header-actions { gap:0; }
+.property-inspector-compact-body {
+  flex:1 1 0;min-height:0;padding:10px 12px;overflow:hidden auto;
+  overscroll-behavior-y:contain;scrollbar-gutter:stable;scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--mf-muted) 55%,transparent) transparent;
+}
+.property-inspector-compact-body:focus-visible { outline:2px solid var(--mf-primary);outline-offset:-2px; }
 .property-inspector-group { margin:0 0 var(--property-group-gap);padding:0;border:1px solid var(--property-border);border-radius:6px;background:var(--mf-surface,#fff);overflow:hidden; }
 .property-inspector-group-title { display:flex;align-items:center;gap:7px;min-height:32px;padding:7px 10px;list-style:none;cursor:pointer;background:var(--property-soft);color:var(--mf-text);font-size:12px;font-weight:600;line-height:1.4; }
 .property-inspector-group-title::-webkit-details-marker,.property-inspector-advanced>summary::-webkit-details-marker { display:none; }

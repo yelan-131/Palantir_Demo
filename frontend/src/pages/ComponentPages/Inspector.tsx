@@ -48,8 +48,7 @@ interface Props {
   roles: Array<{id:number;name:string;label?:string}>;
   disabled: boolean;
   sourceOpen: boolean;
-  sourceImpact?:React.ReactNode;
-  sourceSlots?:Record<'properties'|'actions'|'footer'|'status',React.RefCallback<HTMLDivElement>>;
+  sourceSlots?:Record<'properties'|'actions'|'status',React.RefCallback<HTMLDivElement>>;
   businessTab?: BusinessTab;
   sourceIsBusiness: boolean;
   onPanel: (panel: Panel) => void;
@@ -62,7 +61,6 @@ interface Props {
   headerStatus?: React.ReactNode;
   headerActions?: React.ReactNode;
   status?: React.ReactNode;
-  footer: React.ReactNode;
 }
 
 export default function Inspector(props: Props) {
@@ -196,7 +194,7 @@ export default function Inspector(props: Props) {
         selectedFilterScheme={selectedFilterSchemes[widget.id]}
         onSelectFilterScheme={id=>setSelectedFilterSchemes(previous=>({...previous,[widget.id]:id}))} />}
     </>}
-    {(tab === 'form'||tab === 'flow') && <>{props.sourceImpact}<div className="component-source-properties form-designer-embedded" ref={props.sourceSlots?.properties}/></>}
+    {(tab === 'form'||tab === 'flow') && <div className="component-source-properties form-designer-embedded" ref={props.sourceSlots?.properties}/>}
   </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击左侧组件配置属性" />;
   else if (panel==='style') content=<>
     <PropertyGroup title="组件默认外观" hint="组件未独立设置的分区跟随这里；已独立设置的分区保留自己的外观。">
@@ -224,7 +222,7 @@ export default function Inspector(props: Props) {
   else content=<><div className="analytics-editor-section-title"><strong>组件类型</strong><span>已有 {definition.widgets.length} 个组件</span></div><PropertyHelp>添加后在左侧画布中选中组件，配置数据、样式与交互。</PropertyHelp><div className="analytics-editor-library">{[...componentTypes, ...(props.workspace ? [{type:'workspace' as AddableWidgetType,label:'工作台模块',description:'概览、未完成工作、待办、最近工作和业务入口',icon:<DatabaseOutlined />}]:[])].map(item=><button key={item.type} aria-label={`添加${item.label}`} disabled={disabled||definition.widgets.length>=30} onClick={()=>onAdd(item.type)}><span className="analytics-editor-library-icon">{item.icon}</span><strong>{item.label}</strong><small>{item.description}</small><PlusOutlined className="analytics-editor-library-plus" /></button>)}</div></>;
   return <section className="property-inspector analytics-editor-panel analytics-editor-form-inspector analytics-editor-panel-embedded" aria-label="页面配置">
     <div className="analytics-editor-heading">
-    <PropertyInspectorHeader title={panel==='widget'?'组件属性':panel==='add'?'添加组件':'页面与布局'} titleAccessory={sourceOpen?<div ref={props.sourceSlots?.status}/>:props.headerStatus} actions={<>
+    <PropertyInspectorHeader className="property-inspector-header-compact" title={panel==='widget'?'组件属性':panel==='add'?'添加组件':'页面与布局'} titleAccessory={sourceOpen?<div ref={props.sourceSlots?.status}/>:props.headerStatus} actions={<>
       {panel==='widget'&&widget&&<>{widget.type!=='record-filter'&&<Button type="text" aria-label="复制组件" title="复制组件" size="small" icon={<CopyOutlined />} disabled={disabled||sourceOpen||definition.widgets.length>=30} onClick={copyWidget} />}<Popconfirm title="移除此组件？" onConfirm={()=>onChange({...definition,widgets:definition.widgets.filter(item=>item.id!==widget.id).map(item=>({...item,targetWidgetIds:item.targetWidgetIds?.filter(id=>id!==widget.id)}))})}><Button type="text" danger size="small" aria-label="删除组件" title="删除组件" disabled={disabled||sourceOpen} icon={<DeleteOutlined />} /></Popconfirm></>}
       {sourceOpen?<div className="component-source-actions" ref={props.sourceSlots?.actions}/>:props.headerActions}
     </>} />
@@ -237,11 +235,10 @@ export default function Inspector(props: Props) {
       {key:'filters',label:'筛选'},
       {key:'permissions',label:'权限'},
     ].map(item=>({...item,disabled:disabled||sourceOpen}))} />}
-    <ConfigProvider componentDisabled={disabled||sourceOpen}><div className="analytics-editor-panel-body" key={panelKey}
+    <ConfigProvider componentDisabled={disabled||sourceOpen}><div className="analytics-editor-panel-body property-inspector-compact-body" key={panelKey}
       ref={panelBody} role="region" aria-label="属性内容" tabIndex={0}
       onScroll={event=>scrollPositions.current.set(panelKey,event.currentTarget.scrollTop)}>
       <div className="analytics-widget-properties">{content}</div>
     </div></ConfigProvider>
-    <footer className="analytics-editor-panel-footer">{sourceOpen?<div ref={props.sourceSlots?.footer}/>:props.footer}</footer>
   </section>;
 }

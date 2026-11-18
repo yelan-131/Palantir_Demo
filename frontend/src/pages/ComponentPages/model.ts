@@ -98,6 +98,12 @@ export function widgetSourceId(definition: PageDefinition | undefined | null, wi
   return widget?.dataBinding?.formId ?? definition?.sourceFormId ?? undefined;
 }
 
+export function businessDataComponent(definition: PageDefinition, formId: number, isDashboard = false) {
+  const components = definition.widgets.filter(widget => widget.type !== 'workspace' && widget.type !== 'record-filter');
+  const matching = components.filter(widget => widgetSourceId(definition, widget) === formId);
+  return matching.find(widget => widget.type === 'record-list') ?? matching[0] ?? (isDashboard ? components[0] : undefined);
+}
+
 /** Only clear field references for components affected by a source change. */
 export function bindWidgetSource(definition: PageDefinition, id: string, formId?: number): PageDefinition {
   const selected = definition.widgets.find(w=>w.id===id);

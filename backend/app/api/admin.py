@@ -16,6 +16,7 @@ from app.core.production_errors import database_unavailable
 from app.core.permissions import evaluate_form_permission, has_permission
 from app.core.security import hash_password
 from app.services.iam import ROLE_TEMPLATES, get_oidc_config, load_iam_settings, revoke_session, save_iam_settings, validate_password_policy
+from app.services.roles import stage_role
 from app.services.tenant_onboarding import assert_tenant_quota
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -778,13 +779,7 @@ async def list_roles(user_ctx: dict = Depends(require_admin)):
 async def create_role(body: RoleCreate, user_ctx: dict = Depends(require_admin)):
     """创建角色."""
     async def _query(db):
-        from app.models.relational import Role
-        tenant_id = current_tenant_id(user_ctx)
-        existing = await db.scalar(select(Role.id).where(Role.tenant_id == tenant_id, Role.name == body.name))
-        if existing:
-            raise HTTPException(409, "Role name already exists")
-        role = Role(tenant_id=tenant_id, name=body.name, label=body.label, description=body.description)
-        db.add(role)
+        role = await stage_role(db, current_tenant_id(user_ctx), **body.model_dump())
         await db.commit()
         await db.refresh(role)
         return {"id": role.id, "name": role.name}

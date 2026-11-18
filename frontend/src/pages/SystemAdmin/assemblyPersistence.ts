@@ -21,7 +21,7 @@ type FormApi = {
 export async function persistApplication(api: ApplicationApi, current: ApplicationProperties, values: PropertyValues, status = current.status) {
   const payload = {
     name: values.name, description: values.description,
-    ...(values.role_ids !== undefined ? { role_ids: values.role_ids } : {}),
+    ...(values.access_groups !== undefined ? { access_groups: values.access_groups } : {}),
     ...(!isApplicationCodeLocked(current) ? { code: values.code } : {}),
     ...(current.id > 0 && current.edit_token ? {expected_token: current.edit_token} : {}),
     icon: values.icon, default_route: values.default_route || current.default_route || '/',
@@ -74,36 +74,47 @@ export function propertyError(error: any, fallback: string): string {
   return error?.message || fallback;
 }
 
+function fieldTypes(type: string) {
+  return { field_type: type === 'person' ? 'string' : type === 'attachment' ? 'json' : type, business_type: type };
+}
+
 export function assemblyFieldPayload(values: { label: string; code: string; type: string; maxBytes?: number | null; options?: string; searchable?: boolean; sortable?: boolean }, order: number) {
-  const businessType = values.type;
-  const storage = businessType === 'person' ? 'string' : businessType === 'attachment' ? 'json' : businessType;
   const options = [...new Set((values.options || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
-  if (businessType === 'enum' && !options.length) throw new Error('请至少填写一个单选选项');
+  if (values.type === 'enum' && !options.length) throw new Error('请至少填写一个单选选项');
   return {
-    field_name: values.code.trim(), label: values.label.trim(), field_type: storage, business_type: businessType,
+    field_name: values.code.trim(), label: values.label.trim(), ...fieldTypes(values.type),
     ...(supportsFieldByteLimit(values.type) && values.maxBytes != null ? { validation: fieldByteValidation({}, values.maxBytes) } : {}),
     ...(values.searchable !== undefined ? { searchable: values.searchable } : {}),
     ...(values.sortable !== undefined ? { sortable: values.sortable } : {}),
-    sort_order: order, ...(businessType === 'enum' ? { enum_values: { values: options } } : {}),
+    sort_order: order, ...(values.type === 'enum' ? { enum_values: { values: options } } : {}),
   };
 }
 
 // Patch only controls exposed by this drawer. Designer settings and storage
 // identifiers must survive ordinary label/visibility edits unchanged.
-export function assemblyFieldUpdatePayload(values: { label: string; maxBytes?: number | null; options?: string; searchable?: boolean; sortable?: boolean }, current: PlatformFormField) {
+export function assemblyFieldUpdatePayload(values: { label: string; type?: string; maxBytes?: number | null; options?: string; searchable?: boolean; sortable?: boolean }, current: PlatformFormField) {
   if (current.archived) throw new Error('此字段已删除，请刷新后重试');
+  const currentType = current.business_type || current.field_type;
+  const nextType = values.type ?? currentType;
+  const typeChanged = nextType !== currentType;
+  if (typeChanged && (currentType === 'code' || current.control_type === 'code' || current.encoding_rule)) {
+    throw new Error('自动编码字段使用专用编码规则，无法直接修改字段类型');
+  }
   const payload: Record<string, unknown> = {
     label: values.label.trim(),
+    ...(typeChanged ? fieldTypes(nextType) : {}),
   };
   if (values.searchable !== undefined) payload.searchable = values.searchable;
   if (values.sortable !== undefined) payload.sortable = values.sortable;
-  if (supportsFieldByteLimit(current.business_type || current.field_type)) {
-    payload.validation = fieldByteValidation(current.validation || {}, values.maxBytes);
+  if ((typeChanged && current.validation?.maxBytes !== undefined) || (supportsFieldByteLimit(nextType) && values.maxBytes !== undefined)) {
+    payload.validation = fieldByteValidation(current.validation || {}, supportsFieldByteLimit(nextType) ? values.maxBytes : null);
   }
-  if ((current.business_type || current.field_type) === 'enum' && values.options !== undefined) {
-    const options = [...new Set(values.options.split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
+  if (nextType === 'enum' && (typeChanged || values.options !== undefined)) {
+    const options = [...new Set((values.options ?? '').split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
     if (!options.length) throw new Error('请至少填写一个单选选项');
-    payload.enum_values = { ...current.enum_values, values: options };
+    payload.enum_values = typeChanged ? { values: options } : { ...current.enum_values, values: options };
+  } else if (typeChanged && currentType === 'enum') {
+    payload.enum_values = null;
   }
   return payload;
 }
@@ -115,10 +126,11 @@ export const DEFAULT_FORM_LIMITS = { fields: 200, recordBytes: 2 * 1024 * 1024 }
 
 export const DEFAULT_FIELD_BYTES: Record<string, number> = { string: 1024, code: 1024, person: 1024, enum: 1024, text: 65536, json: 1048576 };
 export function fieldStorageSize(type?: string, maxBytes?: unknown): string {
-  const fixed: Record<string, number> = { integer: 4, int: 4, number: 8, decimal: 8, float: 8, boolean: 1, date: 4, datetime: 8 };
-  if (type && fixed[type]) return `${fixed[type]} 字节`;
+  const fixed: Record<string, number> = { integer: 4, int: 4, number: 8, decimal: 8, float: 8, boolean: 1, bool: 1, date: 4, datetime: 8 };
+  const storageType = ({ longtext: 'text', long_text: 'text', attachment: 'json', select: 'enum' } as Record<string, string>)[type?.toLowerCase() ?? ''] ?? type ?? 'string';
+  if (fixed[storageType]) return `${fixed[storageType]} 字节`;
   if (typeof maxBytes === 'number' && maxBytes > 0) return `最多 ${maxBytes} 字节`;
-  return `默认最多 ${DEFAULT_FIELD_BYTES[type || 'string'] || 1024} 字节`;
+  return `默认最多 ${DEFAULT_FIELD_BYTES[storageType] || 1024} 字节`;
 }
 function fieldByteValidation(current: Record<string, unknown>, maxBytes?: number | null) {
   const validation = { ...current };

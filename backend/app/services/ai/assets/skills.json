@@ -195,6 +195,22 @@
     "domain": "low-code",
     "output_schema": {"type": "configuration_write", "resource": "form_field", "confirmation_checklist": true}
   },
+  "low_code.manage_workflow_design": {
+    "name": "low_code.manage_workflow_design",
+    "title": "搭建和维护表单审批流程",
+    "description": "读取、校验、保存和发布表单审批流程。适用于设置起止事件、审批人、条件分支、自动任务、抄送、开始节点触发入口，以及连线拐点和注释布局。",
+    "capability_level": "agentic",
+    "risk_level": "high",
+    "default_tool": "forms.get_workflow_design",
+    "allowed_tools": [
+      "platform.form_settings.query", "platform.identity_settings.query",
+      "forms.get_workflow_design", "forms.validate_workflow_design", "forms.save_workflow_draft", "forms.publish_workflow_draft"
+    ],
+    "required_permissions": ["config"],
+    "confirmation_policy": "confirm_token",
+    "permission_capability": "config",
+    "domain": "low-code"
+  },
   "workflow.submit_after_confirmation": {
     "name": "workflow.submit_after_confirmation",
     "title": "确认后发起审批",
@@ -286,6 +302,43 @@
     "output_schema": {
       "type": "answer"
     }
+  },
+  "low_code.manage_application": {
+    "name": "low_code.manage_application",
+    "title": "管理应用、菜单和模板",
+    "description": "管理应用及菜单，配置角色权限、启动入口和顺序，复制菜单分组，并保存或使用应用模板。",
+    "capability_level": "agentic",
+    "risk_level": "high",
+    "default_tool": "applications.inspect",
+    "allowed_tools": [
+      "platform.application_settings.query",
+      "platform.identity_settings.query",
+      "applications.inspect",
+      "applications.create",
+      "applications.update",
+      "applications.reorder",
+      "applications.copy_draft",
+      "applications.publish",
+      "applications.disable",
+      "applications.enable",
+      "applications.delete",
+      "menus.create_group",
+      "menus.create_entry",
+      "menus.create_page_draft",
+      "menus.update_entry",
+      "menus.update_properties",
+      "menus.reorder",
+      "menus.copy",
+      "menus.delete_entry",
+      "applications.list_templates",
+      "applications.save_template",
+      "applications.instantiate_template"
+    ],
+    "required_permissions": ["config"],
+    "confirmation_policy": "confirm",
+    "permission_capability": "config",
+    "domain": "low-code",
+    "output_schema": {"type": "configuration_write"}
   },
   "low_code.manage_component_page": {
     "name": "low_code.manage_component_page",

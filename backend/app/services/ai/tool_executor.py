@@ -142,7 +142,12 @@ class AgentToolExecutor:
             arguments = {k: v for k, v in payload.items() if not k.startswith('_')}
             from .application_menu_registry import SNAPSHOT_FIELDS
             from .component_page_tools import PAGE_WRITE_REQUESTS
-            snapshot_field = "_page_snapshot" if harness_tool in PAGE_WRITE_REQUESTS else SNAPSHOT_FIELDS.get(harness_tool)
+            from .workflow_design_tools import SNAPSHOT_FIELD as WORKFLOW_SNAPSHOT, WRITE_TOOLS as WORKFLOW_WRITES
+            snapshot_field = SNAPSHOT_FIELDS.get(harness_tool)
+            if harness_tool in PAGE_WRITE_REQUESTS:
+                snapshot_field = "_page_snapshot"
+            if harness_tool in WORKFLOW_WRITES:
+                snapshot_field = WORKFLOW_SNAPSHOT
             if snapshot_field:
                 snapshot = payload.get(snapshot_field)
                 if not isinstance(snapshot, str) or not snapshot:

@@ -1,15 +1,18 @@
 import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Row, Col, Button, Modal, Tag, Empty, Spin, message,
-  Space, Typography, Input, Tabs,
+  Card, Button, Modal, Tag, Empty, Spin, message,
+  Space, Typography, Tabs,
 } from 'antd';
 import {
-  AppstoreOutlined, CheckCircleOutlined, EyeOutlined,
+  AppstoreOutlined, CheckCircleOutlined,
   ShopOutlined, ThunderboltOutlined, SafetyCertificateOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
-import { listTemplates, instantiateTemplate, getTemplate } from '@/services/api';
+import { listTemplates, instantiateTemplate, getTemplate, listApplicationTemplates, instantiateApplicationTemplate } from '@/services/api';
+import { shellIcon } from '@/components/ShellNavigation';
+import { useAuthStore } from '@/stores/authStore';
+import './style.css';
 
 const CATEGORY_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   production: { label: '生产管理', color: colors.primary, icon: <AppstoreOutlined /> },
@@ -19,13 +22,21 @@ const CATEGORY_CONFIG: Record<string, { label: string; color: string; icon: Reac
   general: { label: '通用', color: colors.muted, icon: <ThunderboltOutlined /> },
 };
 
+const CATEGORY_TABS = [
+  { key: 'all', label: '全部' },
+  ...Object.entries(CATEGORY_CONFIG).map(([key, { label }]) => ({ key, label })),
+];
+
 interface TemplateItem {
   id: number;
+  kind?: 'application';
+  icon?: string;
   name: string;
   description: string;
   category: string;
   config: {
     models?: any[];
+    forms?: number[];
     pages?: any[];
     rules?: any[];
     menus?: any[];
@@ -34,25 +45,28 @@ interface TemplateItem {
   created_at: string;
 }
 
+const templateKey = (tpl: TemplateItem) => `${tpl.kind ?? 'package'}-${tpl.id}`;
+
 export default function TemplateMarket() {
+  const isAdmin = useAuthStore(state => Boolean(state.user?.is_admin));
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
-  const [instantiating, setInstantiating] = useState(false);
+  const [instantiatingKey, setInstantiatingKey] = useState<string | null>(null);
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listTemplates();
-      setTemplates(res.data?.data || res.data || []);
+      const [packages, applications] = await Promise.all([listTemplates(), isAdmin ? listApplicationTemplates() : undefined]);
+      setTemplates([...(applications?.data.data ?? []), ...(packages.data.data ?? [])]);
     } catch {
       message.error('加载模板列表失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
@@ -61,6 +75,11 @@ export default function TemplateMarket() {
     : templates.filter((t) => t.category === activeCategory);
 
   const handleViewDetail = async (tpl: TemplateItem) => {
+    if (tpl.kind === 'application') {
+      setSelectedTemplate(tpl);
+      setDetailVisible(true);
+      return;
+    }
     try {
       const res = await getTemplate(tpl.id);
       setSelectedTemplate(res.data?.data || res.data || tpl);
@@ -72,23 +91,25 @@ export default function TemplateMarket() {
   };
 
   const handleInstantiate = async (tpl: TemplateItem) => {
-    setInstantiating(true);
+    if (instantiatingKey !== null) return;
+    setInstantiatingKey(templateKey(tpl));
     try {
-      await instantiateTemplate(tpl.id);
-      message.success(`模板「${tpl.name}」已成功应用`);
+      if (tpl.kind === 'application') {
+        const { data } = await instantiateApplicationTemplate(tpl.id);
+        window.dispatchEvent(new Event('applications-changed'));
+        message.success(`已创建应用草稿「${data.data.name}」`);
+      } else {
+        const { data } = await instantiateTemplate(tpl.id);
+        message.info(data.message);
+      }
       setDetailVisible(false);
     } catch (err: any) {
       const msg = err?.response?.data?.detail || '应用模板失败';
       message.error(msg);
     } finally {
-      setInstantiating(false);
+      setInstantiatingKey(null);
     }
   };
-
-  const categoryTabs = [
-    { key: 'all', label: '全部' },
-    ...Object.entries(CATEGORY_CONFIG).map(([k, v]) => ({ key: k, label: v.label })),
-  ];
 
   if (loading) {
     return (
@@ -100,16 +121,10 @@ export default function TemplateMarket() {
 
   return (
     <div className="catalog-page">
-      <div className="page-list-toolbar">
-        <Space>
-          <Tag color="blue">{templates.length} 个模板</Tag>
-        </Space>
-      </div>
-
       <Tabs
         activeKey={activeCategory}
         onChange={setActiveCategory}
-        items={categoryTabs}
+        items={CATEGORY_TABS}
         style={{ marginBottom: 16 }}
       />
 
@@ -123,59 +138,44 @@ export default function TemplateMarket() {
           }
         />
       ) : (
-        <Row gutter={[16, 16]}>
+        <div className="template-card-grid">
           {filteredTemplates.map((tpl) => {
+            const key = templateKey(tpl);
             const cat = CATEGORY_CONFIG[tpl.category] || CATEGORY_CONFIG.general;
             const modelCount = tpl.config?.models?.length || 0;
             const pageCount = tpl.config?.pages?.length || 0;
             const ruleCount = tpl.config?.rules?.length || 0;
 
             return (
-              <Col key={tpl.id} xs={24} sm={12} md={8} lg={6}>
-                <Card
-                  hoverable
-                  style={{ height: '100%' }}
-                  actions={[
-                    <EyeOutlined key="view" onClick={() => handleViewDetail(tpl)} />,
-                    <CheckCircleOutlined key="use" onClick={() => handleInstantiate(tpl)} />,
-                  ]}
-                >
-                  <Card.Meta
-                    avatar={
-                      <div style={{
-                        width: 40, height: 40, borderRadius: 8, background: `${cat.color}15`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: cat.color, fontSize: 20,
-                      }}>
-                        {cat.icon}
-                      </div>
-                    }
-                    title={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {tpl.name}
-                        </span>
-                      </div>
-                    }
-                    description={
-                      <div>
-                        <div style={{ marginBottom: 8, color: 'var(--mf-muted)', minHeight: 20 }}>
-                          {tpl.description || '暂无描述'}
-                        </div>
-                        <Space size={4} wrap>
-                          <Tag color={cat.color}>{cat.label}</Tag>
-                          {modelCount > 0 && <Tag>模型 ×{modelCount}</Tag>}
-                          {pageCount > 0 && <Tag>页面 ×{pageCount}</Tag>}
-                          {ruleCount > 0 && <Tag>规则 ×{ruleCount}</Tag>}
-                        </Space>
-                      </div>
-                    }
-                  />
-                </Card>
-              </Col>
+              <Card key={key} className="template-card">
+                <div className="template-card-heading">
+                  <span className="template-card-icon" aria-hidden="true"
+                    style={{ backgroundColor: `${cat.color}15`, color: cat.color }}>
+                    {tpl.kind === 'application' ? shellIcon(tpl.icon) : cat.icon}
+                  </span>
+                  <h2 className="template-card-title">{tpl.name}</h2>
+                </div>
+                <p className="template-card-description">{tpl.description || '暂无描述'}</p>
+                <Space size={4} wrap>
+                  <Tag color={cat.color}>{cat.label}</Tag>
+                  {tpl.kind === 'application' && <Tag>应用模板</Tag>}
+                  {modelCount > 0 && <Tag>模型 ×{modelCount}</Tag>}
+                  {pageCount > 0 && <Tag>页面 ×{pageCount}</Tag>}
+                  {ruleCount > 0 && <Tag>规则 ×{ruleCount}</Tag>}
+                </Space>
+                <div className="template-card-actions">
+                  <Button onClick={() => handleViewDetail(tpl)}>查看详情</Button>
+                  <Button type="primary"
+                    loading={instantiatingKey === key}
+                    disabled={instantiatingKey !== null && instantiatingKey !== key}
+                    onClick={() => handleInstantiate(tpl)}>
+                    使用模板
+                  </Button>
+                </div>
+              </Card>
             );
           })}
-        </Row>
+        </div>
       )}
 
       <Modal
@@ -185,7 +185,8 @@ export default function TemplateMarket() {
         footer={[
           <Button key="close" onClick={() => setDetailVisible(false)}>关闭</Button>,
           <Button key="use" type="primary" icon={<CheckCircleOutlined />}
-            loading={instantiating}
+            loading={Boolean(selectedTemplate && instantiatingKey === templateKey(selectedTemplate))}
+            disabled={instantiatingKey !== null && (!selectedTemplate || instantiatingKey !== templateKey(selectedTemplate))}
             onClick={() => selectedTemplate && handleInstantiate(selectedTemplate)}>
             使用此模板
           </Button>,
@@ -208,6 +209,9 @@ export default function TemplateMarket() {
               {(selectedTemplate.config?.pages?.length || 0) > 0 && (
                 <li>业务页面 {selectedTemplate.config?.pages?.length ?? 0} 个</li>
               )}
+              {(selectedTemplate.config?.forms?.length || 0) > 0 && (
+                <li>业务表单 {selectedTemplate.config?.forms?.length} 个</li>
+              )}
               {(selectedTemplate.config?.rules?.length || 0) > 0 && (
                 <li>业务规则 {selectedTemplate.config?.rules?.length ?? 0} 个</li>
               )}
@@ -216,7 +220,9 @@ export default function TemplateMarket() {
               )}
             </ul>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              点击「使用此模板」将自动创建对应的模型、页面和规则
+              {selectedTemplate.kind === 'application'
+                ? '使用模板会创建应用草稿，菜单沿用原有页面和表单。'
+                : '行业演示包需要通过其数据初始化入口导入。'}
             </Typography.Text>
           </div>
         )}

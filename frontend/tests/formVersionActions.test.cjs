@@ -28,23 +28,27 @@ function harness(analysis = false) {
     ensurePlatformForm: async () => { calls.push(['ensure']); return form; },
     syncFieldDefaultValues: async () => { calls.push(['fields']); },
     updateFormViewConfig: async () => { calls.push(['view']); return savedView; },
-    getWorkflowDesignerMeta: () => ({ draftWorkflowId: 8, publishedWorkflowId: 8 }),
+    getWorkflowDesignerMeta: received => ({ draftWorkflowId: received === savedWorkflow ? 9 : 8, publishedWorkflowId: 8 }),
     saveWorkflowDefinition: async (status, received, id) => { calls.push(['workflow', status, received, id]); return { id: 9 }; },
     updateFormWorkflowMeta: async () => { calls.push(['workflow-meta']); return savedWorkflow; },
     updateFormAnalyticsDesign: async received => { calls.push(['analytics', received]); return savedView; },
     setHasUnsavedChanges: value => { calls.push(['unsaved', value]); },
     setPersistingFlow: value => { ctx.isPersistingFlow = value; },
-    previewPlatformFormPublish: async () => { calls.push(['preview']); return { data: { data: { blocking_count: 0 } } }; },
-    setServerPublishReport: () => calls.push(['report']),
-    setPublishCheckOpen: value => calls.push(['confirmation', value]),
+    publishPlatformForm: async (...args) => { calls.push(['publish', ...args]); return { data: { data: { version: 2 } } }; },
+    getPlatformForm: async () => ({ data: { data: { ...savedWorkflow, status: 'published' } } }),
+    setPlatformForm: value => calls.push(['form', value]),
+    setWorkflowMeta: () => {},
+    setVersion: value => calls.push(['version', value]),
+    onPublished: undefined,
   };
   vm.createContext(ctx); vm.runInContext(script, ctx);
   return { ctx, calls, savedView };
 }
-test('prepare release saves the full draft before checking, and never publishes directly', async () => {
+test('publish saves the full draft and submits its workflow directly', async () => {
   const { ctx, calls, savedView } = harness();
   assert.equal(await ctx.actions.publishConfig(), true);
-  assert.deepEqual(calls.map(call => call[0]), ['ensure', 'fields', 'view', 'workflow', 'workflow-meta', 'unsaved', 'preview', 'report', 'confirmation']);
+  assert.deepEqual(calls.map(call => call[0]), ['ensure', 'fields', 'view', 'workflow', 'workflow-meta', 'unsaved', 'publish', 'form', 'version', 'unsaved', 'success']);
+  assert.deepEqual(calls.find(call => call[0] === 'publish'), ['publish', 1, 9]);
   const workflow = calls.find(call => call[0] === 'workflow');
   assert.equal(workflow[1], 'draft');
   assert.equal(workflow[2], savedView);
@@ -57,25 +61,35 @@ test('analytics save uses the updated form so saving charts cannot overwrite sav
   assert.equal(await ctx.actions.saveDraft(), true);
   assert.equal(calls.find(call => call[0] === 'analytics')[1], savedView);
 });
-test('a failed draft write preserves unsaved state and does not open publish confirmation', async () => {
+test('a failed draft write preserves unsaved state and skips publication', async () => {
   const { ctx, calls } = harness();
   ctx.saveWorkflowDefinition = async () => { throw Error('offline'); };
   assert.equal(await ctx.actions.publishConfig(), false);
-  assert.equal(calls.some(call => ['unsaved', 'preview', 'confirmation'].includes(call[0])), false);
+  assert.equal(calls.some(call => ['unsaved', 'publish'].includes(call[0])), false);
   assert.equal(ctx.isPersistingFlow, false);
 });
-test('failed publish check retains a saved draft and returns failure to keep the workbench open', async () => {
+test('a rejected publish retains the saved draft and reports the field that blocked it', async () => {
   const { ctx, calls } = harness();
-  ctx.previewPlatformFormPublish = async () => { throw Error('offline'); };
+  ctx.publishPlatformForm = async () => { throw { response: { data: { detail: { report: {
+    items: [{ level: 'blocking', label: '组织', detail: '已有记录缺值' }],
+  } } } } }; };
   assert.equal(await ctx.actions.publishConfig(), false);
   assert.ok(calls.some(call => call[0] === 'unsaved' && call[1] === false));
-  assert.equal(calls.some(call => call[0] === 'confirmation'), false);
+  assert.deepEqual(calls.at(-1), ['error', '发布失败，「组织」：已有记录缺值']);
+  assert.equal(calls.some(call => call[0] === 'success'), false);
   assert.equal(ctx.isPersistingFlow, false);
 });
-test('an ongoing save prevents a second prepare-release request', async () => {
+test('an ongoing save prevents a second publish request', async () => {
   const { ctx, calls } = harness(); ctx.isPersistingFlow = true;
   assert.equal(await ctx.actions.publishConfig(), false);
   assert.equal(calls.length, 0);
+});
+
+test('analytics publish saves and publishes without a workflow', async () => {
+  const { ctx, calls, savedView } = harness(true);
+  assert.equal(await ctx.actions.publishConfig(), true);
+  assert.equal(calls.find(call => call[0] === 'analytics')[1], savedView);
+  assert.deepEqual(calls.find(call => call[0] === 'publish'), ['publish', 1, undefined]);
 });
 
 test('invalid selection configuration blocks draft saving and publication before writes', async () => {

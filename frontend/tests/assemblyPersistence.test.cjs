@@ -89,6 +89,23 @@ test('byte size is explicit, persisted and distinct from character limits',()=>{
  assert.throws(()=>assemblyFieldPayload({label:'字段',code:'name',type:'string',maxBytes:1.5},0),/字节上限/);
  assert.equal(fieldStorageSize('integer'),'4 字节');assert.equal(fieldStorageSize('decimal'),'8 字节');
  assert.equal(fieldStorageSize('string',255),'最多 255 字节');assert.equal(fieldStorageSize('string'),'默认最多 1024 字节');assert.equal(fieldStorageSize('text'),'默认最多 65536 字节');assert.equal(fieldStorageSize('json'),'默认最多 1048576 字节');
+ assert.equal(fieldStorageSize('longText'),'默认最多 65536 字节');
+ assert.equal(fieldStorageSize('attachment'),'默认最多 1048576 字节');
+});
+
+test('field type updates preserve the code and use the newly selected type size policy',()=>{
+ const {assemblyFieldUpdatePayload}=context.exports;
+ const current={field_name:'note',field_type:'string',business_type:'string',validation:{maxBytes:64,unique:true}};
+ const same=assemblyFieldUpdatePayload({label:'备注',type:'string'},current);
+ assert.equal(same.validation,undefined);
+ const changed=assemblyFieldUpdatePayload({label:'备注',type:'text'},current);
+ assert.equal(changed.field_name,undefined);
+ assert.equal(changed.field_type,'text');
+ assert.equal(changed.business_type,'text');
+ assert.deepEqual(JSON.parse(JSON.stringify(changed.validation)),{unique:true});
+ assert.throws(()=>assemblyFieldUpdatePayload({label:'状态',type:'enum'},current),/至少填写/);
+ const enumUpdate=assemblyFieldUpdatePayload({label:'状态',type:'enum',options:'待处理\n完成'},current);
+ assert.deepEqual(JSON.parse(JSON.stringify(enumUpdate.enum_values)),{values:['待处理','完成']});
 });
 
 

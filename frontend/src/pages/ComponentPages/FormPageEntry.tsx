@@ -10,15 +10,16 @@ const AppProgramPage = lazy(() => import('../AppPrograms'));
 const AlertCenter = lazy(() => import('../AlertCenter'));
 
 /** Existing form routes resolve their own page; no third creation entry is needed. */
-export default function FormPageEntry({kind, formSlug}: {kind: 'business' | 'program'; formSlug?:string}) {
+export default function FormPageEntry({kind, formSlug, businessDataDesign = false}: {kind: 'business' | 'program'; formSlug?:string; businessDataDesign?: boolean}) {
   const params = useParams<{slug: string; programId: string}>();
   const slug = formSlug || params.slug || params.programId || '';
-  return <BoundFormPage key={`${kind}:${slug}`} kind={kind} slug={slug} />;
+  return <BoundFormPage key={`${kind}:${slug}:${businessDataDesign}`} kind={kind} slug={slug} businessDataDesign={businessDataDesign} />;
 }
 
-function BoundFormPage({kind, slug}: {kind: 'business' | 'program'; slug: string}) {
+function BoundFormPage({kind, slug, businessDataDesign}: {kind: 'business' | 'program'; slug: string; businessDataDesign: boolean}) {
   const [searchParams] = useSearchParams();
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
+  const openEditor = admin && (businessDataDesign || searchParams.get('edit') === '1');
   const [binding, setBinding] = useState<{enabled: boolean; code?: string; form?: {id: number}}>();
   const [error, setError] = useState('');
   useEffect(() => {
@@ -29,7 +30,7 @@ function BoundFormPage({kind, slug}: {kind: 'business' | 'program'; slug: string
         const response = await api.get(`/pages/forms/${encodeURIComponent(slug)}/binding`);
         let value = response.data;
         if (value.enabled && !value.code && admin) {
-          const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: true, populate: true});
+          const created = await api.post(`/pages/forms/${value.form.id}/binding`, {blank: !businessDataDesign, populate: true});
           value = {...value, code: created.data.code};
         }
         if (current) setBinding(value);
@@ -38,11 +39,12 @@ function BoundFormPage({kind, slug}: {kind: 'business' | 'program'; slug: string
       }
     })();
     return () => {current = false;};
-  }, [slug, admin]);
+  }, [slug, admin, businessDataDesign]);
   if (error) return <Alert type="error" showIcon message={error} />;
   if (!binding) return <div style={{padding: 80, textAlign: 'center'}}><Spin /></div>;
+  if (businessDataDesign && (!binding.code || !binding.form)) return <Empty description="找不到此业务数据对应的页面" />;
   return <Suspense fallback={<Spin />}>
-    {searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} /> : <Empty description="此表单的页面尚未发布" />
+    {!openEditor && searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} openEditor={openEditor} businessDataFormId={businessDataDesign ? binding.form?.id : undefined} /> : <Empty description="此表单的页面尚未发布" />
       : slug === 'alert-center' ? <AlertCenter /> : kind === 'business' ? <DynamicPage /> : <AppProgramPage />}
   </Suspense>;
 }

@@ -470,28 +470,18 @@ def _publish_impact_report(latest_version, next_version: int, draft_snapshot: di
         if not _field_cfg_is_active(field):
             continue
         previous = previous_fields.get(field_name)
-        impact = _record_field_impact(record_rows, field)
         if previous is None:
-            if _field_cfg_value(field, "required", False) and impact["missing_required_count"] > 0:
-                items.append({
-                    "level": "blocking",
-                    "type": "new_required_field_missing",
-                    "field_name": field_name,
-                    "label": _field_cfg_label(field),
-                    "detail": "New required field would make existing records invalid",
-                    "affected_count": impact["missing_required_count"],
-                })
-            else:
-                items.append({
-                    "level": "info",
-                    "type": "field_added",
-                    "field_name": field_name,
-                    "label": _field_cfg_label(field),
-                    "detail": "Field will be available in the next published schema",
-                    "affected_count": 0,
-                })
+            items.append({
+                "level": "info",
+                "type": "field_added",
+                "field_name": field_name,
+                "label": _field_cfg_label(field),
+                "detail": "Field will be available in the next published schema",
+                "affected_count": 0,
+            })
             continue
 
+        impact = _record_field_impact(record_rows, field)
         if _field_cfg_value(previous, "field_type") != _field_cfg_value(field, "field_type") and impact["incompatible_count"] > 0:
             items.append({
                 "level": "blocking",

@@ -3,7 +3,7 @@ import {Button, Input, Select, Switch, Tooltip} from 'antd';
 import {DeleteOutlined, PlusOutlined} from '@ant-design/icons';
 import ConfigurationTabs from './ConfigurationTabs';
 import {PropertyRow} from '@/components/PropertyInspector';
-import ToolbarGroups, {GroupAudience, PropertySubgroup} from './ToolbarGroups';
+import ToolbarGroups, {GroupAudience, PermissionGroupName, PropertySubgroup} from './ToolbarGroups';
 import ColumnPicker from './ColumnPicker';
 import {DEFAULT_FILTER_LAYOUT, type FilterControlMode, type FilterScheme, type FilterSettings} from './businessComponents';
 
@@ -46,9 +46,14 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
     commit(remaining);
     onSelect?.(remaining[0].id);
   };
-  const audienceEditors=groups.map(group=><GroupAudience key={`${active?.id}:${group.id}`} group={group} roles={roles}
-    title={groups.length===1?'适用对象':group.name} subgroup={groups.length===1} disabled={disabled}
-    onChange={values=>patch({groups:groups.map(item=>item.id===group.id?{...item,...values}:item)})}/>);
+  const audienceEditors=groups.map(group=>{
+    const update = (values: Partial<FilterScheme['groups'][number]>) =>
+      patch({groups:groups.map(item=>item.id===group.id?{...item,...values}:item)});
+    return <GroupAudience key={`${active?.id}:${group.id}`} group={group} roles={roles}
+      title={groups.length===1?'适用对象':<PermissionGroupName name={group.name}
+        onChange={disabled ? undefined : name => update({name})} />}
+      subgroup={groups.length===1} disabled={disabled} onChange={update}/>;
+  });
   return <div className="component-config-tab-group">
       <ConfigurationTabs items={schemes} selected={active?.id} onSelect={onSelect} disabled={disabled} actions={<>
           <Tooltip title="新增筛选方案">

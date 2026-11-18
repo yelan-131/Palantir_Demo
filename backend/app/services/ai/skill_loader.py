@@ -13,9 +13,10 @@ from .skill_import import split_skill_markdown
 SKILL_TOOL = 'platform.skills.read'
 FORM_SKILL = 'low_code.create_form_definition'
 PAGE_SKILL = 'low_code.manage_component_page'
+WORKFLOW_DESIGN_SKILL = 'low_code.manage_workflow_design'
 BUNDLE_ROOT = Path(__file__).with_name('business_skills')
 PLATFORM_READABLE_SKILLS = frozenset({
-    FORM_SKILL, PAGE_SKILL, 'analysis.manage_dashboard',
+    FORM_SKILL, PAGE_SKILL, WORKFLOW_DESIGN_SKILL, 'low_code.manage_application', 'analysis.manage_dashboard',
     'analysis.query_dashboard', 'low_code.publish_form_to_menu',
 })
 NATIVE_ONLY_SKILLS = frozenset({

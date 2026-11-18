@@ -6,7 +6,6 @@ import { LEGACY_ACCOUNT_SECTIONS, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigati
 
 const AccountCenter = lazy(() => import('../AccountCenter'));
 const Applications = lazy(() => import('../SystemAdmin/AppMenuManagement'));
-const PageDesign = lazy(() => import('../ComponentPages/PageDesignWorkspace'));
 const Templates = lazy(() => import('../TemplateMarket'));
 const DataCenterWorkspace = lazy(() => import('../DataCenterWorkspace'));
 const Reference = lazy(() => import('../SystemAdmin/ReferenceDataManagement'));
@@ -48,7 +47,6 @@ export default function NavigationAreaPage() {
   switch (pathname) {
     case '/studio/applications': content = <Applications key="applications" />; break;
     case '/studio/business-data': content = <Applications key={`business-data:${params.get('form') || ''}`} businessData initialFormId={params.get('form') || undefined} />; break;
-    case '/studio/page-design': content = <PageDesign />; break;
     case '/studio/templates': content = <Templates />; break;
     case '/admin/sources':
     case '/data-center/sources': content = <DataCenterWorkspace workspace="sources" />; break;

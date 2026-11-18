@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form as FormParam
 from pydantic import BaseModel, Field
@@ -157,6 +157,7 @@ from app.services.application_menu_nodes import (
     _delete_application_menu_node,
     _menu_node_payload,
     _update_application_menu_node,
+    paste_application_menu_nodes,
 )
 from app.services import form_admin as form_admin_service
 from app.services.form_published_payload import (
@@ -908,6 +909,23 @@ async def create_application_menu_node(
     return await _create_application_menu_node(application_id, body, db, user)
 
 
+class MenuNodePaste(BaseModel):
+    node_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1, max_length=2000)
+    parent_id: int | None = Field(default=None, gt=0)
+    source_application_id: int | None = Field(default=None, gt=0)
+
+
+@router.post("/applications/{application_id}/menu-nodes/paste")
+async def paste_menu_nodes(application_id: int, body: MenuNodePaste,
+                           db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+    from app.services.field_uniqueness import lock
+
+    await lock(db, current_tenant_id(user))
+    return await paste_application_menu_nodes(
+        application_id, body.node_ids, body.parent_id, db, user, source_application_id=body.source_application_id,
+    )
+
+
 class MenuOrderItem(BaseModel):
     id: int = Field(gt=0)
     parent_id: int | None = Field(default=None, gt=0)
@@ -980,14 +998,20 @@ async def preview_form_publish(
     return await operation(form_id=form_id, db=db, user=user)
 
 
+class FormPublishRequest(BaseModel):
+    workflow_draft_id: int | None = Field(default=None, gt=0)
+
+
 @router.post("/{form_id}/publish")
 async def publish_form(
     form_id: int,
+    body: FormPublishRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_admin),
 ):
     from app.services.form_versions import publish_form as operation
-    return await operation(form_id=form_id, db=db, user=user)
+    return await operation(form_id=form_id, db=db, user=user,
+                           workflow_draft_id=body.workflow_draft_id if body else None)
 
 
 class FormDraftRestore(BaseModel):
@@ -1448,8 +1472,9 @@ async def submit_form_application(form_id: int, record_id: int, body: FormApplic
     instances = await _start_form_workflows(db, tenant_id=tenant_id, form=form, record_payload=record, user=user)
     if len(instances) != 1:
         raise HTTPException(409, "表单须配置唯一的审批流程")
-    await set_status(db, form, record, "pending", user)
-    await audit(db, form, record_id, user, "submit", status="pending", workflow_id=instances[0]['instance_id'])
+    status = "approved" if instances[0]["status"] == "approved" else "pending"
+    await set_status(db, form, record, status, user)
+    await audit(db, form, record_id, user, "submit", status=status, workflow_id=instances[0]['instance_id'])
     await db.commit()
     visible = await _runtime_visible_field_names(user, form_id, fields, db)
     record['data'] = {key: value for key, value in record['data'].items() if key in visible}

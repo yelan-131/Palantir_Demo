@@ -1,16 +1,15 @@
 import './style.css';
 import './designer-dialog.css';
 import { Button, Checkbox, Dropdown, Form, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
-import { AlertOutlined, ApartmentOutlined, ArrowLeftOutlined, CalendarOutlined, CheckCircleOutlined, CheckSquareOutlined, DatabaseOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined, HolderOutlined, LayoutOutlined, LockOutlined, NumberOutlined, PlusOutlined, QuestionCircleOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SettingOutlined, TableOutlined, UndoOutlined, UserSwitchOutlined, WarningOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, ArrowLeftOutlined, CalendarOutlined, CheckCircleOutlined, CheckSquareOutlined, DatabaseOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined, HolderOutlined, LayoutOutlined, LockOutlined, NumberOutlined, PlusOutlined, QuestionCircleOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SettingOutlined, TableOutlined, UndoOutlined, UserSwitchOutlined } from '@ant-design/icons';
 import type { CalculationRule } from '@/utils/formCalculations';
 import { cloneLayoutSubtree, isLayoutContainer, isLayoutControl, layoutDescendants, layoutSlots, normalizeLayout, placeLayoutControl, unwrapLayoutControl } from '@/utils/formLayout';
-import { DEFAULT_FORM_LIMITS } from '../SystemAdmin/assemblyPersistence';
 import { defaultRuleErrors } from '@/utils/formDefaults';
 import type { DefaultValueRule } from '@/utils/formDefaults';
 import type { NewFormDraft, PageAction } from '@/components/AiChatWidget/pageControls';
-import { duplicateFieldBindings, enumOptions, matchesOptionSearch } from '@/utils/formControls';
+import { enumOptions, matchesOptionSearch } from '@/utils/formControls';
 import type { OptionSearchSettings } from '@/utils/formControls';
-import { adminListOrgUnits, adminListRoles, adminListUsers, createPlatformForm, createPlatformFormField, getFormOptionSources, getPlatformForm, getPlatformFormByCode, listPlatformFormLayouts, listPlatformFormPermissions, listPlatformForms, listWorkflowBindings, previewDesignerRules, previewFormReferenceOptions, previewOptionSearchSchema, previewPlatformFormPublish, publishPlatformForm, restorePlatformFormDraft, updatePlatformForm, updatePlatformFormField, updateWorkflowBinding, upsertPlatformFormLayout, upsertWorkflowBinding, wfCreateDefinition, wfGetDefinition, wfUpdateDefinition } from '@/services/api';
+import { adminListOrgUnits, adminListRoles, adminListUsers, createPlatformForm, createPlatformFormField, getFormOptionSources, getPlatformForm, getPlatformFormByCode, listPlatformFormLayouts, listPlatformFormPermissions, listPlatformForms, listWorkflowBindings, previewDesignerRules, previewFormReferenceOptions, previewOptionSearchSchema, publishPlatformForm, restorePlatformFormDraft, updatePlatformForm, updatePlatformFormField, upsertPlatformFormLayout, wfCreateDefinition, wfGetDefinition, wfUpdateDefinition } from '@/services/api';
 import type { PlatformForm, PlatformFormField, PlatformFormPublishReport } from '@/services/api';
 import { PropertyGroup, PropertyInspectorHeader, PropertyRow } from '@/components/PropertyInspector';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,14 +25,12 @@ import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import ProfessionalFlowDesigner, { validateFlowDesignerConfig } from './ProfessionalFlowDesigner';
 import type { FlowDesignerConfig } from './ProfessionalFlowDesigner';
-import PublishReviewDialog from './PublishReviewDialog';
 import { AnalyticsDashboardDesigner, AnalyticsDatasetDesigner, AnalyticsFilterDesigner, AnalyticsStyleDesigner, AnalyticsWidgetPreview } from './AnalyticsDesigners';
-import { buildPublishChecks } from './publishChecks';
 import { RuleToggleControl } from './RuleToggleControl';
 import VersionManager from './VersionManager';
 import { analyticsTabs, configs, defaultConfig, embeddedBusinessTabs, getStoredAnalyticsDesign, inferDesignerKindFromMeta, inferFormDesignerKind, isNumericFormRouteId, makeDefaultAnalyticsDesign, makeDefaultAnalyticsStyle, resolvePlatformFormForConfig, tabs } from './designerConfig';
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, encodingDatePatternOptions, encodingGenerationModeOptions, encodingPaddingOptions, encodingSegmentTypeOptions, ruleLabels, ruleOperatorOptions, ruleStrategyOptions } from './designerOptions';
-import type { AnalyticsDataset, AnalyticsDesign, AnalyticsMetric, AnalyticsStyle, AnalyticsWidget, AnalyticsWidgetType, AssignmentRule, ComponentDefinition, ComponentPanel, ControlRule, ControlRuleCondition, ControlRuleKey, ControlTypeSettings, ControlWidth, DesignerConfig, DesignerField, DesignerTab, DropPosition, EncodingRule, EncodingSegment, FlowConnection, FlowNode, FlowNodeDefinition, FlowPortSide, FormPermissionRow, LayoutControl, OptionSearchSchema, PermissionDesignDraft, PermissionDraftMap, PublishCheckItem, SearchSettingsDraft, ViewConfigMeta, WorkflowBindingPayload, WorkflowDefinitionPayload, WorkflowDesignerMeta } from './designerTypes';
+import type { AnalyticsDataset, AnalyticsDesign, AnalyticsMetric, AnalyticsStyle, AnalyticsWidget, AnalyticsWidgetType, AssignmentRule, ComponentDefinition, ComponentPanel, ControlRule, ControlRuleCondition, ControlRuleKey, ControlTypeSettings, ControlWidth, DesignerConfig, DesignerField, DesignerTab, DropPosition, EncodingRule, EncodingSegment, FlowConnection, FlowNode, FlowNodeDefinition, FlowPortSide, FormPermissionRow, LayoutControl, OptionSearchSchema, PermissionDesignDraft, PermissionDraftMap, SearchSettingsDraft, ViewConfigMeta, WorkflowBindingPayload, WorkflowDefinitionPayload, WorkflowDesignerMeta } from './designerTypes';
 import { encodingSegmentLengthError, getDateSegmentLength, getEncodingRules, getEncodingSegmentTypeLabel, getEncodingSegments, makeEncodingRule, makeEncodingSegment, renderEncodingSample } from './encodingRules';
 import { getFieldBusinessType, isEncodingField, mapDesignerFieldType } from './fieldBusinessType';
 import { alertBusinessSections, designerFieldsToViewFields, getDefaultTypeSettings, getDesignerMeta, getEffectiveControlTypeForControl, getFlowNodeAssigneeLabel, getPreviewNodeNote, getRecommendedRules, getReferenceConfig, inferFieldControlType, inferReferenceSourceKind, isDataSourceControlType, isEditableTarget, makeAiLayoutControl, makeComponentControl, makeControlRules, makeFieldControl, normalizeBusinessSections, normalizeControlRules, optionSourceToOptions } from './fieldModel';
@@ -51,11 +48,10 @@ import type { DataViewDesignerActions } from './DataViewDesigner';
 import { AssignmentEditor, CalculationEditor, ControlIdentityProperties, DataAttributeProperties, DefaultValueEditor, InteractionProperties, LayoutAppearanceProperties, LayoutWidthProperties, SearchSettingsEditor, TypeSpecificProperties } from './PropertyPanels';
 import type { PropertyPanelActions, PropertyPanelScope } from './PropertyPanels';
 
-export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;footer:HTMLElement|null;status:HTMLElement|null}
+export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;status:HTMLElement|null}
 
 export interface FormSettingsPageProps {
   workspaceTargets?: SourceEditorTargets;
-  sourceImpact?:React.ReactNode;
   requestExitRef?:React.MutableRefObject<(()=>void)|null>;
   formId?: string;
   embedded?: boolean;
@@ -66,12 +62,11 @@ export interface FormSettingsPageProps {
   onPublished?: () => void;
 }
 
-export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef, sourceImpact }: FormSettingsPageProps = {}) {
+export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps = {}) {
   const { formId: routeFormId } = useParams();
   const formId = providedFormId || routeFormId;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const businessDataDesigner = searchParams.get('source') === 'business-data';
   const location = useLocation();
   const aiFormDraft = formId === 'new' ? location.state?.aiFormDraft as (NewFormDraft & { id: string }) | undefined : undefined;
   const staticBaseConfig = useMemo(
@@ -179,9 +174,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [previewRole, setPreviewRole] = useState('');
   const [hasAssociatedFlow, setHasAssociatedFlow] = useState(false);
   const [previewFlowNodeId, setPreviewFlowNodeId] = useState('');
-  const [publishCheckOpen, setPublishCheckOpen] = useState(false);
-  const [validationOpen, setValidationOpen] = useState(false);
-  const [serverPublishReport, setServerPublishReport] = useState<PlatformFormPublishReport | null>(null);
   const [versionPanelOpen, setVersionPanelOpen] = useState(false);
   const [designerReloadKey, setDesignerReloadKey] = useState(0);
   const restoredDesignFormId = useRef<number | null>(null);
@@ -202,15 +194,15 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   useEffect(() => {
-    if (!embedded && !businessDataDesigner && platformForm && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
+    if (!embedded && platformForm && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
       navigate(`/program/${encodeURIComponent(platformForm.code)}`, {replace: true}); return;
     }
     const liveAnalytics = platformForm?.config?.analyticsDesign;
     const hasRuntimeDashboard = Boolean(platformForm?.published_version || platformForm?.config?.publishedSchemaVersion || (liveAnalytics && typeof liveAnalytics === 'object' && !Array.isArray(liveAnalytics)));
-    if (embedded || businessDataDesigner || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
+    if (embedded || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
     const panel = ({dataset: 'data', filter: 'filters', style: 'style'} as Record<string, string>)[searchParams.get('tab') || ''];
     navigate(`/program/${encodeURIComponent(platformForm.code)}?edit=1${panel ? `&panel=${panel}` : ''}`, {replace: true});
-  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded, businessDataDesigner]);
+  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded]);
   const viewConfigMeta = getViewConfigMeta(platformForm);
   useEffect(()=>{if(!previewOpen||baseConfig.kind==='analysis'||!platformForm?.id)return;const epoch=++previewEpoch.current;let active=true;const timer=setTimeout(()=>{previewDesignerRules(platformForm.id,layoutControls,previewValues).then(response=>{if(!active||epoch!==previewEpoch.current)return;const result=response.data?.data;setPreviewStates(result?.states||{});previewForm.setFieldsValue(result?.data||{});setPreviewRuleError('');}).catch((error)=>{if(active)setPreviewRuleError(error?.response?.data?.detail || '规则预览失败，请检查条件配置或网络连接。');});},250);return()=>{active=false;clearTimeout(timer);};},[previewOpen,platformForm?.id,layoutControls,previewValues,previewForm]);
 
@@ -338,7 +330,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     scaleY: number;
   } | null>(null);
   const isAnalysisDesigner = baseConfig.kind === 'analysis';
-  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded || businessDataDesigner ? embeddedBusinessTabs : tabs;
+  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
   const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
 
   // External tab navigation changes only the visible panel, never reinitializes drafts.
@@ -408,7 +400,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setDraftReviewReady(false);
     const nextControls = baseConfig.fields.map(makeFieldControl);
     const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
-    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded || businessDataDesigner ? embeddedBusinessTabs : tabs;
+    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
     const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
     const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
     setActiveTab(nextTab);
@@ -430,7 +422,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setLibrarySearch('');
     setHasUnsavedChanges(Boolean(aiFormDraft));
     setPreviewOpen(false);
-    setPublishCheckOpen(false);
     setVersionPanelOpen(false);
     setPreviewFlowNodeId('');
     setPreviewRole('');
@@ -454,7 +445,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setFlowNodes(nextFlowNodes);
     setFlowConnections(makeFlowConnections(nextFlowNodes));
     setPendingFlowPort(null);
-  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, businessDataDesigner, initialTab]);
+  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, initialTab]);
 
   useEffect(() => {
     if (!previewFlowNodeOptions.length) {
@@ -703,44 +694,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     { key: 'default', title: '基础信息', desc: '当前表单的主要录入字段', fieldKeys: baseConfig.fields.map((field) => field.key) },
   ];
   const alertSections = normalizeBusinessSections(designerMeta.businessSections, fallbackBusinessSections);
-  const searchableFieldCount = baseConfig.fields.filter((field) => field.searchable).length;
-  const requiredControlsInCanvas = layoutControls.filter((control) => control.rules.required.enabled).length;
   const hiddenRequiredControls = layoutControls.filter((control) => !control.rules.visible.enabled && control.rules.required.enabled);
-  const publishChecks = useMemo<PublishCheckItem[]>(() => buildPublishChecks({
-    isAnalysisDesigner,
-    analyticsDesign,
-    baseConfig,
-    layoutControls,
-    searchableFieldCount,
-    hiddenRequiredControls,
-    storedViewConfig,
-    professionalFlowConfig,
-  }), [analyticsDesign, baseConfig, hiddenRequiredControls, isAnalysisDesigner, layoutControls, professionalFlowConfig, searchableFieldCount, storedViewConfig]);
-
-  const serverPublishChecks = useMemo<PublishCheckItem[]>(() => {
-    if (!serverPublishReport) return [];
-    const items = serverPublishReport.items.map((item) => ({
-      level: item.level === 'blocking' ? 'error' : item.level === 'warning' ? 'warning' : 'suggestion',
-      title: item.label ? `${item.label} / ${item.type}` : item.type,
-      detail: `${item.detail}${item.affected_count ? `（影响 ${item.affected_count} 条记录）` : ''}`,
-    } as PublishCheckItem));
-    if (!items.length) {
-      items.push({
-        level: 'suggestion',
-        title: '业务数据影响检查',
-        detail: `已检查 ${serverPublishReport.record_count} 条现有记录，未发现阻断发布的结构变更。`,
-      });
-    }
-    return items;
-  }, [serverPublishReport]);
-  const combinedPublishChecks = useMemo(
-    () => [...publishChecks, ...serverPublishChecks],
-    [publishChecks, serverPublishChecks],
-  );
-  const publishErrorCount = combinedPublishChecks.filter((item) => item.level === 'error').length;
-  const publishWarningCount = combinedPublishChecks.filter((item) => item.level === 'warning').length;
-  const localErrorCount = publishChecks.filter((item) => item.level === 'error').length;
-  const localWarningCount = publishChecks.filter((item) => item.level === 'warning').length;
   const recommendedRules = getRecommendedRules(baseConfig.fields);
   const publishedVersion = platformForm?.config?.publishedSchemaVersion || viewConfigMeta.publishedVersion;
   const draftStatusLabel = hasUnsavedChanges ? '草稿有未保存修改' : viewConfigMeta.status === 'published' ? '草稿无修改' : '草稿已保存 · 待发布';
@@ -1250,7 +1204,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     const nextConfig: Record<string, unknown> = mode === 'draft'
       ? {
           ...currentConfig,
-          ...(!businessDataDesigner ? {viewConfigDraft: nextViewConfig} : {}),
+          viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
@@ -1259,7 +1213,8 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         }
       : {
           ...currentConfig,
-          ...(!businessDataDesigner ? {viewConfig: nextViewConfig, viewConfigDraft: nextViewConfig} : {}),
+          viewConfig: nextViewConfig,
+          viewConfigDraft: nextViewConfig,
           formLayout: runtimeFormLayout,
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
@@ -1268,16 +1223,14 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         };
     const response = await updatePlatformForm(form.id, { config: nextConfig });
     const updatedForm = (response.data?.data || { ...form, config: nextConfig }) as PlatformForm;
-    if (!businessDataDesigner) {
-      await upsertPlatformFormLayout(form.id, 'view', {
-        layout_type: 'view',
-        config: {
-          draft: nextConfig.viewConfigDraft,
-          published: nextConfig.viewConfig,
-          meta: nextConfig.viewConfigMeta,
-        },
-      });
-    }
+    await upsertPlatformFormLayout(form.id, 'view', {
+      layout_type: 'view',
+      config: {
+        draft: nextConfig.viewConfigDraft,
+        published: nextConfig.viewConfig,
+        meta: nextConfig.viewConfigMeta,
+      },
+    });
     await upsertPlatformFormLayout(form.id, 'form', {
       layout_type: 'form',
       config: runtimeFormLayout,
@@ -1465,111 +1418,47 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const publishConfig = async () => {
-    if (!checkSelectionConfiguration()) return false;
+    if (isPersistingFlow || !checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
-    if (isPersistingFlow) return false;
     setPersistingFlow(true);
     try {
-      const savedForm = await persistDesignerDraft();
-      const response = await previewPlatformFormPublish(savedForm.id);
-      setServerPublishReport(response.data?.data as PlatformFormPublishReport);
-      setPublishCheckOpen(true);
+      const draft = await persistDesignerDraft();
+      const workflowDraftId = isAnalysisDesigner ? undefined : getWorkflowDesignerMeta(draft).draftWorkflowId;
+      const response = await publishPlatformForm(draft.id, workflowDraftId);
+      const published = response.data.data;
+      const config = (published.snapshot?.form as { config?: PlatformForm['config'] } | undefined)?.config;
+      const refreshed = await getPlatformForm(draft.id, { schema: 'draft', scope: 'designer' }).catch(error => {
+        console.warn('published form refresh failed', error);
+        return null;
+      });
+      const nextForm = refreshed?.data.data ?? { ...draft, status: 'published', config: config ?? draft.config };
+      setPlatformForm(nextForm);
+      setWorkflowMeta(getWorkflowDesignerMeta(nextForm));
+      setVersion(`v${published.version}`);
+      setHasUnsavedChanges(false);
+      onPublished?.();
+      message.success(isAnalysisDesigner ? 'BI 看板配置已发布' : '表单字段、录入与审批配置已发布');
       return true;
     } catch (error) {
-      console.error('form publish preview failed', error);
-      message.error('发布检查未完成，当前修改仍保留，请重试');
+      console.error('form publish failed', error);
+      const detail = (error as { response?: { data?: { detail?: string | { report?: PlatformFormPublishReport } } } }).response?.data?.detail;
+      const blocking = typeof detail === 'object' ? detail?.report?.items.filter(item => item.level === 'blocking') : undefined;
+      if (blocking?.length) {
+        const first = blocking[0];
+        const field = first.label || first.field_name;
+        const remaining = blocking.length - 1;
+        message.error(`发布失败，${field ? `「${field}」：` : ''}${first.detail}${remaining ? `，另有 ${remaining} 项校验未通过` : ''}`);
+      } else {
+        message.error(typeof detail === 'string' ? `发布失败，${detail}` : '发布失败，请重试');
+      }
       return false;
     } finally {
       setPersistingFlow(false);
     }
   };
 
-  const confirmPublish = async () => {
-    if (!checkSelectionConfiguration()) return;
-    if (flowLoadError) { message.error(flowLoadError); return; }
-    if (publishErrorCount > 0) {
-      message.error('请先处理发布确认中的阻断项');
-      return;
-    }
-    if (isPersistingFlow) return;
-    setPersistingFlow(true);
-    try {
-      const form = await ensurePlatformForm();
-      await syncFieldDefaultValues(form);
-      if (isAnalysisDesigner) {
-        const formWithViewDraft = await updateFormViewConfig(form, storedViewConfig, 'draft');
-        const formWithAnalyticsDraft = await updateFormAnalyticsDesign(formWithViewDraft, analyticsDesign, 'draft');
-        const updatedForm = formWithAnalyticsDraft;
-        const formVersionResponse = await publishPlatformForm(updatedForm.id);
-        onPublished?.();
-      const publishedDetail=await getPlatformForm(updatedForm.id,{schema:'draft',scope:'designer'});
-      setPlatformForm(publishedDetail.data.data);
-        const schemaVersion = Number(formVersionResponse.data?.data?.version || ((updatedForm.config || {}).analyticsDesignMeta as any)?.publishedVersion || 1);
-        setServerPublishReport((formVersionResponse.data?.data?.impact_report || null) as PlatformFormPublishReport | null);
-        setVersion(`v${schemaVersion}`);
-        setPublishCheckOpen(false);
-        setHasUnsavedChanges(false);
-        message.success('BI 看板配置已发布，运行页会读取新的数据集、指标、图表和联动配置');
-        return;
-      }
-      const formWithView = await updateFormViewConfig(form, storedViewConfig, 'draft');
-      const meta = getWorkflowDesignerMeta(formWithView);
-      const saved = await saveWorkflowDefinition('published', formWithView, meta.draftWorkflowId);
-      const publishedAt = new Date().toISOString();
-      const updatedForm = await updateFormWorkflowMeta(formWithView, {
-        ...meta,
-        draftWorkflowId: saved.id,
-        publishedWorkflowId: saved.id,
-        publishedAt,
-        publishedVersion: saved.version,
-      });
-      const bindingsResponse = await listWorkflowBindings(updatedForm.id);
-      const existingBindings = (bindingsResponse.data?.data || []) as WorkflowBindingPayload[];
-      await Promise.all(professionalFlowConfig.triggerBindings.map((binding) => {
-        const payload = {
-          workflow_id: saved.id,
-          trigger_action: binding.action,
-          enabled: binding.enabled,
-          config: {
-            label: binding.label,
-            workflowVersion: saved.version,
-            publishedAt,
-            stateMapping: professionalFlowConfig.stateMapping,
-          },
-        };
-        const existing = existingBindings.find((item) => item.trigger_action === binding.action);
-        return existing
-          ? updateWorkflowBinding(updatedForm.id, existing.id, payload)
-          : upsertWorkflowBinding(updatedForm.id, payload);
-      }));
-      const formVersionResponse = await publishPlatformForm(updatedForm.id);
-      onPublished?.();
-      const publishedDetail=await getPlatformForm(updatedForm.id,{schema:'draft',scope:'designer'});
-      setPlatformForm(publishedDetail.data.data);
-      const schemaVersion = Number(formVersionResponse.data?.data?.version || saved.version);
-      setServerPublishReport((formVersionResponse.data?.data?.impact_report || null) as PlatformFormPublishReport | null);
-      setVersion(`v${schemaVersion}`);
-      setPublishCheckOpen(false);
-      setHasUnsavedChanges(false);
-      message.success(businessDataDesigner ? '表单字段、录入与审批配置已发布' : '配置已发布，运行页会读取新的数据筛选和表格配置');
-    } catch (error) {
-      console.error('workflow publish failed', error);
-      const report = (error as any)?.response?.data?.detail?.report as PlatformFormPublishReport | undefined;
-      if (report) {
-        setServerPublishReport(report);
-        message.error('发布被后端影响报告阻断，请先处理不兼容字段变更');
-        return;
-      }
-      message.error('发布失败，请检查流程定义或绑定接口');
-    } finally {
-      setPersistingFlow(false);
-    }
-  };
-
   const warnBeforeLeave = () => {
-    const exit = businessDataDesigner
-      ? () => navigate(`/studio/business-data?form=${encodeURIComponent(formId || '')}`)
-      : embedded ? onExit : undefined;
+    const exit = embedded ? onExit : undefined;
     if (!exit) {
       navigate(`/program/${baseConfig.id}`);
       return;
@@ -2479,7 +2368,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const sourcePortal = (node:React.ReactNode,target:HTMLElement|null|undefined) => workspaceTargets ? target?createPortal(node,target):null : node;
   const sourceStatus = hasUnsavedChanges?'未保存修改':viewConfigMeta.status==='published'?'与线上版本一致':'草稿待发布';
-  const returnLabel = businessDataDesigner ? '返回业务数据' : '返回表单';
   const propertyScope: PropertyPanelScope = {
     embedded,
     baseConfig,
@@ -2595,8 +2483,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           <><Tooltip title="撤销布局修改"><Button type="text" size="small" aria-label="撤销布局修改" icon={<UndoOutlined/>} disabled={activeTab!=='form'||!history.length||isPersistingFlow} onClick={undoLayoutChange}/></Tooltip><Tooltip title="重做布局修改"><Button type="text" size="small" aria-label="重做布局修改" icon={<RedoOutlined/>} disabled={activeTab!=='form'||!future.length||isPersistingFlow} onClick={redoLayoutChange}/></Tooltip></>
           <Tooltip title="试填表单"><Button type="text" size="small" aria-label="试填表单" icon={<EyeOutlined/>} disabled={isPersistingFlow} onClick={()=>setPreviewOpen(true)}/></Tooltip>
           <Tooltip title="数据源版本管理"><Button type="text" size="small" aria-label="数据源版本管理" icon={<HistoryOutlined/>} disabled={isPersistingFlow} onClick={()=>setVersionPanelOpen(true)}/></Tooltip>
+          <Tooltip title="保存草稿"><Button type="text" size="small" aria-label="保存草稿" icon={<SaveOutlined/>} loading={isPersistingFlow} onClick={saveDraft}/></Tooltip>
+          <Tooltip title="发布更改"><Button type="primary" size="small" aria-label="发布更改" icon={<CheckCircleOutlined/>} loading={isPersistingFlow} onClick={publishConfig}/></Tooltip>
         </Space>,workspaceTargets.actions)}
-        {sourcePortal(<div className="analytics-settings-actions"><div><Button icon={<SaveOutlined/>} loading={isPersistingFlow} onClick={saveDraft}>保存草稿</Button><Button type="primary" icon={<CheckCircleOutlined/>} loading={isPersistingFlow} onClick={publishConfig}>发布更改</Button></div></div>,workspaceTargets.footer)}
       </>}
       {!workspaceTargets&&<header className="form-designer-toolbar">
         <div className="form-designer-title">
@@ -2626,7 +2515,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', flow: '流程与审批' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
         />
         <Space className="form-designer-actions" size={4} wrap={false}>
-          {!embedded && <Button size="small" type="text" title={returnLabel} aria-label={returnLabel} icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>{returnLabel}</Button>}
+          {!embedded && <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>返回表单</Button>}
           {embedded && activeTab === 'form' && <><Tooltip title="撤销布局修改"><Button size="small" type="text" aria-label="撤销布局修改" disabled={!history.length} icon={<UndoOutlined />} onClick={undoLayoutChange} /></Tooltip><Tooltip title="重做布局修改"><Button size="small" type="text" aria-label="重做布局修改" disabled={!future.length} icon={<RedoOutlined />} onClick={redoLayoutChange} /></Tooltip></>}
           <Button size="small" type="text" title={embedded ? '试填表单' : '预览'} aria-label={embedded ? '试填表单' : '预览'} icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>{embedded ? '试填表单' : '预览'}</Button>
           <Button
@@ -2687,11 +2576,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 <div className="designer-group-title">快捷排版</div>
                 <div className="designer-side-guide">
                   <strong>配置引导</strong>
-                  <span>{activeTab === 'filter' ? '配置运行页查询条件，选中后在右侧查看属性，发布时会同步做业务校验。' : '拖入字段/控件，选中后在右侧配置属性，发布时会同步做业务校验。'}</span>
+                  <span>{activeTab === 'filter' ? '配置运行页查询条件，选中后在右侧查看属性。' : '拖入字段/控件，选中后在右侧配置属性。'}</span>
                   <div>
                     <Tag color="blue">{activeTab === 'filter' ? '筛选字段' : '字段'} {libraryFields.length}</Tag>
                     <Tag color="green">{activeTab === 'filter' ? '筛选项' : '控件'} {activeTab === 'filter' ? baseConfig.filters.length : layoutControls.length}</Tag>
-                    <Tag color={publishErrorCount ? 'red' : 'success'}>阻断 {publishErrorCount}</Tag>
                   </div>
                 </div>
                 <div className="designer-quick-grid">
@@ -3220,19 +3108,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
             </div>
           ) : (
             <div className="designer-props">
-              <div className="designer-form-overview">
-                <strong>{baseConfig.name}</strong>
-                <p>{baseConfig.description || '暂无表单说明'}</p>
-                <p>新增标题 {baseConfig.createTitle || '—'} · 数据表 {baseConfig.dataSource || '—'} · 主键 {baseConfig.primaryKey || '—'}</p>
-                <p>字段 {baseConfig.fields.length} / {DEFAULT_FORM_LIMITS.fields} 个 · 单条记录 2 MiB。容量按实际填写校验，附件不计入记录正文。</p>
-              </div>
               <PropertyGroup title="画布规格" className="designer-canvas-property-group">
                 <PropertyRow label="默认列数"><Select value={String(canvasSettings.columns)} onChange={value=>{const columns=Number(value);setCanvasSettings(current=>({...current,columns}));commitLayoutChange(current=>current.map(c=>!c.parentId&&!isLayoutContainer(c)&&c.controlType!=='divider'?{...c,width:columns===1?'full':columns===3?'third':'half'}:c));}} options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></PropertyRow>
                 <PropertyRow label="字段间距"><Select value={String(canvasSettings.gap)} onChange={value=>{setCanvasSettings(current=>({...current,gap:Number(value)}));setHasUnsavedChanges(true);}} options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></PropertyRow>
-              </PropertyGroup>
-              <PropertyGroup title="校验摘要" hint="随配置修改自动更新；发布时另做服务器检查。" actions={<Button type="text" size="small" onClick={()=>setValidationOpen(true)}>查看规则</Button>}>
-                <PropertyRow label="阻断项"><Input readOnly value={`${localErrorCount} 项`} status={localErrorCount?'error':undefined}/></PropertyRow>
-                <PropertyRow label="提醒"><Input readOnly value={`${localWarningCount} 项`}/></PropertyRow>
               </PropertyGroup>
               {recommendedRules.length > 0 && <PropertyGroup title="内置配置参考" defaultOpen={true} className="designer-canvas-property-group">
                 <small className="designer-recommendation-note"><strong>来源：平台预置规则</strong><span>按字段名称匹配，仅供参考；需手动配置后生效。</span></small>
@@ -3476,27 +3354,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         </div>
       </Modal>
 
-      <Modal centered className="form-designer-dialog" title="本地配置检查" open={validationOpen} onCancel={() => setValidationOpen(false)} footer={<Button onClick={() => setValidationOpen(false)}>关闭</Button>}>
-        <p className="designer-publish-note">来源：平台内置配置规则。修改字段、布局、列表或流程时自动更新；本窗口展示当前草稿的检查结果。</p>
-        <p className="designer-publish-note">点击“{embedded ? '发布更改' : '发布配置'}”后，服务器还会检查现有业务数据的影响，再进入发布确认。</p>
-        <div className="designer-check-list">
-          {publishChecks.map((item, index) => <div className={`designer-check-item designer-check-${item.level}`} key={`${item.title}-${index}`}>
-            <span>{item.level === 'error' ? <AlertOutlined /> : item.level === 'warning' ? <WarningOutlined /> : <CheckCircleOutlined />}</span>
-            <div><strong>{item.title}</strong><small>{item.detail}</small></div>
-          </div>)}
-        </div>
-      </Modal>
-
-      <PublishReviewDialog
-        open={publishCheckOpen}
-        name={baseConfig.name}
-        sourceImpact={sourceImpact}
-        checks={combinedPublishChecks}
-        busy={isPersistingFlow}
-        onCancel={() => setPublishCheckOpen(false)}
-        onPublish={confirmPublish}
-      />
-
       <VersionManager
         title={workspaceTargets ? '数据源版本管理' : '版本管理'}
         open={versionPanelOpen}
@@ -3517,7 +3374,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           try {
             await restorePlatformFormDraft(platformForm.id, version);
             restoredDesignFormId.current = platformForm.id;
-            setServerPublishReport(null);
             setFieldDefaultValueDrafts({});
             setCopiedControl(null);
             setCopiedTree([]);

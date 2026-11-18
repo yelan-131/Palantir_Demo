@@ -105,6 +105,14 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
                 visible_nodes = await request(client, 'GET', f'/forms/applications/{aid}/menu-nodes')
                 assert next(item for item in visible_nodes if item['id'] == node['id'])['config']['role_ids'] == [role_id]
                 field = await request(client, 'POST', f'/forms/{fid}/fields', {'field_name':'part_no','label':'物料编号','field_type':'string','ui_config':{'placeholder':'请输入物料编号'}})
+                updated_draft_field = await request(client, 'PUT', f'/forms/{fid}/fields/{field["id"]}', {'field_name': 'renamed_part_no'})
+                assert updated_draft_field['field_name'] == 'part_no'
+                type_path = f'/forms/{fid}/fields/{field["id"]}'
+                text_field = await request(client, 'PUT', type_path, {'field_type': 'text', 'business_type': 'text'})
+                assert text_field['field_type'] == 'text' and text_field['field_name'] == 'part_no'
+                await request(client, 'PUT', type_path, {'field_type': 'date'}, expected=409)
+                restored_type = await request(client, 'PUT', type_path, {'field_type': 'string', 'business_type': 'string'})
+                assert restored_type['field_type'] == 'string'
                 await request(client, 'POST', f'/forms/{fid}/fields', {'field_name':'part_no','label':'重复字段'}, expected=409)
                 choice = await request(client, 'POST', f'/forms/{fid}/fields', {'field_name':'review_result','label':'审核结果','field_type':'enum','enum_values':{'values':['待处理','已完成']},'visible_in_list':False})
                 draft = await request(client, 'GET', f'/forms/{fid}?schema=draft&scope=designer')

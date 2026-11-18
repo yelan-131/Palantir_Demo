@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -42,7 +42,7 @@ import GlobalSearch from './components/GlobalSearch';
 import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
 import NotificationCenter from './components/NotificationCenter';
 import { CANON_CSS_VARIABLES, canonTheme } from './theme/canon';
-import { settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
+import { businessDataDesignPath, settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
   getCurrentRelease,
@@ -61,6 +61,15 @@ const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const MaterialApplicationsPage = lazy(() => import('./pages/MaterialApplications'));
 const LoginPage = lazy(() => import('./pages/Login'));
+
+function FormSettingsEntry() {
+  const { formId } = useParams();
+  const { search } = useLocation();
+  if (formId && formId !== 'new' && new URLSearchParams(search).get('source') === 'business-data') {
+    return <Navigate to={businessDataDesignPath(formId)} replace />;
+  }
+  return <FormSettingsPage />;
+}
 
 const { Header, Sider, Content } = Layout;
 interface DynamicMenu {
@@ -295,16 +304,6 @@ function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
   return roots.map((node) => (node.children?.length ? node : { ...node, children: undefined }));
 }
 
-function unwrapApplicationMenuRoot(items: MenuProps['items']): MenuProps['items'] {
-  if (items?.length === 1) {
-    const [first] = items;
-    if (first && 'children' in first && first.children?.length) {
-      return first.children as MenuProps['items'];
-    }
-  }
-  return items;
-}
-
 function menuLabelToText(label: React.ReactNode): string {
   if (typeof label === 'string' || typeof label === 'number') return String(label);
   if (Array.isArray(label)) return label.map(menuLabelToText).join('');
@@ -536,7 +535,7 @@ function AppContent() {
     && releaseInfo && releaseInfo.show_popup !== false && releaseInfo.version !== acknowledgedRelease;
 
   const applicationMenuItems = useMemo(() => isApplicationWorkspace && menusLoadedFor === currentApplication?.id
-    ? unwrapApplicationMenuRoot(dynamicMenus) : [], [isApplicationWorkspace, menusLoadedFor, currentApplication?.id, dynamicMenus]);
+    ? dynamicMenus : [], [isApplicationWorkspace, menusLoadedFor, currentApplication?.id, dynamicMenus]);
   const showContextMenu = !isKnowledgeWorkspace && (isSettingsWorkspace || hasApplicationPage(applicationMenuItems));
   const mobileMenuWasOpen = React.useRef(false);
   useEffect(() => {
@@ -677,13 +676,14 @@ function AppContent() {
                   <Route path="/account-center" element={<AccountEntry currentApplication={currentApplication} />} />
 
                   <Route path="/dynamic/:slug" element={<FormPageEntry kind="business" />} />
-                  <Route path="/pages" element={<Navigate to="/studio/page-design" replace />} />
-                  <Route path="/pages/new" element={<Navigate to="/studio/page-design?new=1" replace />} />
                   <Route path="/pages/:code" element={<ComponentPages />} />
                   <Route path="/program/alert-center" element={<FormPageEntry kind="program" formSlug="alert-center" />} />
                   <Route path="/program/material-application" element={<MaterialApplicationsPage />} />
                   <Route path="/program/:programId" element={<FormPageEntry kind="program" />} />
-                  <Route path="/form-settings/:formId" element={<FormSettingsPage />} />
+                  <Route path="/form-settings/:formId" element={<FormSettingsEntry />} />
+                  <Route path="/studio/business-data/:slug/design" element={isAdmin
+                    ? <FormPageEntry kind="business" businessDataDesign />
+                    : <Navigate to="/studio/business-data" replace />} />
                   <Route path="/studio/*" element={<NavigationAreaPage />} />
                   <Route path="/data-center/*" element={<NavigationAreaPage />} />
                   <Route path="/admin/*" element={<NavigationAreaPage />} />

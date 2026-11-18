@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.identifiers import assert_safe_identifier
 from app.core.principal import current_tenant_id, current_user_id, ensure_admin
 from app.core.audit import write_audit_log
 from app.services.form_runtime import _latest_form_version
@@ -30,7 +31,69 @@ async def preview_form_publish(form_id: int, db: AsyncSession, user: dict):
     return {'data': {'form_id': form_id, **report}}
 
 
-async def publish_form(form_id: int, db: AsyncSession, user: dict, *, defer_commit: bool = False):
+async def _publish_workflow_draft(db, form, workflow_id: int, user: dict, published_at: str, *, expected_version: int | None = None):
+    from app.models.relational import WorkflowBinding, WorkflowDef
+    from app.services.workflow_definitions import snapshot_definition
+    from app.services.workflow_routing import validate_graph
+    from app.services.workflow_views import _definition_config
+
+    config = form.config or {}
+    meta = config.get('workflowDesigner') or {}
+    if meta.get('draftWorkflowId') != workflow_id:
+        raise HTTPException(409, '流程草稿已更新，请刷新后重新发布')
+    definition = await db.scalar(select(WorkflowDef).where(
+        WorkflowDef.id == workflow_id, WorkflowDef.tenant_id == form.tenant_id,
+    ).with_for_update())
+    flow = _definition_config(definition)
+    source_id = flow.get('formId')
+    matches_form = source_id == form.id if source_id is not None else flow.get('formCode') == form.code
+    if not definition or definition.status != 'draft' or not matches_form:
+        raise HTTPException(409, '找不到此表单可发布的流程草稿')
+    if expected_version is not None and definition.version != expected_version:
+        raise HTTPException(409, '流程草稿已更新，请重新复核后发布')
+    validate_graph(flow, require_cc_recipients=True)
+
+    triggers = flow.get('triggerBindings', [])
+    if not isinstance(triggers, list) or any(
+        not isinstance(trigger, dict) or not isinstance(trigger.get('action'), str) for trigger in triggers
+    ):
+        raise HTTPException(422, '流程触发配置无效')
+    actions = [trigger['action'] for trigger in triggers]
+    if len(set(actions)) != len(actions):
+        raise HTTPException(422, '流程触发动作必须唯一')
+    for action in actions:
+        assert_safe_identifier(action)
+
+    definition.status = 'published'
+    definition.version = int(definition.version or 1) + 1
+    snapshot_definition(db, definition, published_by=current_user_id(user))
+    bindings = (await db.scalars(select(WorkflowBinding).where(
+        WorkflowBinding.form_id == form.id, WorkflowBinding.tenant_id == form.tenant_id,
+    ).order_by(WorkflowBinding.id).with_for_update())).all()
+    for trigger in triggers:
+        action = trigger['action']
+        binding = next((row for row in bindings if row.trigger_action == action and row.workflow_id == workflow_id), None)
+        if binding is None:
+            binding = next((row for row in bindings if row.trigger_action == action), None)
+        if binding is None:
+            binding = WorkflowBinding(tenant_id=form.tenant_id, form_id=form.id, trigger_action=action)
+            db.add(binding)
+        binding.workflow_id = workflow_id
+        binding.enabled = bool(trigger.get('enabled'))
+        binding.config = {
+            'label': trigger.get('label'),
+            'workflowVersion': definition.version,
+            'publishedAt': published_at,
+            'stateMapping': flow.get('stateMapping'),
+        }
+    form.config = {**config, 'workflowDesigner': {
+        **meta, 'publishedWorkflowId': workflow_id, 'publishedVersion': definition.version, 'publishedAt': published_at,
+    }}
+
+
+async def publish_form(form_id: int, db: AsyncSession, user: dict, *,
+                       defer_commit: bool = False, workflow_draft_id: int | None = None,
+                       workflow_draft_version: int | None = None):
     ensure_admin(user)
     from app.models.relational import Form, FormVersion
     tenant_id = current_tenant_id(user)
@@ -40,11 +103,15 @@ async def publish_form(form_id: int, db: AsyncSession, user: dict, *, defer_comm
     from app.services.field_uniqueness import lock
     await lock(db, tenant_id)
     await db.refresh(form)
-    report, snapshot = await _build_publish_preview(db, tenant_id, form)
-    if report['blocking_count'] > 0:
-        raise HTTPException(409, {'message': 'Publish blocked by incompatible form changes', 'report': report})
     now = datetime.now()
     published_at = now.isoformat()
+    async with db.begin_nested():
+        if workflow_draft_id is not None:
+            await _publish_workflow_draft(db, form, workflow_draft_id, user, published_at,
+                                          expected_version=workflow_draft_version)
+        report, snapshot = await _build_publish_preview(db, tenant_id, form)
+        if report['blocking_count'] > 0:
+            raise HTTPException(409, {'message': 'Publish blocked by incompatible form changes', 'report': report})
     snapshot = _promote_snapshot_config(snapshot, published_at, report['next_version'])
     from app.services.designer_permissions import sync_published
     await sync_published(db, form, snapshot['form']['config'])

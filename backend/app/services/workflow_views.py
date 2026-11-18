@@ -90,14 +90,9 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
     for outgoing in edge_map.values():
         outgoing.sort(key=lambda edge: (not bool(edge.get("isDefault")), edge.get("priority", 999), edge.get("id", "")))
 
-    # Find the start node and walk the chain
-    start_id = None
-    for node in nodes:
-        if _node_type(node) == "start":
-            start_id = node["id"]
-            break
+    start_ids = [node["id"] for node in nodes if _node_type(node) == "start"]
 
-    if not start_id:
+    if not start_ids:
         # No start node; return nodes in order
         return [
             {"name": _node_label(n), "type": _node_type(n),
@@ -107,7 +102,7 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
 
     ordered = []
     visited = set()
-    queue = [start_id]
+    queue = start_ids.copy()
     while queue:
         current = queue.pop(0)
         if not current or current in visited:
@@ -133,6 +128,9 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
             step["approval_mode"] = node["approvalMode"]
         if node.get("externalAction"):
             step["external_action"] = node["externalAction"]
+        raw_type = node.get("type") or node.get("data", {}).get("type")
+        if raw_type == "ccTask" and node.get("ccRecipients"):
+            step["cc_recipients"] = node["ccRecipients"]
         ordered.append(step)
         for edge in edge_map.get(current, []):
             target = _edge_target(edge)
@@ -142,13 +140,13 @@ def _get_steps_from_workflow(wf_def: dict) -> list[dict]:
     return ordered
 
 
-def _workflow_config_steps(config: dict, form_data: dict | None = None) -> list[dict]:
+def _workflow_config_steps(config: dict, form_data: dict | None = None, *, trigger_action: str | None = None) -> list[dict]:
     """Resolve runtime steps from either simple steps or visual designer config."""
     steps = _get_steps_from_workflow({"steps": config.get("steps") or [], "config": config})
     if form_data is not None and config.get('nodes') and not config.get('steps'):
         from app.services.workflow_routing import route_node_ids
         by_id = {step['node_id']: step for step in steps}
-        return [by_id[node] for node in route_node_ids(config, form_data)]
+        return [by_id[node] for node in route_node_ids(config, form_data, trigger_action=trigger_action)]
     return steps
 
 

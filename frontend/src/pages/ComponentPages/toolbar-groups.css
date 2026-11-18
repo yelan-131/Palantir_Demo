@@ -1,5 +1,6 @@
 .component-toolbar-groups-heading,.component-toolbar-group>summary {display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 10px;font-size:12px;}
 .component-toolbar-groups-heading {color:var(--mf-muted);font-weight:500;}
+.component-toolbar-groups-label {display:inline-flex;align-items:center;gap:6px;}
 .component-toolbar-group {margin:0 8px 8px;border:1px solid var(--property-border);border-radius:5px;overflow:hidden;}
 .component-toolbar-group>summary {cursor:pointer;background:var(--property-soft);list-style:none;}
 .component-toolbar-group>summary::-webkit-details-marker {display:none;}

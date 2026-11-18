@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.services.applications import ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application, validate_application_code_change
+from app.services.applications import ApplicationAccessGroup, ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application, validate_application_code_change, validate_tenant_roles
 from app.core.principal import ensure_admin
 from app.models.relational import ApplicationForm, ApplicationMenuNode
 from app.services.field_uniqueness import lock
@@ -35,6 +35,7 @@ class CreateApplication(ApplicationToolRequest):
     default_route: Route = "/"
     sort_order: SortOrder = 0
     is_pinned: bool = False
+    access_groups: list[ApplicationAccessGroup] | None = Field(default=None, max_length=20, description="应用访问权限组，roleIds 使用本租户角色 ID")
 
 
 class ApplicationTarget(ApplicationToolRequest):
@@ -49,6 +50,8 @@ class UpdateApplication(ApplicationTarget):
     default_route: Route | None = None
     sort_order: SortOrder | None = None
     is_pinned: bool | None = None
+    access_groups: list[ApplicationAccessGroup] | None = Field(default=None, max_length=20, description="完整替换应用访问权限组，空数组清空角色授权")
+    add_access_group: ApplicationAccessGroup | None = Field(default=None, description="新增一个应用访问权限组，保留已有权限组。请为新组提供唯一 id")
 
     @model_validator(mode="after")
     def validate_changes(self):
@@ -57,12 +60,14 @@ class UpdateApplication(ApplicationTarget):
             raise ValueError("请填写要修改的应用属性")
         if any(value is None and key not in {"description", "icon"} for key, value in changes.items()):
             raise ValueError("只有应用说明和图标可以清空")
+        if "access_groups" in changes and "add_access_group" in changes:
+            raise ValueError("请选择追加或替换权限组")
         return self
 
 
 APPLICATION_TOOL_DETAILS = {
-    "applications.create": ("新建草稿应用", "按名称和编码新建草稿应用。可选设置说明、图标、启动页面、排序和置顶。"),
-    "applications.update": ("修改应用属性", "按应用 ID 修改名称、编码、说明、图标、启动页面、排序或置顶。只传需要修改的字段。"),
+    "applications.create": ("新建草稿应用", "按名称和编码新建草稿应用，可设置基本属性、导航和应用访问权限组。"),
+    "applications.update": ("修改应用属性", "按应用 ID 修改基本属性、导航或访问权限组。add_access_group 新增权限组，access_groups 完整替换权限组。"),
     "applications.publish": ("发布草稿应用", "按应用 ID 发布草稿应用，使有权限的成员可以访问。"),
     "applications.disable": ("停用应用", "按应用 ID 停用已发布应用。停用后可重新启用。"),
     "applications.enable": ("重新启用应用", "按应用 ID 重新启用已停用的应用。"),
@@ -81,6 +86,7 @@ STATUS_LABELS = {"draft": "草稿", "published": "已发布", "active": "已发�
 FIELD_LABELS = {
     "name": "应用名称", "code": "应用编码", "description": "应用说明", "icon": "图标",
     "default_route": "启动页面", "sort_order": "排序", "is_pinned": "置顶", "status": "状态",
+    "access_groups": "应用访问权限组",
 }
 
 
@@ -89,6 +95,10 @@ def _preview_value(field, value):
         return STATUS_LABELS.get(value, value)
     if isinstance(value, bool):
         return "是" if value else "否"
+    if field == "access_groups":
+        return "、".join(
+            f"{group['name']}（角色 ID {', '.join(map(str, group['roleIds'])) or '无'}）" for group in value or []
+        ) or "无授权角色"
     return value if value not in {None, ""} else "空"
 
 
@@ -128,6 +138,8 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
     snapshot = {"operation": operation, "arguments": values}
     if not prepare:
         await lock(session, tenant_id)
+    if getattr(request, "access_groups", None) is not None:
+        await validate_tenant_roles(session, tenant_id, {role for group in request.access_groups for role in group.roleIds})
 
     if operation == "applications.create":
         body = ApplicationCreate(**values, status="draft")
@@ -145,9 +157,13 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
         }
 
     app = await get_tenant_application(session, tenant_id, request.application_id, for_update=not prepare)
-    before = await _application_to_dict(session, app)
+    before = await _application_to_dict(session, app, include_bindings=bool({"access_groups", "add_access_group"} & values.keys()))
     snapshot.update(application=before, updated_at=app.updated_at.isoformat() if app.updated_at else None)
     changes = {key: value for key, value in values.items() if key != "application_id"}
+    group = changes.pop("add_access_group", None)
+    if group is not None:
+        await validate_tenant_roles(session, tenant_id, group["roleIds"])
+        changes["access_groups"] = [*before["access_groups"], group]
     fields = {}
     if operation == "applications.delete":
         if app.status != "draft":
@@ -161,6 +177,7 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
         changes["status"] = new_status
 
     if prepare:
+        ApplicationUpdate(**changes)
         if "code" in changes:
             await validate_application_code_change(session, app, changes["code"])
         return {

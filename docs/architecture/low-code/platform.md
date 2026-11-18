@@ -186,7 +186,7 @@ flowchart TB
 - 第一次绑定时写入 `componentPageLegacyFallback`。页面发布之前，普通用户访问原路由仍进入旧的记录页或程序页；发布之后进入组件页面。
 - 前端 `FormPageEntry`（`/dynamic/:slug`、`/program/:programId`）先请求 `GET /pages/forms/{slug}/binding`。管理员访问一个还没有页面的表单时，前端会自动以 `blank=true, populate=true` 创建绑定。地址带 `?view=records` 时直接显示记录页。
 - `/studio/page-design` 是页面设计工作区，列出全部页面并可新建独立页面；`/pages` 和 `/pages/new` 重定向到这里，`/pages/:code` 打开具体页面。
-- 独立的 `/form-settings/:formId` 默认重定向到 `/program/<编码>`；表单设计器主要以嵌入方式出现在组件页面的“录入”和“流程”页签中，地址带 `legacy=1` 或 `source=business-data` 时仍以独立页面打开。
+- 表单设计器以嵌入方式出现在组件页面的「录入」「流程」页签中。独立的 `/form-settings/:formId` 默认重定向到 `/program/<编码>`，`legacy=1` 可打开独立设计器。带 `source=business-data` 的历史地址会跳转到新版的组件属性。
 - 批量补齐脚本 `backend/scripts/populate_component_pages.py` 默认只预演，加 `--apply` 才写入，只处理尚不存在的页面或 `revision=1`、未发布且没有组件的空页面；`--upgrade` 只升级旧转换程序生成且未修改、未发布的看板草稿。转换遇到范围条件、未知组件类型或非业务表单来源时报错，不会静默丢弃。
 
 ### 6.3 保存与发布

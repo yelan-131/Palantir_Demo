@@ -26,6 +26,7 @@ from app.services.applications import (
     create_application,
     delete_application,
     get_tenant_application,
+    reorder_applications,
     update_application,
     replace_application_roles,
 )
@@ -560,25 +561,9 @@ async def admin_create_application(body: ApplicationCreate, user: dict = Depends
 @admin_router.put("/applications/order")
 async def admin_reorder_applications(body: ApplicationOrderUpdate, user: dict = Depends(require_admin)):
     async def _query(db):
-        from app.models.relational import Application
-
         tenant_id = current_tenant_id(user)
         await lock_tenant_writes(db, tenant_id)
-        apps = (await db.scalars(select(Application).where(Application.tenant_id == tenant_id)
-                                 .order_by(Application.sort_order, Application.id).with_for_update())).all()
-        by_id = {app.id: app for app in apps}
-        if body.expected != list(by_id):
-            raise HTTPException(409, "应用顺序已变化，请刷新后重试")
-        if len(body.order) != len(by_id) or set(body.order) != set(by_id):
-            raise HTTPException(422, "排序必须包含当前租户的全部应用")
-        for position, app_id in enumerate(body.order, start=1):
-            by_id[app_id].sort_order = position
-        await db.commit()
-        await write_audit_log(
-            tenant_id=tenant_id, user_id=current_user_id(user), action="reorder",
-            resource_type="application", old_values={"order": body.expected}, new_values={"order": body.order},
-        )
-        return {"data": [await _application_to_dict(db, by_id[app_id], include_bindings=True) for app_id in body.order]}
+        return await reorder_applications(db, tenant_id, body.expected, body.order, user)
 
     return await safe_db_call(_query)
 
