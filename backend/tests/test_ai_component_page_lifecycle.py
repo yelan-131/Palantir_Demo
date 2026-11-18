@@ -39,7 +39,6 @@ async def test_harness_creates_and_publishes_pages_only_after_confirmation(monke
     user = {"tenant_id": 1, "sub": "page-tool-test", "is_admin": True}
     settings = merge_ai_settings({"aiEnabled": True, "agentMode": "confirm"})
     settings["rolePolicies"] = []
-    settings["safetyPolicy"]["maxToolSteps"] = 8
     monkeypatch.setattr(runtime, "load_persisted_ai_settings", AsyncMock())
     monkeypatch.setattr(runtime, "settings_snapshot", lambda: settings)
     bridge = runtime.PlatformBridge(user, settings, {})

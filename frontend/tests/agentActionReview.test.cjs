@@ -8,7 +8,8 @@ const ts = require('typescript');
 const source = fs.readFileSync(path.join(__dirname, '../src/components/AiChatWidget/index.tsx'), 'utf8');
 const ast = ts.createSourceFile('widget.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = ['mapServerMessage', 'mapAgentActions', 'getConfirmationItemPayload', 'getConfirmationActions',
-  'normalizeAgentItems', 'formatActionValue', 'asRecord', 'asRecordArray', 'getLowCodeReview', 'getExecutionResult'];
+  'normalizeAgentItems', 'formatActionValue', 'asRecord', 'asRecordArray', 'getLowCodeReview', 'getExecutionResult',
+  'getCompletedToolResults', 'pickExecutionResult', 'getStoredExecutionResult', 'findActiveSession'];
 const functions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text))
   .map(node => node.getText(ast)).join('\n');
 const context = { mapAgentSteps: () => [], mapTraceFromItems: () => [], formatServerTime: () => '', getContextSources: () => ({}) };
@@ -61,9 +62,45 @@ test('record updates open the original record and report an update', () => {
 
 test('saved form drafts link to the designer and call out separate publication', () => {
   const result = context.getExecutionResult({
-    form: { id: 17, status: 'draft' }, route_path: '/form-settings/17?tab=form&legacy=1',
+    form: { id: 17, status: 'draft' }, route_path: '/studio/business-data/17/design?tab=form',
   });
   assert.equal(result.title, '表单草稿已保存');
   assert.equal(result.detail, '发布需要单独确认');
-  assert.equal(result.href, '/form-settings/17?tab=form&legacy=1');
+  assert.equal(result.href, '/studio/business-data/17/design?tab=form');
+});
+
+test('reloading a completed batch restores its saved form link from the execution snapshot', () => {
+  const saved = message('completed');
+  saved.items.push({
+    type: 'tool_result',
+    execution_snapshot: true,
+    payload: { tool_results: [
+      { status: 'completed', result: { menu_id: 2 } },
+      { status: 'completed', result: { result: {
+        form: { id: 17, status: 'draft' }, route_path: '/form-settings/17?tab=form&legacy=1',
+      } } },
+    ] },
+  });
+  const restored = context.mapServerMessage(saved);
+  assert.equal(restored.executionResult.title, '表单草稿已保存');
+  assert.equal(restored.executionResult.href, '/form-settings/17?tab=form&legacy=1');
+  assert.equal(restored.confirmationPayload, undefined);
+});
+
+test('history restores a durable record receipt and leaves ordinary replies without a receipt', () => {
+  const saved = message('completed');
+  saved.items.push({
+    type: 'tool_result',
+    execution_receipt: true,
+    payload: { operation: 'update', form_code: 'inbound', record_id: 2 },
+  });
+  assert.equal(context.mapServerMessage(saved).executionResult.href, '/dynamic/inbound?recordId=2');
+  assert.equal(context.mapServerMessage({ role: 'assistant', run_status: 'completed', content: '已查到。' }).executionResult, undefined);
+});
+
+test('the selected tab is retained when the server still lists it for this user', () => {
+  const recent = { id: 'recent' };
+  const selected = { id: 'selected' };
+  assert.equal(context.findActiveSession([recent, selected], selected.id), selected);
+  assert.equal(context.findActiveSession([recent], selected.id), recent);
 });

@@ -1,0 +1,60 @@
+.ai-design-preview {
+  min-width: 0;
+  min-height: 100%;
+  background: var(--mf-surface, #fff);
+}
+
+.ai-design-preview-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--mf-border, #dfe2e5);
+}
+
+.ai-design-preview-header h4.ant-typography {
+  margin: 0;
+}
+
+.ai-design-preview-header button {
+  margin-inline-start: auto;
+}
+
+.ai-design-preview-form,
+.ai-design-preview-page {
+  padding: 20px;
+}
+
+.ai-design-preview-form {
+  max-width: 960px;
+}
+
+.ai-design-preview-form .ant-form-item-label .ant-tag {
+  margin-inline-start: 8px;
+}
+
+.ai-design-preview-form .ant-input-number {
+  width: 100%;
+}
+
+.ai-design-preview-flow {
+  min-width: 0;
+  height: clamp(360px, calc(100vh - 170px), 760px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ai-design-preview-flow .professional-flow-library,
+.ai-design-preview-flow .professional-flow-properties {
+  display: none;
+}
+
+.ai-design-preview-flow .professional-flow-designer {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ai-design-preview-flow .professional-flow-canvas-content {
+  pointer-events: none;
+}

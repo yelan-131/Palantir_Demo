@@ -4,6 +4,7 @@ import anyio
 import asyncio
 import json
 import uuid
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +34,7 @@ from app.services.ai.audit import list_ai_audit_logs, record_ai_event
 from app.services.ai.client import get_provider
 from app.services.ai.page_controls import PageControlResult
 from app.services.ai.configuration_review import ConfigurationReviewEdit, revise_configuration
+from app.services.ai.confirmation_stream import ConfirmationStream
 from app.services.ai.confirmations import consume_confirmation_token
 from app.services.ai.agent_context_router import agent_context_router
 from app.services.ai.context_builder import context_builder
@@ -64,6 +66,7 @@ from app.services.ai.tool_registry import list_tools
 
 router = APIRouter()
 _CONFIRMATION_TASKS: set[asyncio.Task] = set()
+_ACTIVE_CONFIRMATIONS: dict[tuple[int, str, str, str], ConfirmationStream] = {}
 
 
 class ChatRequest(BaseModel):
@@ -97,6 +100,9 @@ class SkillMarkdownRequest(BaseModel):
 class AgentRunConfirmRequest(BaseModel):
     confirmation_token: str | None = None
     confirmed: bool = True
+    continue_conversation_id: str | None = Field(default=None, max_length=100)
+    continue_route: str | None = Field(default=None, max_length=1000)
+    follow_design_tools: bool = False
 
 
 class AgentConversationRequest(BaseModel):
@@ -679,6 +685,8 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
     await _emit_agent_step(event_sink, ai_permission_step)
     body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS)
     context = body.context or {}
+    if not body.is_confirmation_follow_up:
+        context.pop("confirmedExecution", None)
     context["_current_user"] = current_user
     context["_tenant_id"] = current_tenant_id(current_user)
     context["_user_key"] = _user_key(current_user)
@@ -753,6 +761,10 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
                 ]
     body.context = context
     context_need = agent_context_router.classify(body.message, body.context)
+    if event_sink and context.get("pageControlsSupported") and context.get("surface") != "knowledge" and not body.is_confirmation_follow_up:
+        from app.services.ai.application_navigation import explicit_navigation_request
+        if explicit_navigation_request(body.message):
+            context_need = "ui_page"
     purpose = 'chat' if context_need in {'none', 'ui_page', 'knowledge_rag'} else 'reasoning'
     body.context = {**(body.context or {}), '_model_purpose': purpose}
     body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS, purpose=purpose)
@@ -857,7 +869,7 @@ async def _apply_agent_action_policies(result, current_user, event_sink):
         await _emit_agent_step(event_sink, skill_policy_step)
 
 
-async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current_user: dict) -> dict[str, Any] | None:
+async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current_user: dict, *, assistant_only=False) -> dict[str, Any] | None:
     if not audit_enabled(AI_SYSTEM_SETTINGS):
         return None
     conversation_id = str((body.context or {}).get("conversation_id") or (body.context or {}).get("conversationId") or "")
@@ -889,7 +901,7 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
                 nonce = (original.get("payload") or {}).get("confirmation_token")
                 if nonce:
                     stored["payload"]["confirmation_token"] = nonce
-        user_message = AIMessage(
+        user_message = None if assistant_only else AIMessage(
             tenant_id=tenant_id,
             message_id=f"msg-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
@@ -920,7 +932,7 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
             tenant_id=tenant_id,
             run_id=result.run_id or f"run-{uuid.uuid4().hex[:12]}",
             conversation_id=conversation_id,
-            user_message_id=user_message.message_id,
+            user_message_id=user_message.message_id if user_message else None,
             assistant_message_id=assistant_message.message_id,
             status=agent_response_status(result),
             mode=result.mode,
@@ -931,7 +943,9 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
             risk_level=result.risk_level,
             requires_confirmation=result.requires_confirmation,
         )
-        records: list[Any] = [user_message, assistant_message, run]
+        records: list[Any] = [assistant_message, run]
+        if user_message:
+            records.insert(0, user_message)
         if record_tool_calls_enabled(AI_SYSTEM_SETTINGS) and (result.evidence or (body.context or {}).get("surface") == "knowledge"):
             records.append(
                 AIToolCall(
@@ -949,7 +963,8 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
                     duration_ms=0,
                 )
             )
-        conversation.last_message = safe_message
+        if user_message:
+            conversation.last_message = safe_message
         conversation.metadata_json = {
             **(conversation.metadata_json or {}),
             "last_run_id": run.run_id,
@@ -969,13 +984,14 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
         )
         await session.commit()
         await session.refresh(conversation)
-        await session.refresh(user_message)
+        if user_message:
+            await session.refresh(user_message)
         await session.refresh(assistant_message)
         await session.refresh(run)
 
         return {
             "conversation": _serialize_conversation(conversation),
-            "user_message": _serialize_message(user_message),
+            **({"user_message": _serialize_message(user_message)} if user_message else {}),
             "assistant_message": _serialize_message(assistant_message),
             "run": _serialize_run(run),
         }
@@ -1076,6 +1092,10 @@ async def list_agent_conversation_messages(conversation_id: str, user: dict = De
         )
         if not conversation:
             raise HTTPException(status_code=404, detail="Agent conversation not found")
+        active_confirmations = {
+            run_id for tenant, owner, chat_id, run_id in _ACTIVE_CONFIRMATIONS
+            if (tenant, owner, chat_id) == (tenant_id, user_key, conversation_id)
+        }
         rows = (
             await session.execute(
                 select(AIMessage)
@@ -1096,7 +1116,14 @@ async def list_agent_conversation_messages(conversation_id: str, user: dict = De
                 )
             ).scalars().all()
             runs_by_message = {row.assistant_message_id: row for row in runs if row.assistant_message_id}
-        return {"data": [_serialize_message(row, runs_by_message.get(row.message_id)) for row in rows], "ok": True}
+        messages = [_serialize_message(row, runs_by_message.get(row.message_id)) for row in rows]
+        active_run_id = next((row.get("run_id") for row in reversed(messages)
+                              if row.get("run_id") in active_confirmations), None)
+        latest_run = runs_by_message.get(rows[-1].message_id) if rows else None
+        continuable_run = (_saved_confirmation(latest_run, user_key)
+                           if not active_run_id and conversation.status == "active" else None)
+        return {"data": messages, "active_confirmation_run_id": active_run_id,
+                "continuable_confirmation_run_id": continuable_run["run_id"] if continuable_run else None, "ok": True}
 
 
 @router.patch("/agent/conversations/{conversation_id}")
@@ -1252,59 +1279,66 @@ async def agent_chat_stream(body: AgentRequest, user: dict = Depends(get_current
 
     current_user = await _normalize_user(user)
 
-    async def event_generator():
-        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
-
-        async def emit(event: str, data: dict[str, Any]) -> None:
-            await queue.put((event, data))
-
-        run_id: str | None = None
-        yield _sse("run.accepted", {"status": "accepted", "message": body.message})
-        yield _sse("assistant.note", {"message": "我收到请求了，会先整理上下文，再按需要调用工具。"})
-        task = asyncio.create_task(_run_agent_for_user(body, current_user, event_sink=emit))
-        loop = asyncio.get_running_loop()
-        last_sent = loop.time()
-        try:
-            while not task.done() or not queue.empty():
-                try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    # Keep the browser connected while the model is thinking without emitting events.
-                    if loop.time() - last_sent >= 15:
-                        last_sent = loop.time()
-                        yield ": keep-alive\n\n"
-                    continue
-                last_sent = loop.time()
-                yield _sse(event, data)
-            result = await task
-            payload = result.model_dump()
-            run_id = payload.get("run_id")
-            persisted = await _persist_agent_turn(body, result, current_user)
-            if persisted:
-                payload.update(persisted)
-                run_id = (persisted.get("run") or {}).get("run_id") or run_id
-            yield _sse("answer.completed", payload)
-            status = agent_response_status(result)
-            yield _sse("run.failed" if status == "failed" else "run.completed", {"run_id": run_id, "status": status, "detail": result.answer if status == "failed" else None})
-        except HTTPException as exc:
-            yield _sse("run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code})
-        except Exception as exc:  # noqa: BLE001 - stream should report failures as events
-            yield _sse("run.failed", {"status": "failed", "detail": str(exc)})
-        finally:
-            if not task.done():
-                task.cancel()
-                # ASGI disconnect cancellation is level-triggered: let child cleanup finish.
-                with anyio.CancelScope(shield=True):
-                    await asyncio.gather(task, return_exceptions=True)
-
     return StreamingResponse(
-        event_generator(),
+        _agent_stream_events(body, current_user),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _agent_stream_events(body, current_user):
+    async with aclosing(_agent_events(body, current_user)) as events:
+        async for event, data in events:
+            yield _sse(event, data) if event else ": keep-alive\n\n"
+
+
+async def _agent_events(body, current_user, *, assistant_only=False):
+    queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+
+    async def emit(event: str, data: dict[str, Any]) -> None:
+        await queue.put((event, data))
+
+    run_id: str | None = None
+    yield "run.accepted", {"status": "accepted", "message": "根据已确认的结果继续处理" if assistant_only else body.message}
+    yield "assistant.note", {"message": "确认已完成，正在继续处理原请求。" if assistant_only else "我收到请求了，会先整理上下文，再按需要调用工具。"}
+    task = asyncio.create_task(_run_agent_for_user(body, current_user, event_sink=emit))
+    loop = asyncio.get_running_loop()
+    last_sent = loop.time()
+    try:
+        while not task.done() or not queue.empty():
+            try:
+                event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                # Keep the browser connected while the model is thinking without emitting events.
+                if loop.time() - last_sent >= 15:
+                    last_sent = loop.time()
+                    yield None, {}
+                continue
+            last_sent = loop.time()
+            yield event, data
+        result = await task
+        payload = result.model_dump()
+        run_id = payload.get("run_id")
+        persisted = await _persist_agent_turn(body, result, current_user, assistant_only=assistant_only)
+        if persisted:
+            payload.update(persisted)
+            run_id = (persisted.get("run") or {}).get("run_id") or run_id
+        yield "answer.completed", payload
+        status = agent_response_status(result)
+        yield ("run.failed" if status == "failed" else "run.completed"), {"run_id": run_id, "status": status, "detail": result.answer if status == "failed" else None}
+    except HTTPException as exc:
+        yield "run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code}
+    except Exception as exc:  # noqa: BLE001 - stream should report failures as events
+        yield "run.failed", {"status": "failed", "detail": str(exc)}
+    finally:
+        if not task.done():
+            task.cancel()
+            # ASGI disconnect cancellation is level-triggered: let child cleanup finish.
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(task, return_exceptions=True)
 
 
 @router.post("/agent-runs")
@@ -1333,6 +1367,7 @@ async def _confirm_agent_run_for_user(
     current_user: dict[str, Any],
     *,
     event_sink=None,
+    on_executed=None,
 ) -> dict[str, Any]:
     await _load_effective_ai_settings()
     _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "qa"))
@@ -1353,10 +1388,10 @@ async def _confirm_agent_run_for_user(
         raise HTTPException(status_code=400, detail="Confirmation token is required")
     registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
     with use_agent_registry(registry):
-        return await _confirm_registered_agent_run(run_id, body, current_user, event_sink=event_sink)
+        return await _confirm_registered_agent_run(run_id, body, current_user, event_sink=event_sink, on_executed=on_executed)
 
 
-async def _confirm_registered_agent_run(run_id, body, current_user, *, event_sink=None):
+async def _confirm_registered_agent_run(run_id, body, current_user, *, event_sink=None, on_executed=None):
     if event_sink:
         await event_sink("pre.confirmation", {"run_id": run_id, "confirmed": True})
     from app.services.ai.run_recovery import claim_confirmation
@@ -1391,7 +1426,92 @@ async def _confirm_registered_agent_run(run_id, body, current_user, *, event_sin
     if event_sink:
         await event_sink("post.confirmation", {"run_id": run_id, "status": run.get("status") or "completed"})
     _audit_ai_event(current_user, "agent_run_confirmed", {"run_id": run_id})
+    if on_executed:
+        on_executed()
     return _public_agent_run(run)
+
+
+async def _confirmation_follow_up_request(run_id, body, current_user, run) -> AgentRequest | None:
+    conversation_id = body.continue_conversation_id
+    results = run.get("tool_results") or []
+    if not conversation_id or run.get("status") != "completed" or not results:
+        return None
+    if any(result.get("status") != "completed" for result in results):
+        return None
+
+    tenant_id, user_key = current_tenant_id(current_user), _user_key(current_user)
+    async with db_session() as session:
+        conversation = await session.scalar(select(AIConversation).where(
+            AIConversation.tenant_id == tenant_id, AIConversation.conversation_id == conversation_id,
+            AIConversation.user_id == user_key, AIConversation.status == "active",
+        ))
+        if conversation is None:
+            return None
+        parent = await session.scalar(select(AIAgentRun).where(
+            AIAgentRun.run_id == run_id, AIAgentRun.tenant_id == tenant_id,
+            AIAgentRun.conversation_id == conversation_id,
+        ))
+
+    cached = get_agent_run(run_id) or {}
+    cached_context = cached.get("context") or {}
+    if (cached.get("tenant_id") != tenant_id or cached.get("created_by") != user_key
+            or (cached_context.get("conversation_id") or cached_context.get("conversationId")) != conversation_id):
+        cached, cached_context = {}, {}
+    original_message = parent.input_message if parent else cached.get("message")
+    if not original_message:
+        return None
+
+    scope_keys = ("route", "pageTitle", "scope", "applicationName", "form_id", "formId", "formCode",
+                  "application_id", "surface", "document_id", "documentId", "documentTitle", "knowledgeMode",
+                  "chatAttachments")
+    metadata = conversation.metadata_json or {}
+    context = {key: metadata[key] for key in scope_keys if key in metadata}
+    context.update({key: cached_context[key] for key in scope_keys if key in cached_context})
+    if body.continue_route and body.continue_route == cached_context.get("route"):
+        context.update({key: cached_context[key] for key in ("pageControlsSupported", "designerContext", "componentPageContext")
+                        if key in cached_context})
+    context["conversation_id"] = conversation_id
+    if body.follow_design_tools:
+        context.update(followDesignTools=True, pageControlsSupported=True)
+    if conversation.document_id:
+        context.setdefault("document_id", conversation.document_id)
+    # Keep the receipt identifiers and summary, without replaying action payloads or confirmation tokens.
+    from app.services.ai.context_builder import trim_text
+    receipts = [{"tool": result.get("tool"), "status": "completed", "result": trim_text(
+        json.dumps(maybe_mask_sensitive_payload(result.get("result"), AI_SYSTEM_SETTINGS), ensure_ascii=False, default=str), 1800,
+    )} for result in results]
+    context["confirmedExecution"] = {"run_id": run_id, "receipts": receipts}
+    request = AgentRequest(message=original_message, page=cached.get("page") or conversation.page, context=context)
+    request.mark_confirmation_follow_up()
+    return request
+
+
+def _saved_confirmation(row, user_key):
+    if row is None or row.status != "completed":
+        return None
+    from app.services.ai.run_recovery import restore_run
+    run = restore_run(row)
+    results = run["tool_results"]
+    if run["created_by"] != user_key or not results or any(item.get("status") != "completed" for item in results):
+        return None
+    return run
+
+
+async def _latest_saved_confirmation(conversation_id, run_id, user):
+    tenant_id, user_key = current_tenant_id(user), _user_key(user)
+    async with db_session() as session:
+        last_message = (select(AIMessage.message_id)
+                        .where(AIMessage.conversation_id == conversation_id, AIMessage.tenant_id == tenant_id)
+                        .order_by(AIMessage.id.desc()).limit(1).scalar_subquery())
+        row = await session.scalar(select(AIAgentRun).join(
+            AIConversation, AIConversation.conversation_id == AIAgentRun.conversation_id,
+        ).where(
+            AIAgentRun.run_id == run_id, AIAgentRun.tenant_id == tenant_id,
+            AIAgentRun.conversation_id == conversation_id, AIAgentRun.assistant_message_id == last_message,
+            AIConversation.tenant_id == tenant_id, AIConversation.user_id == user_key,
+            AIConversation.status == "active",
+        ))
+        return _saved_confirmation(row, user_key)
 
 
 @router.post('/page-actions/{action_id}/result')
@@ -1429,40 +1549,126 @@ async def confirm_ai_agent_run(run_id: str, body: AgentRunConfirmRequest, user: 
 @router.post("/agent-runs/{run_id}/confirm/stream")
 async def confirm_ai_agent_run_stream(run_id: str, body: AgentRunConfirmRequest, user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
+    stream = ConfirmationStream(body.confirmation_token)
+    key = None
+    if body.confirmed and body.continue_conversation_id:
+        key = _confirmation_stream_key(current_user, body.continue_conversation_id, run_id)
+        if existing := _ACTIVE_CONFIRMATIONS.get(key):
+            if existing.confirmation_token != body.confirmation_token:
+                raise HTTPException(404, "Agent run not found")
+            return _confirmation_response(existing)
 
-    async def event_generator():
-        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+    async def execute():
+        executed = False
 
-        async def emit(event: str, data: dict[str, Any]) -> None:
-            await queue.put((event, data))
+        def mark_executed():
+            nonlocal executed
+            executed = True
 
-        yield _sse("run.accepted", {"status": "accepted", "run_id": run_id, "confirmed": body.confirmed})
-        task = asyncio.create_task(_confirm_agent_run_for_user(run_id, body, current_user, event_sink=emit))
+        await stream.publish("run.accepted", {"status": "accepted", "run_id": run_id, "confirmed": body.confirmed})
         try:
-            while not task.done() or not queue.empty():
-                try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-                yield _sse(event, data)
-            run = await task
-            yield _sse("run.completed", {"status": run.get("status") or "completed", "run_id": run_id, "run": _public_agent_run(run)})
+            run = await _confirm_agent_run_for_user(
+                run_id, body, current_user, event_sink=stream.publish, on_executed=mark_executed,
+            )
         except HTTPException as exc:
-            yield _sse("run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code})
+            await stream.publish("run.failed", {"status": "failed", "detail": exc.detail, "status_code": exc.status_code})
+            return
         except Exception as exc:  # noqa: BLE001 - stream should report failures as events
-            yield _sse("run.failed", {"status": "failed", "detail": str(exc)})
-        finally:
-            # A lost response is not cancellation of an already confirmed write.
-            # Keep a strong reference until execution and durable result sync end.
-            _CONFIRMATION_TASKS.add(task)
-            def finished(completed):
-                _CONFIRMATION_TASKS.discard(completed)
-                if not completed.cancelled():
-                    completed.exception()
-            task.add_done_callback(finished)
+            await stream.publish("run.failed", {"status": "failed", "detail": str(exc)})
+            return
+        await stream.publish("run.completed", {"status": run.get("status") or "completed", "run_id": run_id, "run": _public_agent_run(run)})
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream",
+        if executed and body.continue_conversation_id:
+            await _run_confirmation_follow_up(stream, body, current_user, run)
+
+    return _start_confirmation_stream(stream, key, execute())
+
+
+def _start_confirmation_stream(stream, key, coroutine):
+    if key is not None:
+        _ACTIVE_CONFIRMATIONS[key] = stream
+    task = asyncio.create_task(coroutine)
+    _CONFIRMATION_TASKS.add(task)
+
+    def finished(completed):
+        stream.close()
+        _CONFIRMATION_TASKS.discard(completed)
+        if key is not None and _ACTIVE_CONFIRMATIONS.get(key) is stream:
+            _ACTIVE_CONFIRMATIONS.pop(key)
+        if not completed.cancelled():
+            completed.exception()
+
+    task.add_done_callback(finished)
+    return _confirmation_response(stream)
+
+
+async def _run_confirmation_follow_up(stream, body, user, run):
+    try:
+        request = await _confirmation_follow_up_request(run["run_id"], body, user, run)
+        if request:
+            stream.follow_up = asyncio.create_task(_publish_confirmation_follow_up(stream, request, user))
+            await stream.follow_up
+    except asyncio.CancelledError:
+        await stream.publish("continuation.run.stopped", {"status": "stopped"})
+    except Exception:  # The confirmed write already has its own receipt.
+        await stream.publish("continuation.run.failed", {"status": "failed", "detail": "未能继续处理原请求。"})
+
+
+async def _publish_confirmation_follow_up(stream, request, user):
+    async with aclosing(_agent_events(request, user, assistant_only=True)) as events:
+        async for event, data in events:
+            if event:
+                await stream.publish("continuation." + event, data)
+
+
+def _confirmation_stream_key(user, conversation_id, run_id):
+    return current_tenant_id(user), _user_key(user), conversation_id, run_id
+
+
+def _confirmation_response(stream):
+    return StreamingResponse(stream.frames(_sse), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/agent/conversations/{conversation_id}/confirmations/{run_id}/stream")
+async def resume_ai_confirmation_stream(conversation_id: str, run_id: str, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    stream = _ACTIVE_CONFIRMATIONS.get(_confirmation_stream_key(current_user, conversation_id, run_id))
+    if stream is None:
+        raise HTTPException(404, "确认执行已结束")
+    return _confirmation_response(stream)
+
+
+@router.post("/agent/conversations/{conversation_id}/confirmations/{run_id}/continue")
+async def continue_saved_ai_confirmation(conversation_id: str, run_id: str, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    key = _confirmation_stream_key(current_user, conversation_id, run_id)
+    if existing := _ACTIVE_CONFIRMATIONS.get(key):
+        return _confirmation_response(existing)
+    run = await _latest_saved_confirmation(conversation_id, run_id, current_user)
+    if existing := _ACTIVE_CONFIRMATIONS.get(key):
+        return _confirmation_response(existing)
+    if run is None:
+        raise HTTPException(404, "没有待续接的确认回执")
+    stream = ConfirmationStream(None)
+
+    async def execute():
+        # The original confirmation may have completed while this request was reading history.
+        current = await _latest_saved_confirmation(conversation_id, run_id, current_user)
+        if current:
+            body = AgentRunConfirmRequest(continue_conversation_id=conversation_id)
+            await _run_confirmation_follow_up(stream, body, current_user, current)
+
+    return _start_confirmation_stream(stream, key, execute())
+
+
+@router.post("/agent/conversations/{conversation_id}/confirmations/{run_id}/stop")
+async def stop_ai_confirmation_follow_up(conversation_id: str, run_id: str, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    stream = _ACTIVE_CONFIRMATIONS.get(_confirmation_stream_key(current_user, conversation_id, run_id))
+    if stream and stream.follow_up and not stream.follow_up.done():
+        stream.follow_up.cancel()
+    return {"ok": True}
 
 
 @router.post("/agent-runs/{run_id}/cancel")

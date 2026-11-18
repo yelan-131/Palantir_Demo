@@ -76,7 +76,7 @@
 | --- | --- | --- |
 | `knowledge.search` | `rag` | 知识检索，返回证据 |
 | `forms.query_records`、`forms.get_record` | `business_query` | 查询业务记录，按表单、字段权限和数据范围过滤 |
-| `platform.form_settings.query`、`platform.application_settings.query`、`platform.identity_settings.query` | `config` | 查询表单、应用与菜单、身份配置，由 `platform.query` 处理器实现；应用设置查询还要求管理员；表单查询只返回用户可见的字段 |
+| `platform.form_settings.query`、`platform.application_settings.query`、`platform.identity_settings.query` | `config` | 查询表单、应用与菜单、身份配置，由 `platform.query` 处理器实现。应用设置和角色目录查询要求管理员。表单查询只返回用户可见的字段。角色目录接受 `subject=roles`，可按名称或编码精确查找并返回角色 ID。 |
 | `ai.semantic_plan_low_code_form` | `qa` | 根据描述生成表单规划建议 |
 | `forms.preview_publish`、`forms.list_versions`、`forms.get_version`、`forms.get_layouts`、`forms.evaluate_rules` | `config` | 表单发布检查、版本、布局与规则试算 |
 | `forms.list_actions`、`forms.list_permissions`、`forms.list_workflow_bindings` | `config` | 读取表单动作、权限、流程绑定 |
@@ -162,7 +162,6 @@
 - 只能读取当前技能目录中的技能，否则返回“技能不存在、已停用或当前用户不可访问”。读取表单搭建技能时还要求用户有表单设计器权限。
 - 原生技能模式或知识中心对话中调用会被拒绝。
 - 返回技能名、版本、正文的 SHA-256 摘要和正文；同时在本轮执行步骤中记录一条“已读取业务技能”，包含名称、版本和摘要。
-- 每次读取计入本轮工具调用次数（`maxToolSteps`）。
 
 原生技能模式下，平台不记录模型读取了哪些技能。
 
@@ -272,7 +271,6 @@
 | 确认卡片 | 有 | 没有；表单设计器草稿完成后由浮窗提示用户检查并保存 |
 | 可用条件 | 第 7 节的权限判定 | 管理员；浏览器声明支持页面联动；画布工具还要求当前打开组件页面。`ui.component_page.*` 仍经过 `decide_tool_permission`，`ui.form_designer` 经过 `designer_permission_error`（`config` 能力、`low-code` 业务域、管理员、规则未拒绝） |
 | 注册表 | 在注册表中，绑定各自的业务处理器 | 画布工具在注册表中，处理器是 `browser_required`，被后端直接调用时只返回“请在目标业务页面的 AI 助手中调用”；`ui.form_designer` 不在注册表中 |
-| 计数 | 计入 `maxToolSteps` | 同样计入 |
 
 浏览器回执的通道与超时见[运行时文档](harness-runtime.md#43-页面联动的回执通道)。
 

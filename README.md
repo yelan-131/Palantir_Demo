@@ -1,6 +1,6 @@
 # ManuFoundry
 
-当前发布版本为 [0.3.23](docs/releases/release-0.3.23.md)，发布于 2026-11-18。
+当前发布版本为 [0.3.24](docs/releases/release-0.3.24.md)，发布于 2026-11-18。
 版本编号与发布流程见[版本策略](docs/operations/version-policy.md)，历次版本见[文档索引](docs/README.md#6-发布说明历史)。
 
 ManuFoundry 是面向制造业的低代码数据工作台原型。用户可以搭建应用、表单、页面和菜单，在其中录入和审批业务数据，并结合知识库、对象图谱和 AI 助手完成查询与配置。项目仍在开发中，用于演示和产品探索，不建议直接用于商业生产。

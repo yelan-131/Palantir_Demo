@@ -7,6 +7,7 @@ import { Alert, Button, Collapse, ConfigProvider, Empty, Input, InputNumber, Mod
 import { SettingOutlined, BarChartOutlined, CloseOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, LineChartOutlined, NumberOutlined, PieChartOutlined, PlusOutlined, SafetyCertificateOutlined, TableOutlined, TrophyOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { getPlatformFormByCode, listPlatformForms, type PlatformForm, type PlatformFormField } from '@/services/api';
+import { formPermissionsPath } from '@/config/navigation';
 import type { AnalyticsEditorPanelName, AnalyticsWidgetTabName, RuntimeAnalyticsDataset, RuntimeAnalyticsDesign, RuntimeAnalyticsMetric, RuntimeAnalyticsWidget } from './analyticsTypes';
 import './analytics-editor-panel.css';
 import AnalyticsDatasetDialog from './AnalyticsDatasetDialog';
@@ -516,7 +517,7 @@ export default function AnalyticsEditorPanel({ panel, design, selectedWidgetId, 
         {panel === 'filters' && renderFiltersPanel()}
         {panel === 'style' && renderStylePanel()}
         {panel === 'add' && <><div className="analytics-editor-section-title"><strong>组件类型</strong><span>看板已有 {widgets.length} 个组件</span></div><p className="analytics-editor-help">添加后即可配置数据、布局与交互。</p><div className="analytics-editor-library">{widgetTypes.map(type => <button key={type.value} type="button" aria-label={`添加${type.label}`} disabled={disabled} onClick={() => addWidget(type.value)}><span className="analytics-editor-library-icon">{type.icon}</span><strong>{type.label}</strong><small>{type.description}</small><PlusOutlined className="analytics-editor-library-plus" /></button>)}</div>{(!datasets.length || !metrics.length) && <Alert type="info" message="可以先添加组件，再在「数据与指标」中配置来源和指标。" />}</>}
-        {panel === 'permissions' && <div className="analytics-editor-permissions"><SafetyCertificateOutlined /><h3>沿用表单权限</h3><p>当前由管理员编辑和发布看板。普通用户查看已发布版本。</p><p>每个数据集继承来源表单的数据与字段权限，图表汇总和明细都只读取当前用户有权访问的数据。</p><p>修改布局、公式或筛选条件，不会扩大访问权限。</p><Alert type="info" message="保存草稿只更新配置草稿；发布成功后，查看模式才会使用新版本。" /><p className="analytics-editor-permission-link"><Link to={`/form-settings/${encodeURIComponent(programId)}?tab=permission&legacy=1`}>查看详细权限设置</Link></p></div>}
+        {panel === 'permissions' && <div className="analytics-editor-permissions"><SafetyCertificateOutlined /><h3>沿用表单权限</h3><p>当前由管理员编辑和发布看板。普通用户查看已发布版本。</p><p>每个数据集继承来源表单的数据与字段权限，图表汇总和明细都只读取当前用户有权访问的数据。</p><p>修改布局、公式或筛选条件，不会扩大访问权限。</p><Alert type="info" message="保存草稿只更新配置草稿；发布成功后，查看模式才会使用新版本。" /><p className="analytics-editor-permission-link"><Link to={formPermissionsPath(programId)}>查看详细权限设置</Link></p></div>}
         </>}
       </div>
     </ConfigProvider>

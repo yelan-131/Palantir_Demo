@@ -135,8 +135,36 @@ export function dataCenterDestination(pathname: string, search = ''): string | u
   return destination + (params.size ? `?${params}` : '');
 }
 
-export function businessDataDesignPath(formId: number | string) {
-  return `/studio/business-data/${encodeURIComponent(formId)}/design`;
+export type BusinessDataDesignTab = 'form' | 'flow' | 'data' | 'style';
+
+export const newBusinessFormDesignPath = '/studio/business-data/new/design';
+
+export function businessDataDesignPath(formId: number | string, tab?: BusinessDataDesignTab) {
+  return `/studio/business-data/${encodeURIComponent(formId)}/design${tab ? `?tab=${tab}` : ''}`;
+}
+
+export function formPermissionsPath(formId: number | string) {
+  return `/form-settings/${encodeURIComponent(formId)}?tab=permission&legacy=1`;
+}
+
+export function formSettingsRedirect(formId: string | undefined, search: string) {
+  if (!formId) return '/studio/business-data';
+  const params = new URLSearchParams(search);
+  if (formId === 'new') {
+    const draft = params.get('draft');
+    return draft ? `${newBusinessFormDesignPath}?${new URLSearchParams({ draft })}` : '/studio/business-data';
+  }
+  switch (params.get('tab')) {
+    case 'form': return businessDataDesignPath(formId, 'form');
+    case 'approval':
+    case 'flow': return businessDataDesignPath(formId, 'flow');
+    case 'dataset':
+    case 'filter': return businessDataDesignPath(formId, 'data');
+    case 'style': return businessDataDesignPath(formId, 'style');
+    case 'dashboard': return params.get('legacy') === '1'
+      ? businessDataDesignPath(formId) : `/program/${encodeURIComponent(formId)}`;
+    default: return businessDataDesignPath(formId);
+  }
 }
 
 /** All tabs and legacy URLs highlight their parent workspace. */

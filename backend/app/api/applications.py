@@ -467,7 +467,7 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
                 "title": binding.alias or form.name,
                 "icon": "FormOutlined",
                 "route_path": (
-                    f"/form-settings/{form.code}?tab=dashboard"
+                    f"/program/{form.code}"
                     if str((form.config or {}).get("assemblyKind") or (form.config or {}).get("kind") or (form.config or {}).get("type") or "").lower()
                     in {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
                     else f"/dynamic/{form.code}"

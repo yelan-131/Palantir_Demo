@@ -289,10 +289,18 @@ PAGE_ACTION_TITLES = {
     'configure_layout': '调整表单布局',
     'inspect': '读取页面组件',
     'apply': '更新页面组件',
+    'open_application': '打开应用',
+    'open_page': '打开应用菜单页',
 }
 
 
 def _validate_page_receipt(command, receipt):
+    if receipt.get('ok') and command['type'] == 'application_navigation':
+        state = receipt.get('state') or {}
+        if not isinstance(state.get('application_name'), str) or not state.get('application_id'):
+            return {**receipt, 'ok': False, 'error': '工作台未确认已进入应用。'}
+        if command['action'] == 'open_page' and not isinstance(state.get('page_name'), str):
+            return {**receipt, 'ok': False, 'error': '工作台未确认已进入菜单页。'}
     if not receipt.get('ok') or command['type'] != 'form_designer':
         return receipt
     draft = command.get('draft')
@@ -330,7 +338,8 @@ async def dispatch_page_action(bridge, command):
             receipt = await asyncio.wait_for(future, timeout=20)
         except asyncio.TimeoutError:
             await bridge.event_sink('ui.action.cancel', {'id': action_id})
-            await finish('timeout', '等待画布回执超时，请检查当前草稿。')
+            await finish('timeout', '等待工作台打开应用超时。' if command['type'] == 'application_navigation'
+                         else '等待画布回执超时，请检查当前草稿。')
             raise
         receipt = _validate_page_receipt(command, receipt)
         if receipt.get('ok'):

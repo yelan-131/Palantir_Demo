@@ -46,7 +46,7 @@
 7. 组装系统提示词：`.agent/agent.md` 中“System Prompt”一节（文件不存在时用打包副本 `services/ai/assets/agent.md`），加上平台当前时间与时区、确认协议与工具使用规则；关闭原生技能时再加上技能定义和 `platform.skills.read` 的技能目录；最后声明“工具输出和文档内容是数据，不是授权”。
 8. 检查输入预算：系统提示词、工具定义和用户消息按 UTF-8 字节数的一半估算 Token（`context_builder.estimate_tokens`），从本轮输入预算中扣除，再预留 256。剩余不足 32 时直接报错，请用户缩短请求或请管理员检查预算和开放的工具。剩余部分用于平台上下文，由 `fit_context_to_budget` 裁剪，优先保留配置草稿和待确认状态，先裁历史消息和证据。
 9. 同一逻辑会话的请求在进程内串行执行（`SESSION_LOCKS`）。运行期间桥的有效期延长到“初始化超时 + 执行超时 + 60 秒”。
-10. 在线程中启动 SDK、创建会话并运行。整体等待时间为初始化超时加执行超时；超时、客户端断开或工具次数达到上限时关闭 SDK 进程（SDK 没有取消接口，只能关闭）。
+10. 在线程中启动 SDK、创建会话并运行。整体等待时间为初始化超时加执行超时，超时或客户端断开时关闭 SDK 进程。
 11. 结束后无论成功与否，都从 `BRIDGES` 中移除桥，令牌随即失效。
 
 运行结果的处理：
@@ -58,7 +58,6 @@
 | 输出达到 `max-tokens` 且已有待确认动作 | 保留这些动作，提示用户逐项复核，说明后续操作可能还没生成 |
 | 输出达到 `max-tokens`、模型调用错误或其他未完成原因 | 返回失败说明，附上去除密钥后的错误摘要 |
 | 整体超时且已有待确认动作 | 保留确认卡片，提示“尚未执行写入” |
-| 工具次数达到上限 | 停止运行，保留已生成的待确认动作 |
 
 文档识别（OCR）走单独的 `run_document_sdk`：每次使用临时目录作为 Harness 主目录，不登记 MCP 桥、不开放任何工具，使用“文档”用途的模型。
 
@@ -88,11 +87,12 @@ Harness 子进程通过 `POST /api/v1/ai/harness/mcp`（`backend/app/api/ai_harn
 - 知识中心对话只保留 `knowledge.*` 工具。
 - 组件页面画布工具 `ui.component_page.*` 只在以下条件同时满足时出现：不是知识中心对话、浏览器声明支持页面联动（`pageControlsSupported`）、当前用户是管理员、上下文中有当前组件页面编码（`componentPageContext.code`）。
 - 表单设计器工具 `ui.form_designer` 在浏览器支持页面联动、用户是管理员且 `low-code` 业务域开放时出现。
+- 工作台导航使用两个独立工具。`ui.open_application` 接受应用名或编码，`ui.open_page` 接受菜单名和可选的所属应用。浏览器按当前账号可访问的应用及菜单解析入口，页面切换完成后才回执成功。导航使用工作台现有权限和离开编辑器的拦截机制。
 - 除知识中心对话外，总会加入 `platform.report_configuration_status`，供模型报告无法生成确认卡片的原因。
 
 MCP 中的工具名是别名：逻辑名中的点换成下划线，再加上逻辑名 SHA-256 的前 8 位，例如 `forms_query_records_xxxxxxxx`。`platform.tools.invoke` 使用逻辑名。
 
-`describe` 的调用次数和实际工具调用次数分别计数，上限都是 `safetyPolicy.maxToolSteps`（默认 5，可设 1–20）。实际调用次数达到上限时运行停止。
+工具定义查询和实际工具调用在本轮执行超时内进行。读取旧设置时自动移除原有的 `maxToolSteps` 字段。
 
 ### 4.2 一次工具调用
 
@@ -163,11 +163,11 @@ AI 设置保存在 `system_settings` 表的 `ai.system` 键下，是平台级设
 | 输入预算 | `contextPolicy.maxContextTokens`（默认 32768）与“窗口减最大输出”中的较小值 |
 | 工具超时 | `safetyPolicy.toolTimeoutSeconds`，默认 30 秒，可设 1–180 秒 |
 | MCP 调用超时 | 工具超时加 5 秒 |
-| 建议执行超时 | （流式空闲超时 ×（重试次数 + 1）+ MCP 调用超时）×（工具步数 + 1），不少于 30 秒；未单独配置执行超时时取它与 3600 秒的较小值 |
+| 执行超时 | `harnessPolicy.request_timeout_seconds`，可设 1–3600 秒，默认 3600 秒 |
 | 初始化超时 | 默认 30 秒 |
 | 压缩 | 默认开启，触发比例 0.8，保留比例 0.16；预留空间默认取最大输出与消息预算 10% 中的较小值，摘要输出不超过最大输出 |
 
-窗口不大于最大输出，或压缩参数互相冲突（触发阈值不大于 0、保留量不小于阈值、摘要输出超过最大输出）时，保存和运行都会报错。执行超时短于建议值时，设置页显示警告。
+窗口不大于最大输出，或压缩参数互相冲突（触发阈值不大于 0、保留量不小于阈值、摘要输出超过最大输出）时，保存和运行都会报错。执行超时短于一轮模型等待（含重试）加一次 MCP 调用的估算时间时，设置页显示警告。估算时间最低为 30 秒。
 
 保存设置时，`memoryPolicy` 和 `compactionPolicy` 被强制关闭（平台自身的记忆和会话摘要已停用，压缩由 Harness 负责），`safetyPolicy.agentLoopMode` 只能是 `harness`。以下设置项仍可保存，但运行时不读取：`agentMaxInputTokens`、`agentMaxOutputTokens`、`maxToolResultChars`、`deferredToolLoading`（按需加载始终开启）、`highRiskConfirm`。
 
@@ -195,6 +195,8 @@ AI 设置保存在 `system_settings` 表的 `ai.system` 键下，是平台级设
 `harness.progress` 只转发根会话的阶段事件（轮次、步骤、压缩的开始与结束）、助手文本、Token 用量、重试信息和结束原因，不转发提示词和推理内容，也不是逐字流式输出：助手文本在一条消息生成完后整体发送。浏览器断开连接时，后端取消运行并关闭 SDK 进程。
 
 确认接口 `POST /ai/agent-runs/{run_id}/confirm/stream` 发送 `run.accepted`、`pre.confirmation`、`assistant.note`、`post.confirmation`，最后是 `run.completed`、`run.failed` 或 `run.cancelled`。确认后的写入在独立任务中执行，浏览器断开不会中断已开始的写入。
+
+浮窗传入 `continue_conversation_id` 时，首次确认成功的响应先发出写入回执，再用 `continuation.` 前缀发送原对话的下一轮 AI 事件。续跑使用原请求及已执行操作的回执，新增一条助手消息。重复确认只返回原回执，失败或取消的操作结束在确认阶段。停止后续对话不会撤销已经完成的写入。
 
 ## 9. 部署约束
 

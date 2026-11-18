@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { businessDataDesignPath } from '@/config/navigation';
 import {
   Alert,
   Button,
@@ -259,7 +260,7 @@ export default function DashboardPage() {
         <Typography.Text type="secondary">产线、设备、工单与质量概览</Typography.Text>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={fetchAllData}>刷新</Button>
-          <Button icon={<SettingOutlined />} onClick={() => navigate('/form-settings/production-overview')}>表单配置</Button>
+          <Button icon={<SettingOutlined />} onClick={() => navigate(businessDataDesignPath('production-overview'))}>表单配置</Button>
         </Space>
       </div>
 

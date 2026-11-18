@@ -5,7 +5,6 @@ import type { LayoutPlacement } from '@/utils/formLayout';
 import React from 'react';
 import type { FlowDesignerConfig } from './ProfessionalFlowDesigner';
 
-export type DesignerTab = 'form' | 'dataset' | 'dashboard' | 'filter' | 'style' | 'flow' | 'approval' | 'permission';
 
 export type ComponentPanel = 'components' | 'fieldTypes';
 

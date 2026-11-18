@@ -586,22 +586,22 @@ const readAgentEventStream = async (
   if (buffer.trim()) flushBlock(buffer);
 };
 
-const postAgentEventStream = async (
+const requestAgentEventStream = async (
   path: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown> | undefined,
   onEvent: (event: AgentStreamEvent) => void,
   signal?: AbortSignal,
 ) => {
   const token = localStorage.getItem('mf_token');
   const response = await fetch(`${apiBaseURL}${path}`, {
-    method: 'POST',
+    method: data ? 'POST' : 'GET',
     signal,
     headers: {
-      'Content-Type': 'application/json',
+      ...(data ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     credentials: 'include',
-    body: JSON.stringify(data),
+    body: data ? JSON.stringify(data) : undefined,
   });
   await readAgentEventStream(response, onEvent);
 };
@@ -613,7 +613,7 @@ export const streamAgentChat = async (
 ) => {
   let receivedResult = false;
   try {
-    await postAgentEventStream('/ai/agent/stream', data, event => {
+    await requestAgentEventStream('/ai/agent/stream', data, event => {
       onEvent(event);
       if (event.event === 'answer.completed' || event.event === 'run.failed') receivedResult = true;
     }, signal);
@@ -648,14 +648,31 @@ export const streamConfirmAgentRun = async (
   runId: string,
   data: Record<string, unknown>,
   onEvent: (event: AgentStreamEvent) => void,
+  signal?: AbortSignal,
 ) => {
   let finished = false;
-  await postAgentEventStream(`/ai/agent-runs/${runId}/confirm/stream`, data, event => {
+  await requestAgentEventStream(`/ai/agent-runs/${runId}/confirm/stream`, data, event => {
     if (['run.completed', 'run.failed', 'run.cancelled'].includes(event.event)) finished = true;
     onEvent(event);
-  });
+  }, signal);
   if (!finished) throw new Error('连接已中断，正在核实原操作结果');
 };
+const confirmationResource = (conversationId: string, runId: string) =>
+  `/ai/agent/conversations/${encodeURIComponent(conversationId)}/confirmations/${encodeURIComponent(runId)}`;
+export const resumeAgentConfirmation = (
+  conversationId: string,
+  runId: string,
+  onEvent: (event: AgentStreamEvent) => void,
+  signal: AbortSignal,
+) => requestAgentEventStream(`${confirmationResource(conversationId, runId)}/stream`, undefined, onEvent, signal);
+export const continueSavedAgentConfirmation = (
+  conversationId: string,
+  runId: string,
+  onEvent: (event: AgentStreamEvent) => void,
+  signal: AbortSignal,
+) => requestAgentEventStream(`${confirmationResource(conversationId, runId)}/continue`, {}, onEvent, signal);
+export const stopAgentConfirmation = (conversationId: string, runId: string) =>
+  api.post(`${confirmationResource(conversationId, runId)}/stop`);
 export const cancelAgentRun = (runId: string) =>
   api.post(`/ai/agent-runs/${runId}/cancel`);
 export const listAIDrafts = (params?: Record<string, unknown>) =>

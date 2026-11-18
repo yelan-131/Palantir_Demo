@@ -9,6 +9,7 @@ in-module mock store is gone.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 import pytest
@@ -209,17 +210,26 @@ def test_definition_update_bumps_version_and_snapshots(client):
     assert updated["version"] == 2
 
     from app.core.db import db_session
-    from app.models.relational import WorkflowDefVersion
+    from app.models.relational import AuditLog, WorkflowDefVersion
     from sqlalchemy import select
 
-    async def _versions():
+    async def _versions_and_audit():
         async with db_session() as session:
             rows = (await session.execute(
                 select(WorkflowDefVersion.version).where(WorkflowDefVersion.workflow_id == created["id"])
             )).scalars().all()
-            return sorted(rows)
+            audit = await session.scalar(select(AuditLog).where(
+                AuditLog.tenant_id == TENANT_ID,
+                AuditLog.user_id == admin,
+                AuditLog.resource_type == "workflow_def",
+                AuditLog.resource_id == created["id"],
+                AuditLog.action == "update",
+            ))
+            return sorted(rows), json.loads(audit.new_values)
 
-    assert asyncio.run(_versions()) == [1, 2]
+    versions, audit = asyncio.run(_versions_and_audit())
+    assert versions == [1, 2]
+    assert audit == {"version": 2, "status": "published"}
 
 
 def test_get_definition_not_found_is_404(client):

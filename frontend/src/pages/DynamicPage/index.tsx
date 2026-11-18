@@ -14,6 +14,7 @@ import { canonTheme, CANON_CSS_VARIABLES } from '@/theme/canon';
 import { useAuthStore } from '@/stores/authStore';
 import { canConfigureWorkspace, reconcilePublishedViewState } from './workspaceState';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { businessDataDesignPath, formPermissionsPath } from '@/config/navigation';
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
@@ -58,9 +59,8 @@ import './style.css';
 import './canon-list.css';
 import './canon-form.css';
 
-const EmbeddedFormSettings = lazy(() => import('../FormSettings'));
 const AlertRecordPanel = lazy(() => import('../AlertCenter'));
-type WorkspaceEditorTab = 'form' | 'filter' | 'flow' | 'permission';
+type WorkspaceEditorTab = 'form' | 'data' | 'flow' | 'permission';
 
 interface FieldDef {
   field_name: string;
@@ -397,7 +397,6 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const linkedRecordId = searchParams.get('recordId');
   const aliasProgramRoute = !embedded && slug ? dynamicProgramRouteAliases[slug] : undefined;
   const user = useAuthStore(state => state.user);
-  const [editorTab, setEditorTab] = useState<WorkspaceEditorTab | null>(null);
   const [configRevision, setConfigRevision] = useState(0);
   const [configRefreshing, setConfigRefreshing] = useState(true);
   const configRequest = useRef(0);
@@ -406,7 +405,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
   const workspaceTitle = pageConfig?.title || platformForm?.name;
-  useShellPageTitle(editorTab && workspaceTitle ? `${workspaceTitle} · 编辑表单` : workspaceTitle, !embedded);
+  useShellPageTitle(workspaceTitle, !embedded);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [referenceLabels,setReferenceLabels]=useState<Record<string,Record<string,string>>>({});
   const [mutationLayout, setMutationLayout] = useState<FormLayoutNode[] | null>(null);
@@ -639,7 +638,6 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     setConfigDenied(false);
     if (schemaSlug.current !== slug) {
       schemaSlug.current = slug;
-      setEditorTab(null);
       setPageConfig(null);
       setPlatformForm(null);
       setFields([]);
@@ -770,7 +768,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const canRunAction = (action: string) => Boolean(platformForm) && (!readOnly || ['view', 'detail', 'refresh'].includes(action)) && runtimePermissions[action] !== false;
 
   const standalone = !embedded && !toolbarTargetId && display === 'all';
-  useShellPageOwnsHeading(standalone && Boolean(pageConfig && viewConfig) && !editorTab);
+  useShellPageOwnsHeading(standalone && Boolean(pageConfig && viewConfig));
   const statusTones: Record<string, string> = {
     running: 'success', idle: 'warning', maintenance: 'primary', fault: 'danger', offline: 'neutral',
     active: 'success', pending: 'neutral', in_progress: 'primary', completed: 'success',
@@ -893,12 +891,13 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const configuredToolbarActions = activeViewTab?.table?.toolbarActions || pageConfig?.config.viewConfig?.table?.toolbarActions;
   const toolbarActions = viewConfig?.table.toolbarActions || configuredToolbarActions || ['settings'];
   const canConfigureForm = Boolean(platformForm) && canConfigureWorkspace(Boolean(user?.is_admin), canRunAction('configure'));
-  useEffect(() => { if (editorTab && !canConfigureForm) setEditorTab(null); }, [editorTab, canConfigureForm]);
   const openWorkspace = (tab: WorkspaceEditorTab) => {
-    if (canConfigureForm && !modalOpen && !importOpen && !detailRecord && !schemaLoading) setEditorTab(tab);
+    if (platformForm && canConfigureForm && !modalOpen && !importOpen && !detailRecord && !schemaLoading) {
+      navigate(tab === 'permission' ? formPermissionsPath(platformForm.id) : businessDataDesignPath(platformForm.id, tab));
+    }
   };
   const workspaceMenuItems = [
-    { key: 'filter', label: '列表与筛选' },
+    { key: 'data', label: '列表与筛选' },
     { key: 'flow', label: '流程与审批' },
     { key: 'permission', label: '权限管理' },
   ];
@@ -914,11 +913,8 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     requestIdRef.current += 1;
     setConfigRevision(revision => revision + 1);
   };
-  const renderWorkspace = (runtime: React.ReactNode) => <div className={`form-workspace${editorTab ? ' form-workspace-editing' : ''}`}>
-    {editorTab && platformForm && canConfigureForm && <div className="form-workspace-editor"><Suspense fallback={<div className="form-workspace-loading"><Spin /><span>正在打开表单编辑器</span></div>}>
-      <EmbeddedFormSettings formId={String(platformForm.id)} embedded initialTab={editorTab} onExit={() => setEditorTab(null)} onPublished={refreshPublishedConfig} />
-    </Suspense></div>}
-    <div className="form-workspace-runtime" hidden={Boolean(editorTab)} style={editorTab ? { display: 'none' } : undefined}>{withCanonTheme(runtime)}</div>
+  const renderWorkspace = (runtime: React.ReactNode) => <div className="form-workspace">
+    <div className="form-workspace-runtime">{withCanonTheme(runtime)}</div>
   </div>;
   if (rowActions.length && !toolbarTargetId) {
     (tableColumns as any[]).push({
@@ -1427,10 +1423,10 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         {recordTable}
       </section>
 
-      {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen && !editorTab} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();onMutated?.();}}/>}
-      {platformForm?.code==='alert-center'&&!editorTab&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);setDetailRecord(null);}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
+      {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();onMutated?.();}}/>}
+      {platformForm?.code==='alert-center'&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);setDetailRecord(null);}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
       <Drawer title={<div className="mf-canon-drawer-title"><strong title={detailTitle}>{detailTitle}</strong><span>{pageConfig.title}</span></div>}
-        open={Boolean(detailRecord) && !editorTab && platformForm?.code!=='alert-center'} onClose={() => setDetailRecord(null)} width={560}
+        open={Boolean(detailRecord) && platformForm?.code!=='alert-center'} onClose={() => setDetailRecord(null)} width={560}
         className="mf-canon-drawer" rootClassName="mf-canon-form-root" styles={{ wrapper: CANON_CSS_VARIABLES }}
         extra={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}
         footer={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}>
@@ -1450,7 +1446,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         className="dynamic-business-modal mf-canon-form"
         rootClassName="mf-canon-form-root"
         title={editingRecord ? `编辑${pageConfig.title}` : `${platformForm?.runtime_submission_available ? '填写申请：' : '新增记录：'}${pageConfig.title}`}
-        open={modalOpen && !editorTab}
+        open={modalOpen}
         onOk={handleModalOk}
         onCancel={() => setModalOpen(false)}
         confirmLoading={confirmLoading || rulesLoading}

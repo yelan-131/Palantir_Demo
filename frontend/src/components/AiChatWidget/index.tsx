@@ -12,21 +12,28 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  acknowledgePageAction,
   cancelAgentRun,
   closeAgentConversation,
+  continueSavedAgentConfirmation,
   createAgentConversation,
   listAgentConversationMessages,
   listAgentConversations,
+  resumeAgentConfirmation,
+  stopAgentConfirmation,
   streamAgentChat,
   streamConfirmAgentRun,
   getAgentRunState,
   updateAgentConversation,
 } from '@/services/api';
+import type { AgentStreamEvent } from '@/services/api';
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
 import { LEGACY_ACCOUNT_SECTIONS, navigationAreaForPath } from '@/config/navigation';
 import { useAiWorkbench } from './context';
+import { confirmationDesignPreview, designPreviewPath, parseDesignPreview } from './designPreview';
+import type { DesignPreview } from './designPreview';
 import type { BrowserPageAction, PageAction } from './pageControls';
 import type { AiKnowledgeContext } from './context';
 import './style.css';
@@ -115,6 +122,7 @@ interface AgentSession {
   createdAtRaw?: string | null;
   updatedAtRaw?: string | null;
   status?: string;
+  continuableConfirmationRunId?: string;
 }
 
 interface AgentConversationPayload {
@@ -144,6 +152,12 @@ interface AgentMessagePayload {
   items?: Array<Record<string, unknown>>;
   risk_level?: string;
   requires_confirmation?: boolean;
+}
+
+interface AgentConversationHistory {
+  data?: AgentMessagePayload[];
+  active_confirmation_run_id?: string | null;
+  continuable_confirmation_run_id?: string | null;
 }
 
 interface PageContext {
@@ -187,6 +201,23 @@ interface AgentChatResponse {
 
 const nowText = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 const AI_WORKBENCH_PAGE = 'ai-workbench';
+const AI_CHAT_TAB_KEY = 'mf:ai-workbench:tab';
+
+function readChatTabState(): { sessionId?: string; open: boolean } {
+  try {
+    const stored = asRecord(JSON.parse(window.sessionStorage.getItem(AI_CHAT_TAB_KEY) || 'null'));
+    return {
+      sessionId: typeof stored.sessionId === 'string' ? stored.sessionId : undefined,
+      open: stored.open === true,
+    };
+  } catch {
+    return { open: false };
+  }
+}
+
+function findActiveSession(sessions: AgentSession[], sessionId?: string): AgentSession | undefined {
+  return sessions.find(session => session.id === sessionId) || sessions[0];
+}
 
 function getClientContextNeed(message: string, hasKnowledgeContext: boolean): string {
   const normalized = message.trim().toLowerCase();
@@ -420,6 +451,7 @@ function mapServerMessage(message: AgentMessagePayload): ChatMessage {
     runId: isAssistant ? message.run_id : undefined,
     requiresConfirmation: isAssistant && !terminal ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : false,
     confirmationPayload: isAssistant ? confirmationPayload : undefined,
+    executionResult: isAssistant && message.run_status === 'completed' ? getStoredExecutionResult(items) : undefined,
   };
 }
 
@@ -877,8 +909,34 @@ function getConfirmationToken(payload?: Record<string, unknown>): string | undef
   return typeof token === 'string' ? token : undefined;
 }
 
+function getCompletedToolResults(toolResults: unknown): Record<string, unknown>[] {
+  return asRecordArray(toolResults)
+    .filter(item => item.status === 'completed')
+    .map(item => {
+      const outer = asRecord(item.result);
+      return outer.result && typeof outer.result === 'object' && !Array.isArray(outer.result)
+        ? asRecord(outer.result)
+        : outer;
+    });
+}
+
+function pickExecutionResult(results: Record<string, unknown>[]): AgentExecutionResult | undefined {
+  const receipts = results.map(getExecutionResult);
+  return receipts.find(receipt => receipt.href) || receipts[0];
+}
+
+function getStoredExecutionResult(items: Record<string, unknown>[]): AgentExecutionResult | undefined {
+  const snapshot = [...items].reverse().find(item => item.execution_snapshot === true);
+  const results = snapshot
+    ? getCompletedToolResults(asRecord(snapshot.payload).tool_results)
+    : items.filter(item => item.execution_receipt === true).map(item => asRecord(item.payload));
+  return pickExecutionResult(results);
+}
+
 function getExecutionResult(result: Record<string, unknown>): AgentExecutionResult {
-  const routePath = typeof result.route_path === 'string' ? result.route_path : '';
+  const routePath = typeof result.route_path === 'string' && /^\/(?![\/\\])/.test(result.route_path)
+    ? result.route_path
+    : '';
   if (routePath) {
     const savedDraft = asRecord(result.form).status === 'draft';
     return {
@@ -927,11 +985,17 @@ function generateUnavailableReply(): AssistantReply {
 
 export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
-  const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext, componentPageContext } = useAiWorkbench();
-  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext, componentPageContext, setDesignPreview } = useAiWorkbench();
+  const currentLocation = useRef(location);
+  currentLocation.current = location;
+  const [restoredTab] = useState(readChatTabState);
+  const [open, setOpen] = useState(restoredTab.open);
   const [input, setInput] = useState('');
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
+  const [historyLoadError, setHistoryLoadError] = useState<string>();
+  const [historyLoadAttempt, setHistoryLoadAttempt] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyScope, setHistoryScope] = useState<'recent' | 'archived'>('recent');
@@ -939,6 +1003,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [sending, setSending] = useState(false);
   const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string; menuTarget?: NonNullable<PageAction['draft']>['menu_target'] }>();
   const streamController = useRef<AbortController | null>(null);
+  const activeContinuation = useRef<{ conversationId: string; runId: string } | null>(null);
   useEffect(() => () => streamController.current?.abort(), []);
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
   const confirmationLocks = useRef(new Set<string>());
@@ -955,9 +1020,20 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const surface = knowledgeContext ? 'knowledge' : 'global';
   const contextKey = AI_WORKBENCH_PAGE;
   const intro = '我是独立 AI 工作区。你可以直接聊天；当你问到当前页面、表单、数据、知识文档或业务分析时，我会按需读取相关上下文。';
-  const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0];
+  const activeSession = findActiveSession(sessions, activeSessionId);
+  const visibleSessionId = useRef(activeSession?.id);
+  visibleSessionId.current = activeSession?.id;
   const messages = activeSession?.messages || [];
   const latestTrace = messages[messages.length - 1]?.trace;
+
+  useEffect(() => {
+    if (!enabled || !activeSession?.id) return;
+    try {
+      window.sessionStorage.setItem(AI_CHAT_TAB_KEY, JSON.stringify({ sessionId: activeSession.id, open }));
+    } catch {
+      // Chat history remains available when browser storage is disabled.
+    }
+  }, [activeSession?.id, enabled, open]);
 
   useEffect(() => {
     if (!enabled || sessions.length) return;
@@ -976,9 +1052,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         const rows = ((response.data?.data || []) as AgentConversationPayload[])
           .map((conversation) => mapServerConversation(conversation, contextKey, intro));
         if (!active) return;
-        if (rows.length) {
+        const selected = findActiveSession(rows, restoredTab.sessionId);
+        if (selected) {
           setSessions(rows);
-          setActiveSessionId(rows[0].id);
+          setActiveSessionId(selected.id);
           setHistoryOpen(false);
           setInput('');
           return;
@@ -995,19 +1072,14 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         setHistoryOpen(false);
         setInput('');
       } catch {
-        if (!active) return;
-        const nextSession = createAgentSession(contextKey, intro);
-        setSessions([nextSession]);
-        setActiveSessionId(nextSession.id);
-        setHistoryOpen(false);
-        setInput('');
+        if (active) setHistoryLoadError(AI_WORKBENCH_PAGE);
       }
     };
     void bootstrapSessions();
     return () => {
       active = false;
     };
-  }, [contextKey, intro, enabled]);
+  }, [contextKey, intro, enabled, historyLoadAttempt, restoredTab.sessionId]);
 
   useEffect(() => {
     if (!enabled || !activeSession?.id || activeSession.messages.length) return;
@@ -1015,16 +1087,19 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     listAgentConversationMessages(activeSession.id)
       .then((response) => {
         if (!active) return;
-        const loadedMessages = ((response.data?.data || []) as AgentMessagePayload[]).map(mapServerMessage);
-        setSessionMessages(activeSession.id, loadedMessages.length ? loadedMessages : [createAssistantMessage(intro)]);
+        const history = (response.data || {}) as AgentConversationHistory;
+        const loadedMessages = restoreSessionHistory(activeSession.id, history);
+        const activeRunId = history.active_confirmation_run_id;
+        const parent = activeRunId && loadedMessages.find(message => message.runId === activeRunId);
+        if (parent) void confirmAgentAction(parent, 'reconnect');
       })
       .catch(() => {
-        if (active) setSessionMessages(activeSession.id, [createAssistantMessage(intro)]);
+        if (active) setHistoryLoadError(activeSession.id);
       });
     return () => {
       active = false;
     };
-  }, [activeSession?.id, activeSession?.messages.length, intro, enabled]);
+  }, [activeSession?.id, activeSession?.messages.length, intro, enabled, historyLoadAttempt]);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
@@ -1065,6 +1140,22 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         ? { ...session, messages: nextMessages, updatedAt: nowText() }
         : session
     )));
+  };
+
+  const restoreSessionHistory = (sessionId: string, history: AgentConversationHistory) => {
+    const messages = (history.data || []).map(mapServerMessage);
+    setSessions(prev => prev.map(session => session.id === sessionId ? {
+      ...session,
+      messages: messages.length ? messages : [createAssistantMessage(intro)],
+      continuableConfirmationRunId: history.continuable_confirmation_run_id || undefined,
+    } : session));
+    return messages;
+  };
+
+  const appendSessionMessages = (sessionId: string, ...newMessages: ChatMessage[]) => {
+    setSessions(prev => prev.map(session => session.id === sessionId
+      ? { ...session, messages: [...session.messages, ...newMessages], updatedAt: nowText() }
+      : session));
   };
 
   const updateSessionMessage = (
@@ -1256,9 +1347,146 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     }
   };
 
+  const showDesignPreview = (preview: DesignPreview, sessionId: string, messageId: string, runId?: string) => {
+    const previousLocation = currentLocation.current;
+    setDesignPreview(current => ({
+      preview, sessionId, messageId, runId,
+      returnTo: previousLocation.state?.aiDesignPreviewId && current
+        ? current.returnTo : previousLocation.pathname + previousLocation.search,
+    }));
+    navigate(designPreviewPath(preview), {
+      replace: Boolean(previousLocation.state?.aiDesignPreviewId),
+      state: { aiDesignPreviewId: preview.id },
+    });
+  };
+
+  const turnEventHandler = (
+    sessionId: string,
+    assistantMessageId: string,
+    pageActionIds: Set<string>,
+    onAccepted?: () => void,
+  ) => ({ event, data }: AgentStreamEvent) => {
+    if (event === 'ui.design_preview') {
+      const preview = parseDesignPreview(data);
+      if (preview && visibleSessionId.current === sessionId) {
+        showDesignPreview(preview, sessionId, assistantMessageId);
+      }
+      return;
+    }
+    if (event === 'ui.action.cancel') {
+      if (typeof data.id === 'string') finishPageAction(data.id);
+      return;
+    }
+    if (event === 'ui.action') {
+      const action = data as unknown as BrowserPageAction;
+      if (action.type === 'application_navigation' && visibleSessionId.current !== sessionId) {
+        void acknowledgePageAction(action.id, { ok: false, error: '请切回发起请求的 AI 窗口，再打开目标。' }).catch(() => {});
+        return;
+      }
+      pageActionIds.add(action.id);
+      if (action.type === 'form_designer' && action.draft_id) setNativeDraftReview(previous => previous?.draftId === action.draft_id ? previous : {
+        sessionId, draftId: action.draft_id!, menuTarget: action.draft?.menu_target,
+      });
+      enqueuePageAction(action);
+      return;
+    }
+    const traceItem = createTraceItem(event, data);
+    if (traceItem || (event === 'harness.progress' && typeof data.text === 'string' && data.text)) {
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        trace: traceItem ? appendAgentTraceItem(message.trace, traceItem) : message.trace,
+        ...(event === 'harness.progress' && typeof data.text === 'string' && data.text ? { content: data.text, fullContent: data.text, typing: false } : {}),
+      }));
+      return;
+    }
+    if (event === 'run.accepted') {
+      onAccepted?.();
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        steps: [{
+          id: 'run-accepted',
+          label: '后端已接收任务',
+          status: 'completed',
+          detail: typeof data.message === 'string' ? data.message : undefined,
+        }],
+      }));
+      return;
+    }
+    if (event === 'item.created' || event === 'item.updated') {
+      const rawItem = data.item && typeof data.item === 'object'
+        ? data.item as Record<string, unknown>
+        : data;
+      const nextStep = mapAgentStep(rawItem);
+      updateSessionMessage(sessionId, assistantMessageId, (message) => {
+        const items = message.items || [];
+        const itemId = String(rawItem.item_id || rawItem.id || nextStep.id);
+        const itemExisting = items.findIndex((item) => String(item.item_id || item.id) === itemId);
+        const nextItems = itemExisting >= 0
+          ? items.map((item, index) => (index === itemExisting ? rawItem : item))
+          : [...items, rawItem];
+        const steps = message.steps || [];
+        const existing = steps.findIndex((step) => step.id === nextStep.id);
+        const nextSteps = existing >= 0
+          ? steps.map((step, index) => (index === existing ? nextStep : step))
+          : [...steps, nextStep];
+        const confirmationPayload = getConfirmationItemPayload(nextItems);
+        return {
+          ...message,
+          items: nextItems,
+          steps: nextSteps,
+          actions: mapAgentActions(getConfirmationActions(nextItems)) || message.actions,
+          requiresConfirmation: Boolean(confirmationPayload?.confirmation_token || message.requiresConfirmation),
+          confirmationPayload: confirmationPayload || message.confirmationPayload,
+        };
+      });
+      return;
+    }
+    if (event === 'answer.completed') {
+      const payload = data as AgentChatResponse;
+      setDesignPreview(current => current?.messageId === assistantMessageId
+        ? { ...current, runId: payload.run_id } : current);
+      const answerContent = payload.answer || payload.assistant_message?.content || '后端没有返回可展示的回答。';
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        content: answerContent,
+        fullContent: answerContent,
+        typing: false,
+        actions: mapAgentActions(getConfirmationActions(payload.items)) || message.actions,
+        items: normalizeAgentItems(payload.items) || message.items,
+        steps: mapAgentSteps(payload.items) || message.steps,
+        source: getAgentResponseSource(payload),
+        contextSources: getContextSources(payload),
+        runId: payload.run_id,
+        requiresConfirmation: Boolean(getConfirmationItemPayload(payload.items)?.confirmation_token || payload.requires_confirmation),
+        confirmationPayload: getConfirmationItemPayload(payload.items),
+        actionState: payload.action_state,
+      }));
+      if (payload.conversation) {
+        const updated = mapServerConversation(payload.conversation, contextKey, intro);
+        setSessions((prev) => prev.map((session) => (
+          session.id === sessionId
+            ? { ...session, title: updated.title, updatedAt: updated.updatedAt }
+            : session
+        )));
+      }
+      return;
+    }
+    if (event === 'run.failed') {
+      const errorContent = `执行失败：${String(data.detail || '未知错误')}`;
+      updateSessionMessage(sessionId, assistantMessageId, (message) => ({
+        ...message,
+        content: '',
+        fullContent: errorContent,
+        typing: true,
+        trace: finishPendingPageTrace(message.trace, 'interrupted'),
+        source: 'Agent 事件流',
+      }));
+    }
+  };
+
   const sendMessage = async (content: string, extraContext?: Record<string, unknown>, attachments: ChatAttachment[] = []) => {
     const trimmed = content.trim();
-    if (!trimmed || streamController.current || !activeSession) return;
+    if (!trimmed || streamController.current || confirmationLocks.current.size || !activeSession?.messages.length) return;
 
     const controller = new AbortController();
     streamController.current = controller;
@@ -1277,11 +1505,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         detail: '等待后端确认任务已接收',
       }],
     };
-    const pending = [...messages, userMessage, assistantPlaceholder];
     const sessionId = activeSession.id;
     const pageActionIds = new Set<string>();
     let accepted = false;
-    setSessionMessages(sessionId, pending);
+    appendSessionMessages(sessionId, userMessage, assistantPlaceholder);
     setInput('');
     setSending(true);
     try {
@@ -1294,116 +1521,13 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         applicationName,
         knowledgeContext,
       });
-      Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {}, { componentPageContext });
+      Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {},
+        { componentPageContext, followDesignTools: true });
       await streamAgentChat({
         message: messageText,
         page: AI_WORKBENCH_PAGE,
         context: attachments.length ? { ...runtimeContext, chatAttachments: attachments } : runtimeContext,
-      }, ({ event, data }) => {
-        if (event === 'ui.action.cancel') {
-          if (typeof data.id === 'string') finishPageAction(data.id);
-          return;
-        }
-        if (event === 'ui.action') {
-          const action = data as unknown as BrowserPageAction;
-          pageActionIds.add(action.id);
-          if (action.type === 'form_designer' && action.draft_id) setNativeDraftReview(previous => previous?.draftId === action.draft_id ? previous : {
-            sessionId, draftId: action.draft_id!, menuTarget: action.draft?.menu_target,
-          });
-          enqueuePageAction(action);
-          return;
-        }
-        const traceItem = createTraceItem(event, data);
-        if (traceItem || (event === 'harness.progress' && typeof data.text === 'string' && data.text)) {
-          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
-            ...message,
-            trace: traceItem ? appendAgentTraceItem(message.trace, traceItem) : message.trace,
-            ...(event === 'harness.progress' && typeof data.text === 'string' && data.text ? { content: data.text, fullContent: data.text, typing: false } : {}),
-          }));
-          return;
-        }
-        if (event === 'run.accepted') {
-          accepted = true;
-          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
-            ...message,
-            steps: [{
-              id: 'run-accepted',
-              label: '后端已接收任务',
-              status: 'completed',
-              detail: typeof data.message === 'string' ? data.message : undefined,
-            }],
-          }));
-          return;
-        }
-        if (event === 'item.created' || event === 'item.updated') {
-          const rawItem = data.item && typeof data.item === 'object'
-            ? data.item as Record<string, unknown>
-            : data;
-          const nextStep = mapAgentStep(rawItem);
-          updateSessionMessage(sessionId, assistantMessageId, (message) => {
-            const items = message.items || [];
-            const itemId = String(rawItem.item_id || rawItem.id || nextStep.id);
-            const itemExisting = items.findIndex((item) => String(item.item_id || item.id) === itemId);
-            const nextItems = itemExisting >= 0
-              ? items.map((item, index) => (index === itemExisting ? rawItem : item))
-              : [...items, rawItem];
-            const steps = message.steps || [];
-            const existing = steps.findIndex((step) => step.id === nextStep.id);
-            const nextSteps = existing >= 0
-              ? steps.map((step, index) => (index === existing ? nextStep : step))
-              : [...steps, nextStep];
-            const confirmationPayload = getConfirmationItemPayload(nextItems);
-            return {
-              ...message,
-              items: nextItems,
-              steps: nextSteps,
-              actions: mapAgentActions(getConfirmationActions(nextItems)) || message.actions,
-              requiresConfirmation: Boolean(confirmationPayload?.confirmation_token || message.requiresConfirmation),
-              confirmationPayload: confirmationPayload || message.confirmationPayload,
-            };
-          });
-          return;
-        }
-        if (event === 'answer.completed') {
-          const payload = data as AgentChatResponse;
-          const answerContent = payload.answer || payload.assistant_message?.content || '后端没有返回可展示的回答。';
-          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
-            ...message,
-            content: answerContent,
-            fullContent: answerContent,
-            typing: false,
-            actions: mapAgentActions(getConfirmationActions(payload.items)) || message.actions,
-            items: normalizeAgentItems(payload.items) || message.items,
-            steps: mapAgentSteps(payload.items) || message.steps,
-            source: getAgentResponseSource(payload),
-            contextSources: getContextSources(payload),
-            runId: payload.run_id,
-            requiresConfirmation: Boolean(getConfirmationItemPayload(payload.items)?.confirmation_token || payload.requires_confirmation),
-            confirmationPayload: getConfirmationItemPayload(payload.items),
-            actionState: payload.action_state,
-          }));
-          if (payload.conversation) {
-            const updated = mapServerConversation(payload.conversation, contextKey, intro);
-            setSessions((prev) => prev.map((session) => (
-              session.id === sessionId
-                ? { ...session, title: updated.title, updatedAt: updated.updatedAt }
-                : session
-            )));
-          }
-          return;
-        }
-        if (event === 'run.failed') {
-          const errorContent = `执行失败：${String(data.detail || '未知错误')}`;
-          updateSessionMessage(sessionId, assistantMessageId, (message) => ({
-            ...message,
-            content: '',
-            fullContent: errorContent,
-            typing: true,
-            trace: finishPendingPageTrace(message.trace, 'interrupted'),
-            source: 'Agent 事件流',
-          }));
-        }
-      }, controller.signal);
+      }, turnEventHandler(sessionId, assistantMessageId, pageActionIds, () => { accepted = true; }), controller.signal);
     } catch {
       if (controller.signal.aborted) {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
@@ -1432,16 +1556,27 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     }
   };
 
-  const confirmAgentAction = async (message: ChatMessage) => {
+  const confirmAgentAction = async (message: ChatMessage, intent: 'confirm' | 'reconnect' | 'continue' = 'confirm') => {
     const runId = message.runId;
     const token = getConfirmationToken(message.confirmationPayload);
-    if (!runId || !token || !activeSession) return;
-    if (confirmationLocks.current.has(runId)) return;
+    if (!runId || (!token && intent === 'confirm') || !activeSession) return;
+    if (confirmationLocks.current.size || streamController.current) return;
     confirmationLocks.current.add(runId);
     setConfirmingRunId(runId);
     const sessionId = activeSession.id;
+    const controller = new AbortController();
+    streamController.current = controller;
+    const continuationMessageId = `assistant-continuation-${runId}`;
+    const pageActionIds = new Set<string>();
+    const handleContinuation = turnEventHandler(sessionId, continuationMessageId, pageActionIds);
+    let receiptShown = intent === 'continue';
+    let continuationStarted = false;
+    let continuationFinished = false;
+    let streamFinished = false;
 
     const applyCompletedRun = (run: Record<string, unknown>) => {
+      if (receiptShown) return;
+      receiptShown = true;
       if (run.status !== 'completed') {
         const results = Array.isArray(run.tool_results) ? run.tool_results as Record<string, unknown>[] : [];
         const failed = results.find(result => result.status === 'failed');
@@ -1453,18 +1588,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         }));
         return;
       }
-      const results = Array.isArray(run.tool_results) ? run.tool_results : [];
-      const completed = results.find((item) => (
-        item && typeof item === 'object' && (item as Record<string, unknown>).status === 'completed'
-      )) as Record<string, unknown> | undefined;
-      const nested = completed?.result && typeof completed.result === 'object'
-        ? completed.result as Record<string, unknown>
-        : {};
-      const result = nested.result && typeof nested.result === 'object'
-        ? nested.result as Record<string, unknown>
-        : nested;
-      const executionResult = getExecutionResult(result);
-      if (result.menu_id) window.dispatchEvent(new Event('applications-changed'));
+      const results = getCompletedToolResults(run.tool_results);
+      setDesignPreview(current => current?.sessionId === sessionId && current.runId === runId ? undefined : current);
+      const executionResult = pickExecutionResult(results) || getExecutionResult({});
+      if (results.some(result => result.menu_id)) window.dispatchEvent(new Event('applications-changed'));
       const routePath = executionResult.href || '';
       updateSessionMessage(sessionId, message.id, (item) => {
         const currentContent = item.fullContent || item.content;
@@ -1484,54 +1611,129 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       });
     };
 
-    try {
-      await streamConfirmAgentRun(runId, {
-        confirmation_token: token,
-        confirmed: true,
-      }, ({ event, data }) => {
-        const traceItem = createTraceItem(event, data);
-        if (traceItem) {
-          updateSessionMessage(sessionId, message.id, (item) => ({
-            ...item,
-            trace: appendAgentTraceItem(item.trace, traceItem),
+    const onEvent = ({ event, data }: AgentStreamEvent) => {
+      if (event === 'confirmation.finished') {
+        streamFinished = true;
+        return;
+      }
+      if (event.startsWith('continuation.')) {
+        if (!continuationStarted) {
+          continuationStarted = true;
+          activeContinuation.current = { conversationId: sessionId, runId };
+          setSending(true);
+          const pending: ChatMessage = {
+            id: continuationMessageId, role: 'assistant', content: '', createdAt: nowText(),
+          };
+          setSessions(prev => prev.map(session => session.id === sessionId ? {
+            ...session,
+            messages: [...session.messages.filter(item => item.id !== continuationMessageId), pending],
+          } : session));
+        }
+        const turnEvent = event.slice('continuation.'.length);
+        if (turnEvent === 'run.stopped') {
+          continuationFinished = true;
+          updateSessionMessage(sessionId, continuationMessageId, item => ({
+            ...item, content: '已停止继续处理。', fullContent: undefined, typing: false,
+            trace: finishPendingPageTrace(item.trace, 'stopped'),
           }));
           return;
         }
-        if (event === 'item.created' || event === 'item.updated') {
-          const rawItem = data.item && typeof data.item === 'object'
-            ? data.item as Record<string, unknown>
-            : data;
-          updateSessionMessage(sessionId, message.id, (item) => {
-            const items = item.items || [];
-            const itemId = String(rawItem.item_id || rawItem.id || Date.now());
-            const existing = items.findIndex((entry) => String(entry.item_id || entry.id) === itemId);
-            const nextItems = existing >= 0
-              ? items.map((entry, index) => (index === existing ? rawItem : entry))
-              : [...items, rawItem];
-            return {
-              ...item,
-              items: nextItems,
-              steps: mapAgentSteps(nextItems) || item.steps,
+        if (turnEvent === 'answer.completed' || turnEvent === 'run.failed') continuationFinished = true;
+        if (turnEvent === 'answer.completed' && data.run_id) {
+          setSessions(prev => prev.map(session => {
+            if (session.id !== sessionId) return session;
+            const alreadyRestored = session.messages.some(item => item.runId === data.run_id && item.id !== continuationMessageId);
+            return { ...session,
+              continuableConfirmationRunId: undefined,
+              messages: alreadyRestored ? session.messages.filter(item => item.id !== continuationMessageId) : session.messages,
             };
-          });
-          return;
-        }
-        if (event === 'run.completed') {
-          const run = asRecord(data.run);
-          applyCompletedRun(run);
-          return;
-        }
-        if (event === 'run.failed') {
-          const detail = String(data.detail || 'unknown error');
-          updateSessionMessage(sessionId, message.id, (item) => ({
-            ...item,
-            content: `${item.fullContent || item.content}\n\n确认执行失败：${detail}`,
-            fullContent: undefined,
-            typing: false,
           }));
         }
-      });
+        handleContinuation({ event: turnEvent, data });
+        return;
+      }
+      const traceItem = createTraceItem(event, data);
+      if (traceItem) {
+        updateSessionMessage(sessionId, message.id, (item) => ({
+          ...item,
+          trace: appendAgentTraceItem(item.trace, traceItem),
+        }));
+        return;
+      }
+      if (event === 'item.created' || event === 'item.updated') {
+        const rawItem = data.item && typeof data.item === 'object'
+          ? data.item as Record<string, unknown>
+          : data;
+        updateSessionMessage(sessionId, message.id, (item) => {
+          const items = item.items || [];
+          const itemId = String(rawItem.item_id || rawItem.id || Date.now());
+          const existing = items.findIndex((entry) => String(entry.item_id || entry.id) === itemId);
+          const nextItems = existing >= 0
+            ? items.map((entry, index) => (index === existing ? rawItem : entry))
+            : [...items, rawItem];
+          return {
+            ...item,
+            items: nextItems,
+            steps: mapAgentSteps(nextItems) || item.steps,
+          };
+        });
+        return;
+      }
+      if (event === 'run.completed') {
+        const run = asRecord(data.run);
+        applyCompletedRun(run);
+        return;
+      }
+      if (event === 'run.failed') {
+        const detail = String(data.detail || 'unknown error');
+        updateSessionMessage(sessionId, message.id, (item) => ({
+          ...item,
+          content: `${item.fullContent || item.content}\n\n确认执行失败：${detail}`,
+          fullContent: undefined,
+          typing: false,
+        }));
+      }
+    };
+    try {
+      let originalError: unknown;
+      if (intent !== 'reconnect') {
+        try {
+          if (intent === 'continue') {
+            await continueSavedAgentConfirmation(sessionId, runId, onEvent, controller.signal);
+          } else {
+            await streamConfirmAgentRun(runId, {
+              confirmation_token: token,
+              confirmed: true,
+              continue_conversation_id: sessionId,
+              continue_route: location.pathname,
+              follow_design_tools: true,
+            }, onEvent, controller.signal);
+          }
+        } catch (error) {
+          originalError = error;
+        }
+      }
+      if (!streamFinished && !controller.signal.aborted) {
+        try {
+          await resumeAgentConfirmation(sessionId, runId, onEvent, controller.signal);
+          if (streamFinished) return;
+        } catch (error) {
+          if (intent === 'confirm' && !receiptShown) throw originalError || error;
+        }
+        if (!controller.signal.aborted && (intent !== 'confirm' || receiptShown)) {
+          // The job can commit immediately before the reconnect request arrives.
+          const response = await listAgentConversationMessages(sessionId);
+          if (!controller.signal.aborted) {
+            const history = (response.data || {}) as AgentConversationHistory;
+            restoreSessionHistory(sessionId, history);
+            if (intent === 'continue' && originalError && history.continuable_confirmation_run_id === runId) {
+              onEvent({event: 'continuation.run.failed', data: {detail: '暂时无法从回执继续，请重试。'}});
+            }
+          }
+        }
+      }
     } catch (error) {
+      if (controller.signal.aborted || receiptShown) return;
       try {
         const recovered = asRecord((await getAgentRunState(runId)).data?.data);
         if (recovered.status === 'completed' || recovered.status === 'failed') {
@@ -1549,8 +1751,32 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         typing: false,
       }));
     } finally {
+      if (continuationStarted) {
+        for (const actionId of pageActionIds) finishPageAction(actionId);
+        if (!continuationFinished) {
+          updateSessionMessage(sessionId, continuationMessageId, item => ({
+            ...item,
+            content: '后续对话连接已中断，刷新后可恢复进度。',
+            fullContent: undefined,
+            typing: false,
+            trace: finishPendingPageTrace(item.trace, 'interrupted'),
+          }));
+        }
+        activeContinuation.current = null;
+        setSending(false);
+      }
+      if (streamController.current === controller) streamController.current = null;
       confirmationLocks.current.delete(runId);
       setConfirmingRunId(undefined);
+    }
+  };
+
+  const stopGeneration = () => {
+    const continuation = activeContinuation.current;
+    if (continuation) {
+      void stopAgentConfirmation(continuation.conversationId, continuation.runId).catch(() => {});
+    } else {
+      streamController.current?.abort();
     }
   };
 
@@ -1560,6 +1786,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     setConfirmingRunId(runId);
     try {
       await cancelAgentRun(runId);
+      setDesignPreview(current => current?.sessionId === activeSession.id && current.runId === runId ? undefined : current);
       const nextMessages = messages.map((item) => (
         item.id === message.id
           ? {
@@ -1610,6 +1837,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     return `${session.title} ${session.messages.length} ${session.updatedAt}`.toLowerCase().includes(query);
   });
   const historyGroups = groupSessionsForHistory(filteredHistorySessions);
+  const historyFailed = historyLoadError === (activeSession?.id || AI_WORKBENCH_PAGE);
 
   const chatWorkbench = (
           <div className="ai-workbench-chat">
@@ -1617,6 +1845,19 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
             const body = event.currentTarget;
             followLatest.current = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
           }}>
+            {!messages.length && (
+              <div role="status">
+                <Typography.Text type="secondary">{historyFailed ? '对话加载失败。' : '正在恢复对话…'}</Typography.Text>
+                {historyFailed && (
+                  <Button type="link" size="small" onClick={() => {
+                    setHistoryLoadError(undefined);
+                    setHistoryLoadAttempt(attempt => attempt + 1);
+                  }}>
+                    重试
+                  </Button>
+                )}
+              </div>
+            )}
             {messages.map((message) => {
               const hasContent = Boolean(message.content.trim());
               const isTypingAssistant = message.role === 'assistant' && Boolean(message.typing);
@@ -1624,9 +1865,23 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const hasTraceOrSteps = Boolean(message.trace?.length || message.steps?.length);
               const isPendingAssistant = message.role === 'assistant' && hasTraceOrSteps && !hasAnswer;
               const canShowAssistantMeta = message.role === 'assistant' && !isTypingAssistant;
+              const hasBatchReview = (message.actions?.length || 0) > 1;
+              const confirmationButtons = (label = '确认执行', cancelLabel = '取消') => <>
+                <Button size="small" disabled={sending || confirmingRunId === message.runId}
+                  onClick={() => { void cancelAgentAction(message); }}>
+                  {cancelLabel}
+                </Button>
+                <Button type="primary" size="small" icon={<CheckCircleOutlined />}
+                  loading={confirmingRunId === message.runId}
+                  disabled={sending || Boolean(confirmingRunId && confirmingRunId !== message.runId)}
+                  onClick={() => { void confirmAgentAction(message); }}>
+                  {label}
+                </Button>
+              </>;
               const actionStateReview = message.role === 'assistant' ? getActionStateReview(message.actionState) : undefined;
               const traceItems = message.trace || [];
               const hasDshTrace = traceItems.some((item) => item.source === 'dsh');
+              const executionHref = message.executionResult?.href;
               const activeRun = (sending && message.id === messages[messages.length - 1]?.id)
                 || Boolean(confirmingRunId && confirmingRunId === message.runId);
               const traceSummary = activeRun ? '执行过程 · 执行中'
@@ -1695,11 +1950,17 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                         <strong>{message.executionResult.title}</strong>
                         {message.executionResult.detail ? <small>{message.executionResult.detail}</small> : null}
                       </div>
-                      {message.executionResult.href ? (
-                        <Button size="small" href={message.executionResult.href}>
-                          打开
-                        </Button>
-                      ) : null}
+                      <Space size={6}>
+                        {executionHref ? (
+                          <Button size="small" onClick={() => navigate(executionHref)}>打开</Button>
+                        ) : null}
+                        {message.runId && message.runId === activeSession?.continuableConfirmationRunId && (
+                          <Button size="small" disabled={sending || Boolean(confirmingRunId)}
+                            onClick={() => { void confirmAgentAction(message, 'continue'); }}>
+                            继续处理
+                          </Button>
+                        )}
+                      </Space>
                     </div>
                   ) : null}
                   {canShowAssistantMeta && message.actions?.length ? (
@@ -1707,6 +1968,8 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                       {message.actions.map((action, actionIndex) => {
                         const review = getLowCodeReview(action);
                         const genericReview = getGenericActionReview(action);
+                        const actionPreview = message.requiresConfirmation
+                          ? confirmationDesignPreview(message.items, actionIndex, action.payload) : undefined;
                         const note = messageScopedNote(action.id);
                         return (
                         <article className="ai-skill-action-card" key={action.id}>
@@ -1725,6 +1988,12 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                           <Typography.Paragraph className="ai-skill-action-summary">
                             {action.summary}
                           </Typography.Paragraph>
+                          {actionPreview && activeSession && (
+                            <Button type="link" size="small" aria-label={`查看${action.title}预览`}
+                              onClick={() => showDesignPreview(actionPreview, activeSession.id, message.id, message.runId)}>
+                              查看预览
+                            </Button>
+                          )}
                           {review ? (
                             <div className="ai-confirm-review">
                               <div className="ai-confirm-review-head">
@@ -1787,22 +2056,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                     >
                                       提交调整
                                     </Button>
-                                    <Button
-                                      size="small"
-                                      disabled={sending || confirmingRunId === message.runId}
-                                      onClick={() => { void cancelAgentAction(message); }}
-                                    >
-                                      取消
-                                    </Button>
-                                    <Button
-                                      type="primary"
-                                      size="small"
-                                      icon={<CheckCircleOutlined />}
-                                      loading={confirmingRunId === message.runId}
-                                      onClick={() => { void confirmAgentAction(message); }}
-                                    >
-                                      确认保存草稿
-                                    </Button>
+                                    {!hasBatchReview && confirmationButtons('确认保存草稿')}
                                   </div>
                                 </div>
                               ) : null}
@@ -1843,22 +2097,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                                     >
                                       提交调整
                                     </Button>
-                                    <Button
-                                      size="small"
-                                      disabled={sending || confirmingRunId === message.runId}
-                                      onClick={() => { void cancelAgentAction(message); }}
-                                    >
-                                      取消
-                                    </Button>
-                                    <Button
-                                      type="primary"
-                                      size="small"
-                                      icon={<CheckCircleOutlined />}
-                                      loading={confirmingRunId === message.runId}
-                                      onClick={() => { void confirmAgentAction(message); }}
-                                    >
-                                      确认执行
-                                    </Button>
+                                    {!hasBatchReview && confirmationButtons()}
                                   </div>
                                 </div>
                               ) : null}
@@ -1881,29 +2120,16 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                               ))}
                             </ol>
                           </div>
-                          {!review && !genericReview && message.requiresConfirmation && message.runId ? (
-                            <Space size={6}>
-                              <Button
-                                size="small"
-                                disabled={confirmingRunId === message.runId}
-                                onClick={() => { void cancelAgentAction(message); }}
-                              >
-                                取消
-                              </Button>
-                              <Button
-                              type="primary"
-                              size="small"
-                              icon={<CheckCircleOutlined />}
-                              loading={confirmingRunId === message.runId}
-                              onClick={() => { void confirmAgentAction(message); }}
-                            >
-                              确认执行
-                              </Button>
-                            </Space>
-                          ) : null}
+                          {!hasBatchReview && !review && !genericReview && message.requiresConfirmation && message.runId
+                            ? <Space size={6}>{confirmationButtons()}</Space> : null}
                         </article>
                         );
                       })}
+                      {hasBatchReview && message.requiresConfirmation && message.runId && (
+                        <div className="ai-confirm-actions">
+                          {confirmationButtons(`确认执行 ${message.actions.length} 项`, '取消这批')}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>
@@ -1923,11 +2149,11 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           <ChatComposer
             key={activeSession?.id}
             input={input}
-            enabled={Boolean(activeSession)}
+            enabled={messages.length > 0 && (!confirmingRunId || sending)}
             sending={sending}
             onChange={setInput}
             onSend={(message, attachments) => sendMessage(message, undefined, attachments)}
-            onStop={() => streamController.current?.abort()}
+            onStop={stopGeneration}
           />
     </div>
   );

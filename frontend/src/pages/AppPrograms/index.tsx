@@ -1,4 +1,5 @@
 import ConfiguredAnalysisDashboard from './AnalyticsWorkspace';
+import { businessDataDesignPath } from '@/config/navigation';
 import type { RuntimeAnalyticsDesign, RuntimeAnalyticsData } from './analyticsTypes';
 import DynamicPage from '../DynamicPage';
 import React from 'react';
@@ -304,7 +305,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
           key={program.id}
           program={program}
           payload={programData}
-          onSettings={() => navigate('/form-settings/production-overview?tab=dashboard')}
+          onSettings={() => navigate(businessDataDesignPath('production-overview'))}
           onReload={loadProgramData}
           loading={programLoading}
         />
@@ -315,7 +316,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
         <div className="app-program-page app-program-business">
           <BusinessProgram
             program={{ ...program, kind: 'business' }}
-            onSettings={() => navigate('/form-settings/production-overview?tab=dashboard')}
+            onSettings={() => navigate(businessDataDesignPath('production-overview', 'form'))}
             onReload={loadProgramData}
             loading={programLoading}
           />
@@ -336,8 +337,7 @@ function AppProgramPage({ programId: configuredProgramId }: { programId?: string
   }
 
   const openSettings = () => {
-    const tab = programData?.form?.kind === 'analysis' ? '?tab=dashboard' : '';
-    navigate(`/form-settings/${program.id}${tab}`);
+    navigate(businessDataDesignPath(program.id, program.kind === 'business' ? 'form' : undefined));
   };
 
   return (

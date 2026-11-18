@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core import db as db_module
 from app.core.application_menu_registry_schema import install_workflow_design_tools
 from app.models.relational import (
-    AIAgentSkillDefinition, AIAgentToolDefinition, Base, Form, Tenant, WorkflowBinding, WorkflowDef,
+    AIAgentSkillDefinition, AIAgentToolDefinition, Base, ComponentPage, Form, FormField, Tenant, WorkflowBinding, WorkflowDef,
 )
 from app.services import form_versions
-from app.services.ai import agent_registry, harness_runtime as runtime, tool_handlers
+from app.services.ai import agent_registry, harness_runtime as runtime, tool_handlers, workbench_preview
 from app.services.ai.agent_definition import use_agent_registry
 from app.services.ai.agent_registry import load_seed_registry
 from app.services.ai.settings import merge_ai_settings
@@ -41,6 +41,59 @@ def design():
                          "color": "#527d9b", "size": {"width": 260, "height": 260},
                          "titleStyle": {"underline": True}, "frameStyle": {"borderStyle": "dashed"}}],
     }
+
+
+@pytest.mark.asyncio
+async def test_workbench_previews_follow_staged_tools_without_saving(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as db:
+        await db.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(db_module, "db_session", factory)
+    monkeypatch.setattr(workbench_preview, "db_session", factory)
+    monkeypatch.setattr(runtime, "load_persisted_ai_settings", AsyncMock())
+    settings = merge_ai_settings({"aiEnabled": True, "agentMode": "confirm"})
+    settings.update(rolePolicies=[], domains=["low-code"])
+    monkeypatch.setattr(runtime, "settings_snapshot", lambda: settings)
+    events = AsyncMock()
+    bridge = runtime.PlatformBridge(ADMIN, settings, {"pageControlsSupported": True, "followDesignTools": True}, event_sink=events)
+    skills, tools = load_seed_registry()
+    try:
+        async with factory() as db:
+            db.add(Tenant(id=1, name="Test", slug="test"))
+            db.add(Form(id=10, tenant_id=1, name="异常台账", code="issues", storage_mode="dynamic", status="draft",
+                        config={"formDesignerControls": []}))
+            db.add(FormField(tenant_id=1, form_id=10, field_name="title", label="标题", field_type="string"))
+            await db.commit()
+
+        async def stage(tool, arguments):
+            result = await bridge._call_platform_tool(runtime.tool_alias(tool), arguments)
+            assert result["status"] == "waiting_confirmation", result
+
+        with use_agent_registry({"skills": skills, "tools": tools}):
+            for name, label in (("note", "补充说明"), ("batch", "批次")):
+                await stage("forms.add_form_field", {"form_id": 10, "fields": [
+                    {"field_name": name, "label": label, "field_type": "string"},
+                ]})
+            await stage("pages.create", {"definition": {"title": "异常工作台"}})
+            await stage(SAVE, {"form_id": 10, "design": design(), "expected_definition": None})
+
+        previews = [call.args[1] for call in events.await_args_list if call.args[0] == "ui.design_preview"]
+        assert [preview["kind"] for preview in previews] == ["form", "form", "page", "workflow"]
+        assert [field["name"] for field in previews[1]["fields"]] == ["title", "note", "batch"]
+        assert previews[-1]["design"]["nodes"][1]["label"] == "抄送"
+        assert [action.skill for action in bridge.pending] == ["forms.add_form_field", "pages.create", SAVE]
+        assert all(action.requires_confirmation for action in bridge.pending)
+        descriptors = {item["id"]: item["payload"] for item in bridge.items if item["id"].startswith("workbench-preview-")}
+        assert [descriptors[f"workbench-preview-{index}"]["kind"] for index in range(3)] == ["form", "page", "workflow"]
+        assert "definition" not in descriptors["workbench-preview-1"]
+        assert "design" not in descriptors["workbench-preview-2"]
+        async with factory() as db:
+            assert list(await db.scalars(select(FormField.field_name))) == ["title"]
+            assert await db.scalar(select(ComponentPage.id)) is None
+            assert await db.scalar(select(WorkflowDef.id)) is None
+    finally:
+        await engine.dispose()
 
 
 def test_existing_tenant_registry_installs_workflow_tools_idempotently():
@@ -76,7 +129,6 @@ async def test_workflow_skill_reads_validates_saves_and_publishes_through_confir
     monkeypatch.setattr(form_versions, "write_audit_log", AsyncMock())
     settings = merge_ai_settings({"aiEnabled": True, "agentMode": "confirm"})
     settings.update(rolePolicies=[], domains=["low-code"])
-    settings["safetyPolicy"]["maxToolSteps"] = 24
     monkeypatch.setattr(runtime, "load_persisted_ai_settings", AsyncMock())
     monkeypatch.setattr(runtime, "settings_snapshot", lambda: settings)
     bridge = runtime.PlatformBridge(ADMIN, settings, {}, native_skills=False)

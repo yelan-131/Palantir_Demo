@@ -70,7 +70,8 @@ node --test tests/*.test.cjs    # 单元测试（需先安装依赖）
 | `/program/:programId` | 程序页（见 4.3）；`/program/alert-center` 固定为告警中心 |
 | `/program/material-application` | 料号申请 |
 | `/pages/:code` | 组件页面 |
-| `/form-settings/:formId` | 表单设计器 |
+| `/studio/business-data/:formId/design` | 业务数据与组件属性，包含表单录入和流程设计 |
+| `/form-settings/:formId` | 权限管理及其他历史链接重定向 |
 | `/studio/*`、`/data-center/*`、`/admin/*` | 由 `pages/NavigationArea` 按路径分发，见 4.2 |
 
 ### 4.2 配置、数据与后台入口

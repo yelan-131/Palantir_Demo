@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { businessDataDesignPath, newBusinessFormDesignPath } from '@/config/navigation';
 import { acknowledgePageAction } from '@/services/api';
 import { useAiWorkbench } from './context';
 import type { AiLayoutOperation } from '@/utils/aiFormLayout';
@@ -41,14 +42,22 @@ export type PageController = (action: PageAction) => Promise<Record<string, unkn
 export type ComponentPageAction = { id: string; type: 'component_page'; page_code: string } & (
   { action: 'inspect'; widget_id?: string } | { action: 'apply'; operations: ComponentOperation[] }
 );
-export type BrowserPageAction = PageAction | ComponentPageAction;
+export type ApplicationNavigationAction = { id: string; type: 'application_navigation' } & (
+  { action: 'open_application'; application: string } | { action: 'open_page'; page: string; application?: string }
+);
+export type ApplicationNavigationTarget = { application_id: number; application_name: string; page_name?: string };
+export type BrowserPageAction = PageAction | ComponentPageAction | ApplicationNavigationAction;
 export type ComponentPageController = (action: ComponentPageAction) => Promise<Record<string, unknown>>;
 
-export function AiPageActionRouter() {
+export function AiPageActionRouter({ onOpenWorkspaceTarget, applicationReady }: {
+  onOpenWorkspaceTarget: (action: ApplicationNavigationAction, active: () => boolean) => Promise<ApplicationNavigationTarget>;
+  applicationReady: boolean;
+}) {
   const { pageActions, finishPageAction, getPageController, getComponentPageController, controllerVersion } = useAiWorkbench();
   const navigate = useNavigate(), location = useLocation();
   const running = useRef(new Set<string>());
   const navigating = useRef(new Set<string>());
+  const [navigationTarget, setNavigationTarget] = useState<{ id: string; target: ApplicationNavigationTarget }>();
   const currentLocation = useRef(location);
   currentLocation.current = location;
   const action = pageActions[0];
@@ -59,8 +68,12 @@ export function AiPageActionRouter() {
     const timer = window.setTimeout(() => {
       if (activeAction.current === action.id) {
         activeAction.current = undefined;
-        const atDesigner = action.type === 'form_designer' && currentLocation.current.pathname === (action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`);
-        const error = running.current.has(action.id) ? '设计器操作未及时完成，已停止等待；页面可能保留部分修改，请检查当前草稿。' : atDesigner ? '设计器尚未加载完成，请稍后重试。' : '未能进入设计器，请检查当前页面状态后重试。';
+        const atDesigner = action.type === 'form_designer' && (action.draft_id
+          ? currentLocation.current.pathname === newBusinessFormDesignPath
+          : `${currentLocation.current.pathname}${currentLocation.current.search}` === businessDataDesignPath(action.form_id, 'form'));
+        const error = action.type === 'application_navigation'
+          ? '工作台切换未完成，请检查当前页面是否有未保存的修改。'
+          : running.current.has(action.id) ? '设计器操作未及时完成，已停止等待；页面可能保留部分修改，请检查当前草稿。' : atDesigner ? '设计器尚未加载完成，请稍后重试。' : '未能进入设计器，请检查当前页面状态后重试。';
         void acknowledgePageAction(action.id, { ok: false, error }).catch(() => undefined);
         running.current.delete(action.id);
         navigating.current.delete(action.id);
@@ -84,6 +97,25 @@ export function AiPageActionRouter() {
         finishPageAction(action.id);
       }
     };
+    if (action.type === 'application_navigation') {
+      if (navigationTarget?.id === action.id
+        && location.state?.aiNavigationId === action.id
+        && location.state?.applicationId === navigationTarget.target.application_id && applicationReady) {
+        running.current.add(action.id);
+        void execute(async () => ({ ...navigationTarget.target }));
+      } else if (!navigating.current.has(action.id)) {
+        navigating.current.add(action.id);
+        const active = () => activeAction.current === action.id;
+        void onOpenWorkspaceTarget(action, active).then(target => {
+          if (active()) setNavigationTarget({ id: action.id, target });
+        }).catch(error => {
+          if (!active()) return;
+          running.current.add(action.id);
+          void execute(async () => { throw error; });
+        });
+      }
+      return;
+    }
     if (action.type === 'component_page') {
       const controller = getComponentPageController(action.page_code);
       running.current.add(action.id);
@@ -93,23 +125,27 @@ export function AiPageActionRouter() {
       });
       return;
     }
-    const targetPath = action.draft_id ? '/form-settings/new' : `/form-settings/${action.form_id}`;
-    if (action.action === 'draft_new' && (location.pathname !== targetPath || new URLSearchParams(location.search).get('draft') !== action.draft_id)) {
+    if (action.action === 'draft_new' && (location.pathname !== newBusinessFormDesignPath || new URLSearchParams(location.search).get('draft') !== action.draft_id)) {
       // Navigation may suspend while the native designer chunk loads. Repeating
       // it can run into the new editor's own unsaved-change blocker.
       if (!navigating.current.has(action.id)) {
         navigating.current.add(action.id);
-        navigate(`${targetPath}?tab=form&legacy=1&draft=${action.draft_id}`, { state: { aiFormDraft: { ...action.draft, fields: [], id: action.draft_id } } });
+        const search = new URLSearchParams({ draft: action.draft_id || '' });
+        navigate(`${newBusinessFormDesignPath}?${search}`, { state: { aiFormDraft: { ...action.draft, fields: [], id: action.draft_id } } });
       }
       return;
     }
     const controller = getPageController(action.form_id);
     if (!controller) {
-      if (!action.draft_id && location.pathname !== targetPath) navigate(`${targetPath}?tab=form&legacy=1`);
+      if (!action.draft_id && !navigating.current.has(action.id)) {
+        navigating.current.add(action.id);
+        navigate(businessDataDesignPath(action.form_id, 'form'));
+      }
       return;
     }
     running.current.add(action.id);
     void execute(() => controller(action));
-  }, [action, location.pathname, location.search, controllerVersion, getPageController, getComponentPageController, finishPageAction, navigate]);
+  }, [action, location, navigationTarget, applicationReady, onOpenWorkspaceTarget, controllerVersion,
+    getPageController, getComponentPageController, finishPageAction, navigate]);
   return null;
 }

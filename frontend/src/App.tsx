@@ -37,12 +37,14 @@ import { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasAppli
 import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
 import { AiPageActionRouter } from './components/AiChatWidget/pageControls';
+import type { ApplicationNavigationAction } from './components/AiChatWidget/pageControls';
+import { resolveNavigationTarget } from './components/AiChatWidget/navigationTarget';
 import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
 import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
 import NotificationCenter from './components/NotificationCenter';
 import { CANON_CSS_VARIABLES, canonTheme } from './theme/canon';
-import { businessDataDesignPath, settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
+import { formSettingsRedirect, newBusinessFormDesignPath, settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
   getCurrentRelease,
@@ -56,19 +58,34 @@ const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => 
 const SchedulerPage = lazy(() => import('./pages/Scheduler'));
 const WorkspacePage = lazy(() => import('./pages/Workspace'));
 const ComponentPages = lazy(() => import('./pages/ComponentPages'));
+const WorkbenchDesignPreview = lazy(() => import('./components/AiChatWidget/WorkbenchDesignPreview'));
 const FormPageEntry = lazy(() => import('./pages/ComponentPages/FormPageEntry'));
 const FormSettingsPage = lazy(() => import('./pages/FormSettings'));
 const WorkflowPage = lazy(() => import('./pages/Workflow'));
 const MaterialApplicationsPage = lazy(() => import('./pages/MaterialApplications'));
 const LoginPage = lazy(() => import('./pages/Login'));
 
-function FormSettingsEntry() {
+function WorkspaceRoutes({ allowPreview, children }: { allowPreview: boolean; children: React.ReactNode }) {
+  const location = useLocation();
+  return allowPreview && location.state?.aiDesignPreviewId
+    ? <WorkbenchDesignPreview>{children}</WorkbenchDesignPreview>
+    : <>{children}</>;
+}
+
+function FormSettingsEntry({isAdmin}: {isAdmin: boolean}) {
   const { formId } = useParams();
-  const { search } = useLocation();
-  if (formId && formId !== 'new' && new URLSearchParams(search).get('source') === 'business-data') {
-    return <Navigate to={businessDataDesignPath(formId)} replace />;
+  const { search, state } = useLocation();
+  if (isAdmin && formId && formId !== 'new' && new URLSearchParams(search).get('tab') === 'permission') {
+    return <FormSettingsPage key={formId} formId={formId} initialTab="permission" />;
   }
-  return <FormSettingsPage />;
+  return <Navigate to={formSettingsRedirect(formId, search)} state={state} replace />;
+}
+
+function NewBusinessFormDesigner() {
+  const { search, state } = useLocation();
+  const draftId = new URLSearchParams(search).get('draft');
+  if (!draftId || state?.aiFormDraft?.id !== draftId) return <Navigate to="/studio/business-data" replace />;
+  return <FormSettingsPage key={draftId} formId="new" initialTab="form" />;
 }
 
 const { Header, Sider, Content } = Layout;
@@ -584,7 +601,8 @@ function AppContent() {
     const path = findMenuLabelPath(allMenuItems, selectedKey);
     return path?.length ? path[path.length - 1] : undefined;
   }, [allMenuItems, selectedKey]);
-  const runtimeTitle = isAccountPage ? '账号设置' : location.pathname === '/more' ? '应用中心' : location.pathname === '/scheduler' ? '日常任务' : location.pathname === '/plugins' ? '插件与扩展' : location.pathname.startsWith('/form-settings/') ? '页面设计' : areaEntry?.label || currentMenuTitle || (isAccountPage ? (new URLSearchParams(location.search).get('section') === 'preferences' ? '设置与偏好' : '个人账号') : activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
+  const isBusinessDataDesign = /^\/studio\/business-data\/[^/]+\/design\/?$/.test(location.pathname);
+  const runtimeTitle = isAccountPage ? '账号设置' : location.pathname === '/more' ? '应用中心' : location.pathname === '/scheduler' ? '日常任务' : location.pathname === '/plugins' ? '插件与扩展' : isBusinessDataDesign ? '业务数据设计' : areaEntry?.label || currentMenuTitle || (activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
   const releaseRecords = normalizeReleaseRecords(releaseInfo);
   const activeReleaseIndex = releaseRecords.length
     ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
@@ -602,9 +620,33 @@ function AppContent() {
   };
 
 
-  const switchApplication = (app: ApplicationInfo) => {
-    const route = normalizeRuntimeRoute(app.default_route) || '/';
-    navigate(route, { state: { applicationId: app.id } });
+  const switchApplication = (app: ApplicationInfo, target?: { id: string; path: string }) => {
+    const route = normalizeRuntimeRoute(target?.path || app.default_route) || '/';
+    navigate(route, { state: { applicationId: app.id, ...(target && { aiNavigationId: target.id }) } });
+  };
+
+  const openAiWorkspaceTarget = async (action: ApplicationNavigationAction, active: () => boolean) => {
+    const app = action.application
+      ? resolveNavigationTarget(applications, action.application, item => item.name, item => item.code)
+      : isApplicationWorkspace ? currentApplication : undefined;
+    if (!app) throw new Error(action.application ? `没找到可访问的应用「${action.application}」。` : '请先指定菜单页所属的应用。');
+    let path = app.default_route || '/';
+    let pageName: string | undefined;
+    if (action.action === 'open_page') {
+      const response = await listApplicationMenus(app.id);
+      const flatten = (menus: DynamicMenu[]): DynamicMenu[] => menus.filter(menu => menu.is_visible !== false)
+        .flatMap(menu => [menu, ...flatten(menu.children || [])]);
+      const menus = flatten(response.data?.data || []).filter(menu => Boolean(menu.route_path));
+      const menu = resolveNavigationTarget(menus, action.page, item => item.title);
+      if (!menu) throw new Error(`在「${app.name}」里没找到可访问的菜单页「${action.page}」。`);
+      path = menu.route_path || '/';
+      pageName = menu.title;
+    }
+    const pathname = path.split(/[?#]/, 1)[0];
+    const route = normalizeRuntimeRoute(pathname) + path.slice(pathname.length);
+    if (!route.startsWith('/') || route.startsWith('//') || route.includes('\\')) throw new Error('目标入口地址无效。');
+    if (active()) switchApplication(app, { id: action.id, path: route });
+    return { application_id: app.id, application_name: app.name, page_name: pageName };
   };
 
   const openWorkspace = () => navigate('/', { state: { workspaceHome: true } });
@@ -618,7 +660,8 @@ function AppContent() {
   return (
     <ShellPageTitleProvider fallback={runtimeTitle}>
     <AiWorkbenchProvider>
-    <AiPageActionRouter />
+    <AiPageActionRouter onOpenWorkspaceTarget={openAiWorkspaceTarget}
+      applicationReady={location.pathname !== '/' || Boolean(routeApplication && menusLoadedFor === routeApplication.id && !firstApplicationRoute)} />
     <Layout style={CANON_CSS_VARIABLES} className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <a className="shell-skip-link" href="#workspace-main">跳转到页面内容</a>
       <ApplicationRail library={library} onOpen={openLibraryApp} onHome={openWorkspace} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
@@ -662,6 +705,7 @@ function AppContent() {
           <div className="content-surface">
             <ErrorBoundary>
               <Suspense fallback={<PageLoader />}>
+                <WorkspaceRoutes allowPreview={isAdmin}>
                 <Routes>
                   <Route path="/" element={<WorkspacePage />} />
                   <Route path="/more" element={<ApplicationLibrary library={library} onOpen={openLibraryApp} />} />
@@ -680,7 +724,8 @@ function AppContent() {
                   <Route path="/program/alert-center" element={<FormPageEntry kind="program" formSlug="alert-center" />} />
                   <Route path="/program/material-application" element={<MaterialApplicationsPage />} />
                   <Route path="/program/:programId" element={<FormPageEntry kind="program" />} />
-                  <Route path="/form-settings/:formId" element={<FormSettingsEntry />} />
+                  <Route path="/form-settings/:formId" element={<FormSettingsEntry isAdmin={isAdmin} />} />
+                  <Route path={newBusinessFormDesignPath} element={isAdmin ? <NewBusinessFormDesigner /> : <Navigate to="/studio/business-data" replace />} />
                   <Route path="/studio/business-data/:slug/design" element={isAdmin
                     ? <FormPageEntry kind="business" businessDataDesign />
                     : <Navigate to="/studio/business-data" replace />} />
@@ -693,13 +738,14 @@ function AppContent() {
 
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
+                </WorkspaceRoutes>
               </Suspense>
             </ErrorBoundary>
           </div>
         </Content>
       </Layout>
 
-      <AiChatWidget enabled={preferences.aiBubbleVisible} pageTitle={runtimeTitle} applicationName={activeArea === 'business' && location.pathname !== '/account-center' || location.pathname.startsWith('/form-settings/') ? currentApplication?.name : undefined} />
+      <AiChatWidget enabled={preferences.aiBubbleVisible} pageTitle={runtimeTitle} applicationName={activeArea === 'business' && !isAccountPage || isBusinessDataDesign ? currentApplication?.name : undefined} />
 
 
       <Modal

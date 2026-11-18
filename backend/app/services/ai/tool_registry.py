@@ -84,6 +84,13 @@ def to_openai_function(tool: ToolDefinition) -> dict[str, Any]:
             'form_id': {'type': 'integer', 'description': '精确查询表单及其已发布字段'},
             'form_code': {'type': 'string', 'description': '精确查询表单及其已发布字段'},
         })
+    if tool.name == 'platform.identity_settings.query':
+        description += ' 使用 subject=roles 查询角色目录，返回可用于配置权限的数字角色 ID。'
+        parameters.setdefault('properties', {})['role_name'] = {
+            'type': 'string', 'description': '查询角色时，按显示名称或编码精确匹配',
+        }
+    if tool.name == 'forms.create_permissions':
+        description += ' 为指定表单配置角色的记录或字段权限。按角色名称查角色目录取得 role_id，禁止删除用 action=delete、effect=deny。'
     return {
         "type": "function",
         "function": {

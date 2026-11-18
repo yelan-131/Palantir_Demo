@@ -23,9 +23,8 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
     tool = int(safety.get('toolTimeoutSeconds') or 30)
     # The MCP transport must outlive the handler's own cancellation and serialization.
     transport = tool + 5
-    steps = int(safety.get('maxToolSteps') or 5)
-    recommended = max(30, int((idle / 1000 * (config.retry_count + 1) + transport) * (steps + 1)))
-    execution = int(native.get('request_timeout_seconds') or min(3600, recommended))
+    recommended = max(30, idle / 1000 * (config.retry_count + 1) + transport)
+    execution = int(native.get('request_timeout_seconds') or 3600)
     compaction = native.get('compaction') or {}
     message_budget = window - output
     if message_budget <= 0:
@@ -48,7 +47,7 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
             'retryCount': config.retry_count, 'streamIdleTimeoutMs': idle,
             'initializeTimeoutSeconds': int(native.get('initialize_timeout_seconds') or 30),
             'executionTimeoutSeconds': execution, 'toolTimeoutSeconds': tool,
-            'mcpTimeoutMs': transport * 1000, 'maxToolSteps': steps,
+            'mcpTimeoutMs': transport * 1000,
             'inputBudgetTokens': min(configured_input, window - output),
             'compactionEnabled': bool(compaction.get('enabled', True)),
             'thresholdRatio': float(compaction.get('thresholdRatio', .8)),
@@ -62,7 +61,7 @@ def effective_harness_parameters(data: dict, purpose: str = 'reasoning') -> dict
             'maxTokens': 'DeepSeek 官方上限' if effective.get('_officialDeepSeekLimits') and output == DEEPSEEK_MAX_OUTPUT_TOKENS else '模型配置' if model.get('maxTokens') else '平台默认',
             'reasoningEffort': '模型配置' if model.get('reasoningEffort') else '全局配置' if native.get('reasoning_effort') else '模型默认',
             'streamIdleTimeoutMs': '服务配置' if service.get('streamIdleTimeoutMs') else '全局配置' if (data.get('harnessPolicy') or {}).get('streamIdleTimeoutMs') else '服务响应等待时间',
-            'executionTimeoutSeconds': '全局配置' if native.get('request_timeout_seconds') else '工具预算、等待时间与重试次数计算',
+            'executionTimeoutSeconds': '全局配置' if native.get('request_timeout_seconds') else '平台默认',
         },
         'warnings': ['执行超时短于建议预算，可能在重试或工具处理完成前结束。'] if enabled and execution < recommended else [],
     }

@@ -288,7 +288,7 @@ export default function AnalyticsWorkspace({program, payload}: Props) {
             </Space></div>}
           status={errorNotice || (editor && !editor.publishedVersion && !editor.publishedDesign) ? <div className="analytics-settings-status">
             {errorNotice}
-            {editor && !editor.publishedVersion && !editor.publishedDesign && <Alert type="info" showIcon message="请先完成新表单的首次发布" description={<Link to={`/form-settings/${encodeURIComponent(program.id)}?legacy=1&tab=dashboard`}>前往表单设置</Link>} />}
+            {editor && !editor.publishedVersion && !editor.publishedDesign && <Alert type="info" showIcon message="请先在业务数据中发布表单" description={<Link to={`/studio/business-data?${new URLSearchParams({form: program.id})}`}>前往业务数据</Link>} />}
           </div> : undefined}
           content={panel === 'library' ? <AnalyticsMetricLibrary design={draft} focusId={libraryFocusId} refreshKey={editor?.revision} disabled={!!operation} hasUnsavedBoardChanges={dirty} onChange={changeDesign} onPublished={async () => { await enterEditor({panel:'library'}); setRefreshKey(key => key + 1); }} onDirtyChange={setLibraryDirty} onBusyChange={setLibraryBusy} /> : panel === 'versions' ? <AnalyticsVersionHistory programId={program.id} draft={draft} refreshKey={editor?.revision} previewVersion={historicalPreview?.version} disabled={locked} onPreview={setHistoricalPreview} onStopPreview={() => setHistoricalPreview(undefined)} onRestore={restoreVersion} /> : undefined}
           actions={<div className="analytics-settings-actions">{(panel==='library' || historicalPreview) && <span>{panel==='library'?'以下操作仅保存或发布当前看板配置。':`正在预览 v${historicalPreview?.version}，返回草稿后可保存或发布。`}</span>}<div>

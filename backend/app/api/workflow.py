@@ -227,7 +227,7 @@ async def update_definition(def_id: int, body: WorkflowDefCreate, user: dict = D
             action="update",
             resource_type="workflow_def",
             resource_id=d.id,
-            new_values={"version": next_version, "status": d.status},
+            new_values={"version": d.version, "status": d.status},
         )
         return {"id": d.id, "version": d.version, "status": d.status}
 

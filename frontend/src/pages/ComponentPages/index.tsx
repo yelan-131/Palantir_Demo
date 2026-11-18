@@ -42,13 +42,14 @@ type RouteExit = {proceed: () => void; reset: () => void};
 function NavigationGuard({enabled,onBlocked}: {enabled: boolean;onBlocked:(value: RouteExit)=>void}) {
   const blocker = useBlocker(({currentLocation,nextLocation})=>enabled&&(
     currentLocation.pathname !== nextLocation.pathname ||
+    currentLocation.state?.aiDesignPreviewId !== nextLocation.state?.aiDesignPreviewId ||
     new URLSearchParams(currentLocation.search).get('edit') !== new URLSearchParams(nextLocation.search).get('edit')
   ));
   useEffect(()=>{if(blocker.state==='blocked')onBlocked({proceed:blocker.proceed,reset:blocker.reset});},[blocker.state,onBlocked]);
   return null;
 }
 
-export default function ComponentPages({pageCode, openEditor = false, businessDataFormId, workspace = false, renderWorkspaceWidget}: {pageCode?: string; openEditor?: boolean; businessDataFormId?: number; workspace?: boolean; renderWorkspaceWidget?: (widget: PageWidget) => React.ReactNode} = {}) {
+export default function ComponentPages({pageCode, openEditor = false, businessDataFormId, designTab, designNavigationKey, workspace = false, renderWorkspaceWidget}: {pageCode?: string; openEditor?: boolean; businessDataFormId?: number; designTab?: BusinessTab|'data'|'style'; designNavigationKey?: string; workspace?: boolean; renderWorkspaceWidget?: (widget: PageWidget) => React.ReactNode} = {}) {
   const navigate = useNavigate();
   const {code: routeCode} = useParams<{code: string}>();
   const code = pageCode || routeCode;
@@ -98,10 +99,13 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
   const [loadingData, setLoadingData] = useState(false);
   const request = useRef(0);
   const resolvedIdentity = useRef<string>();
+  const openedDesignLink = useRef<string>();
   const dirty = Boolean(draft && state && JSON.stringify(draft) !== JSON.stringify(state.definition));
   const {draftPreview, definition:active} = useMemo(() => pagePresentation(state,admin,editing,draft), [state,admin,editing,draft]);
   const selectedWidget = active?.widgets.find(item=>item.id===selected);
-  const sourceId = panel === 'widget' || sourceEditor ? widgetSourceId(active, selectedWidget) : active?.sourceFormId;
+  const sourceId = sourceEditor && !selectedWidget && businessDataFormId
+    ? businessDataFormId
+    : panel === 'widget' || sourceEditor ? widgetSourceId(active, selectedWidget) : active?.sourceFormId;
   const sourceActive = Boolean(editing && draft && sourceEditor && sourceId);
   const source = sourceId ? sources[sourceId] : undefined;
   const globalSource = active?.sourceFormId ? sources[active.sourceFormId] : undefined;
@@ -151,6 +155,30 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     })();
     return () => { current = false; };
   }, [code, admin, accountKey, startInEditor, businessDataFormId]);
+
+  useEffect(() => {
+    if (!designNavigationKey || !designTab || !editing || !state || !draft || !businessDataFormId || openedDesignLink.current === designNavigationKey) return;
+    openedDesignLink.current = designNavigationKey;
+    if (designTab === 'style' || designTab === 'data') {
+      setSourceEditor(undefined);
+      sourceInitialTab.current = undefined;
+    }
+    if (designTab === 'style') { setPanel('style'); return; }
+    const isDashboard = ['analysis', 'analytics', 'dashboard', 'report'].includes(state.hostForm?.kind ?? '');
+    const component = businessDataComponent(draft, businessDataFormId, isDashboard && designTab === 'data');
+    if (designTab === 'data') {
+      setSelected(component?.id);
+      setPanel(component ? 'widget' : 'data');
+      setWidgetTab('data');
+      return;
+    }
+    if (isDashboard) return;
+    setSelected(component?.id);
+    setPanel('widget');
+    if (!sourceEditor) sourceInitialTab.current = designTab;
+    setWidgetTab(designTab);
+    setSourceEditor(designTab);
+  }, [designNavigationKey, designTab, editing, state, draft, businessDataFormId, sourceEditor]);
 
   useEffect(() => {
     if (!admin) return;
@@ -560,11 +588,11 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
             ]},
           ],onClick:({key})=>void openContextAction(key),
         }}>{canvas}</Dropdown>:canvas}</div>
-        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings formId={String(sourceId)} embedded requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
+        {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings key={sourceId} formId={String(sourceId)} requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
       </div>
       {editing&&draft&&<div className="analytics-settings-page">
         <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
-          sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} businessTab={sourceEditor} sourceIsBusiness={Boolean(sourceIsBusiness)}
+          sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} sourceIsBusiness={Boolean(sourceIsBusiness)}
           onPanel={setPanel} onTab={changeWidgetTab} onChange={changeDraft} onAdd={add} onSelect={selectWidget}
           onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} />
       </div>}

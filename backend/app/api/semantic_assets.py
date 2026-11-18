@@ -1648,7 +1648,7 @@ async def list_page_contracts(
     contracts = [
         {
             "route": (
-                f"/form-settings/{form.code}?tab=dashboard"
+                f"/program/{form.code}"
                 if str((form.config or {}).get("assemblyKind") or (form.config or {}).get("kind") or (form.config or {}).get("type") or "").lower()
                 in {"analysis", "analytics", "dashboard", "report", "bi_report", "metric_dashboard", "list_analysis"}
                 else f"/dynamic/{form.code}"

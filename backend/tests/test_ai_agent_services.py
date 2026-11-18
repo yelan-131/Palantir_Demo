@@ -224,13 +224,17 @@ def test_preflight_blocks_viewer_business_query_without_capability():
     assert decision.capability == "business_query"
 
 
-def test_safety_policy_max_tool_steps_is_mirrored_for_runtime_compatibility():
+def test_settings_discard_retired_tool_step_limit():
     from app.services.ai.settings import merge_ai_settings, safety_policy_snapshot
 
-    merged = merge_ai_settings({"safetyPolicy": {"maxToolSteps": 2, "toolTimeoutSeconds": 9}}, existing={})
+    legacy = {"safetyPolicy": {"maxToolSteps": "unused", "toolTimeoutSeconds": 9},
+              "riskPolicy": {"maxToolSteps": 12, "high": "confirm_and_audit"}}
+    merged = merge_ai_settings(legacy, existing={})
 
-    assert safety_policy_snapshot(merged)["maxToolSteps"] == 2
-    assert merged["riskPolicy"]["maxToolSteps"] == 2
+    assert "maxToolSteps" not in safety_policy_snapshot(legacy)
+    assert "maxToolSteps" not in merged["safetyPolicy"]
+    assert merged["safetyPolicy"]["toolTimeoutSeconds"] == 9
+    assert merged["riskPolicy"] == {"high": "confirm_and_audit"}
 
 
 def test_legacy_switch_cannot_remove_high_risk_confirmation():

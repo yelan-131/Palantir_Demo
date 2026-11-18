@@ -127,7 +127,7 @@ release.json        发布清单，后端 /api/v1/release/current 读取此文�
 | `Scheduler` | `/scheduler` 日常任务 |
 | `NavigationArea` | `/studio/*`、`/data-center/*`、`/admin/*` 的分发页，按路径渲染下列页面，也提供 `/account-center` |
 | `ComponentPages` | 组件页面画布与属性面板（`/pages/:code`、`/studio/page-design`），以及表单页面入口 `FormPageEntry`（`/dynamic/:slug`、`/program/:programId`） |
-| `FormSettings` | `/form-settings/:formId` 表单设计器：字段、布局、规则、版本、发布校验、流程设计、分析设计 |
+| `FormSettings` | `/studio/business-data/:formId/design` 内编辑录入和流程。角色权限从原权限管理入口打开 |
 | `DynamicPage` | 未启用组件页面时的业务记录列表与表单 |
 | `AppPrograms` | 未启用组件页面时的 `/program/*` 程序页；内部复用 `Dashboard` |
 | `AlertCenter`、`MaterialApplications` | 告警中心、料号申请 |

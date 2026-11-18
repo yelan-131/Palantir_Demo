@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, useRef, useCallback, type ReactNode } from 'react';
 
 import type { BrowserPageAction, ComponentPageController, PageController } from './pageControls';
+import type { DesignPreview } from './designPreview';
 
 export type AiSurface = 'global' | 'knowledge';
 
@@ -20,6 +21,8 @@ export interface AiKnowledgeContext {
 }
 
 interface AiWorkbenchContextValue {
+  designPreview?: { preview: DesignPreview; sessionId: string; messageId: string; runId?: string; returnTo: string };
+  setDesignPreview: React.Dispatch<React.SetStateAction<AiWorkbenchContextValue['designPreview']>>;
   pageActions: BrowserPageAction[];
   enqueuePageAction: (action: BrowserPageAction) => void;
   registerComponentPageController: (code: string, controller: ComponentPageController) => () => void;
@@ -39,6 +42,7 @@ interface AiWorkbenchContextValue {
 const AiWorkbenchContext = createContext<AiWorkbenchContextValue | undefined>(undefined);
 
 export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
+  const [designPreview, setDesignPreview] = useState<AiWorkbenchContextValue['designPreview']>();
   const [knowledgeContext, setKnowledgeContext] = useState<AiKnowledgeContext | undefined>();
   const [pageActions, setPageActions] = useState<BrowserPageAction[]>([]);
   const [componentPageContext, setComponentPageContext] = useState<{ code: string; title: string }>();
@@ -47,6 +51,13 @@ export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
   const [designerContext, setDesignerContext] = useState<Record<string, unknown>>();
   const controllers = useRef(new Map<number, PageController>());
   const enqueuePageAction = useCallback((action: BrowserPageAction) => {
+    if (action.type === 'application_navigation') {
+      const validName = (value: unknown) => typeof value === 'string' && value.trim().length > 0 && value.length <= 100;
+      if (!action.id || (action.action === 'open_application' ? !validName(action.application)
+        : action.action !== 'open_page' || !validName(action.page) || (action.application !== undefined && !validName(action.application)))) return;
+      setPageActions(current => current.some(item => item.id === action.id) ? current : [...current, action]);
+      return;
+    }
     if (action.type === 'component_page') {
       if (!action.id || !action.page_code || !['inspect', 'apply'].includes(action.action)) return;
       setPageActions(current => current.some(item => item.id === action.id) ? current : [...current, action]);
@@ -74,10 +85,10 @@ export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   const getComponentPageController = useCallback((code: string) => componentControllers.current.get(code), []);
-  const value = useMemo(() => ({ knowledgeContext, setKnowledgeContext, pageActions, enqueuePageAction, finishPageAction,
+  const value = useMemo(() => ({ designPreview, setDesignPreview, knowledgeContext, setKnowledgeContext, pageActions, enqueuePageAction, finishPageAction,
     registerPageController, getPageController, controllerVersion, designerContext, setDesignerContext,
     componentPageContext, setComponentPageContext, registerComponentPageController, getComponentPageController }),
-    [knowledgeContext, pageActions, enqueuePageAction, finishPageAction, registerPageController, getPageController, controllerVersion, designerContext,
+    [designPreview, knowledgeContext, pageActions, enqueuePageAction, finishPageAction, registerPageController, getPageController, controllerVersion, designerContext,
       componentPageContext, registerComponentPageController, getComponentPageController]);
   return <AiWorkbenchContext.Provider value={value}>{children}</AiWorkbenchContext.Provider>;
 }

@@ -110,7 +110,6 @@ DEFAULT_SAFETY_POLICY: dict[str, Any] = {
     "highRiskConfirm": True,
     # The public runtime always uses the official Harness kernel.
     "agentLoopMode": "harness",
-    "maxToolSteps": 5,
     "toolTimeoutSeconds": 30,
     "persistConfirmations": False,
     "agentMaxInputTokens": 100000,
@@ -204,9 +203,7 @@ def settings_snapshot() -> dict[str, Any]:
 def safety_policy_snapshot(settings_data: dict[str, Any] | None = None) -> dict[str, Any]:
     data = settings_data or AI_SYSTEM_SETTINGS
     safety_policy = _merge_nested(DEFAULT_SAFETY_POLICY, data.get("safetyPolicy"))
-    risk_policy = data.get("riskPolicy") or {}
-    if safety_policy.get("maxToolSteps") in (None, "") and risk_policy.get("maxToolSteps") not in (None, ""):
-        safety_policy["maxToolSteps"] = risk_policy.get("maxToolSteps")
+    safety_policy.pop("maxToolSteps", None)
     return safety_policy
 
 
@@ -379,7 +376,7 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
     merged["harnessPolicy"] = _merge_nested(deepcopy(DEFAULT_HARNESS_POLICY), merged.get("harnessPolicy"))
     merged["harnessPolicy"]["compaction"] = _merge_nested(deepcopy(DEFAULT_HARNESS_POLICY["compaction"]), merged["harnessPolicy"].get("compaction"))
     # Retired platform summaries must never override native DSH compaction.
-    merged["safetyPolicy"] = _merge_nested(DEFAULT_SAFETY_POLICY, merged.get("safetyPolicy"))
+    merged["safetyPolicy"] = safety_policy_snapshot(merged)
     for key in ("highRiskConfirm", "sensitiveMasking"):
         if key in clean_incoming and key not in (clean_incoming.get("safetyPolicy") or {}):
             merged["safetyPolicy"][key] = clean_incoming[key]
@@ -389,8 +386,8 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
         if key in clean_incoming and target not in (clean_incoming.get("ragPolicy") or {}):
             merged["ragPolicy"][target] = clean_incoming[key]
         merged.pop(key, None)
-    if merged["safetyPolicy"].get("maxToolSteps") not in (None, ""):
-        merged.setdefault("riskPolicy", {})["maxToolSteps"] = merged["safetyPolicy"].get("maxToolSteps")
+    if isinstance(merged["riskPolicy"], dict):
+        merged["riskPolicy"].pop("maxToolSteps", None)
     merged["safetyPolicy"]["agentLoopMode"] = "harness"
     for deprecated in ("proactiveEnabled", "streaming", "dailyLimit", "userDailyLimit", "knowledgeScopes", "tools", "retentionDays"):
         merged.pop(deprecated, None)
@@ -487,13 +484,12 @@ def validate_ai_settings(data: dict[str, Any]) -> None:
             raise ValueError(f"{key} 必须是整数") from None
         if not low <= number <= high:
             raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
-    for key, low, high in [("maxToolSteps", 1, 20), ("toolTimeoutSeconds", 1, 180)]:
-        try:
-            number = int(policy.get(key, DEFAULT_SAFETY_POLICY[key]))
-        except (ValueError, TypeError):
-            raise ValueError(f"{key} 必须是整数") from None
-        if not low <= number <= high:
-            raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
+    try:
+        tool_timeout = int(policy.get("toolTimeoutSeconds", DEFAULT_SAFETY_POLICY["toolTimeoutSeconds"]))
+    except (ValueError, TypeError):
+        raise ValueError("toolTimeoutSeconds 必须是整数") from None
+    if not 1 <= tool_timeout <= 180:
+        raise ValueError("toolTimeoutSeconds 必须在 1 到 180 之间")
     for group, ranges in {
         "contextPolicy": {"recentMessageLimit": (2, 50), "maxContextTokens": (1000, 200000)},
         "ragPolicy": {"topK": (1, 20), "maxEvidenceChars": (200, 5000)},

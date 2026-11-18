@@ -17,8 +17,8 @@ import {widgetFontOptions, widgetPalettes} from '../AppPrograms/analyticsWidgetA
 import '../AppPrograms/analytics-editor-panel.css';
 
 export type Panel = 'widget' | 'style' | 'data' | 'filters' | 'add' | 'permissions';
-export type WidgetTab = 'basic' | 'data' | 'form' | 'flow';
 export type BusinessTab = 'form' | 'flow';
+export type WidgetTab = 'basic' | 'data' | BusinessTab;
 const textAlignmentOptions = [
   {value:'left',label:'左对齐'},
   {value:'center',label:'居中'},
@@ -49,7 +49,6 @@ interface Props {
   disabled: boolean;
   sourceOpen: boolean;
   sourceSlots?:Record<'properties'|'actions'|'status',React.RefCallback<HTMLDivElement>>;
-  businessTab?: BusinessTab;
   sourceIsBusiness: boolean;
   onPanel: (panel: Panel) => void;
   onTab: (tab: WidgetTab) => void;
@@ -94,7 +93,8 @@ export default function Inspector(props: Props) {
   };
   const paletteNames = {manufacturing:'制造蓝绿', business:'经营彩色', warning:'风险预警', mono:'单色专业'};
   let content: React.ReactNode;
-  if (panel === 'widget') content = widget?.type === 'record-filter'
+  if (panel === 'widget' && (tab === 'form' || tab === 'flow')) content = <div className="component-source-properties form-designer-embedded" ref={props.sourceSlots?.properties}/>;
+  else if (panel === 'widget') content = widget?.type === 'record-filter'
     ? <Alert type="info" message="旧版独立筛选" description="需要移除此组件时，请先在业务列表的「数据 → 列表筛选」配置所需条件。" />
     : widget ? <>
 
@@ -194,7 +194,6 @@ export default function Inspector(props: Props) {
         selectedFilterScheme={selectedFilterSchemes[widget.id]}
         onSelectFilterScheme={id=>setSelectedFilterSchemes(previous=>({...previous,[widget.id]:id}))} />}
     </>}
-    {(tab === 'form'||tab === 'flow') && <div className="component-source-properties form-designer-embedded" ref={props.sourceSlots?.properties}/>}
   </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击左侧组件配置属性" />;
   else if (panel==='style') content=<>
     <PropertyGroup title="组件默认外观" hint="组件未独立设置的分区跟随这里；已独立设置的分区保留自己的外观。">
@@ -228,7 +227,7 @@ export default function Inspector(props: Props) {
     </>} />
     {props.status&&<div className="analytics-editor-heading-status">{props.status}</div>}
     </div>
-    {panel==='widget'&&widget&&widget.type!=='record-filter'&&<InspectorTabs activeKey={tab} onChange={value=>onTab(value as WidgetTab)} items={tabs.map(item=>({...item,disabled}))} />}
+    {panel==='widget'&&(sourceOpen||(widget&&widget.type!=='record-filter'))&&<InspectorTabs activeKey={tab} onChange={value=>onTab(value as WidgetTab)} items={tabs.map(item=>({...item,disabled}))} />}
     {panel!=='widget'&&panel!=='add'&&<InspectorTabs aria-label="页面设置分类" activeKey={panel} onChange={value=>onPanel(value as Panel)} items={[
       {key:'style',label:'布局'},
       {key:'data',label:'数据'},

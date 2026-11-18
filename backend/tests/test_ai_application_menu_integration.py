@@ -51,7 +51,6 @@ async def test_harness_discovery_and_confirmed_application_menu_writes(monkeypat
     settings = merge_ai_settings({"aiEnabled": True, "agentMode": "confirm"})
     settings["rolePolicies"] = []
     settings["domains"] = ["low-code"]
-    settings["safetyPolicy"]["maxToolSteps"] = 24
     monkeypatch.setattr(runtime, "load_persisted_ai_settings", AsyncMock())
     monkeypatch.setattr(runtime, "settings_snapshot", lambda: settings)
     bridge = runtime.PlatformBridge(user, settings, {})

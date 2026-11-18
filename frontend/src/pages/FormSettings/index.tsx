@@ -7,30 +7,29 @@ import { cloneLayoutSubtree, isLayoutContainer, isLayoutControl, layoutDescendan
 import { defaultRuleErrors } from '@/utils/formDefaults';
 import type { DefaultValueRule } from '@/utils/formDefaults';
 import type { NewFormDraft, PageAction } from '@/components/AiChatWidget/pageControls';
+import { businessDataDesignPath } from '@/config/navigation';
 import { enumOptions, matchesOptionSearch } from '@/utils/formControls';
 import type { OptionSearchSettings } from '@/utils/formControls';
 import { adminListOrgUnits, adminListRoles, adminListUsers, createPlatformForm, createPlatformFormField, getFormOptionSources, getPlatformForm, getPlatformFormByCode, listPlatformFormLayouts, listPlatformFormPermissions, listPlatformForms, listWorkflowBindings, previewDesignerRules, previewFormReferenceOptions, previewOptionSearchSchema, publishPlatformForm, restorePlatformFormDraft, updatePlatformForm, updatePlatformFormField, upsertPlatformFormLayout, wfCreateDefinition, wfGetDefinition, wfUpdateDefinition } from '@/services/api';
 import type { PlatformForm, PlatformFormField, PlatformFormPublishReport } from '@/services/api';
 import { PropertyGroup, PropertyInspectorHeader, PropertyRow } from '@/components/PropertyInspector';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import SettingsTabs from '@/components/SettingsTabs';
-import { controlTypeForField, defaultOperatorForControl, getViewTabs, normalizeViewConfig, renderTypeForField, sortByOrder, updateActiveView } from '@/utils/viewConfig';
-import type { ViewConfig, ViewFilterConfig, ViewTableColumnConfig } from '@/utils/viewConfig';
+import { normalizeViewConfig } from '@/utils/viewConfig';
+import type { ViewConfig } from '@/utils/viewConfig';
 import { applyAiLayoutOperations, describeAiLayout } from '@/utils/aiFormLayout';
 import { createPortal } from 'react-dom';
 import { createUuid } from '@/utils/uuid';
 import { normalizeSelection, parseStaticOptions, selectionConfigErrors, selectionCountError, staticOptionErrors } from '@/utils/selectOptions';
 import { useAiWorkbench } from '@/components/AiChatWidget/context';
-import { useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useBlocker, useLocation, useNavigate } from 'react-router-dom';
 import { useShellPageTitle } from '@/components/ShellPageTitle';
 import ProfessionalFlowDesigner, { validateFlowDesignerConfig } from './ProfessionalFlowDesigner';
 import type { FlowDesignerConfig } from './ProfessionalFlowDesigner';
-import { AnalyticsDashboardDesigner, AnalyticsDatasetDesigner, AnalyticsFilterDesigner, AnalyticsStyleDesigner, AnalyticsWidgetPreview } from './AnalyticsDesigners';
 import { RuleToggleControl } from './RuleToggleControl';
 import VersionManager from './VersionManager';
-import { analyticsTabs, configs, defaultConfig, embeddedBusinessTabs, getStoredAnalyticsDesign, inferDesignerKindFromMeta, inferFormDesignerKind, isNumericFormRouteId, makeDefaultAnalyticsDesign, makeDefaultAnalyticsStyle, resolvePlatformFormForConfig, tabs } from './designerConfig';
+import { configs, defaultConfig, getStoredAnalyticsDesign, inferDesignerKindFromMeta, inferFormDesignerKind, isNumericFormRouteId, makeDefaultAnalyticsDesign, resolvePlatformFormForConfig } from './designerConfig';
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, encodingDatePatternOptions, encodingGenerationModeOptions, encodingPaddingOptions, encodingSegmentTypeOptions, ruleLabels, ruleOperatorOptions, ruleStrategyOptions } from './designerOptions';
-import type { AnalyticsDataset, AnalyticsDesign, AnalyticsMetric, AnalyticsStyle, AnalyticsWidget, AnalyticsWidgetType, AssignmentRule, ComponentDefinition, ComponentPanel, ControlRule, ControlRuleCondition, ControlRuleKey, ControlTypeSettings, ControlWidth, DesignerConfig, DesignerField, DesignerTab, DropPosition, EncodingRule, EncodingSegment, FlowConnection, FlowNode, FlowNodeDefinition, FlowPortSide, FormPermissionRow, LayoutControl, OptionSearchSchema, PermissionDesignDraft, PermissionDraftMap, SearchSettingsDraft, ViewConfigMeta, WorkflowBindingPayload, WorkflowDefinitionPayload, WorkflowDesignerMeta } from './designerTypes';
+import type { AnalyticsDesign, AssignmentRule, ComponentDefinition, ComponentPanel, ControlRule, ControlRuleCondition, ControlRuleKey, ControlTypeSettings, ControlWidth, DesignerConfig, DesignerField, DropPosition, EncodingRule, EncodingSegment, FlowConnection, FlowNode, FlowNodeDefinition, FlowPortSide, FormPermissionRow, LayoutControl, OptionSearchSchema, PermissionDesignDraft, PermissionDraftMap, SearchSettingsDraft, ViewConfigMeta, WorkflowBindingPayload, WorkflowDefinitionPayload, WorkflowDesignerMeta } from './designerTypes';
 import { encodingSegmentLengthError, getDateSegmentLength, getEncodingRules, getEncodingSegmentTypeLabel, getEncodingSegments, makeEncodingRule, makeEncodingSegment, renderEncodingSample } from './encodingRules';
 import { getFieldBusinessType, isEncodingField, mapDesignerFieldType } from './fieldBusinessType';
 import { alertBusinessSections, designerFieldsToViewFields, getDefaultTypeSettings, getDesignerMeta, getEffectiveControlTypeForControl, getFlowNodeAssigneeLabel, getPreviewNodeNote, getRecommendedRules, getReferenceConfig, inferFieldControlType, inferReferenceSourceKind, isDataSourceControlType, isEditableTarget, makeAiLayoutControl, makeComponentControl, makeControlRules, makeFieldControl, normalizeBusinessSections, normalizeControlRules, optionSourceToOptions } from './fieldModel';
@@ -43,31 +42,29 @@ import { getStoredViewConfig, getViewConfigMeta, getWorkflowDesignerMeta, makeDe
 
 import { CanvasControl, ContainerProperties, PreviewContent, TableProperties } from './CanvasStage';
 import type { CanvasActions, CanvasScope } from './CanvasStage';
-import { DataViewDesigner } from './DataViewDesigner';
-import type { DataViewDesignerActions } from './DataViewDesigner';
 import { AssignmentEditor, CalculationEditor, ControlIdentityProperties, DataAttributeProperties, DefaultValueEditor, InteractionProperties, LayoutAppearanceProperties, LayoutWidthProperties, SearchSettingsEditor, TypeSpecificProperties } from './PropertyPanels';
 import type { PropertyPanelActions, PropertyPanelScope } from './PropertyPanels';
 
 export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;status:HTMLElement|null}
 
+type SourceDesignerTab = 'form' | 'flow';
+type DesignerTab = SourceDesignerTab | 'permission';
+
 export interface FormSettingsPageProps {
   workspaceTargets?: SourceEditorTargets;
   requestExitRef?:React.MutableRefObject<(()=>void)|null>;
-  formId?: string;
-  embedded?: boolean;
-  initialTab?: 'form' | 'filter' | 'flow' | 'permission';
-  requestedTab?: 'form' | 'flow';
-  onTabChange?: (tab:'form'|'flow')=>void;
+  formId: string;
+  initialTab?: DesignerTab;
+  requestedTab?: SourceDesignerTab;
+  onTabChange?: (tab: SourceDesignerTab) => void;
   onExit?: () => void;
   onPublished?: () => void;
 }
 
-export default function FormSettingsPage({ formId: providedFormId, embedded = false, initialTab, requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps = {}) {
-  const { formId: routeFormId } = useParams();
-  const formId = providedFormId || routeFormId;
+export default function FormSettingsPage({ formId, initialTab = 'form', requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const location = useLocation();
+  const permissionOnly = initialTab === 'permission';
   const aiFormDraft = formId === 'new' ? location.state?.aiFormDraft as (NewFormDraft & { id: string }) | undefined : undefined;
   const staticBaseConfig = useMemo(
     () => {
@@ -79,14 +76,13 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       } satisfies DesignerConfig;
       if (formId && configs[formId]) return configs[formId];
       const fallbackId = formId || defaultConfig.id;
-      const requestedTab = searchParams.get('tab');
       return {
         ...defaultConfig,
         id: fallbackId,
-        kind: inferDesignerKindFromMeta(defaultConfig.kind, fallbackId, requestedTab),
+        kind: inferDesignerKindFromMeta(defaultConfig.kind, fallbackId),
       };
     },
-    [formId, searchParams, aiFormDraft],
+    [formId, aiFormDraft],
   );
   const initializedAiDraft = useRef<string>();
   const lastSavedForm = useRef<PlatformForm | null>(null);
@@ -115,27 +111,13 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       description: databaseMeta?.description || staticBaseConfig.description,
     };
   }, [databaseFieldsByForm, databaseMetaByForm, staticBaseConfig]);
-  useShellPageTitle(`${baseConfig.name}配置`, !embedded);
-  const [activeTab, setActiveTab] = useState<DesignerTab>(() => (staticBaseConfig.kind === 'analysis' ? 'dashboard' : 'form'));
-  const [componentPanel, setComponentPanel] = useState<ComponentPanel>(embedded ? 'fieldTypes' : 'components');
+  useShellPageTitle(permissionOnly ? `${baseConfig.name} · 权限管理` : `${baseConfig.name}配置`, Boolean(aiFormDraft) || permissionOnly);
+  const [activeTab, setActiveTab] = useState<DesignerTab>(initialTab);
+  const [componentPanel, setComponentPanel] = useState<ComponentPanel>('fieldTypes');
   const [version, setVersion] = useState('v1');
   const [storedViewConfig, setViewConfig] = useState<ViewConfig>(() => makeDesignerViewConfig(baseConfig));
-  const [activeViewTabId, setActiveViewTabId] = useState('default');
-  const activeViewTab = getViewTabs(storedViewConfig).find((tab) => tab.id === activeViewTabId) || getViewTabs(storedViewConfig)[0];
-  const viewConfig: ViewConfig = { ...storedViewConfig, filters: activeViewTab.filters, table: activeViewTab.table };
-  const sortedViewFilters = sortByOrder(viewConfig.filters);
-  const sortedViewColumns = sortByOrder(viewConfig.table.columns);
   const [identityUsers, setIdentityUsers] = useState<Array<{ id: number; username: string; label: string }>>([]);
   const [analyticsDesign, setAnalyticsDesign] = useState<AnalyticsDesign>(() => makeDefaultAnalyticsDesign(baseConfig));
-  const [selectedAnalyticsWidgetId, setSelectedAnalyticsWidgetId] = useState('');
-  const [analyticsLibrarySearch, setAnalyticsLibrarySearch] = useState('');
-  const [analyticsSourceFields, setAnalyticsSourceFields] = useState<Record<string, PlatformFormField[]>>({});
-  const [draggedAnalyticsWidgetId, setDraggedAnalyticsWidgetId] = useState('');
-  const [expandedViewRow, setExpandedViewRow] = useState<string>('filter-0');
-  const [filterFieldPickerOpen, setFilterFieldPickerOpen] = useState(false);
-  const [tableFieldPickerOpen, setTableFieldPickerOpen] = useState(false);
-  const [draggedViewFilterId, setDraggedViewFilterId] = useState('');
-  const [draggedViewColumnId, setDraggedViewColumnId] = useState('');
   const [layoutControls, setLayoutControls] = useState<LayoutControl[]>(baseConfig.fields.map(makeFieldControl));
   const [selectedControlId, setSelectedControlId] = useState<string>('');
   const [defaultValueDraft, setDefaultValueDraft] = useState<{ controlId: string; rule: DefaultValueRule; fixed: string } | null>(null);
@@ -166,7 +148,8 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     // Its new draft must not block the navigation that is opening it.
     && currentLocation.pathname === location.pathname
     && currentLocation.search === location.search
-    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search));
+    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search
+      || currentLocation.state?.aiDesignPreviewId !== nextLocation.state?.aiDesignPreviewId));
   useEffect(()=>{if(!hasUnsavedChanges)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[hasUnsavedChanges]);
   useEffect(()=>{if(blocker.state!=='blocked')return;const modal=Modal.confirm({className:'form-designer-dialog',title:'当前有未保存修改',content:'离开后本次修改不会保留。请先保存草稿，或确认放弃修改。',okText:'放弃并离开',cancelText:'继续编辑',onOk:()=>blocker.proceed(),onCancel:()=>blocker.reset()});return()=>modal.destroy();},[blocker]);
   const [flowLoadError, setFlowLoadError] = useState('');
@@ -193,16 +176,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   }>(() => ({ open: false, draft: makeEncodingSegment('fixed', baseConfig.fields) }));
   const [professionalFlowConfig, setProfessionalFlowConfig] = useState<FlowDesignerConfig>(() => makeProfessionalFlowConfig(baseConfig));
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
-  useEffect(() => {
-    if (!embedded && platformForm && searchParams.get('legacy') !== '1' && !hasUnsavedChanges) {
-      navigate(`/program/${encodeURIComponent(platformForm.code)}`, {replace: true}); return;
-    }
-    const liveAnalytics = platformForm?.config?.analyticsDesign;
-    const hasRuntimeDashboard = Boolean(platformForm?.published_version || platformForm?.config?.publishedSchemaVersion || (liveAnalytics && typeof liveAnalytics === 'object' && !Array.isArray(liveAnalytics)));
-    if (embedded || baseConfig.kind !== 'analysis' || !platformForm || !hasRuntimeDashboard || hasUnsavedChanges || searchParams.get('legacy') === '1' || searchParams.get('tab') === 'permission') return;
-    const panel = ({dataset: 'data', filter: 'filters', style: 'style'} as Record<string, string>)[searchParams.get('tab') || ''];
-    navigate(`/program/${encodeURIComponent(platformForm.code)}?edit=1${panel ? `&panel=${panel}` : ''}`, {replace: true});
-  }, [baseConfig.kind, platformForm, hasUnsavedChanges, searchParams, navigate, embedded]);
   const viewConfigMeta = getViewConfigMeta(platformForm);
   useEffect(()=>{if(!previewOpen||baseConfig.kind==='analysis'||!platformForm?.id)return;const epoch=++previewEpoch.current;let active=true;const timer=setTimeout(()=>{previewDesignerRules(platformForm.id,layoutControls,previewValues).then(response=>{if(!active||epoch!==previewEpoch.current)return;const result=response.data?.data;setPreviewStates(result?.states||{});previewForm.setFieldsValue(result?.data||{});setPreviewRuleError('');}).catch((error)=>{if(active)setPreviewRuleError(error?.response?.data?.detail || '规则预览失败，请检查条件配置或网络连接。');});},250);return()=>{active=false;clearTimeout(timer);};},[previewOpen,platformForm?.id,layoutControls,previewValues,previewForm]);
 
@@ -330,31 +303,13 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     scaleY: number;
   } | null>(null);
   const isAnalysisDesigner = baseConfig.kind === 'analysis';
-  const designerTabs = isAnalysisDesigner ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
-  const isNoLeftTab = (['permission', 'filter', 'style', 'flow', 'approval', 'dataset', 'dashboard'] as DesignerTab[]).includes(activeTab);
+  const isNoLeftTab = activeTab !== 'form';
 
   // External tab navigation changes only the visible panel, never reinitializes drafts.
-  useEffect(()=>{
-    if(embedded && requestedTab && activeTab!==requestedTab && designerTabs.some(item=>item.key===requestedTab)) {
-      setActiveTab(requestedTab);setSelectedControlId('');
-    }
-  },[embedded,requestedTab,designerTabs,activeTab]);
-
   useEffect(() => {
-    const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
-    if (!requestedTab) return;
-    if (designerTabs.some((item) => item.key === requestedTab) && activeTab !== requestedTab) {
-      setActiveTab(requestedTab);
-      setSelectedControlId('');
-    }
-  }, [designerTabs, searchParams, embedded, initialTab]);
-
-  useEffect(() => {
-    if (!designerTabs.some((item) => item.key === activeTab)) {
-      setActiveTab(designerTabs[0].key as DesignerTab);
-      setSelectedControlId('');
-    }
-  }, [activeTab, designerTabs]);
+    setActiveTab(requestedTab ?? initialTab);
+    setSelectedControlId('');
+  }, [requestedTab, initialTab]);
 
   useEffect(() => {
     adminListUsers().then((response) => setIdentityUsers((response.data?.data || [])
@@ -399,22 +354,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     initializedAiDraft.current = aiFormDraft?.id;
     setDraftReviewReady(false);
     const nextControls = baseConfig.fields.map(makeFieldControl);
-    const requestedTab = embedded ? initialTab || 'form' : (searchParams.get('tab') === 'approval' ? 'flow' : searchParams.get('tab')) as DesignerTab | null;
-    const nextTabs = baseConfig.kind === 'analysis' ? analyticsTabs : embedded ? embeddedBusinessTabs : tabs;
-    const nextDefaultTab = baseConfig.kind === 'analysis' ? 'dashboard' : 'form';
-    const nextTab = requestedTab && nextTabs.some((item) => item.key === requestedTab) ? requestedTab : nextDefaultTab;
-    setActiveTab(nextTab);
     setLayoutControls(nextControls);
     setSelectedControlId(nextControls[0]?.id || '');
     setSelectedAssetKey(baseConfig.fields[0]?.key || '');
     setViewConfig(makeDesignerViewConfig(baseConfig));
     setAnalyticsDesign(makeDefaultAnalyticsDesign(baseConfig));
-    setSelectedAnalyticsWidgetId('');
-    setExpandedViewRow('filter-0');
-    setFilterFieldPickerOpen(false);
-    setTableFieldPickerOpen(false);
-    setDraggedViewFilterId('');
-    setDraggedViewColumnId('');
     setVersion(baseConfig.version);
     setCopiedControl(null);
     setHistory([]);
@@ -445,7 +389,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     setFlowNodes(nextFlowNodes);
     setFlowConnections(makeFlowConnections(nextFlowNodes));
     setPendingFlowPort(null);
-  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, searchParams, staticBaseConfig.id, embedded, initialTab]);
+  }, [baseConfig.id, baseConfig.kind, baseConfig.version, baseConfig.fields, baseConfig.flowSteps, formId, isPlatformFormRoute, staticBaseConfig.id]);
 
   useEffect(() => {
     if (!previewFlowNodeOptions.length) {
@@ -504,7 +448,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           kind: inferFormDesignerKind(formDetail),
         });
         setAnalyticsDesign(storedAnalyticsDesign);
-        setSelectedAnalyticsWidgetId(storedAnalyticsDesign.widgets[0]?.id || '');
         setPermissionDrafts(permissionDraftsFromConfig({...formDetail.config,permissionDesign:formDetail.config?.permissionDesignDraft||formDetail.config?.permissionDesign}));
         try {
           const permissionsResponse = await listPlatformFormPermissions(formDetail.id);
@@ -595,16 +538,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     () => new Set(layoutControls.map((control) => control.fieldKey).filter(Boolean)),
     [layoutControls],
   );
-  const selectedField = useMemo(
-    () => {
-      const targetKey = selectedControl?.fieldKey || selectedAssetKey;
-      if (activeTab === 'filter') {
-        return baseConfig.filters.find((field) => field.key === targetKey) || baseConfig.fields.find((field) => field.key === targetKey);
-      }
-      return baseConfig.fields.find((field) => field.key === targetKey);
-    },
-    [activeTab, baseConfig.fields, baseConfig.filters, selectedAssetKey, selectedControl],
-  );
+  const selectedField = baseConfig.fields.find(field => field.key === (selectedControl?.fieldKey || selectedAssetKey));
   const selectedEffectiveControlType = getEffectiveControlTypeForControl(selectedControl, selectedField);
   const selectedControlUsesDataSource = Boolean(
     selectedControl && isDataSourceControlType(selectedEffectiveControlType),
@@ -620,19 +554,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const [referenceForms,setReferenceForms]=useState<PlatformForm[]>([]);
   const [referenceLabelOptions,setReferenceLabelOptions]=useState<Array<{value:string;label:string}>>([]);
   useEffect(()=>{listPlatformForms().then(res=>setReferenceForms(res.data?.data||[])).catch(()=>{});},[]);
-  useEffect(() => {
-    let cancelled = false;
-    const sources = Array.from(new Set(analyticsDesign.datasets.map(dataset => dataset.source)));
-    void Promise.all(sources.map(async source => {
-      if (analyticsSourceFields[source]) return;
-      const form = referenceForms.find(item => item.code === source || String(item.id) === source);
-      if (!form) return;
-      try { const response = await getPlatformForm(form.id); if (!cancelled) setAnalyticsSourceFields(current => ({...current, [source]: response.data.data.fields || []})); }
-      catch { /* The runtime and publish check surface unavailable sources. */ }
-    }));
-    return () => { cancelled = true; };
-  }, [analyticsDesign.datasets.map(dataset => dataset.source).join('|'), referenceForms]);
-
   useEffect(()=>{
     let cancelled=false;
     setReferenceLabelOptions(selectedReferenceConfig.labelFields);
@@ -688,16 +609,14 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     }))
     .filter((group) => !normalizedLibrarySearch || group.items.length > 0 || matchesLibrarySearch(group.category));
   const filteredFields = baseConfig.fields.filter((field) => matchesLibrarySearch(`${field.name} ${field.key} ${field.type} ${field.optionSource || ''}`));
-  const libraryFields = activeTab === 'filter' ? baseConfig.filters : baseConfig.fields;
-  const filteredLibraryFields = libraryFields.filter((field) => matchesLibrarySearch(`${field.name} ${field.key} ${field.type} ${field.optionSource || ''}`));
+  const libraryFields = baseConfig.fields;
+  const filteredLibraryFields = filteredFields;
   const fallbackBusinessSections = baseConfig.id === 'alert-center' ? alertBusinessSections : [
     { key: 'default', title: '基础信息', desc: '当前表单的主要录入字段', fieldKeys: baseConfig.fields.map((field) => field.key) },
   ];
   const alertSections = normalizeBusinessSections(designerMeta.businessSections, fallbackBusinessSections);
   const hiddenRequiredControls = layoutControls.filter((control) => !control.rules.visible.enabled && control.rules.required.enabled);
   const recommendedRules = getRecommendedRules(baseConfig.fields);
-  const publishedVersion = platformForm?.config?.publishedSchemaVersion || viewConfigMeta.publishedVersion;
-  const draftStatusLabel = hasUnsavedChanges ? '草稿有未保存修改' : viewConfigMeta.status === 'published' ? '草稿无修改' : '草稿已保存 · 待发布';
 
   const updateSelectedControlRule = (ruleKey: ControlRuleKey, patch: Partial<ControlRule>) => {
     if (!selectedControl) return;
@@ -937,143 +856,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   const markUnsaved = () => setHasUnsavedChanges(true);
 
-  const updateViewConfig = (updater: (current: ViewConfig) => ViewConfig) => {
-    setViewConfig((current) => updateActiveView(current, activeViewTab.id, updater));
-    markUnsaved();
-  };
-
-  const updateViewFilter = (id: string, patch: Partial<ViewFilterConfig>) => {
-    updateViewConfig((current) => ({
-      ...current,
-      filters: current.filters.map((filter) => (filter.id === id ? { ...filter, ...patch } : filter)),
-    }));
-  };
-
-  const updateViewColumn = (id: string, patch: Partial<ViewTableColumnConfig>) => {
-    updateViewConfig((current) => ({
-      ...current,
-      table: {
-        ...current.table,
-        columns: current.table.columns.map((column) => (column.id === id ? { ...column, ...patch } : column)),
-      },
-    }));
-  };
-
-  const moveViewItem = (kind: 'filter' | 'column', id: string, direction: -1 | 1) => {
-    updateViewConfig((current) => {
-      const source = kind === 'filter' ? sortByOrder(current.filters) : sortByOrder(current.table.columns);
-      const index = source.findIndex((item) => item.id === id);
-      const targetIndex = index + direction;
-      if (index < 0 || targetIndex < 0 || targetIndex >= source.length) return current;
-      const next = [...source];
-      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
-      const reordered = next.map((item, sortOrder) => ({ ...item, sortOrder }));
-      return kind === 'filter'
-        ? { ...current, filters: reordered as ViewFilterConfig[] }
-        : { ...current, table: { ...current.table, columns: reordered as ViewTableColumnConfig[] } };
-    });
-  };
-
-  const reorderViewFilters = (draggedId: string, targetId: string) => {
-    if (!draggedId || draggedId === targetId) return;
-    updateViewConfig((current) => {
-      const source = sortByOrder(current.filters);
-      const fromIndex = source.findIndex((filter) => filter.id === draggedId);
-      const toIndex = source.findIndex((filter) => filter.id === targetId);
-      if (fromIndex < 0 || toIndex < 0) return current;
-      const next = [...source];
-      const [dragged] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, dragged);
-      return {
-        ...current,
-        filters: next.map((filter, sortOrder) => ({ ...filter, sortOrder })),
-      };
-    });
-  };
-
-  const reorderViewColumns = (draggedId: string, targetId: string) => {
-    if (!draggedId || draggedId === targetId) return;
-    updateViewConfig((current) => {
-      const source = sortByOrder(current.table.columns);
-      const fromIndex = source.findIndex((column) => column.id === draggedId);
-      const toIndex = source.findIndex((column) => column.id === targetId);
-      if (fromIndex < 0 || toIndex < 0) return current;
-      const next = [...source];
-      const [dragged] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, dragged);
-      return {
-        ...current,
-        table: {
-          ...current.table,
-          columns: next.map((column, sortOrder) => ({ ...column, sortOrder })),
-        },
-      };
-    });
-  };
-
-  const syncViewFiltersByFields = (fieldNames: string[]) => {
-    updateViewConfig((current) => {
-      const selected = new Set(fieldNames);
-      const existingByField = new Map(current.filters.map((filter) => [filter.fieldName, filter]));
-      const filters = fieldNames
-        .map((fieldName, index) => {
-          const existing = existingByField.get(fieldName);
-          if (existing) {
-            return { ...existing, enabled: true, sortOrder: index };
-          }
-          const field = baseConfig.fields.find((item) => item.key === fieldName);
-          const controlType = controlTypeForField(field?.type);
-          return {
-            id: `filter-${fieldName}-${Date.now()}-${index}`,
-            fieldName,
-            label: field?.name || fieldName,
-            controlType,
-            operator: defaultOperatorForControl(controlType),
-            placeholder: controlType === 'keyword' || controlType === 'text' ? `请输入${field?.name || fieldName}` : `请选择${field?.name || fieldName}`,
-            enabled: true,
-            advanced: index > 3,
-            sortOrder: index,
-          } satisfies ViewFilterConfig;
-        })
-        .filter((filter) => selected.has(filter.fieldName));
-      return { ...current, filters };
-    });
-  };
-
-  const syncViewColumnsByFields = (fieldNames: string[]) => {
-    updateViewConfig((current) => {
-      const selected = new Set(fieldNames);
-      const existingByField = new Map(current.table.columns.map((column) => [column.fieldName, column]));
-      const columns = fieldNames
-        .map((fieldName, index) => {
-          const existing = existingByField.get(fieldName);
-          if (existing) {
-            return { ...existing, enabled: true, sortOrder: index };
-          }
-          const field = baseConfig.fields.find((item) => item.key === fieldName);
-          return {
-            id: `column-${fieldName}-${Date.now()}-${index}`,
-            fieldName,
-            label: field?.name || fieldName,
-            enabled: true,
-            width: index === 0 ? 180 : 140,
-            sortable: Boolean(field?.sortable),
-            renderType: renderTypeForField(field?.type),
-            emptyText: '-',
-            sortOrder: index,
-          } satisfies ViewTableColumnConfig;
-        })
-        .filter((column) => selected.has(column.fieldName));
-      return {
-        ...current,
-        table: {
-          ...current.table,
-          columns,
-        },
-      };
-    });
-  };
-
   const ensurePlatformForm = async () => {
     if (platformForm) return platformForm;
     if (aiFormDraft) throw new Error('请先确认创建草稿');
@@ -1085,32 +867,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
       return matchedForm;
     }
 
-    const createResponse = await createPlatformForm({
-      name: baseConfig.name,
-      code: baseConfig.id,
-      description: baseConfig.description,
-      table_name: baseConfig.dataSource,
-      storage_mode: 'dynamic',
-      status: 'active',
-      config: {
-        workflowDesigner: {},
-        source: 'form-settings',
-        viewConfig: storedViewConfig,
-        viewConfigDraft: storedViewConfig,
-        viewConfigMeta: {
-          draftVersion: 1,
-          publishedVersion: 1,
-          draftSavedAt: new Date().toISOString(),
-          publishedAt: new Date().toISOString(),
-          status: 'published',
-        },
-      },
-    });
-    const createdForm = createResponse.data?.data as PlatformForm;
-    await Promise.all(initialFieldPayloads().map(field => createPlatformFormField(createdForm.id, field)));
-    setPlatformForm(createdForm);
-    setWorkflowMeta({});
-    return createdForm;
+    throw new Error('找不到对应的业务表单，请从业务数据重新打开');
   };
 
   const initialFieldPayloads = () => baseConfig.fields.map((baseField, index) => {
@@ -1458,9 +1215,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const warnBeforeLeave = () => {
-    const exit = embedded ? onExit : undefined;
+    const exit = onExit;
     if (!exit) {
-      navigate(`/program/${baseConfig.id}`);
+      navigate('/studio/business-data');
       return;
     }
     if (isPersistingFlow) return;
@@ -1658,11 +1415,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   };
 
   const { registerPageController, setDesignerContext } = useAiWorkbench();
-  const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, fields: baseConfig.fields });
-  aiNativeState.current = { layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, fields: baseConfig.fields };
+  const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields });
+  aiNativeState.current = { layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields };
   const [pageCallCompletion, setPageCallCompletion] = useState<{ resolve: (state: Record<string, unknown>) => void; layoutOperationCount?: number; includeLayout: boolean } | null>(null);
   useEffect(() => {
-    if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig || isAnalysisDesigner) return;
+    if (permissionOnly || (!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig || isAnalysisDesigner) return;
     return registerPageController(platformForm?.id || 0, async (action: PageAction) => {
       const current = aiNativeState.current;
       if (action.draft_id ? (current.platformForm || action.draft_id !== aiFormDraft?.id) : current.platformForm?.id !== action.form_id) throw new Error('当前设计器与目标表单不一致');
@@ -1727,6 +1484,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         });
       }
       setActiveTab('form');
+      current.onTabChange?.('form');
       if (control) setSelectedControlId(control.id);
       if (action.action === 'preview') setPreviewOpen(true);
       // Resolve only after React commits the native designer's changed state.
@@ -1735,7 +1493,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         includeLayout: action.action === 'inspect_layout' || Boolean(operations?.length),
       }));
     });
-  }, [platformForm?.id, aiFormDraft, isResolvingPlatformConfig, isAnalysisDesigner, registerPageController, baseConfig.fields]);
+  }, [platformForm?.id, aiFormDraft, isResolvingPlatformConfig, isAnalysisDesigner, permissionOnly, registerPageController, baseConfig.fields]);
   useEffect(() => {
     if (!pageCallCompletion) return;
     const selected = layoutControls.find(control => control.id === selectedControlId);
@@ -1763,7 +1521,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.kind, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, selectedControlId, hasUnsavedChanges, setDesignerContext]);
   useEffect(() => {
     if (aiFormDraft && platformForm?.id && !hasUnsavedChanges && !isPersistingFlow) {
-      navigate(`/form-settings/${platformForm.id}?tab=form&legacy=1`, { replace: true });
+      navigate(businessDataDesignPath(platformForm.id, 'form'), { replace: true });
     }
   }, [aiFormDraft, platformForm?.id, hasUnsavedChanges, isPersistingFlow, navigate]);
   useEffect(() => () => setDesignerContext(undefined), [setDesignerContext]);
@@ -2062,11 +1820,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   }, [activeTab, copiedControl, copiedTree, selectedControl, selectedControlId, layoutControls]);
 
   const getCanvasControlDragProps = (control: LayoutControl) => ({
-    tabIndex: embedded ? 0 : undefined,
-    role: embedded ? 'group' : undefined,
-    'aria-label': embedded ? `编辑字段：${control.name}` : undefined,
+    tabIndex: 0,
+    role: 'group',
+    'aria-label': `编辑字段：${control.name}`,
     onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!embedded || event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
+      if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
       event.preventDefault();
       setSelectedControlId(control.id);
       setSelectedAssetKey(control.fieldKey || '');
@@ -2209,113 +1967,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     return permission?.visible !== false;
   });
 
-  const updateAnalyticsDesign = (updater: (current: AnalyticsDesign) => AnalyticsDesign) => {
-    setAnalyticsDesign((current) => updater(current));
-    markUnsaved();
-  };
-
-  const updateAnalyticsDataset = (id: string, patch: Partial<AnalyticsDataset>) => {
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      datasets: current.datasets.map((dataset) => (dataset.id === id ? { ...dataset, ...patch } : dataset)),
-    }));
-  };
-
-  const updateAnalyticsMetric = (id: string, patch: Partial<AnalyticsMetric>) => {
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      metrics: current.metrics.map((metric) => (metric.id === id ? { ...metric, ...patch } : metric)),
-    }));
-  };
-
-  const updateAnalyticsWidget = (id: string, patch: Partial<AnalyticsWidget>) => {
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      widgets: current.widgets.map((widget) => (widget.id === id ? { ...widget, ...patch } : widget)),
-    }));
-  };
-
-  const updateAnalyticsStyle = (patch: Partial<AnalyticsStyle>) => {
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      style: { ...makeDefaultAnalyticsStyle(), ...(current.style || {}), ...patch },
-    }));
-  };
-
-  const addAnalyticsDataset = () => {
-    const datasetId = `dataset-${Date.now()}`;
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      datasets: [
-        ...current.datasets,
-        {
-          id: datasetId,
-          name: '新数据集',
-          sourceType: 'businessForm',
-          source: platformForm?.code || baseConfig.id,
-          refreshMode: 'realtime',
-          dimensions: [],
-          measures: [],
-        },
-      ],
-    }));
-  };
-
-  const addAnalyticsMetric = () => {
-    const datasetId = analyticsDesign.datasets[0]?.id || `${baseConfig.id}-dataset`;
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      metrics: [
-        ...current.metrics,
-        {
-          id: `metric-${Date.now()}`,
-          name: '新指标',
-          expression: 'count(*)',
-          datasetId,
-          format: 'number',
-          threshold: '按需配置',
-        },
-      ],
-    }));
-  };
-
-  const addAnalyticsWidget = (type: AnalyticsWidgetType) => {
-    const datasetId = analyticsDesign.datasets[0]?.id || `${baseConfig.id}-dataset`;
-    const metricId = analyticsDesign.metrics[0]?.id;
-    const widgetId = `widget-${Date.now()}`;
-    updateAnalyticsDesign((current) => ({
-      ...current,
-      widgets: [
-        ...current.widgets,
-        {
-          id: widgetId,
-          title: type === 'metric-card' ? '指标卡' : type === 'detail-table' ? '明细表' : '新图表',
-          type,
-          datasetId,
-          metricIds: metricId ? [metricId] : [],
-          dimension: current.datasets[0]?.dimensions[0],
-          width: type === 'metric-card' || type === 'detail-table' ? 'full' : 'half',
-          interaction: type === 'detail-table' ? 'navigate' : 'filter',
-        },
-      ],
-    }));
-    setSelectedAnalyticsWidgetId(widgetId);
-  };
-
-  const analyticsDatasetOptions = analyticsDesign.datasets.map((dataset) => ({ value: dataset.id, label: dataset.name }));
-  const analyticsWidgetOptions = analyticsDesign.widgets.map((widget) => ({ value: widget.id, label: widget.title }));
-  const selectedAnalyticsWidget = analyticsDesign.widgets.find((widget) => widget.id === selectedAnalyticsWidgetId) || analyticsDesign.widgets[0];
-  const analyticsStyle = { ...makeDefaultAnalyticsStyle(), ...(analyticsDesign.style || {}) };
-  const analyticsCanvasStyle: React.CSSProperties = {
-    background: analyticsStyle.background,
-    gap: analyticsStyle.componentGap,
-  };
-  const analyticsWidgetStyle: React.CSSProperties = {
-    borderRadius: analyticsStyle.cardRadius,
-    borderColor: analyticsStyle.cardBorder === 'none' ? 'transparent' : analyticsStyle.cardBorder === 'strong' ? '#2c6e84' : '#dce5ec',
-  };
-
-  const activeTabKey: string = activeTab;
   const permissionActionRows = permissionActionDefinitions.map((item) => ({
     ...item,
     enabled: activePermissionDraft.actions[item.key] ?? getDefaultPermissionActionEnabled(activePermissionRoleKind, item.key),
@@ -2344,7 +1995,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     (safeFieldPermissionPage - 1) * permissionFieldPageSize,
     safeFieldPermissionPage * permissionFieldPageSize,
   );
-  const currentDesignerTabLabel = designerTabs.find((item) => item.key === activeTab)?.label || '';
   const hasResolvedRemoteDesignerConfig = Boolean(
     databaseMetaByForm[staticBaseConfig.id]
     || platformForm?.code === staticBaseConfig.id
@@ -2357,7 +2007,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
   if (shouldWaitForDatabaseConfig) {
     return (
-      <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}`}>
+      <div className="form-designer-page form-designer-embedded">
         <div className="form-designer-loading-state">
           <Spin />
           <Typography.Text type="secondary">正在加载数据库表单配置...</Typography.Text>
@@ -2369,7 +2019,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
   const sourcePortal = (node:React.ReactNode,target:HTMLElement|null|undefined) => workspaceTargets ? target?createPortal(node,target):null : node;
   const sourceStatus = hasUnsavedChanges?'未保存修改':viewConfigMeta.status==='published'?'与线上版本一致':'草稿待发布';
   const propertyScope: PropertyPanelScope = {
-    embedded,
+    embedded: true,
     baseConfig,
     layoutControls,
     platformForm,
@@ -2430,7 +2080,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     checkCalculation,
   };
   const canvasScope: CanvasScope = {
-    embedded,
+    embedded: true,
     baseConfig,
     layoutControls,
     platformForm,
@@ -2460,89 +2110,47 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
     getPreviewFieldPermission,
     setPreviewValues,
   };
-  const dataViewActions: DataViewDesignerActions = {
-    setActiveViewTabId,
-    setExpandedViewRow,
-    setViewConfig,
-    markUnsaved,
-    setFilterFieldPickerOpen,
-    setTableFieldPickerOpen,
-    setDraggedViewFilterId,
-    setDraggedViewColumnId,
-    reorderViewFilters,
-    reorderViewColumns,
-    updateViewConfig,
-    updateViewColumn,
-    moveViewItem,
-  };
   return (
-    <div className={`form-designer-page ${embedded ? 'form-designer-embedded' : ''}${workspaceTargets?' form-designer-unified':''}`}>
+    <div className={`form-designer-page form-designer-embedded${workspaceTargets?' form-designer-unified':''}`}>
       {workspaceTargets&&<>
         {sourcePortal(<Tooltip title={sourceStatus}><span className={'analytics-save-indicator'+(hasUnsavedChanges?' is-dirty':viewConfigMeta.status!=='published'?' is-pending':'')} role="status" aria-label={sourceStatus} tabIndex={0}/></Tooltip>,workspaceTargets.status)}
         {sourcePortal(<Space size={0}>
           <><Tooltip title="撤销布局修改"><Button type="text" size="small" aria-label="撤销布局修改" icon={<UndoOutlined/>} disabled={activeTab!=='form'||!history.length||isPersistingFlow} onClick={undoLayoutChange}/></Tooltip><Tooltip title="重做布局修改"><Button type="text" size="small" aria-label="重做布局修改" icon={<RedoOutlined/>} disabled={activeTab!=='form'||!future.length||isPersistingFlow} onClick={redoLayoutChange}/></Tooltip></>
-          <Tooltip title="试填表单"><Button type="text" size="small" aria-label="试填表单" icon={<EyeOutlined/>} disabled={isPersistingFlow} onClick={()=>setPreviewOpen(true)}/></Tooltip>
+          {!isAnalysisDesigner && <Tooltip title="试填表单"><Button type="text" size="small" aria-label="试填表单" icon={<EyeOutlined/>} disabled={isPersistingFlow} onClick={()=>setPreviewOpen(true)}/></Tooltip>}
           <Tooltip title="数据源版本管理"><Button type="text" size="small" aria-label="数据源版本管理" icon={<HistoryOutlined/>} disabled={isPersistingFlow} onClick={()=>setVersionPanelOpen(true)}/></Tooltip>
           <Tooltip title="保存草稿"><Button type="text" size="small" aria-label="保存草稿" icon={<SaveOutlined/>} loading={isPersistingFlow} onClick={saveDraft}/></Tooltip>
           <Tooltip title="发布更改"><Button type="primary" size="small" aria-label="发布更改" icon={<CheckCircleOutlined/>} loading={isPersistingFlow} onClick={publishConfig}/></Tooltip>
         </Space>,workspaceTargets.actions)}
       </>}
-      {!workspaceTargets&&<header className="form-designer-toolbar">
+      {permissionOnly && <header className="form-designer-toolbar">
         <div className="form-designer-title">
-          {embedded ? <>
-            <Tooltip title="返回数据列表"><Button className="form-editor-back" aria-label="返回数据" icon={<ArrowLeftOutlined />} disabled={isPersistingFlow} onClick={warnBeforeLeave} /></Tooltip>
-            <div className="form-editor-identity">
-              <strong>表单编辑</strong>
-              <div className="form-editor-version-status">
-                <span className="designer-release-status">{publishedVersion || viewConfigMeta.status === 'published' ? `线上 v${publishedVersion || 1}` : '尚未发布'}</span>
-                <span className={`designer-draft-status ${hasUnsavedChanges ? 'is-unsaved' : ''}`}>{hasUnsavedChanges ? '有未保存修改' : viewConfigMeta.status === 'published' ? '已与线上同步' : '草稿待发布'}</span>
-              </div>
-            </div>
-          </> :
-          <div className="form-editor-version-status">
-          <span className="designer-release-status">{publishedVersion || viewConfigMeta.status === 'published' ? `已发布 v${publishedVersion || 1}` : '尚未发布'}</span>
-          <span className={`designer-draft-status ${hasUnsavedChanges ? 'is-unsaved' : ''}`}>{draftStatusLabel}</span>
-          </div>}
+          <Tooltip title="返回业务数据"><Button className="form-editor-back" aria-label="返回业务数据" icon={<ArrowLeftOutlined />} disabled={isPersistingFlow} onClick={warnBeforeLeave} /></Tooltip>
+          <div className="form-editor-identity"><strong>{baseConfig.name}</strong><span className="designer-draft-status">权限管理</span></div>
         </div>
-        <SettingsTabs
-          className="form-designer-tabs"
-          activeKey={activeTab}
-          onChange={(key) => {
-            setActiveTab(key as DesignerTab);
-            if(key==='form'||key==='flow')onTabChange?.(key);
-            setSelectedControlId('');
-          }}
-          items={designerTabs.map((item) => ({ key: item.key, label: <span>{item.icon}{embedded ? ({ form: '填写表单', flow: '流程与审批' } as Record<string, string>)[item.key] || item.label : item.label}</span> }))}
-        />
-        <Space className="form-designer-actions" size={4} wrap={false}>
-          {!embedded && <Button size="small" type="text" title="返回表单" aria-label="返回表单" icon={<ArrowLeftOutlined />} onClick={warnBeforeLeave}>返回表单</Button>}
-          {embedded && activeTab === 'form' && <><Tooltip title="撤销布局修改"><Button size="small" type="text" aria-label="撤销布局修改" disabled={!history.length} icon={<UndoOutlined />} onClick={undoLayoutChange} /></Tooltip><Tooltip title="重做布局修改"><Button size="small" type="text" aria-label="重做布局修改" disabled={!future.length} icon={<RedoOutlined />} onClick={redoLayoutChange} /></Tooltip></>}
-          <Button size="small" type="text" title={embedded ? '试填表单' : '预览'} aria-label={embedded ? '试填表单' : '预览'} icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>{embedded ? '试填表单' : '预览'}</Button>
-          <Button
-            className="designer-version-action"
-            size="small"
-            title="版本管理"
-            aria-label="版本管理"
-            icon={<HistoryOutlined />}
-            onClick={() => setVersionPanelOpen(true)}
-          >
-            版本管理
-          </Button>
-          {<Button size="small" title={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} aria-label={aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'} icon={<SaveOutlined />} loading={isPersistingFlow} onClick={saveDraft}>{aiFormDraft && !platformForm ? '确认创建草稿' : '保存草稿'}</Button>}
-          {<Button className="designer-publish-button" size="small" type="primary" disabled={Boolean(aiFormDraft && !platformForm)} icon={<CheckCircleOutlined />} loading={isPersistingFlow} onClick={publishConfig}>{embedded ? '发布更改' : '发布配置'}</Button>}
+        <Space className="form-designer-actions" size={4}>
+          <Button size="small" aria-label="版本管理" icon={<HistoryOutlined />} disabled={!platformForm || isPersistingFlow} onClick={() => setVersionPanelOpen(true)}>版本管理</Button>
+          <Button size="small" type="primary" aria-label="发布更改" icon={<CheckCircleOutlined />} disabled={!platformForm} loading={isPersistingFlow} onClick={publishConfig}>发布更改</Button>
+        </Space>
+      </header>}
+      {aiFormDraft && <header className="form-designer-toolbar">
+        <div className="form-designer-title">
+          <Tooltip title="返回业务数据"><Button className="form-editor-back" aria-label="返回业务数据" icon={<ArrowLeftOutlined />} disabled={isPersistingFlow} onClick={warnBeforeLeave} /></Tooltip>
+          <div className="form-editor-identity"><strong>{aiFormDraft.name}</strong><span className="designer-draft-status">草稿待确认</span></div>
+        </div>
+        <Space className="form-designer-actions" size={4}>
+          <Tooltip title="撤销布局修改"><Button size="small" type="text" aria-label="撤销布局修改" disabled={!history.length} icon={<UndoOutlined />} onClick={undoLayoutChange} /></Tooltip>
+          <Tooltip title="重做布局修改"><Button size="small" type="text" aria-label="重做布局修改" disabled={!future.length} icon={<RedoOutlined />} onClick={redoLayoutChange} /></Tooltip>
+          <Button size="small" type="text" aria-label="试填表单" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>试填表单</Button>
+          <Button size="small" type="primary" aria-label="确认创建草稿" icon={<SaveOutlined />} loading={isPersistingFlow} disabled={!draftReviewReady} onClick={saveDraft}>确认创建草稿</Button>
         </Space>
       </header>}
 
-      <section className={`form-designer-shell ${isNoLeftTab ? 'form-designer-shell-no-left' : ''} ${activeTab === 'filter' || activeTab === 'style' || activeTab === 'dataset' || activeTab === 'dashboard' ? 'form-designer-shell-data-view' : ''} ${activeTab === 'flow' ? 'form-designer-shell-flow' : ''} ${activeTab === 'permission' ? 'form-designer-shell-permission' : ''}`}>
+      <section className={`form-designer-shell ${isNoLeftTab ? 'form-designer-shell-no-left' : ''} ${activeTab === 'flow' ? 'form-designer-shell-flow' : ''} ${activeTab === 'permission' ? 'form-designer-shell-permission' : ''}`}>
         {!isNoLeftTab && (
           <aside className="form-designer-left">
             <div className="designer-panel-head">
-              <strong>{embedded && <LayoutOutlined />}{embedded ? '字段与布局' : '控件'}</strong>
-              {activeTab !== 'form' && (
-                <span>{currentDesignerTabLabel}</span>
-              )}
+              <strong><LayoutOutlined />字段与布局</strong>
             </div>
-            {(activeTab === 'form' || activeTab === 'filter') && (
               <div className="designer-library-search">
                 <Input
                   allowClear
@@ -2552,10 +2160,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                   onChange={(event) => setLibrarySearch(event.target.value)}
                 />
               </div>
-            )}
 
-          {(activeTab === 'form' || activeTab === 'filter') ? (
-            <>
               <Segmented
                 block
                 className="designer-library-switch"
@@ -2563,11 +2168,11 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 onChange={(value) => setComponentPanel(value as ComponentPanel)}
                 options={[
                   {
-                    label: <Tooltip title="点击或拖入填写控件、分组和布局容器。"><span>{embedded ? '添加控件' : '控件库'}</span></Tooltip>,
+                    label: <Tooltip title="点击或拖入填写控件、分组和布局容器。"><span>添加控件</span></Tooltip>,
                     value: 'components',
                   },
                   {
-                    label: <Tooltip title="点击已使用的字段进行设置；点击未使用的字段添加到表单。"><span>{embedded ? '表单字段' : '字段库'}</span></Tooltip>,
+                    label: <Tooltip title="点击已使用的字段进行设置；点击未使用的字段添加到表单。"><span>表单字段</span></Tooltip>,
                     value: 'fieldTypes',
                   },
                 ]}
@@ -2576,10 +2181,10 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 <div className="designer-group-title">快捷排版</div>
                 <div className="designer-side-guide">
                   <strong>配置引导</strong>
-                  <span>{activeTab === 'filter' ? '配置运行页查询条件，选中后在右侧查看属性。' : '拖入字段/控件，选中后在右侧配置属性。'}</span>
+                  <span>拖入字段或控件，选中后在右侧配置属性。</span>
                   <div>
-                    <Tag color="blue">{activeTab === 'filter' ? '筛选字段' : '字段'} {libraryFields.length}</Tag>
-                    <Tag color="green">{activeTab === 'filter' ? '筛选项' : '控件'} {activeTab === 'filter' ? baseConfig.filters.length : layoutControls.length}</Tag>
+                    <Tag color="blue">字段 {libraryFields.length}</Tag>
+                    <Tag color="green">控件 {layoutControls.length}</Tag>
                   </div>
                 </div>
                 <div className="designer-quick-grid">
@@ -2613,7 +2218,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                           draggable
                           key={item.key}
                           data-desc={item.desc}
-                          onClick={() => activeTab === 'filter' ? message.info('筛选页先选择字段，再在右侧查看或调整属性') : addComponentToCanvas(item)}
+                          onClick={() => addComponentToCanvas(item)}
                           onDragEnd={() => setCanvasDragActive(false)}
                           onDragStart={(event) => {
                             event.dataTransfer.setData('componentKey', item.key);
@@ -2639,7 +2244,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                             draggable
                             key={item.key}
                             data-desc={item.desc}
-                            onClick={() => activeTab === 'filter' ? message.info('筛选页先选择字段，再在右侧查看或调整属性') : addComponentToCanvas(item)}
+                            onClick={() => addComponentToCanvas(item)}
                             onDragEnd={() => setCanvasDragActive(false)}
                             onDragStart={(event) => {
                               event.dataTransfer.setData('componentKey', item.key);
@@ -2657,7 +2262,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
               ) : (
                 <section className="designer-component-group designer-field-library-group">
                   <div className="designer-group-title">
-                    <span>{activeTab === 'filter' ? '筛选字段' : '字段库'}</span>
+                    <span>字段库</span>
                     <small>{filteredLibraryFields.length} / {libraryFields.length} 个</small>
                   </div>
                   <div className="designer-field-list">
@@ -2666,50 +2271,30 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                       return (
                         <div
                           className={`designer-field ${selectedAssetKey === field.key ? 'designer-field-active' : ''} ${isFieldOnCanvas ? 'designer-field-used' : ''}`}
-                          draggable={activeTab === 'form'}
+                          draggable
                           key={field.key}
                           onClick={() => {
-                            if (embedded && activeTab === 'form' && !isFieldOnCanvas) { addFieldToCanvas(field); return; }
+                            if (!isFieldOnCanvas) { addFieldToCanvas(field); return; }
                             setSelectedAssetKey(field.key);
                             setSelectedControlId(layoutControls.find(control => control.fieldKey === field.key)?.id || '');
                           }}
-                          onDragStart={(event) => activeTab === 'form' && event.dataTransfer.setData('fieldKey', field.key)}
+                          onDragStart={(event) => event.dataTransfer.setData('fieldKey', field.key)}
                           title={`${field.name} / ${field.key} / ${field.type}`}
                         >
                           <span>{field.name}</span>
                           {isFieldOnCanvas && <CheckCircleOutlined className="designer-field-check" />}
-                          {embedded && !isFieldOnCanvas && <PlusOutlined />}
+                          {!isFieldOnCanvas && <PlusOutlined />}
                         </div>
                       );
                     })}
                   </div>
                 </section>
               )}
-            </>
-          ) : (
-              <div className="designer-component-list">
-                <div className="designer-component" title="页面级规则配置">
-                <span>{currentDesignerTabLabel}</span>
-              </div>
-            </div>
-          )}
         </aside>
         )}
 
         <main className="form-designer-canvas">
-          {activeTabKey === 'dataset' && (
-            <div className="data-view-canvas">
-              <AnalyticsDatasetDesigner analyticsDesign={analyticsDesign} referenceForms={referenceForms} analyticsSourceFields={analyticsSourceFields} analyticsDatasetOptions={analyticsDatasetOptions} updateAnalyticsDesign={updateAnalyticsDesign} updateAnalyticsDataset={updateAnalyticsDataset} updateAnalyticsMetric={updateAnalyticsMetric} addAnalyticsDataset={addAnalyticsDataset} addAnalyticsMetric={addAnalyticsMetric} />
-            </div>
-          )}
-
-          {activeTabKey === 'dashboard' && (
-            <div className="data-view-canvas">
-              <AnalyticsDashboardDesigner analyticsDesign={analyticsDesign} formName={baseConfig.name} analyticsDatasetOptions={analyticsDatasetOptions} selectedAnalyticsWidget={selectedAnalyticsWidget} analyticsLibrarySearch={analyticsLibrarySearch} setAnalyticsLibrarySearch={setAnalyticsLibrarySearch} draggedAnalyticsWidgetId={draggedAnalyticsWidgetId} setDraggedAnalyticsWidgetId={setDraggedAnalyticsWidgetId} setSelectedAnalyticsWidgetId={setSelectedAnalyticsWidgetId} analyticsCanvasStyle={analyticsCanvasStyle} analyticsWidgetStyle={analyticsWidgetStyle} addAnalyticsWidget={addAnalyticsWidget} updateAnalyticsDesign={updateAnalyticsDesign} updateAnalyticsWidget={updateAnalyticsWidget} />
-            </div>
-          )}
-
-          {activeTabKey === 'form' && (
+          {activeTab === 'form' && (
             <div
               className="canvas-board create-form-canvas"
               onClick={() => { setSelectedControlId(''); setSelectedAssetKey(''); }}
@@ -2748,36 +2333,16 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 <span>{layoutControls.filter(control => !isLayoutContainer(control)).length} 个控件 · 点击选择，拖动排序</span>
               </div>
               <div className="create-form-modal" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
-                {embedded && <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>}
+                <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>
                 <div style={{gap:canvasSettings.gap}} className={`create-form-grid ${isCanvasDragActive ? 'canvas-drag-active' : ''}`} onClick={event => { if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
                   {layoutControls.filter(control => !control.parentId).map(control => <CanvasControl key={control.id} control={control} scope={canvasScope} actions={canvasActions} />)}
                   {isCanvasDragActive && !dropHint && <div className="canvas-drop-end-indicator">拖到这里放在末尾</div>}
                 </div>
-                {!workspaceTargets&&<div className="create-form-actions">
-                  <span className="designer-business-actions-note">{embedded ? '调整完成后，先试填检查效果' : '业务表单按钮区 · 预览时可体验'}</span>
-                  {embedded ? <Button className="form-editor-preview-action" icon={<EyeOutlined />} onClick={() => setPreviewOpen(true)}>试填表单</Button> : <div className="create-form-action-buttons">
-                    <Button disabled title="表单设计预览">取消</Button>
-                    <Button disabled title="设计预览，不写入业务数据">保存草稿</Button>
-                    <Button type="primary" disabled title="设计预览，不提交业务数据">提交</Button>
-                  </div>}
-                </div>}
               </div>
             </div>
           )}
 
-          {activeTabKey === 'filter' && (
-            <div className="data-view-canvas">
-              {isAnalysisDesigner ? <AnalyticsFilterDesigner analyticsDesign={analyticsDesign} analyticsWidgetOptions={analyticsWidgetOptions} updateAnalyticsDesign={updateAnalyticsDesign} /> : <DataViewDesigner storedViewConfig={storedViewConfig} viewConfig={viewConfig} activeViewId={activeViewTab.id} baseConfig={baseConfig} expandedViewRow={expandedViewRow} draggedViewFilterId={draggedViewFilterId} draggedViewColumnId={draggedViewColumnId} identityRoleRecords={identityRoleRecords} identityUsers={identityUsers} permissionOrgUnits={permissionOrgUnits} actions={dataViewActions} />}
-            </div>
-          )}
-
-          {activeTabKey === 'style' && (
-            <div className="data-view-canvas">
-              <AnalyticsStyleDesigner analyticsStyle={analyticsStyle} updateAnalyticsStyle={updateAnalyticsStyle} />
-            </div>
-          )}
-
-          {activeTabKey === 'flow' && (
+          {activeTab === 'flow' && (
             <ProfessionalFlowDesigner
               externalInspector={Boolean(workspaceTargets)} propertiesTarget={workspaceTargets?.properties}
               config={professionalFlowConfig}
@@ -2798,7 +2363,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
             />
           )}
 
-          {activeTabKey === 'permission' && (
+          {activeTab === 'permission' && (
             <div className="permission-canvas">
               <div className="permission-workbench">
                 <aside className="permission-role-rail">
@@ -3088,7 +2653,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
           )}
         </main>
 
-        {!isAnalysisDesigner && !(['permission', 'filter', 'flow', 'approval'] as DesignerTab[]).includes(activeTab) && (
+        {!isAnalysisDesigner && activeTab === 'form' && (
         sourcePortal(<aside className="form-designer-right property-inspector">
           <PropertyInspectorHeader title={selectedControl ? '控件属性' : '表单属性'} context={selectedControl?.name || baseConfig.name} />
           {selectedControl ? (
@@ -3249,62 +2814,6 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
 
       <Modal
         centered
-        className="form-designer-dialog view-filter-field-modal"
-        okText="完成"
-        onCancel={() => setFilterFieldPickerOpen(false)}
-        onOk={() => setFilterFieldPickerOpen(false)}
-        open={filterFieldPickerOpen}
-        title="选择筛选字段"
-        width={720}
-      >
-        <div className="view-filter-field-modal-note">勾选表单字段后，会自动出现在筛选区；取消勾选会从筛选区移除。</div>
-        <Checkbox.Group
-          className="view-filter-field-grid"
-          value={sortedViewFilters.map((filter) => filter.fieldName)}
-          onChange={(values) => syncViewFiltersByFields(values.map(String))}
-        >
-          {baseConfig.fields.map((field) => (
-            <label className="view-filter-field-option" key={field.key}>
-              <Checkbox value={field.key} />
-              <span>
-                <strong>{field.name}</strong>
-                <small>{field.key} · {field.type}</small>
-              </span>
-            </label>
-          ))}
-        </Checkbox.Group>
-      </Modal>
-
-      <Modal
-        centered
-        className="form-designer-dialog view-filter-field-modal"
-        okText="完成"
-        onCancel={() => setTableFieldPickerOpen(false)}
-        onOk={() => setTableFieldPickerOpen(false)}
-        open={tableFieldPickerOpen}
-        title="选择列表字段"
-        width={720}
-      >
-        <div className="view-filter-field-modal-note">勾选表单字段后，会自动出现在数据列表区；取消勾选会从列表区移除。</div>
-        <Checkbox.Group
-          className="view-filter-field-grid"
-          value={sortedViewColumns.map((column) => column.fieldName)}
-          onChange={(values) => syncViewColumnsByFields(values.map(String))}
-        >
-          {baseConfig.fields.map((field) => (
-            <label className="view-filter-field-option" key={field.key}>
-              <Checkbox value={field.key} />
-              <span>
-                <strong>{field.name}</strong>
-                <small>{field.key} · {field.type}</small>
-              </span>
-            </label>
-          ))}
-        </Checkbox.Group>
-      </Modal>
-
-      <Modal
-        centered
         className="form-designer-dialog designer-preview-modal"
         footer={<div className="trial-footer">
           <span><LockOutlined /> {isAnalysisDesigner ? '示意数据 · 仅预览布局' : '试填内容不会保存为业务记录'}</span>
@@ -3317,7 +2826,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         open={previewOpen}
         title={<div className="trial-title">
           <span className="trial-title-icon"><EyeOutlined /></span>
-          <div><div className="trial-title-line"><span>{isAnalysisDesigner ? '看板布局预览' : embedded ? '试填表单' : '表单预览'}</span><Tag>当前草稿</Tag></div>
+          <div><div className="trial-title-line"><span>{isAnalysisDesigner ? '看板布局预览' : '试填表单'}</span><Tag>当前草稿</Tag></div>
             <p>{isAnalysisDesigner ? '检查组件布局，真实数据请在发布后的运行页验证。' : '体验填写过程，检查表单布局、必填规则与节点权限。'}</p>
           </div>
         </div>}
@@ -3336,7 +2845,7 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
                 onChange={setPreviewRole} options={permissionRoles.map(role => ({ value: role, label: role }))}
                 disabled={!permissionRoles.length} placeholder="请先配置角色" />
             </label>
-            <Button type="link" className="trial-flow-link" onClick={() => { setPreviewOpen(false); setActiveTab('flow'); }}>流程与审批 <ArrowLeftOutlined rotate={180} /></Button>
+            {!aiFormDraft && !isAnalysisDesigner && <Button type="link" className="trial-flow-link" onClick={() => { setPreviewOpen(false); onTabChange?.('flow'); }}>流程与审批 <ArrowLeftOutlined rotate={180} /></Button>}
           </div>
           <div className="trial-context-note">
             {flowLoadError || (hasAssociatedFlow ? `流程：${professionalFlowConfig.name}。${getPreviewNodeNote(selectedPreviewFlowNode)}` : '尚未关联流程，请在「流程与审批」中配置。')}
@@ -3346,9 +2855,9 @@ export default function FormSettingsPage({ formId: providedFormId, embedded = fa
         <div className="trial-stage">
         <div className="trial-stage-label"><span className="trial-live-dot" />表单预览<span>·</span><span>{isAnalysisDesigner ? '示意布局' : '与当前草稿同步'}</span></div>
         <div className="designer-preview-shell designer-preview-desktop">
-          <div className={`designer-preview-surface trial-canvas ${embedded ? 'form-designer-embedded' : ''}`}>
+          <div className="designer-preview-surface trial-canvas form-designer-embedded">
             <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>
-            <div className="trial-form-body">{isAnalysisDesigner ? <><p>此处仅预览组件布局。真实数据、筛选和交互请在发布后的运行页验证。</p><div className="analytics-dashboard-canvas" style={{...analyticsCanvasStyle, display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))'}}>{analyticsDesign.widgets.map(widget => <div key={widget.id} className={`analytics-widget analytics-widget-${widget.width}`} style={analyticsWidgetStyle}><strong>{widget.title}</strong><AnalyticsWidgetPreview widget={widget} metrics={analyticsDesign.metrics} /></div>)}</div></> : <PreviewContent scope={canvasScope} actions={canvasActions} />}</div>
+            <div className="trial-form-body"><PreviewContent scope={canvasScope} actions={canvasActions} /></div>
           </div>
         </div>
         </div>

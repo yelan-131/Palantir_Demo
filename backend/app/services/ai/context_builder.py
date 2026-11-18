@@ -31,7 +31,7 @@ def fit_context_to_budget(payload: dict[str, Any], budget: int) -> dict[str, Any
     # these objects whole, trimming replaceable history and evidence first.
     protected = {"configurationDraft", "pendingActionState", "pending_action_state",
                  "resumeDraft", "resume_draft", "form_id", "formId", "application_id",
-                 "designerContext", "componentPageContext", "pageControlsSupported", "chatAttachments"}
+                 "designerContext", "componentPageContext", "pageControlsSupported", "chatAttachments", "confirmedExecution"}
     required = {key: value for key, value in trimmed.items() if key in protected}
     if required and estimate_tokens(required) > budget:
         if "chatAttachments" in required:

@@ -73,7 +73,7 @@ export function ModelExecutionFields({ values }: { values: Record<string, any> }
     <div className="ai-setting-block-heading"><h3>SDK 超时</h3><p>控制 Harness 进程初始化和单次执行等待时间，单位为秒。</p></div>
     <div className="ai-execution-field-grid">
       <Form.Item name={['harnessPolicy', 'initialize_timeout_seconds']} label="初始化超时 · 秒" extra={<code>initialize_timeout_seconds</code>}><InputNumber min={1} max={180} precision={0} /></Form.Item>
-      <Form.Item name={['harnessPolicy', 'request_timeout_seconds']} label="请求执行超时 · 秒" extra={<code>request_timeout_seconds</code>}><InputNumber min={1} max={3600} precision={0} placeholder="自动，按空闲超时与工具步数计算" /></Form.Item>
+      <Form.Item name={['harnessPolicy', 'request_timeout_seconds']} label="请求执行超时 · 秒" extra={<code>request_timeout_seconds</code>}><InputNumber min={1} max={3600} precision={0} placeholder="默认 3600 秒" /></Form.Item>
     </div>
     <div className="ai-setting-block-heading"><h3>DSH 会话压缩</h3><p>直接配置 compaction-basic 插件，比例按模型上下文容量计算。</p></div>
     <Form.Item name={['harnessPolicy', 'compaction', 'enabled']} label="启用会话压缩" valuePropName="checked"><Switch /></Form.Item>

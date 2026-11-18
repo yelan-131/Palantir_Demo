@@ -665,7 +665,7 @@ async def execute_create_form_definition(
         "fields": [{"id": field.id, "field_name": field.field_name, "label": field.label} for field in created_fields],
         "application_binding": {"id": binding.id, "application_id": binding.application_id} if binding else None,
         "menu_node": None,
-        "route_path": f"/form-settings/{form.code}?tab=dashboard" if assembly_kind == "analysis" else f"/form-settings/{form.id}?tab=form&legacy=1",
+        "route_path": f"/studio/business-data/{form.id}/design" + ("" if assembly_kind == "analysis" else "?tab=form"),
     }
 
 

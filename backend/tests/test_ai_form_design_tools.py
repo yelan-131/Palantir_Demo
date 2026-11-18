@@ -81,3 +81,37 @@ async def test_layout_save_matches_http_and_rejects_other_tenant(environment):
         await execute_form_design_tool('forms.save_layout', db,
             user={**user, 'tenant_id': 99999}, payload=payload)
     assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_role_lookup_resolves_permission_target_without_user_membership(environment, monkeypatch):
+    from app.models.relational import Role
+    from app.services.ai import tool_handlers
+    from app.services.ai.tool_envelope import tool_execution_envelope
+
+    db, factory, _, user, _ = environment
+    db.add_all([
+        Role(id=2, tenant_id=1, name='viewer', label='只读观察员'),
+        Role(id=3, tenant_id=2, name='viewer', label='只读观察员'),
+    ])
+    await db.commit()
+    monkeypatch.setattr(tool_handlers, 'db_session', factory)
+
+    async def query(payload):
+        result = await tool_execution_envelope.execute_tool(
+            tool_name='platform.identity_settings.query', payload=payload,
+            current_user={**user, 'is_admin': True}, settings={'domains': ['low-code']},
+        )
+        assert result['status'] == 'completed', result
+        return result['result']
+
+    for name in ['只读观察员', 'viewer']:
+        assert await query({'subject': 'roles', 'role_name': name, 'limit': 1}) == {
+            'items': [{'id': 2, 'name': 'viewer', 'label': '只读观察员'}],
+            'count': 1, 'subject': 'roles',
+        }
+    assert (await query({'subject': 'roles', 'role_name': 'viewer'}))['count'] == 1
+    assert (await query({'subject': 'roles', 'role_name': '不存在'}))['items'] == []
+    users = await query({'subject': 'users', 'limit': 1})
+    assert users['subject'] == 'users'
+    assert users['items'][0]['username'] == 'user1'

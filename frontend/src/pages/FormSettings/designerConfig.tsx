@@ -1,4 +1,4 @@
-import { BarChartOutlined, CalendarOutlined, CheckCircleOutlined, DatabaseOutlined, FileImageOutlined, FileSearchOutlined, FormOutlined, HolderOutlined, LinkOutlined, LockOutlined, NumberOutlined, PaperClipOutlined, SearchOutlined, SelectOutlined, SettingOutlined, SwitcherOutlined, TableOutlined, TagsOutlined, UserOutlined, UserSwitchOutlined } from '@ant-design/icons';
+import { CalendarOutlined, CheckCircleOutlined, DatabaseOutlined, FileImageOutlined, FileSearchOutlined, FormOutlined, HolderOutlined, LinkOutlined, LockOutlined, NumberOutlined, PaperClipOutlined, SelectOutlined, SettingOutlined, SwitcherOutlined, TableOutlined, TagsOutlined, UserOutlined, UserSwitchOutlined } from '@ant-design/icons';
 import { getPlatformForm, getPlatformFormByCode, listPlatformForms } from '@/services/api';
 import type { PlatformForm } from '@/services/api';
 import React from 'react';
@@ -141,24 +141,6 @@ export async function resolvePlatformFormForConfig(configId: string) {
   const detailResponse = await getPlatformForm(matchedForm.id, { schema: 'draft', scope: 'designer' });
   return (detailResponse.data?.data || matchedForm) as PlatformForm;
 }
-
-export const tabs = [
-  { key: 'form', label: '表单设计', icon: <FormOutlined /> },
-  { key: 'filter', label: '数据筛选', icon: <SearchOutlined /> },
-  { key: 'flow', label: '流程与审批', icon: <UserSwitchOutlined /> },
-  { key: 'permission', label: '权限设计', icon: <LockOutlined /> },
-];
-
-// Component pages own their list, filter and permission settings.
-export const embeddedBusinessTabs = tabs.filter(item=>item.key==='form'||item.key==='flow');
-
-export const analyticsTabs = [
-  { key: 'dashboard', label: '看板画布', icon: <BarChartOutlined /> },
-  { key: 'dataset', label: '数据与指标', icon: <DatabaseOutlined /> },
-  { key: 'filter', label: '筛选联动', icon: <SearchOutlined /> },
-  { key: 'style', label: '样式主题', icon: <SettingOutlined /> },
-  { key: 'permission', label: '权限发布', icon: <LockOutlined /> },
-];
 
 export function inferDesignerKindFromMeta(kindValue?: unknown, codeValue?: unknown, tabValue?: unknown): DesignerConfig['kind'] {
   const kind = String(kindValue || '').toLowerCase();

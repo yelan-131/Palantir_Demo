@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 # ── Provider configuration ──────────────────────────────────
@@ -181,6 +181,14 @@ class AgentRequest(BaseModel):
     page: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     provider_config: AIProviderConfig | None = None
+    _confirmation_follow_up: bool = PrivateAttr(default=False)
+
+    @property
+    def is_confirmation_follow_up(self) -> bool:
+        return self._confirmation_follow_up
+
+    def mark_confirmation_follow_up(self) -> None:
+        self._confirmation_follow_up = True
 
 
 class AgentResponse(BaseModel):

@@ -227,7 +227,7 @@ async def test_ai_creation_uses_shared_field_schema_and_storage(environment):
     created = await db.get(Form, form_id)
     try:
         assert result['form']['status'] == created.status == 'draft'
-        assert result['route_path'] == f'/form-settings/{form_id}?tab=form&legacy=1'
+        assert result['route_path'] == f'/studio/business-data/{form_id}/design?tab=form'
         assert result['application_binding']['application_id'] == app.id
         assert await db.scalar(select(FormVersion.id).where(FormVersion.form_id == form_id)) is None
         assert await db.scalar(select(ApplicationMenuNode.id).where(ApplicationMenuNode.form_id == form_id)) is None

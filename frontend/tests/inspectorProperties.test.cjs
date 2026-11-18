@@ -8,11 +8,13 @@ const keys=(type,business,open)=>Array.from(inspectorTabs(type,business,open),ta
 test('component tabs expose editing capabilities rather than irrelevant disabled entries',()=>{
  for(const type of ['metric','chart','record-filter'])assert.deepEqual(keys(type,true),['basic','data']);
  assert.deepEqual(keys('record-list',true),['basic','data','form','flow']);
+ assert.deepEqual(keys('record-list',true,true),['basic','data','form','flow']);
  assert.deepEqual(keys('record-list',false),['basic','data']);
  assert.deepEqual(keys('workspace',true),['basic']);
 });
 test('context-menu source editing retains source tabs so users can switch and exit',()=>{
  assert.deepEqual(keys('metric',true,true),['basic','data','form','flow']);
+ assert.deepEqual(keys(undefined,false,true),['form','flow']);
 });
 const presentation=load('../src/pages/ComponentPages/presentation.ts');
 const inspector=load('../src/components/PropertyInspector/index.tsx',name=>name.endsWith('.css')?{}:require(name));

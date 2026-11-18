@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from app.services.workflow_views import _workflow_config_steps, _instance_steps
 from app.services.workflow_routing import route_node_ids, validate_graph
-from tests.test_workflow import client, _uid, _seed_users, _headers, _ok
+from tests.test_workflow import client, _definition_payload, _uid, _seed_users, _headers, _ok
 
 
 def graph(a=1, b=2):
@@ -123,18 +123,16 @@ def test_parallel_graph_cannot_be_published_as_a_misleading_sequential_flow(clie
 def test_old_page_cannot_approve_another_node_assigned_to_same_person(client, endpoint):
     admin, initiator, a = [_uid() for _ in range(3)]
     _seed_users([admin, initiator, a], admin_uid=admin)
-    definition = _ok(client.post('/api/v1/workflow/definitions', headers=_headers(admin, is_admin=True), json={
-        'name': '同一人连续审批', 'status': 'published', 'steps': [
-            {'type': 'approval', 'node_id': key, 'assignee_rules': [{'type': 'user', 'value': [str(a)]}]}
-            for key in ['first', 'second']]}), 'create')
+    definition = _ok(client.post('/api/v1/workflow/definitions', headers=_headers(admin, is_admin=True),
+        json=_definition_payload('同一人连续审批', [[a], [a]])), 'create')
     started = _ok(client.post(f'/api/v1/workflow/definitions/{definition["id"]}/start', headers=_headers(initiator), json={'title': '防止旧页面重复审批'}), 'start')
     iid = started['instance_id']
-    payload = {'expected_node_id': 'first', 'action': 'approve'}
+    payload = {'expected_node_id': 'approval-1', 'action': 'approve'}
     _ok(client.post(f'/api/v1/workflow/instances/{iid}/{endpoint}', headers=_headers(a), json=payload), 'first step')
     assert client.post(f'/api/v1/workflow/instances/{iid}/{endpoint}', headers=_headers(a), json=payload).status_code == 409
     detail = _ok(client.get(f'/api/v1/workflow/instances/{iid}', headers=_headers(initiator)), 'detail')
     assert detail['status'] == 'pending'
-    assert detail['workflow_state']['current_node'] == 'second'
+    assert detail['workflow_state']['current_node'] == 'approval-2'
     assert len([row for row in detail['approvals'] if row['action'] == 'approve']) == 1
 
 

@@ -42,7 +42,8 @@ def test_preview_and_runtime_share_resolved_parameters(tmp_path, monkeypatch):
     assert options['max_tokens'] == p['maxTokens'] == 256
     assert int(options['env']['MF_DSH_TOOL_TIMEOUT_MS']) == p['mcpTimeoutMs'] == 14000
     assert options['request_timeout_seconds'] == p['executionTimeoutSeconds']
-    assert p['executionTimeoutSeconds'] >= p['mcpTimeoutMs'] / 1000
+    assert p['executionTimeoutSeconds'] == 3600
+    assert 'maxToolSteps' not in p
     assert 'private-test-only' not in json.dumps(preview)
 
 
@@ -58,7 +59,7 @@ def test_native_event_projection_omits_other_sessions_prompts_and_reasoning():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['timeout', 'cancel', 'budget'])
+@pytest.mark.parametrize('mode', ['timeout', 'cancel'])
 async def test_stopping_runtime_closes_sdk_process(monkeypatch, mode):
     import deepseek_harness
     from app.services.ai import harness_runtime as mod
@@ -76,32 +77,49 @@ async def test_stopping_runtime_closes_sdk_process(monkeypatch, mode):
             return SimpleNamespace(final_response='stopped', finish_reason='completed', events=[])
     monkeypatch.setattr(deepseek_harness, 'DeepSeekHarness', Harness)
     monkeypatch.setattr(mod, 'harness_options', lambda *args, **kwargs: {'initialize_timeout_seconds': .01, 'request_timeout_seconds': .05})
-    bridge = mod.PlatformBridge(USER, {}, {}, native_skills=False)
-    monkeypatch.setitem(mod.BRIDGES, 'test-stop-token', bridge)
-    task = asyncio.create_task(mod.run_sdk({}, USER, 'test', 'test', token='test-stop-token'))
+    task = asyncio.create_task(mod.run_sdk({}, USER, 'test', 'test'))
     assert await asyncio.to_thread(started.wait, 1)
     if mode == 'cancel':
         task.cancel()
         with pytest.raises(asyncio.CancelledError): await task
     else:
-        if mode == 'budget':
-            bridge.stop_reason = '工具预算耗尽'; bridge.stop_event.set()
         with pytest.raises(mod.HarnessRunStopped): await task
     assert closed.is_set()
 
 
 @pytest.mark.asyncio
-async def test_tool_budget_signals_process_stop(monkeypatch):
+async def test_legacy_tool_limit_does_not_block_discovery_or_execution(monkeypatch):
     from app.services.ai import harness_runtime as mod, agent_registry
+    from app.services.ai.settings import merge_ai_settings
+    from app.services.ai.tool_envelope import tool_execution_envelope
+
+    settings = merge_ai_settings({'aiEnabled': True, 'agentMode': 'confirm', 'domains': ['low-code'], 'rolePolicies': []})
+    settings['safetyPolicy']['maxToolSteps'] = 1
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
-    monkeypatch.setattr(mod, 'settings_snapshot', lambda: {'safetyPolicy': {'maxToolSteps': 1}})
-    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
-    monkeypatch.setattr(mod, 'decide_tool_permission', lambda *args: SimpleNamespace(allowed=True))
-    bridge = mod.PlatformBridge(USER, {}, {}, calls=1)
-    described = await bridge.call_tool(mod.tool_alias(mod.DESCRIBE_TOOL), {'name': 'forms.query_records'})
-    assert described['status'] == 'completed' and not bridge.stop_event.is_set()
-    result = await bridge.call_tool(mod.tool_alias(mod.INVOKE_TOOL), {'name': 'forms.query_records', 'arguments': {}})
-    assert result['status'] == 'blocked' and bridge.stop_event.is_set() and bridge.calls == 1
+    monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
+    skills, tools = agent_registry.load_seed_registry()
+    monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value={'skills': skills, 'tools': tools}))
+    execute = AsyncMock(return_value={'status': 'completed', 'result': {'items': []}})
+    monkeypatch.setattr(tool_execution_envelope, 'execute_tool', execute)
+    bridge = mod.PlatformBridge(USER, settings, {})
+
+    async def describe(name):
+        return await bridge.call_tool(mod.tool_alias(mod.DESCRIBE_TOOL), {'name': name})
+
+    async def invoke(name, arguments):
+        return await bridge.call_tool(mod.tool_alias(mod.INVOKE_TOOL), {'name': name, 'arguments': arguments})
+
+    for _ in range(25):
+        assert (await describe('forms.query_records'))['status'] == 'completed'
+        assert (await invoke('forms.query_records', {'form_id': 61}))['status'] == 'completed'
+    assert execute.await_count == 25
+
+    assert (await describe('forms.create_permissions'))['status'] == 'completed'
+    result = await invoke('forms.create_permissions', {
+        'form_id': 61, 'body': {'role_id': 11, 'action': 'delete', 'effect': 'deny'},
+    })
+    assert result['status'] == 'waiting_confirmation'
+    assert len(bridge.pending) == 1 and execute.await_count == 25
 
 
 @asynccontextmanager

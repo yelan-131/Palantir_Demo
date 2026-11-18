@@ -546,7 +546,6 @@ export function AIPlatformPanelV2() {
       blockSecretMemory: true,
       highRiskConfirm: true,
       agentLoopMode: 'harness',
-      maxToolSteps: 5,
       toolTimeoutSeconds: 30,
       enabledHooks: ['enforce_permissions', 'validate_before_confirmation', 'validate_before_tool', 'validate_after_tool', 'audit_tool_use'],
       permissionRules: [],

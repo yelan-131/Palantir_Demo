@@ -76,6 +76,26 @@ async def test_conversation_does_not_force_write_or_retry(runtime, monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_follow_up_prompt_includes_the_receipt_and_original_request(runtime, monkeypatch):
+    from app.services.ai.schemas import AgentRequest
+
+    mod, _settings = runtime
+    runner = AsyncMock(return_value=result('已创建草稿。'))
+    monkeypatch.setattr(mod, 'run_sdk', runner)
+    request = AgentRequest(message='先建巡检应用，再发布。', context={
+        'confirmedExecution': {'receipts': [{'tool': 'applications.create', 'result': {'id': 481}}]},
+    })
+    request.mark_confirmation_follow_up()
+    await mod.HarnessRuntime().run(request, user=USER)
+
+    prompt = runner.call_args.args[2]
+    assert '不要重复已完成的动作' in prompt
+    assert '新的写入仍需生成确认卡' in prompt
+    assert '"id": 481' in prompt
+    assert '原请求：先建巡检应用，再发布。' in prompt
+
+
+@pytest.mark.asyncio
 async def test_deferred_tool_requires_discovery_and_live_permission(runtime, monkeypatch):
     mod, settings = runtime
     from app.services.ai.schemas import AgentRequest

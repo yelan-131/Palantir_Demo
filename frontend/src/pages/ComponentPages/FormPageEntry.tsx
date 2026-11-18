@@ -1,6 +1,6 @@
 import React, {lazy, Suspense, useEffect, useState} from 'react';
 import {Alert, Empty, Spin} from 'antd';
-import {useParams, useSearchParams} from 'react-router-dom';
+import {useLocation, useParams, useSearchParams} from 'react-router-dom';
 import api from '@/services/api';
 import {useAuthStore} from '@/stores/authStore';
 
@@ -18,8 +18,11 @@ export default function FormPageEntry({kind, formSlug, businessDataDesign = fals
 
 function BoundFormPage({kind, slug, businessDataDesign}: {kind: 'business' | 'program'; slug: string; businessDataDesign: boolean}) {
   const [searchParams] = useSearchParams();
+  const {key: navigationKey} = useLocation();
   const admin = Boolean(useAuthStore(state => state.user?.is_admin));
   const openEditor = admin && (businessDataDesign || searchParams.get('edit') === '1');
+  const tab = searchParams.get('tab');
+  const designTab = openEditor && businessDataDesign && (tab === 'form' || tab === 'flow' || tab === 'data' || tab === 'style') ? tab : undefined;
   const [binding, setBinding] = useState<{enabled: boolean; code?: string; form?: {id: number}}>();
   const [error, setError] = useState('');
   useEffect(() => {
@@ -44,7 +47,7 @@ function BoundFormPage({kind, slug, businessDataDesign}: {kind: 'business' | 'pr
   if (!binding) return <div style={{padding: 80, textAlign: 'center'}}><Spin /></div>;
   if (businessDataDesign && (!binding.code || !binding.form)) return <Empty description="找不到此业务数据对应的页面" />;
   return <Suspense fallback={<Spin />}>
-    {!openEditor && searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} openEditor={openEditor} businessDataFormId={businessDataDesign ? binding.form?.id : undefined} /> : <Empty description="此表单的页面尚未发布" />
+    {!openEditor && searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} openEditor={openEditor} businessDataFormId={businessDataDesign ? binding.form?.id : undefined} designTab={designTab} designNavigationKey={navigationKey} /> : <Empty description="此表单的页面尚未发布" />
       : slug === 'alert-center' ? <AlertCenter /> : kind === 'business' ? <DynamicPage /> : <AppProgramPage />}
   </Suspense>;
 }

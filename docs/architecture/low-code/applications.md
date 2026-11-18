@@ -150,7 +150,7 @@
 `GET /applications/{id}/menus` 按以下顺序取第一个有数据的来源：
 
 1. `application_menu_nodes`（当前方式），返回树形结构。
-2. `application_forms` 中启用且已发布、用户有查看权限的表单，平铺返回。注意此回退中分析类表单的路由是 `/form-settings/<编码>?tab=dashboard`，与第 4.1 节菜单节点生成的 `/program/<编码>` 不同。
+2. `application_forms` 中启用且已发布、用户有查看权限的表单，平铺返回。分析类表单使用 `/program/<编码>`，其他表单使用 `/dynamic/<编码>`。
 3. 旧版 `application_menus` + `menu_items`。
 
 新配置的应用都会走第 1 条；第 2、3 条只用于兼容早期数据。

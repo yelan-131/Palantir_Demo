@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from fastapi import HTTPException
 
 from app.core.db import db_session
@@ -161,6 +161,18 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
             return {"items": items, "count": len(items), "subject": "forms"}
 
         if context.tool_name == "platform.identity_settings.query":
+            if payload.get("subject") == "roles":
+                from app.core.principal import ensure_admin
+
+                ensure_admin(context.current_user or {})
+                statement = select(Role.id, Role.name, Role.label).where(Role.tenant_id == tenant_id)
+                role_name = (payload.get("role_name") or "").strip()
+                if role_name:
+                    statement = statement.where(or_(Role.name == role_name, Role.label == role_name))
+                rows = (await session.execute(statement.order_by(Role.id).limit(limit))).all()
+                items = [{"id": role_id, "name": name, "label": label} for role_id, name, label in rows]
+                return {"items": items, "count": len(items), "subject": "roles"}
+
             rows = (
                 await session.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.id).limit(limit))
             ).scalars().all()

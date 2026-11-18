@@ -598,7 +598,9 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
         if (platformForms.length) {
           const mappedPlatformForms = platformForms.map(mapPlatformFormToRecord);
           setForms((prev) => mergeFormRecords(prev, mappedPlatformForms));
-          const initialForm = platformForms.find(form => String(form.id) === initialFormId) ?? platformForms[0];
+          const initialForm = platformForms.find(form => String(form.id) === initialFormId)
+            ?? platformForms.find(form => form.code === initialFormId)
+            ?? platformForms[0];
           setSelectedFormId(String(initialForm.id));
         }
       })
