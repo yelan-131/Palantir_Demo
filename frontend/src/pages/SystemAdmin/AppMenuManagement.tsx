@@ -712,11 +712,11 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
     finally { propertyOperation.current = false; setPropertySaving(false); }
   };
 
-  const persistAppDraft = async (status = selectedApp.status) => {
+  const persistAppDraft = async (status = selectedApp.status, current = selectedApp, token = appDraft.token()) => {
     const values = await appForm.validateFields();
-    const saved = await persistApplication(persistenceApi, {...selectedApp, edit_token: appDraft.token()}, selectedApp.id < 0 ? { ...values, sort_order: selectedApp.sort_order } : values, status) as AppRecord;
+    const saved = await persistApplication(persistenceApi, {...current, edit_token: token}, current.id < 0 ? { ...values, sort_order: current.sort_order } : values, status) as AppRecord;
     appDraft.accept(String(saved.id), appPropertyValues(saved), saved.edit_token);
-    setApplications(previous => previous.map(item => item.id === selectedApp.id ? saved : item));
+    setApplications(previous => previous.map(item => item.id === current.id ? saved : item));
     setSelectedAppId(saved.id);
     try {
       const response = await listPlatformMenuNodes(saved.id);
@@ -812,7 +812,13 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
   });
 
   const publishSelectedApp = () => runPropertyOperation(async () => {
-    await persistAppDraft('published'); message.success('应用已发布');
+    if (selectedApp.id < 0) {
+      const draft = await persistAppDraft('draft');
+      await persistAppDraft('published', draft, draft.edit_token);
+    } else {
+      await persistAppDraft('published');
+    }
+    message.success('应用已发布');
   });
   const disableSelectedApp = () => runPropertyOperation(async () => {
     await persistAppDraft('disabled'); message.success('应用已停用');
@@ -821,7 +827,7 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
     await persistAppDraft('published'); message.success('应用已启用');
   });
   const deleteSelectedDraftApp = () => runPropertyOperation(async () => {
-    if (selectedApp.status !== 'draft') { message.warning('只能删除草稿应用'); return; }
+    if (selectedApp.status !== 'draft' || isApplicationCodeLocked(selectedApp)) { message.warning('只能删除未发布过的草稿应用'); return; }
     if (selectedApp.id > 0) await adminDeleteApplication(selectedApp.id);
     const remaining = applications.filter(item => item.id !== selectedApp.id);
     setApplications(remaining); setSelectedAppId(remaining[0]?.id || 0);
@@ -965,9 +971,10 @@ export default function AppMenuManagement({ businessData = false, initialFormId 
       const tree = mapPlatformMenuNodesToTree(unwrapApiList<PlatformMenuNode>(response));
       setMenusByApp(previous => ({...previous, [applicationId]: tree}));
       setSelectedMenuKey(tree[0]?.key ?? '');
-      if (target.defaultEntry) {
+      const appState = response.data.application;
+      if (appState) {
         setApplications(previous => previous.map(app =>
-          app.id === applicationId ? {...app, default_route: '/'} : app));
+          app.id === applicationId ? {...app, ...appState} : app));
       }
       notifyApplicationsChanged();
       message.success(isMenuGroup(target) && target.children?.length
@@ -1377,7 +1384,7 @@ function AssemblyWorkspace({
     }));
   };
   const appOrder = apps.filter(app => app.id > 0).map(app => app.id);
-  const canDeleteApp = selectedApp?.status === 'draft' && !menuBusy;
+  const canDeleteApp = selectedApp?.status === 'draft' && !isApplicationCodeLocked(selectedApp) && !menuBusy;
   const canDeleteForm = selectedForm?.status === 'draft' && !menuBusy;
   const canDeleteMenu = Boolean(selectedMenu?.dbId) && !menuBusy;
   const canReorderApps = !menuBusy && !query && appOrder.length > 1 && apps.length === appOrder.length;
@@ -1821,7 +1828,7 @@ function AppConfigForm({ form, app, menus, roles, publishedPageCodes, disabled, 
   const codeLocked = isApplicationCodeLocked(app);
   const entryOptions = new Map([['/', '自动选择首个可访问页面']]);
   for (const node of getAllMenuNodes(menus)) {
-    if (node.visible !== false && node.routePath && !entryOptions.has(node.routePath)
+    if (!isMenuGroup(node) && node.visible !== false && node.routePath && !entryOptions.has(node.routePath)
       && (!node.pageCode || publishedPageCodes.has(node.pageCode))) {
       entryOptions.set(node.routePath, getMenuLabel(node));
     }
@@ -1919,7 +1926,7 @@ function menuPropertyValues(node?: MenuNode) {
     icon: node?.icon || defaultMenuIcon(node ?? {}),
     description: typeof node?.config?.description === 'string' ? node.config.description : '',
     visible: node?.visible ?? true,
-    defaultEntry: node?.defaultEntry ?? false,
+    defaultEntry: Boolean(node && !isMenuGroup(node) && node.defaultEntry),
     permissionMode: node?.permissionMode ?? 'inherit',
     accessGroups: Array.isArray(node?.config?.access_groups)
       ? node.config.access_groups as RoleAccessGroup[]

@@ -57,6 +57,7 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
             return await query(db)
     app = FastAPI()
     app.include_router(forms.router, prefix='/forms')
+    app.include_router(applications.router, prefix='/applications')
     app.include_router(applications.admin_router, prefix='/admin')
     app.include_router(admin.router, prefix='/admin')
     app.dependency_overrides[get_db] = database
@@ -75,6 +76,15 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
             a = await request(client, 'POST', '/admin/applications', {'name':'A','code':'integrity-a'})
             b = await request(client, 'POST', '/admin/applications', {'name':'B','code':'integrity-b'})
+            assert a['status'] == b['status'] == 'draft'
+            await request(client, 'POST', '/admin/applications', {'name':'Bad','code':'integrity-bad','status':'published'}, expected=422)
+            await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'status':'disabled'}, expected=409)
+            await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'status':'published'})
+            await request(client, 'DELETE', f'/admin/applications/{a["id"]}', expected=409)
+            await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'status':'disabled'})
+            await request(client, 'DELETE', f'/admin/applications/{a["id"]}', expected=409)
+            await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'status':'draft'}, expected=409)
+            a = await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'status':'published'})
             path = f'/forms/applications/{a["id"]}/menu-nodes'
             parent = await request(client, 'POST', path, {'title':'Parent','node_type':'group'})
             # Two editors start with the same snapshot. A stale write must not overwrite either names or permissions.
@@ -108,8 +118,17 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
             assert all(row['parent_id'] is None for row in saved)
             await request(client,'PUT',order_path,{'expected':expected,'nodes':moved},expected=409)
             # The default route and flags change together, with only one default.
-            first = await request(client,'POST',path,{'title':'Entry1','node_type':'group','route_path':'/dashboard','default_entry':True})
-            second = await request(client,'POST',path,{'title':'Entry2','node_type':'group','route_path':'/quality','default_entry':True})
+            first = await request(client,'POST',path,{'title':'Entry1','route_path':'/dashboard','default_entry':True})
+            second = await request(client,'POST',path,{'title':'Entry2','route_path':'/quality','default_entry':True})
+            await request(client, 'POST', path, {'title':'Group with route','node_type':'group','route_path':'/quality','default_entry':True}, expected=422)
+            await request(client, 'PUT', f'{path}/{parent["id"]}', {'route_path':'/group-route'})
+            await request(client, 'PUT', f'/admin/applications/{a["id"]}', {'default_route':'/group-route'}, expected=422)
+            await request(client, 'POST', path, {'title':'Invalid child','parent_id':first['id']}, expected=422)
+            await request(client, 'PUT', f'{path}/{parent["id"]}', {'parent_id':first['id']}, expected=422)
+            rows = await request(client, 'GET', path)
+            expected = [{key: row[key] for key in ('id', 'parent_id', 'sort_order')} for row in rows]
+            invalid = [{**row, 'parent_id': first['id']} if row['id'] == child['id'] else row for row in expected]
+            await request(client, 'PUT', order_path, {'expected': expected, 'nodes': invalid}, expected=422)
             async def assert_default(route, node_id):
                 apps = await request(client,'GET','/admin/applications')
                 assert next(row for row in apps if row['id']==a['id'])['default_route'] == route
@@ -123,14 +142,18 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
             await request(client,'PUT',f'{path}/{first["id"]}',{'visible':False})
             await assert_default('/',None)
             await request(client,'PUT',f'{path}/{second["id"]}',{'default_entry':True})
-            await request(client,'DELETE',f'{path}/{second["id"]}')
+            response = await client.delete(f'{path}/{second["id"]}')
+            assert response.status_code == 200, response.text
+            app_after_delete = response.json()['application']
+            reloaded_app = next(row for row in await request(client, 'GET', '/admin/applications') if row['id'] == a['id'])
+            assert app_after_delete == {'default_route': '/', 'edit_token': reloaded_app['edit_token']}
             await assert_default('/',None)
             await request(client,'POST',path,{'title':'No destination','node_type':'group','default_entry':True},expected=422)
             # Deleting a group promotes children in the same transaction.
             await request(client,'PUT',f'{path}/{child["id"]}',{'parent_id':parent['id']})
-            await request(client,'DELETE',f'{path}/{parent["id"]}')
-            nodes = await request(client,'GET',path)
+            nodes = await request(client,'DELETE',f'{path}/{parent["id"]}')
             assert next(row for row in nodes if row['id']==child['id'])['parent_id'] is None
+            assert nodes == await request(client,'GET',path)
 
             # A selected group includes its children once, even if the box also covers them.
             entry = await request(client, 'POST', path, {
@@ -197,5 +220,25 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
                 assert binding.enabled and binding.tenant_id == 1
                 grant = await db.scalar(select(RolePermission).where(RolePermission.resource_key == f'menu_node:{copied_form["id"]}'))
                 assert grant.role_id == role_id and grant.enabled
+
+            runtime_path = f'/applications/{a["id"]}/menus'
+            assert await request(client, 'GET', runtime_path)
+            for node in source_before:
+                await request(client, 'PUT', f'{path}/{node["id"]}', {'visible': False})
+            assert await request(client, 'GET', runtime_path) == []
+            for node in await request(client, 'GET', path):
+                await request(client, 'DELETE', f'{path}/{node["id"]}')
+            assert await request(client, 'GET', path) == []
+            assert await request(client, 'GET', runtime_path) == []
+            legacy = await request(client, 'POST', '/admin/applications', {'name':'Legacy','code':'integrity-legacy'})
+            await request(client, 'PUT', f'/admin/applications/{legacy["id"]}', {'status':'published'})
+            async with sessions() as db:
+                assert await db.get(Form, form_id)
+                assert await db.scalar(select(ApplicationForm.id).where(
+                    ApplicationForm.application_id == a['id'], ApplicationForm.form_id == form_id,
+                ))
+                db.add(ApplicationForm(tenant_id=1, application_id=legacy['id'], form_id=form_id))
+                await db.commit()
+            assert [node['title'] for node in await request(client, 'GET', f'/applications/{legacy["id"]}/menus')] == ['Shared inspection']
     finally:
         await engine.dispose()

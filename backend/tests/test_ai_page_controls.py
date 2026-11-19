@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
 from app.services.ai.page_controls import PageControlRequest
@@ -11,6 +11,7 @@ from app.services.ai.page_controls import PageControlRequest
 
 @pytest.mark.parametrize('payload', [
     {'action': 'confirm_draft', 'draft_id': 'a' * 32},
+    {'action': 'confirm_layout_draft', 'form_id': 7},
     {'action': 'open'}, {'action': 'set_field_properties', 'form_id': 1},
     {'action': 'set_field_properties', 'form_id': 1, 'field_name': 'qty', 'properties': {'min': 20, 'max': 1}},
     {'action': 'set_field_properties', 'form_id': 1, 'field_name': 'qty', 'properties': {'role': 'admin'}},
@@ -74,12 +75,16 @@ async def test_page_receipts_are_bound_to_current_user_and_tenant(monkeypatch):
     bridge.page_actions['action-test'] = future
     monkeypatch.setitem(BRIDGES, 'test-page-token', bridge)
     monkeypatch.setattr(api, '_normalize_user', AsyncMock(side_effect=lambda user: user))
+    request = Request({'type': 'http'})
+    receipt = PageControlResult(ok=False, error='目标不存在', error_code='AI_FORM_LAYOUT_TARGET_INVALID')
     for user in [{'tenant_id': 1, 'sub': 'other'}, {'tenant_id': 2, 'sub': 'owner'}]:
         with pytest.raises(HTTPException) as failure:
-            await api.receive_page_action_result('action-test', PageControlResult(ok=True), user)
+            await api.receive_page_action_result('action-test', receipt, request, user)
         assert failure.value.status_code == 404 and not future.done()
-    result = await api.receive_page_action_result('action-test', PageControlResult(ok=True), {'tenant_id': 1, 'sub': 'owner'})
-    assert result['ok'] and future.result()['ok']
+    result = await api.receive_page_action_result('action-test', receipt, request, {'tenant_id': 1, 'sub': 'owner'})
+    assert result['ok'] and not future.result()['ok']
+    assert request.state.partial_failure == ('AI_FORM_LAYOUT_TARGET_INVALID', 1)
+    assert 'AI_FORM_LAYOUT_TARGET_INVALID' in future.result()['error']
 
 
 @pytest.mark.asyncio
@@ -296,8 +301,12 @@ async def test_rich_plan_drives_native_steps_and_reviews_only_after_success(monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('new_form', [True, False])
-async def test_layout_batch_dispatches_once_and_requires_browser_receipt(monkeypatch, new_form):
+@pytest.mark.parametrize(('new_form', 'layout_review_ready', 'receipt_form_id'), [
+    (True, False, None), (False, True, 7), (False, False, 7), (False, True, 8),
+])
+async def test_layout_batch_dispatches_once_and_requires_browser_receipt(
+    monkeypatch, new_form, layout_review_ready, receipt_form_id,
+):
     from app.services.ai import page_controls as mod
     from app.services.ai.harness_runtime import PlatformBridge
 
@@ -308,8 +317,11 @@ async def test_layout_batch_dispatches_once_and_requires_browser_receipt(monkeyp
     monkeypatch.setattr(mod, 'db_session', lambda: manager)
     monkeypatch.setattr(mod, 'decide_ai_permission', lambda *args, **kwargs: SimpleNamespace(allowed=True))
     bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
-    operations = [{'op': 'add', 'control_id': 'group', 'control_type': 'container'},
-                  {'op': 'move', 'field_name': 'material', 'parent_id': 'group'}]
+    operations = [
+        {'op': 'add', 'control_id': 'tabs', 'control_type': 'tabs',
+         'properties': {'layout': {'tabs': [{'id': 'basic', 'label': '基础信息'}]}}},
+        {'op': 'move', 'field_name': 'material', 'parent_id': 'tabs', 'slot_id': 'basic'},
+    ]
     received = []
 
     async def sink(event, action):
@@ -319,17 +331,31 @@ async def test_layout_batch_dispatches_once_and_requires_browser_receipt(monkeyp
         payload = action['draft'] if new_form else action
         assert payload['layout_operations'] == operations
         bridge.page_actions[action['id']].set_result({'ok': True, 'state': {
-            'draft_id': action.get('draft_id'), 'form_id': action['form_id'] or None,
+            'draft_id': action.get('draft_id'), 'form_id': receipt_form_id,
             'fields': DRAFT['fields'], 'review_ready': True, 'saved': False, 'published': False,
-            'layout_controls': [{'control_id': 'group'}], 'layout_operation_count': len(operations),
+            'layout_controls': [{'control_id': 'tabs'}], 'layout_operation_count': len(operations),
+            'layout_review_ready': layout_review_ready,
         }})
 
     bridge.event_sink = sink
     request = ({'action': 'draft_new', 'draft': {**DRAFT, 'layout_operations': operations}} if new_form else
                {'action': 'configure_layout', 'form_id': 7, 'layout_operations': operations})
     result = await mod.call_page_control(bridge, request)
-    assert result['status'] == 'completed'
-    assert bridge.configuration_outcome['status'] == 'ui_draft'
-    assert mod.page_control_model_result(result)['result']['layout_controls'] == [{'control_id': 'group'}]
     assert len(received) == 1
     db.commit.assert_not_awaited()
+    page_action = bridge.items[-1]
+    if receipt_form_id == 8:
+        assert result['status'] == 'blocked'
+        assert page_action['status'] == 'failed'
+        assert not page_action['payload']
+        return
+    assert result['status'] == 'completed'
+    assert bridge.configuration_outcome['status'] == 'ui_draft'
+    assert mod.page_control_model_result(result)['result']['layout_controls'] == [{'control_id': 'tabs'}]
+    if layout_review_ready:
+        assert page_action['item_id'] == received[0]['id']
+        assert page_action['payload']['form_layout_review'] == {'form_id': 7, 'operation_count': 2}
+        assert '确认保存草稿' in result['message']
+    else:
+        assert not page_action['payload']
+        assert '确认保存草稿' not in result['message']

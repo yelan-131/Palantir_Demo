@@ -93,6 +93,7 @@ export interface FlowDesignerNode {
   assigneeSource?: AssigneeSource;
   assigneeValue?: string;
   assigneeRules?: FlowAssigneeRule[];
+  rejectionTargetId?: string;
   ccRecipients?: FlowCcRecipient[];
   approvalMode?: ApprovalMode;
   slaHours?: number;
@@ -111,6 +112,7 @@ export interface FlowDesignerEdge {
   target: string;
   targetSide: FlowPortSide;
   label: string;
+  approvalOutcome?: 'approve' | 'reject';
   condition?: string;
   conditionField?: string;
   conditionOperator?: string;
@@ -231,6 +233,20 @@ const nodeGroups: Array<{ key: NodeCategory; title: string; items: NodeDefinitio
 
 const executableNodeTypes = new Set(['startEvent', 'endEvent', 'userTask', 'serviceTask', 'ccTask', 'exclusiveGateway', 'parallelGateway', 'joinGateway']);
 const approvalTaskTypes = new Set(['userTask', 'manualTask']);
+const approvalOutcomeLabels = { approve: '通过', reject: '驳回' } as const;
+
+export function approvalRejectionTargets(config: Pick<FlowDesignerConfig, 'nodes' | 'edges'>, nodeId: string) {
+  const previous = new Set<string>();
+  const next = new Set<string>();
+  for (const edge of config.edges) {
+    if (edge.target === nodeId && edge.source !== nodeId) previous.add(edge.source);
+    if (edge.source === nodeId && edge.target !== nodeId) next.add(edge.target);
+  }
+  return {
+    previous: config.nodes.filter((node) => previous.has(node.id)),
+    next: config.nodes.filter((node) => next.has(node.id) && !previous.has(node.id)),
+  };
+}
 const nodeDefinitions = nodeGroups.flatMap((group) => group.items);
 
 const assigneeSourceOptions = [
@@ -528,8 +544,19 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
   ));
   const incompleteGateways = config.nodes.filter((node) => node.type === 'exclusiveGateway').filter((node) => {
     const routes = outgoing.get(node.id) ?? [];
-    return routes.length < 2 || routes.every((edge) => !edge.condition && !edge.isDefault);
+    return routes.length < 2 || routes.every((edge) => !edge.conditionField && !edge.condition && !edge.isDefault);
   });
+  const invalidApprovalRoutes = config.nodes.filter((node) => {
+    const routes = outgoing.get(node.id) ?? [];
+    if (!routes.some((edge) => edge.approvalOutcome)) return false;
+    const rejections = routes.filter((edge) => edge.approvalOutcome === 'reject').length;
+    return !approvalTaskTypes.has(node.type) || rejections > 1 || routes.length - rejections !== 1;
+  });
+  const invalidRejectionTargets = config.nodes.filter((node) => (
+    node.rejectionTargetId && (!approvalTaskTypes.has(node.type) ||
+      (!outgoing.get(node.id)?.some((edge) => edge.target !== node.id && edge.target === node.rejectionTargetId) &&
+       !incoming.get(node.id)?.some((source) => source !== node.id && source === node.rejectionTargetId)))
+  ));
   const hasParallelGateway = config.nodes.some((node) => ['parallelGateway', 'joinGateway'].includes(node.type));
   const invalidEdges = config.edges.filter((edge) => !nodeIds.has(edge.source) || !nodeIds.has(edge.target));
   const enabledTriggers = config.triggerBindings.filter((binding) => binding.enabled);
@@ -594,6 +621,12 @@ export function validateFlowDesignerConfig(config: FlowDesignerConfig): FlowDesi
   }
   if (endNodes.length && startsWithoutEnd.length) {
     issues.push({ level: 'error', title: '起止路径', detail: `请为以下开始事件连接至少一个结束事件：${startsWithoutEnd.map((node) => node.label).join('、')}。` });
+  }
+  if (invalidApprovalRoutes.length) {
+    issues.push({ level: 'error', title: '审批结果连线', detail: `请从审批节点配置一条通过连线和至多一条驳回连线：${invalidApprovalRoutes.map((node) => node.label).join('、')}。` });
+  }
+  if (invalidRejectionTargets.length) {
+    issues.push({ level: 'error', title: '自定义驳回', detail: `请选择直接相连的驳回目标：${invalidRejectionTargets.map((node) => node.label).join('、')}。` });
   }
   return issues;
 }
@@ -786,7 +819,8 @@ export default function ProfessionalFlowDesigner({
   const canCopySelection = Boolean(selectedNodeIds.length || selectedAnnotationIds.size);
   const copyLabel = selectedAnnotationIds.size ? (selectedNodeIds.length ? '复制所选项' : '复制注释') : '复制节点';
   const selectedEdgeSourceNode = selectedEdge ? config.nodes.find((node) => node.id === selectedEdge.source) : undefined;
-  const isSelectedEdgeFromBranch = selectedEdgeSourceNode?.category === 'gateway';
+  const isSelectedEdgeFromBranch = selectedEdgeSourceNode?.type === 'exclusiveGateway';
+  const isSelectedEdgeFromApproval = approvalTaskTypes.has(selectedEdgeSourceNode?.type ?? '');
 
   useEffect(() => {
     setSelectedWaypoint(null);
@@ -1435,13 +1469,17 @@ export default function ProfessionalFlowDesigner({
       return;
     }
     const sourceNode = config.nodes.find((item) => item.id === pendingPort.nodeId);
+    const approvalOutcome = approvalTaskTypes.has(sourceNode?.type ?? '')
+      ? config.edges.some((edge) => edge.source === pendingPort.nodeId && edge.approvalOutcome !== 'reject') ? 'reject' : 'approve'
+      : undefined;
     const newEdge: FlowDesignerEdge = {
       id: makeId('edge'),
       source: pendingPort.nodeId,
       sourceSide: pendingPort.side,
       target: targetNode.id,
       targetSide,
-      label: '通过',
+      label: approvalOutcome ? approvalOutcomeLabels[approvalOutcome] : sourceNode?.type === 'startEvent' ? '提交' : '',
+      ...(approvalOutcome && { approvalOutcome }),
       priority: config.edges.length + 1,
       isDefault: sourceNode?.category !== 'gateway',
     };
@@ -1535,6 +1573,15 @@ export default function ProfessionalFlowDesigner({
 
   const renderNodeProperties = () => {
     if (!selectedNode) return null;
+    const isApproval = approvalTaskTypes.has(selectedNode.type);
+    const rejectionTargets = isApproval ? approvalRejectionTargets(config, selectedNode.id) : undefined;
+    const outcomeEdges = isApproval ? config.edges.filter((edge) => edge.source === selectedNode.id) : [];
+    const hasApprovalPath = outcomeEdges.some((edge) => edge.approvalOutcome !== 'reject');
+    const linkedRejectionEdge = outcomeEdges.find((edge) => edge.approvalOutcome === 'reject');
+    const linkedRejectionTarget = config.nodes.find((node) => node.id === linkedRejectionEdge?.target);
+    const savedNextTarget = rejectionTargets?.next.find((node) => node.id === selectedNode.rejectionTargetId);
+    const customTargetInvalid = selectedNode.rejectionTargetId && !savedNextTarget &&
+      !rejectionTargets?.previous.some((node) => node.id === selectedNode.rejectionTargetId);
     const fieldOptions = fields.map((field) => ({ value: field.key, label: field.name }));
     const selectedNodeTypeLabel = getNodeTypeLabel(selectedNode);
     const ccRecipients = selectedNode.ccRecipients ?? [];
@@ -1638,6 +1685,28 @@ export default function ProfessionalFlowDesigner({
                 </div>
               );
             })}
+          </PropertyGroup>
+        )}
+
+        {rejectionTargets && (
+          <PropertyGroup title="同意与驳回" hint="默认沿本次进入的路线退到上一个审批节点。退到开始事件时，交回发起人。">
+            <PropertyRow label="同意后">
+              <Input aria-label="同意后" value={hasApprovalPath ? '沿通过连线继续' : '未连接通过路线'} readOnly />
+            </PropertyRow>
+            <PropertyRow label="驳回到">
+              <Select
+                aria-label="驳回到"
+                value={selectedNode.rejectionTargetId || ''}
+                status={customTargetInvalid ? 'error' : undefined}
+                options={[
+                  { value: '', label: linkedRejectionTarget ? `沿驳回线到 ${linkedRejectionTarget.label}` : '沿来路退回（默认）' },
+                  ...(rejectionTargets.previous.length ? [{ label: '前置节点', options: rejectionTargets.previous.map((node) => ({ value: node.id, label: node.label })) }] : []),
+                  ...(savedNextTarget ? [{ value: savedNextTarget.id, label: savedNextTarget.label }] : []),
+                  ...(customTargetInvalid ? [{ value: selectedNode.rejectionTargetId, label: '原目标已断开，请重新选择', disabled: true }] : []),
+                ]}
+                onChange={(value) => patchNode(selectedNode.id, { rejectionTargetId: value || undefined })}
+              />
+            </PropertyRow>
           </PropertyGroup>
         )}
 
@@ -1791,12 +1860,11 @@ export default function ProfessionalFlowDesigner({
         ? '已配置自定义条件'
         : '未设置条件规则';
     const updateEdgeCondition = (patch: Partial<FlowDesignerEdge>) => {
-      const nextField = patch.conditionField ?? selectedEdge.conditionField;
-      const nextOperator = patch.conditionOperator ?? selectedEdge.conditionOperator ?? 'eq';
-      const nextValue = patch.conditionValue ?? selectedEdge.conditionValue;
+      const next = { ...selectedEdge, ...patch };
       patchEdge(selectedEdge.id, {
         ...patch,
-        condition: buildEdgeConditionExpression(nextField, nextOperator, nextValue),
+        ...(next.conditionField && { isDefault: false }),
+        condition: buildEdgeConditionExpression(next.conditionField, next.conditionOperator || 'eq', next.conditionValue),
       });
     };
     const clearEdgeCondition = () => patchEdge(selectedEdge.id, {
@@ -1809,10 +1877,32 @@ export default function ProfessionalFlowDesigner({
       <div className="professional-flow-props">
         <PropertyGroup title="连线规则">
 
-          <label><span>动作结果</span><Input value={selectedEdge.label} onChange={(event) => patchEdge(selectedEdge.id, { label: event.target.value })} /></label>
+          {isSelectedEdgeFromApproval && (
+            <PropertyRow label="审批结果">
+              <Select
+                aria-label="审批结果"
+                value={selectedEdge.approvalOutcome || 'approve'}
+                options={[
+                  { value: 'approve', label: '审批通过' },
+                  { value: 'reject', label: '审批驳回' },
+                ]}
+                onChange={(approvalOutcome: NonNullable<FlowDesignerEdge['approvalOutcome']>) => {
+                  const label = selectedEdge.label;
+                  patchEdge(selectedEdge.id, {
+                    approvalOutcome,
+                    label: !label || label === '通过' || label === '驳回' ? approvalOutcomeLabels[approvalOutcome] : label,
+                  });
+                }}
+              />
+            </PropertyRow>
+          )}
+          <PropertyRow label="连线名称">
+            <Input aria-label="连线名称" value={selectedEdge.label} onChange={(event) => patchEdge(selectedEdge.id, { label: event.target.value })} />
+          </PropertyRow>
           <label>
             <span>条件规则</span>
             <div className="designer-rule-toggle professional-flow-edge-rule-toggle" data-rule-title="条件规则" title={conditionSummary} onClick={(event) => event.stopPropagation()}>
+              <small>{conditionSummary}</small>
               <Button
                 className="designer-rule-config-button"
                 data-rule-action="config"
@@ -1829,19 +1919,19 @@ export default function ProfessionalFlowDesigner({
                   event.stopPropagation();
                   setConditionModalOpen(true);
                 }}
+                aria-label="设置条件规则"
                 title="设置条件规则"
               />
             </div>
           </label>
           <label><span>优先级</span><InputNumber min={1} value={selectedEdge.priority} onChange={(value) => patchEdge(selectedEdge.id, { priority: Number(value || 1) })} /></label>
-          <label>
+          {isSelectedEdgeFromBranch && <label>
             <span>默认路径</span>
             <Switch
-              checked={isSelectedEdgeFromBranch ? selectedEdge.isDefault : true}
-              disabled={!isSelectedEdgeFromBranch}
+              checked={Boolean(selectedEdge.isDefault)}
               onChange={(checked) => patchEdge(selectedEdge.id, { isDefault: checked })}
             />
-          </label>
+          </label>}
         </PropertyGroup>
         <PropertyGroup title="连线路径">
           <div className="professional-flow-property-actions">

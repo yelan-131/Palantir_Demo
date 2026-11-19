@@ -72,11 +72,40 @@ export default function AISettingsWorkspace(props: Props) {
   };
   const active = AI_SETTINGS_SECTIONS.some(section => section.key === props.active) ? props.active : 'connection';
   return <div className="ai-settings-workspace ai-settings-tabs-workspace">
-
     {contextHolder}
-    <div className="ai-runtime-toolbar"><div className="ai-settings-tab-actions"><span className="ai-runtime-status">DeepSeek Harness <small>{props.sdkVersion ? `SDK ${props.sdkVersion}` : '运行依赖未就绪'}</small></span><Button size="small" loading={checking} onClick={checkUpdate}>检查 DSH 更新</Button><div className="ai-settings-master-switch"><span>启用平台 AI</span><Form.Item name="aiEnabled" valuePropName="checked" noStyle><Switch aria-label="启用平台 AI" disabled={!props.loaded || props.saving || props.testing} /></Form.Item></div></div></div>
-    {update && <Alert showIcon closable onClose={() => setUpdate(null)} type={update.updateAvailable ? "info" : "success"} message={update.updateAvailable ? `发现 DSH 新版本 ${update.latestVersion}` : update.currentVersion ? "当前 DSH 已是最新可用版本" : "DSH 尚未安装"} description={<span>SDK：{update.currentVersion || "未安装"} · Runtime：{update.runtimeVersion || "未安装"} · 最新可用：{update.latestVersion}。<a href={update.releaseUrl} target="_blank" rel="noreferrer">查看版本说明</a>（检查不会自动升级）</span>} />}
-    <SettingsTabs className="ai-primary-tabs" activeKey={active} onChange={props.onSelect} items={AI_SETTINGS_SECTIONS.map(item => ({key: item.key, label: <span>{item.icon}{item.title}</span>, disabled: props.saving || props.testing, forceRender: true, children: <fieldset disabled={!props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">{props.sections.find(section => section.key === item.key)?.children}</fieldset>}))} />
+    <SettingsTabs className="ai-primary-tabs" activeKey={active} onChange={props.onSelect} items={AI_SETTINGS_SECTIONS.map(item => ({
+      key: item.key,
+      label: <span>{item.icon}{item.title}</span>,
+      disabled: props.saving || props.testing,
+      forceRender: true,
+      children: <>
+        {item.key === 'connection' && <>
+          <div className="ai-runtime-toolbar">
+            <div className="ai-runtime-status">
+              <strong>DeepSeek Harness</strong>
+              <small>{props.sdkVersion ? `SDK ${props.sdkVersion}` : '运行依赖未就绪'}</small>
+            </div>
+            <div className="ai-runtime-actions">
+              <Button size="small" loading={checking} onClick={checkUpdate}>检查 DSH 更新</Button>
+              <label className="ai-settings-master-switch">
+                <span>启用平台 AI</span>
+                <Form.Item name="aiEnabled" valuePropName="checked" noStyle>
+                  <Switch aria-label="启用平台 AI" disabled={!props.loaded || props.saving || props.testing} />
+                </Form.Item>
+              </label>
+            </div>
+          </div>
+          {update && <Alert className="ai-runtime-update" showIcon closable onClose={() => setUpdate(null)}
+            type={update.updateAvailable ? 'info' : 'success'}
+            message={update.updateAvailable ? `发现 DSH 新版本 ${update.latestVersion}` : update.currentVersion ? '当前 DSH 已是最新可用版本' : 'DSH 尚未安装'}
+            description={<span>SDK：{update.currentVersion || '未安装'} · Runtime：{update.runtimeVersion || '未安装'} · 最新可用：{update.latestVersion}。<a href={update.releaseUrl} target="_blank" rel="noreferrer">查看版本说明</a>（检查不会自动升级）</span>}
+          />}
+        </>}
+        <fieldset disabled={!props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">
+          {props.sections.find(section => section.key === item.key)?.children}
+        </fieldset>
+      </>,
+    }))} />
     {active !== 'agent-registry' && props.effectivePreview}
     {props.saveActions && <footer className="ai-settings-save-footer">{props.saveActions}</footer>}
   </div>;

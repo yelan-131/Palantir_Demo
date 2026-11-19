@@ -1,13 +1,14 @@
 """Application CRUD shared by the application routes and AI application tools."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id, current_user_id
 from app.core.audit import write_audit_log
+from app.core.production_errors import coded_error
 from app.services.tenant_onboarding import assert_tenant_quota
 
 
@@ -36,7 +37,7 @@ class ApplicationCreate(ApplicationAccessSettings):
     icon: Optional[str] = None
     default_route: str = "/"
     sort_order: int = 0
-    status: str = "published"
+    status: Literal["draft"] = "draft"
     is_pinned: bool = False
 
 
@@ -48,7 +49,7 @@ class ApplicationUpdate(ApplicationAccessSettings):
     icon: Optional[str] = None
     default_route: Optional[str] = None
     sort_order: Optional[int] = None
-    status: Optional[str] = None
+    status: Optional[Literal["draft", "published", "active", "disabled"]] = None
     is_pinned: Optional[bool] = None
 
 
@@ -112,7 +113,7 @@ async def ensure_application_code_available(db, tenant_id, code, *, application_
     if application_id is not None:
         query = query.where(Application.id != application_id)
     if await db.scalar(query) is not None:
-        raise HTTPException(409, "Application code already exists")
+        raise coded_error(409, "APPLICATION_CODE_CONFLICT", "Application code already exists")
 
 
 def application_code_locked(app) -> bool:
@@ -148,7 +149,7 @@ async def validate_tenant_roles(db, tenant_id, role_ids):
         Role.tenant_id == tenant_id, Role.id.in_(role_ids),
     )))
     if role_ids != valid_ids:
-        raise HTTPException(422, "所选角色不存在或不属于当前租户")
+        raise coded_error(422, "APPLICATION_ROLES_INVALID", "所选角色不存在或不属于当前租户")
     return role_ids
 
 
@@ -255,6 +256,10 @@ async def update_application(db, app, body: ApplicationUpdate, user: dict):
     values = body.model_dump(exclude_unset=True, exclude={"expected_token"})
     if "code" in values:
         await validate_application_code_change(db, app, body.code)
+    if "status" in values and body.status != app.status:
+        allowed = {"draft": "published", "published": "disabled", "active": "disabled", "disabled": "published"}
+        if body.status is None or body.status != allowed.get(app.status):
+            raise coded_error(409, "APPLICATION_STATE_CONFLICT", "当前应用状态不支持该操作")
     code_was_locked = application_code_locked(app)
     for key, value in values.items():
         if key not in {"role_ids", "access_groups"}:
@@ -272,10 +277,17 @@ async def update_application(db, app, body: ApplicationUpdate, user: dict):
     return {"data": await _application_to_dict(db, app, include_bindings=True)}
 
 
+def require_deletable_application(app):
+    if app.status != "draft" or application_code_locked(app):
+        raise coded_error(409, "APPLICATION_STATE_CONFLICT", "只能删除未发布过的草稿应用")
+
+
 async def delete_application(db, app, user: dict):
     from app.services.application_menu_nodes import _delete_menu_node_entry_permissions
-    from app.models.relational import ApplicationForm, ApplicationMenuNode
+    from app.services.application_menus import empty_menu_key
+    from app.models.relational import ApplicationForm, ApplicationMenuNode, SystemSetting
 
+    require_deletable_application(app)
     tenant_id, app_id = app.tenant_id, app.id
     nodes = await db.scalars(select(ApplicationMenuNode).where(
         ApplicationMenuNode.tenant_id == tenant_id, ApplicationMenuNode.application_id == app_id,
@@ -289,6 +301,7 @@ async def delete_application(db, app, user: dict):
     await db.execute(delete(ApplicationForm).where(
         ApplicationForm.tenant_id == tenant_id, ApplicationForm.application_id == app_id,
     ))
+    await db.execute(delete(SystemSetting).where(SystemSetting.key == empty_menu_key(app)))
     await db.delete(app)
     await db.commit()
     await write_audit_log(

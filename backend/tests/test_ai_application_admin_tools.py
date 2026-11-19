@@ -77,7 +77,7 @@ async def test_application_tools_require_confirmation_and_enforce_lifecycle(appl
         confirmation = await run(operation, target, prepare=True)
         result = await run(operation, confirmation)
         assert result["data"]["status"] == status
-    with pytest.raises(HTTPException, match="只能删除草稿"):
+    with pytest.raises(HTTPException, match="只能删除未发布过的草稿"):
         await run("delete", target, prepare=True)
 
 
@@ -114,7 +114,7 @@ async def test_application_code_stays_locked_after_first_publish(application_db)
     published = await update(code="final-code", status="published")
     assert published["code"] == "final-code"
     assert published["code_locked"] is True
-    for status in ("published", "disabled", "draft"):
+    for status in ("published", "disabled", "published"):
         await update(status=status)
         with pytest.raises(HTTPException, match="首次发布后不可修改"):
             await update(code="changed-code")
@@ -124,6 +124,8 @@ async def test_application_code_stays_locked_after_first_publish(application_db)
                 payload={"application_id": app.id, "code": "changed-code"}, prepare=True,
             )
         assert (await update(code="final-code", name="巡检应用"))["code"] == "final-code"
+    with pytest.raises(HTTPException, match="当前应用状态不支持该操作"):
+        await update(status="draft")
 
 
 @pytest.mark.asyncio

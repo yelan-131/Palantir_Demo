@@ -75,6 +75,7 @@ type WorkflowBusinessItem = {
     initiator_id?: number | null;
     initiator_name?: string | null;
     current_node_id?: string;
+    current_step?: number;
     approvals?: Array<{ id: number; node_id?: string | null; approver_id?: number | null; approver_name?: string | null; action?: string | null; comment?: string | null; acted_at?: string | null }>;
     current_assignees?: Array<{ id: number; name: string; username?: string | null }>;
   } | null;
@@ -395,8 +396,11 @@ export default function WorkflowPage() {
         }
         setApprovalLoading(action);
         try {
-          await wfApproveOrReject(item.workflow!.id, { action, comment, expected_node_id: item.workflow!.current_node_id });
-          message.success(action === 'approve' ? '审批已通过' : '已驳回申请');
+          const response = await wfApproveOrReject(item.workflow!.id, {
+            action, comment, expected_node_id: item.workflow!.current_node_id, expected_step: item.workflow!.current_step,
+          });
+          const status = (response.data?.data ?? response.data)?.status;
+          message.success(action === 'approve' ? '审批已通过' : status === 'pending' ? '已驳回并流转至配置节点' : '已驳回申请');
           await loadItems();
           closeWorkflowDetail();
           setSelectedId(undefined);

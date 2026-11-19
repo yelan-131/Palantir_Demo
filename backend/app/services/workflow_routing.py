@@ -7,7 +7,15 @@ import ast
 import re
 
 from fastapi import HTTPException
+from app.core.production_errors import coded_error
 from app.services.form_rules import matches
+
+
+APPROVAL_NODE_TYPES = ('userTask', 'manualTask', 'approval')
+
+
+def _approval_route_error(detail, status=422):
+    return coded_error(status, 'WORKFLOW_APPROVAL_ROUTE_INVALID', detail)
 
 
 def _node_kind(node):
@@ -77,12 +85,26 @@ def validate_graph(config, *, require_cc_recipients=False):
         source, target = edge.get('source') or edge.get('fromId'), edge.get('target') or edge.get('toId')
         if source not in ids or target not in ids:
             raise HTTPException(422, '流程连线指向不存在的节点')
+        outcome = edge.get('approvalOutcome')
+        if outcome is not None and (outcome not in ('approve', 'reject') or kinds[source] not in APPROVAL_NODE_TYPES):
+            raise _approval_route_error('审批结果只能在审批节点的出线上配置，且必须是通过或驳回')
         outgoing.setdefault(source, []).append(edge)
         incoming.setdefault(target, []).append(source)
     for node in nodes:
         routes = outgoing.get(node['id'], [])
         kind = kinds[node['id']]
-        if len(routes) > 1 and kind != 'exclusiveGateway':
+        rejection_target = node.get('rejectionTargetId')
+        if rejection_target is not None:
+            downstream = {edge.get('target') or edge.get('toId') for edge in routes}
+            neighbors = downstream | set(incoming.get(node['id'], []))
+            if (kind not in APPROVAL_NODE_TYPES or not isinstance(rejection_target, str)
+                    or rejection_target == node['id'] or rejection_target not in neighbors):
+                raise _approval_route_error('自定义驳回目标必须是与该审批节点直接相连的前置或后续节点')
+        if kind in APPROVAL_NODE_TYPES and any(edge.get('approvalOutcome') for edge in routes):
+            outcomes = [edge.get('approvalOutcome') or 'approve' for edge in routes]
+            if outcomes.count('approve') != 1 or outcomes.count('reject') > 1:
+                raise _approval_route_error('审批节点必须有一条通过连线，且最多有一条驳回连线')
+        elif len(routes) > 1 and kind != 'exclusiveGateway':
             raise HTTPException(422, '多条分支必须通过条件网关配置')
         if kind == 'exclusiveGateway' and sum(bool(e.get('isDefault')) for e in routes) > 1:
             raise HTTPException(422, '条件网关只能有一条默认路径')
@@ -97,6 +119,8 @@ def validate_graph(config, *, require_cc_recipients=False):
         pending.extend(incoming.get(node_id, []))
     if any(start not in visited for start in starts):
         raise HTTPException(422, '每个开始事件必须连接到至少一个结束事件')
+    if any(edge.get('approvalOutcome') and (edge.get('target') or edge.get('toId')) not in visited for edge in edges):
+        raise _approval_route_error('每条审批结果连线都必须通往结束事件')
     if len(starts) > 1:
         _start_bindings(config, starts)
 
@@ -147,20 +171,81 @@ def route_node_ids(config, data, *, trigger_action=None):
             current = next(iter(entries.values()))
         if current is None:
             raise HTTPException(409, '未为当前触发动作配置开始事件')
-    path = []
+    return _follow_route(config, nodes, data, current)
+
+
+def rejection_route(config, data, path):
+    """Keep the executed visits and resolve an explicit or default return."""
+    if config.get('steps') or not path:
+        return None
+    current = path[-1]
+    nodes = {node['id']: node for node in config.get('nodes') or []}
+    target = nodes.get(current, {}).get('rejectionTargetId')
+    edges = config.get('edges') or []
+    if target is None:
+        if any(edge.get('approvalOutcome') == 'reject' and (edge.get('source') or edge.get('fromId')) == current
+               for edge in edges):
+            validate_graph(config)
+            return _follow_route(config, nodes, data, current, path=path[:-1], reject_at=current)
+        target = _previous_return_node(nodes, edges, path)
+    if target is None:
+        return None
+    validate_graph(config)
+    if _node_kind(nodes[target]) in ('startEvent', 'start'):
+        return [*path, target]
+    # A return may revisit earlier nodes. The new forward path must still be acyclic.
+    try:
+        return [*path, *_follow_route(config, nodes, data, target)]
+    except HTTPException as error:
+        if error.status_code == 409:
+            raise _approval_route_error(f'驳回后无法继续。{error.detail}', 409) from error
+        raise
+
+
+def _previous_return_node(nodes, edges, path):
+    # Keep the route of the current round. Revisiting an earlier node rewinds
+    # that route without removing any visits from the recorded history.
+    active_route = {}
+    for node in path:
+        if node in active_route:
+            while next(reversed(active_route)) != node:
+                active_route.popitem()
+        else:
+            active_route[node] = None
+    connections = {(edge.get('source') or edge.get('fromId'), edge.get('target') or edge.get('toId'))
+                   for edge in edges}
+    route = list(active_route)
+    for source, target in zip(reversed(route[:-1]), reversed(route[1:])):
+        if (source, target) not in connections:
+            return None
+        if _node_kind(nodes[source]) in (*APPROVAL_NODE_TYPES, 'startEvent', 'start'):
+            return source
+    return None
+
+
+def _follow_route(config, nodes, data, current, *, path=None, reject_at=None):
+    path = list(path or [])
+    visited = set(path)
+    visited.discard(reject_at)
     outgoing = {}
     for edge in config.get('edges') or []:
         outgoing.setdefault(edge.get('source') or edge.get('fromId'), []).append(edge)
     while current:
-        if current in path:
+        if current in visited:
+            if reject_at is not None:
+                raise _approval_route_error('驳回路径回到了已处理的节点，请检查连线', 409)
             raise HTTPException(409, '流程存在循环，无法启动审批')
         path.append(current)
+        visited.add(current)
         if _node_kind(nodes[current]) in ('endEvent', 'end'):
             return path
         routes = sorted(outgoing.get(current, []), key=lambda e: (e.get('priority', 999), str(e.get('id', ''))))
         selected = None
         defaults = []
         for edge in routes:
+            outcome = edge.get('approvalOutcome') or 'approve'
+            if (outcome == 'reject') != (current == reject_at):
+                continue
             if edge.get('isDefault'):
                 defaults.append(edge)
                 continue
@@ -176,6 +261,8 @@ def route_node_ids(config, data, *, trigger_action=None):
         if selected is None and defaults:
             selected = defaults[0]
         if selected is None:
+            if reject_at is not None:
+                raise _approval_route_error(f'驳回路径的节点 {current} 没有符合条件的后续连线', 409)
             raise HTTPException(409, f'流程节点 {current} 没有符合条件的后续路径')
         current = selected.get('target') or selected.get('toId')
     raise HTTPException(409, '流程没有有效结束节点')

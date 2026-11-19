@@ -119,7 +119,7 @@ class PlatformBridge:
             from .page_controls import TOOL, PageControlRequest
             definitions[TOOL] = {
                 'name': tool_alias(TOOL),
-                'description': '在网页设计器搭建或调整本地表单草稿。先读取表单搭建 Skill，等待页面回执。',
+                'description': '在网页设计器搭建或调整本地表单草稿。布局先读取；已有字段可按编码从字段库放入指定位置。先读取表单搭建 Skill，等待页面回执。',
                 'inputSchema': PageControlRequest.model_json_schema(),
             }
         for name, (request, description) in NAVIGATION_TOOLS.items():
@@ -693,7 +693,9 @@ class HarnessRuntime:
                 message = (
                     "用户正在工作台中查看设计进度。配置表单字段、搭建组件页面或扩展工作流时，按需先读取实际配置，"
                     "再用表单写工具、pages.create / pages.save_draft、forms.save_workflow_draft 准备方案。"
-                    "工作台会跟随这些工具显示预览。可继续准备同一请求中其余可独立校验的配置；"
+                    "表单页签、分组和字段位置使用 ui.form_designer，先 inspect_layout 再 configure_layout。"
+                    "已有表单布局应用成功后，对话会提供保存草稿确认卡。"
+                    "工作台会跟随服务端写工具显示预览。可继续准备同一请求中其余可独立校验的配置；"
                     "最后汇总为平台确认卡。后续动作依赖尚未创建的 ID 或版本时，等当前确认执行成功后继续。\n\n"
                     + message
                 )

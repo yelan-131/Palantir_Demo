@@ -44,10 +44,14 @@ async def test_internal_delivery_creates_one_draft_and_never_resubmits(environme
     from app.services import records
     db,_,_,user,_=environment
     inst=instance()
+    state=json.loads(inst.workflow_state)
+    state['dispatch_jobs'][0].update(error='previous failure', error_code='WORKFLOW_DISPATCH_FAILED')
+    inst.workflow_state=json.dumps(state)
     await delivery.process_instance(db,inst)
     job=json.loads(inst.workflow_state)['dispatch_jobs'][0]
     assert job['status']=='succeeded',job
     assert job['result']['record_status']=='draft'
+    assert 'error_code' not in job
     await delivery.process_instance(db,inst)
     rows=await records.list_records(1,db,{**user,'is_admin':True})
     assert rows['total']==1
@@ -55,7 +59,7 @@ async def test_internal_delivery_creates_one_draft_and_never_resubmits(environme
 
 
 @pytest.mark.asyncio
-async def test_target_tenant_failure_is_logged_without_creating_record(environment):
+async def test_target_tenant_failure_is_logged_without_creating_record(environment, caplog):
     from app.models.relational import Form
     db,_,_,_,_=environment
     db.add(Form(id=2,tenant_id=2,code='other',name='Other',status='published'))
@@ -64,6 +68,8 @@ async def test_target_tenant_failure_is_logged_without_creating_record(environme
     await delivery.process_instance(db,inst)
     state=json.loads(inst.workflow_state)
     assert state['dispatch_jobs'][0]['status']=='failed'
+    assert state['dispatch_jobs'][0]['error_code']=='WORKFLOW_DISPATCH_FAILED'
+    assert "error_code=WORKFLOW_DISPATCH_FAILED instance_id=99 node_id='send'" in caplog.text
     assert state['dispatch_pending'] is False
 
 
@@ -121,14 +127,18 @@ async def test_approving_node_queues_only_reached_delivery(environment,monkeypat
 
 
 @pytest.mark.asyncio
-async def test_failed_job_can_be_retried_and_history_hides_configuration(environment,monkeypatch):
+@pytest.mark.parametrize('status', ['approved', 'rejected'])
+async def test_failed_job_can_be_retried_and_history_hides_configuration(environment,monkeypatch,status):
     from app.api import workflow
     from app.models.relational import WorkflowDef,WorkflowInstance
     db,_,_,user,_=environment
     definition=WorkflowDef(tenant_id=1,name='Delivery',config='{}',status='published',version=1)
     db.add(definition);await db.flush()
     data=instance({**action(),'targetFormId':99999})
-    inst=WorkflowInstance(tenant_id=1,workflow_id=definition.id,workflow_version=1,title='Failure',initiator_id=1,status='approved',form_data=data.form_data,workflow_state=data.workflow_state)
+    state=json.loads(data.workflow_state)
+    if status == 'rejected':
+        state['dispatch_jobs'][0]['on_rejection'] = True
+    inst=WorkflowInstance(tenant_id=1,workflow_id=definition.id,workflow_version=1,title='Failure',initiator_id=1,status=status,form_data=data.form_data,workflow_state=json.dumps(state))
     db.add(inst);await db.commit()
     await delivery.process_instance(db,inst);await db.commit()
     assert json.loads(inst.workflow_state)['dispatch_jobs'][0]['status']=='failed'
@@ -146,9 +156,10 @@ async def test_failed_job_can_be_retried_and_history_hides_configuration(environ
 
 
 @pytest.mark.asyncio
-async def test_cancelled_workflow_does_not_send_pending_job(environment):
+@pytest.mark.parametrize('status', ['cancelled', 'rejected'])
+async def test_cancelled_workflow_does_not_send_pending_job(environment, status):
     db,_,_,_,_=environment
-    inst=instance();inst.status='cancelled'
+    inst=instance();inst.status=status
     await delivery.process_instance(db,inst)
     job=json.loads(inst.workflow_state)['dispatch_jobs'][0]
     assert job['status']=='cancelled'

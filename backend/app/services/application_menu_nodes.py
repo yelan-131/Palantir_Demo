@@ -8,7 +8,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id
-from app.services.application_menus import lock_application, menu_nodes, validate_parent, sync_menu_default, set_application_default
+from app.core.production_errors import coded_error
+from app.services.application_menus import empty_menu_key, lock_application, menu_nodes, validate_parent, sync_menu_default, set_application_default
 from app.services.applications import ApplicationAccessSettings, effective_access_groups, validate_tenant_roles
 
 
@@ -176,7 +177,7 @@ async def _set_menu_page_target(db: AsyncSession, user: dict, values: dict, node
             raise HTTPException(422, "请选择一个菜单目标")
         page = await find_page(db, user, page_code)
         if await published(db, page) is None:
-            raise HTTPException(409, "请先发布目标页面")
+            raise coded_error(409, "APPLICATION_MENU_TARGET_UNPUBLISHED", "请先发布目标页面")
         values.update(node_type="page", form_id=None, route_path=f"/pages/{page.code}")
     elif values.get("node_type") == "page" or (
         node is not None and node.node_type == "page"
@@ -200,7 +201,7 @@ async def _create_application_menu_node(application_id, body, db, user, *, defer
         if body.page_code is not None or body.form_id is not None or body.route_path is not None or body.node_type == "group":
             raise HTTPException(422, "新建页面的菜单不能同时指定其他入口")
         if body.default_entry:
-            raise HTTPException(422, "请先发布页面，再设为应用默认入口")
+            raise coded_error(422, "APPLICATION_MENU_TARGET_UNPUBLISHED", "请先发布页面，再设为应用默认入口")
         from app.services.component_page_editor import PageDefinition, create_page_draft
 
         title = body.title.strip()
@@ -251,6 +252,14 @@ async def _update_application_menu_node(application_id, node_id, body, db, user)
         raise HTTPException(404, "Form not found")
     if "parent_id" in updates:
         await validate_parent(db, app, updates["parent_id"], node.id)
+    if node.node_type == "group" and updates.get("node_type", "group") != "group":
+        child_id = await db.scalar(select(ApplicationMenuNode.id).where(
+            ApplicationMenuNode.tenant_id == tenant_id,
+            ApplicationMenuNode.application_id == app.id,
+            ApplicationMenuNode.parent_id == node.id,
+        ).limit(1))
+        if child_id is not None:
+            raise HTTPException(422, "有子菜单的分组不能改为普通入口")
     was_default = node.default_entry
     if updates.get("form_id") and not updates.get("route_path"):
         form_config = form.config or {}
@@ -303,6 +312,8 @@ async def paste_application_menu_nodes(application_id, node_ids, parent_id, db, 
         copied_parent = copies.get(source.parent_id)
         if copied_parent is None and source.id not in selected:
             continue
+        if copied_parent is not None and copied_parent.node_type != "group":
+            raise HTTPException(422, "父菜单必须是分组")
 
         destination = copied_parent.id if copied_parent else parent_id
         order = next_order.get(destination, 0)
@@ -337,7 +348,7 @@ async def paste_application_menu_nodes(application_id, node_ids, parent_id, db, 
 
 
 async def _delete_application_menu_node(application_id, node_id, db, user, *, defer_commit=False):
-    from app.models.relational import ApplicationMenuNode
+    from app.models.relational import ApplicationMenuNode, SystemSetting
 
     tenant_id = current_tenant_id(user)
     app = await lock_application(db, tenant_id, application_id)
@@ -345,6 +356,10 @@ async def _delete_application_menu_node(application_id, node_id, db, user, *, de
     if not node or node.application_id != application_id or node.tenant_id != tenant_id:
         raise HTTPException(404, "Menu node not found")
     nodes = await menu_nodes(db, app)
+    if len(nodes) == 1:
+        key = empty_menu_key(app)
+        if await db.scalar(select(SystemSetting.id).where(SystemSetting.key == key)) is None:
+            db.add(SystemSetting(key=key, value={}, description="应用菜单已主动清空"))
     siblings = [item for item in nodes if item.parent_id == node.parent_id and item.id != node.id]
     sort_order = max((item.sort_order for item in siblings), default=-1) + 1
     for child in sorted((item for item in nodes if item.parent_id == node.id), key=lambda item: (item.sort_order, item.id)):

@@ -389,7 +389,7 @@ def merge_ai_settings(incoming: dict[str, Any], *, existing: dict[str, Any] | No
     if isinstance(merged["riskPolicy"], dict):
         merged["riskPolicy"].pop("maxToolSteps", None)
     merged["safetyPolicy"]["agentLoopMode"] = "harness"
-    for deprecated in ("proactiveEnabled", "streaming", "dailyLimit", "userDailyLimit", "knowledgeScopes", "tools", "retentionDays"):
+    for deprecated in ("domains", "proactiveEnabled", "streaming", "dailyLimit", "userDailyLimit", "knowledgeScopes", "tools", "retentionDays"):
         merged.pop(deprecated, None)
     from .model_catalog import merge_catalog, catalog_from_legacy
     catalog_existing = deepcopy(existing if existing is not None else AI_SYSTEM_SETTINGS)
@@ -455,9 +455,9 @@ def validate_ai_settings(data: dict[str, Any]) -> None:
     for key in ("sensitiveMasking", "blockSecretMemory", "highRiskConfirm"):
         if key in (data.get("safetyPolicy") or {}) and not isinstance(data["safetyPolicy"][key], bool):
             raise ValueError(f"safetyPolicy.{key} 必须是布尔值")
-    for key in ("domains", "forbiddenActions"):
-        if key in data and (not isinstance(data[key], list) or not all(isinstance(item, str) for item in data[key])):
-            raise ValueError(f"{key} 必须是文本数组")
+    forbidden_actions = data.get("forbiddenActions", [])
+    if not isinstance(forbidden_actions, list) or not all(isinstance(item, str) for item in forbidden_actions):
+        raise ValueError("forbiddenActions 必须是文本数组")
     policies = data.get("rolePolicies", [])
     if not isinstance(policies, list):
         raise ValueError("rolePolicies 必须是数组")

@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from tests.test_record_service import environment, seed
 from app.api import component_pages
+from app.core.request_diagnostics import install_request_diagnostics
 from app.models.relational import ComponentPageVersion, FormPermission, RolePermission
 
 
@@ -678,8 +679,9 @@ async def test_global_filters_only_apply_to_inherited_source(pages_environment):
 
 
 @pytest.mark.asyncio
-async def test_denied_statistics_source_never_leaks_or_hides_other_source(pages_environment):
+async def test_denied_statistics_source_never_leaks_or_hides_other_source(pages_environment, caplog):
     db, _, user, client = pages_environment
+    install_request_diagnostics(client._transport.app)
     await seed(db, 'Visible')
     await second_source(db, user, client)
     page = await create_publish(client, user, {'title': '权限隔离', 'widgets': [
@@ -688,7 +690,15 @@ async def test_denied_statistics_source_never_leaks_or_hides_other_source(pages_
     db.add(FormPermission(tenant_id=1, form_id=20, role_id=1, action='view', effect='deny'))
     await db.commit()
     user['is_admin'] = False
-    data = (await client.post(f'/pages/{page["code"]}/data', json={})).json()['analyticsData']
+    response = await client.post(
+        f'/pages/{page["code"]}/data', json={}, headers={'X-Request-ID': 'partial-page-test'},
+    )
+    assert response.status_code == 200
+    assert response.headers['X-Error-Code'] == 'COMPONENT_DATA_PARTIAL_FAILURE'
+    assert response.headers['X-Request-ID'] == 'partial-page-test'
+    assert 'error_code=COMPONENT_DATA_PARTIAL_FAILURE request_id=partial-page-test' in caplog.text
+    assert 'affected_components=1' in caplog.text
+    data = response.json()['analyticsData']
     assert data['metricValues']['one'] == 1
     assert data['metricValues']['two'] is None
     assert data['widgetErrors']['one'] == []

@@ -3,6 +3,7 @@ import hashlib
 import json
 from fastapi import HTTPException
 from sqlalchemy import select, update
+from app.core.production_errors import coded_error
 from app.models.relational import Application, ApplicationMenuNode, ComponentPage
 
 
@@ -28,15 +29,24 @@ async def menu_nodes(db, app):
     ).execution_options(populate_existing=True))).all())
 
 
+def empty_menu_key(app):
+    return f"application-menu-empty:{app.tenant_id}:{app.id}:{app.created_at.isoformat()}"
+
+
+def require_group_parent(parent_id, group_ids):
+    if parent_id is not None and parent_id not in group_ids:
+        raise coded_error(422, "APPLICATION_MENU_TREE_INVALID", "父菜单必须是当前应用的分组")
+
+
 def validate_tree(parents):
     for node_id in parents:
         visited = set()
         parent_id = node_id
         while parent_id is not None:
             if parent_id in visited:
-                raise HTTPException(422, "菜单不能引用自身或形成循环")
+                raise coded_error(422, "APPLICATION_MENU_TREE_INVALID", "菜单不能引用自身或形成循环")
             if parent_id not in parents:
-                raise HTTPException(422, "父菜单必须属于当前应用")
+                raise coded_error(422, "APPLICATION_MENU_TREE_INVALID", "父菜单必须属于当前应用")
             visited.add(parent_id)
             parent_id = parents[parent_id]
 
@@ -45,7 +55,8 @@ async def validate_parent(db, app, parent_id, node_id=None):
     nodes = await menu_nodes(db, app)
     parents = {node.id: node.parent_id for node in nodes}
     if parent_id is not None and parent_id not in parents:
-        raise HTTPException(422, "父菜单必须属于当前应用")
+        raise coded_error(422, "APPLICATION_MENU_TREE_INVALID", "父菜单必须属于当前应用")
+    require_group_parent(parent_id, {node.id for node in nodes if node.node_type == "group"})
     parents[node_id if node_id is not None else 0] = parent_id
     validate_tree(parents)
 
@@ -53,16 +64,21 @@ async def validate_parent(db, app, parent_id, node_id=None):
 async def set_application_default(db, app, route):
     """The application route is authoritative; mark at most one matching menu."""
     nodes = await menu_nodes(db, app)
-    if any(node.node_type == "page" and node.route_path == route for node in nodes):
+    targets = [node for node in nodes if node.node_type != "group" and node.route_path == route]
+    if route != "/" and not targets and any(node.route_path == route for node in nodes):
+        raise HTTPException(422, "菜单分组不能设为默认入口")
+    if any(node.node_type == "page" for node in targets):
         await require_published_menu_page(db, app, route)
     matched = False
     for node in sorted(nodes, key=lambda item: (item.sort_order, item.id)):
-        node.default_entry = bool(not matched and route != "/" and node.visible and node.route_path == route)
+        node.default_entry = bool(not matched and route != "/" and node.visible and node in targets)
         matched = matched or node.default_entry
     app.default_route = route
 
 
 async def sync_menu_default(db, app, node, was_default=False):
+    if node.node_type == "group" and node.default_entry:
+        raise HTTPException(422, "菜单分组不能设为默认入口")
     if node.default_entry and node.visible:
         if not node.route_path:
             raise HTTPException(422, "默认入口必须指向可打开的页面")
@@ -88,7 +104,7 @@ async def require_published_menu_page(db, app, route):
         ComponentPage.published_version > 0,
     ))
     if page_id is None:
-        raise HTTPException(422, "请先发布页面，再设为应用默认入口")
+        raise coded_error(422, "APPLICATION_MENU_TARGET_UNPUBLISHED", "请先发布页面，再设为应用默认入口")
 
 
 def edit_token(values):
@@ -104,7 +120,7 @@ def application_edit_token(app, role_ids):
 
 def check_edit_token(expected, actual):
     if expected is not None and expected != actual:
-        raise HTTPException(409, "配置已被其他编辑更新，您的修改尚未保存，请重新加载后核对")
+        raise coded_error(409, "CONFIG_EDIT_CONFLICT", "配置已被其他编辑更新，您的修改尚未保存，请重新加载后核对")
 
 
 def form_edit_token(form):

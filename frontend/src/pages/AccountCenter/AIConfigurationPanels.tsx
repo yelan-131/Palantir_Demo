@@ -31,31 +31,64 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
     setSelected(id); onChange();
   };
   return <div className="ai-catalog">
-    <AIStatusSummary items={[{ label: '模型服务', value: services.length }, { label: '可用模型配置', value: services.reduce((n: number, service: any) => n + (service.models || []).filter((model: any) => model.id).length, 0) }, { label: '已分配用途', value: Object.values(values.modelAssignments || {}).filter(Boolean).length }]} />
-    <div className="ai-catalog-toolbar"><Select aria-label="选择模型服务" value={active} onChange={setSelected} options={services.map((s: any) => ({ value: s.id, label: s.name || s.id }))} /><Button icon={<PlusOutlined />} onClick={add}>添加模型服务</Button></div>
+    <aside className="ai-service-list" aria-label="模型服务列表">
+      <div className="ai-service-list-heading">
+        <h2>服务列表</h2>
+        <Button size="small" type="text" icon={<PlusOutlined />} aria-label="添加模型服务" title="添加模型服务" onClick={add} />
+      </div>
+      <ul>
+        {services.map((service: any) => (
+          <li key={service.id}>
+            <button type="button" aria-pressed={service.id === active} onClick={() => setSelected(service.id)}>
+              <span>{service.name || '未命名服务'}</span>
+              <small>{(service.models || []).filter((model: any) => model.id).length} 个模型</small>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {!services.length && <p className="ai-service-empty">暂无模型服务</p>}
+    </aside>
+    <div className="ai-service-editor">
     <Form.List name="modelServices">{(fields, { remove }) => fields.map(field => {
       const service = services[field.name] || {};
       return <section key={field.key} hidden={service.id !== active}>
         <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
-        <Card title="连接配置" className="settings-section ai-catalog-connection" extra={<Space><Form.Item name={[field.name, 'provider']} noStyle><Select aria-label="接口适配类型" style={{ width: 180 }} options={[{ value: 'openai-compatible', label: '通用 Chat Completions' }, { value: 'deepseek', label: 'DeepSeek 兼容' }, { value: 'openai', label: 'OpenAI 兼容' }, { value: 'glm', label: 'GLM 兼容' }, { value: 'qwen', label: 'Qwen 兼容' }]} /></Form.Item><Button size="small" icon={<ApiOutlined />} loading={testing} onClick={() => onTest({ serviceId: service.id, modelId: service.models?.[0]?.id })}>测试连接</Button><Button size="small" type="text" danger disabled={services.length === 1 || used(service.id)} title={used(service.id) ? '请先修改引用此服务的模型用途' : undefined} onClick={() => remove(field.name)}>移除服务</Button></Space>}>
+        <Card title="连接配置" className="settings-section ai-catalog-connection" extra={
+          <Space wrap>
+            <Button size="small" icon={<ApiOutlined />} loading={testing} onClick={() => onTest({ serviceId: service.id, modelId: service.models?.[0]?.id })}>测试连接</Button>
+            <Button size="small" type="text" danger disabled={services.length === 1 || used(service.id)} title={used(service.id) ? '请先修改引用此服务的模型用途' : undefined} onClick={() => remove(field.name)}>移除服务</Button>
+          </Space>
+        }>
           <div className="ai-catalog-field-grid">
             <Form.Item name={[field.name, 'name']} label="服务名称" rules={[{ required: true, whitespace: true, message: '请输入服务名称' }]}><Input placeholder="例如：企业模型网关" /></Form.Item>
+            <Form.Item name={[field.name, 'provider']} label="接口适配类型">
+              <Select options={[
+                { value: 'openai-compatible', label: '通用 Chat Completions' },
+                { value: 'deepseek', label: 'DeepSeek 兼容' },
+                { value: 'openai', label: 'OpenAI 兼容' },
+                { value: 'glm', label: 'GLM 兼容' },
+                { value: 'qwen', label: 'Qwen 兼容' },
+              ]} />
+            </Form.Item>
             <Form.Item name={[field.name, 'baseUrl']} label="服务地址" rules={[{ required: true, message: '请输入服务地址' }, { validator: (_, value) => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && url.hostname && !url.username && !url.password ? Promise.resolve() : Promise.reject(new Error('请输入不含账号密码的 HTTP(S) 地址')); } catch { return Promise.reject(new Error('请输入完整的 HTTP(S) 地址')); } } }]}><Input placeholder="https://gateway.example.com/v1" autoComplete="off" /></Form.Item>
             <Form.Item name={[field.name, 'apiKey']} label={<>API Key <Tag>{service.apiKey === '********' ? '已保存' : service.apiKey ? '待保存' : '未配置'}</Tag></>} tooltip="星号表示保留已存密钥；清空并保存将移除密钥。"><Input.Password autoComplete="new-password" placeholder="输入此服务的 API Key" /></Form.Item>
           </div>
           {/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(service.baseUrl || '') && <Alert showIcon type="warning" message="后端在 Docker 中，访问宿主机服务请使用 host.docker.internal。" />}
         </Card>
-        <Card title="模型目录" className="settings-section ai-model-directory">
-        <Form.List name={[field.name, 'models']}>{(models, { add: addModel, remove: removeModel }) => <>
-          <div className="ai-model-column-head" aria-hidden="true"><span>模型 ID</span><span>显示名称</span><span>输入能力</span><span /></div><div className="ai-catalog-models">{models.map(modelField => {
+        <Form.List name={[field.name, 'models']}>{(models, { add: addModel, remove: removeModel }) => <Card
+          title="模型目录"
+          className="settings-section ai-model-directory"
+          extra={<Button size="small" icon={<PlusOutlined />} onClick={() => addModel({ id: '', name: '', inputTypes: ['text'] })}>添加模型</Button>}
+        >
+          <div className="ai-catalog-models">{models.map(modelField => {
             const model = service.models?.[modelField.name] || {};
             const officialDeepSeek = isOfficialDeepSeek(service.baseUrl, model.id);
             const path = [modelField.name];
             return <div className="ai-catalog-model" key={modelField.key}>
               <div className="ai-catalog-model-row">
-                <Form.Item name={[...path, 'id']} aria-label="模型 ID" rules={[{ required: true, whitespace: true, message: '请输入模型 ID' }]}><Input aria-label="模型 ID" placeholder="例如：deepseek-flash" /></Form.Item>
-                <Form.Item name={[...path, 'name']} ><Input aria-label="显示名称" placeholder="可选，默认使用模型 ID" /></Form.Item>
-                <Form.Item name={[...path, 'inputTypes']} ><Select aria-label="输入能力" mode="multiple" options={[{ label: '文本', value: 'text' }, { label: '图像', value: 'image' }]} /></Form.Item>
+                <Form.Item name={[...path, 'id']} label="模型 ID" rules={[{ required: true, whitespace: true, message: '请输入模型 ID' }]}><Input placeholder="例如：deepseek-flash" /></Form.Item>
+                <Form.Item name={[...path, 'name']} label="显示名称"><Input placeholder="可选，默认使用模型 ID" /></Form.Item>
+                <Form.Item name={[...path, 'inputTypes']} label="输入能力"><Select mode="multiple" options={[{ label: '文本', value: 'text' }, { label: '图像', value: 'image' }]} /></Form.Item>
                 <Button type="text" aria-label={`移除模型 ${model.id || modelField.name + 1}`} icon={<DeleteOutlined />} disabled={models.length === 1 || used(service.id, model.id)} onClick={() => removeModel(modelField.name)} />
               </div>
               <Collapse ghost items={[{ key: 'model', label: '参数设置', children: <div className="ai-catalog-field-grid">
@@ -65,9 +98,7 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
               </div> }]} />
             </div>;
           })}</div>
-          <Button size="small" type="link" icon={<PlusOutlined />} onClick={() => addModel({ id: '', name: '', inputTypes: ['text'] })}>添加模型</Button>
-        </>}</Form.List>
-        </Card>
+        </Card>}</Form.List>
         <Collapse className="ai-catalog-advanced" items={[{ key: 'advanced', label: '请求与连接参数', children: <div className="ai-catalog-field-grid">
           {number('响应等待回退 · 秒', [field.name, 'timeoutSeconds'], 1, 300, '未设置流式空闲超时时使用')}
           {number('请求重试次数', [field.name, 'retryCount'], 0, 3)}
@@ -82,6 +113,7 @@ export function ServiceCatalogPanel({ form, values, onChange, onTest, testing }:
       {number('初始化超时 · 秒', ['harnessPolicy', 'initialize_timeout_seconds'], 1, 180)}
       {number('执行超时 · 秒', ['harnessPolicy', 'request_timeout_seconds'], 1, 3600)}
     </div> }]} />
+    </div>
   </div>;
 }
 
@@ -121,5 +153,27 @@ export function PurposeModelsPanel({ values, onTest, testing }: { values: any; o
 }
 
 export function NativeCompactionPanel() {
-  return <div className="ai-native-compaction"><div className="ai-native-compaction-heading"><strong>DSH 会话压缩</strong><Form.Item name={['harnessPolicy', 'compaction', 'enabled']} valuePropName="checked" noStyle><Switch aria-label="启用 DSH 会话压缩" /></Form.Item></div><p className="ai-settings-quiet-note">上下文达到阈值时，由 Harness 原生压缩并保留最近的会话内容。</p><div className="ai-catalog-field-grid"><Form.Item name={['harnessPolicy', 'compaction', 'thresholdRatio']} label="触发比例"><InputNumber min={0.01} max={1} step={0.01} /></Form.Item><Form.Item name={['harnessPolicy', 'compaction', 'retainRatio']} label="保留比例"><InputNumber min={0.01} max={0.99} step={0.01} /></Form.Item></div><Collapse ghost items={[{ key: 'compression-budget', label: '高级压缩参数', children: <div className="ai-catalog-field-grid">{number('压缩预留 · Token', ['harnessPolicy', 'compaction', 'headroomTokens'], 0, 32768, '留空时按所选模型计算')}{number('摘要输出上限 · Token', ['harnessPolicy', 'compaction', 'maxTokens'], 1, 32768, '不得超过模型输出上限')}</div> }]} /></div>;
+  return <Card title="DSH 会话压缩" className="settings-section ai-safety-card" extra={
+    <Form.Item name={['harnessPolicy', 'compaction', 'enabled']} valuePropName="checked" noStyle>
+      <Switch aria-label="启用 DSH 会话压缩" />
+    </Form.Item>
+  }>
+    <p className="ai-safety-note">达到阈值时，Harness 压缩较早的对话并保留最近的内容。</p>
+    <div className="ai-safety-fields">
+      <Form.Item name={['harnessPolicy', 'compaction', 'thresholdRatio']} label="触发比例">
+        <InputNumber min={0.01} max={1} step={0.01} />
+      </Form.Item>
+      <Form.Item name={['harnessPolicy', 'compaction', 'retainRatio']} label="保留比例">
+        <InputNumber min={0.01} max={0.99} step={0.01} />
+      </Form.Item>
+    </div>
+    <Collapse ghost className="ai-safety-details" items={[{
+      key: 'compression-budget',
+      label: '高级压缩参数',
+      children: <div className="ai-safety-fields">
+        {number('压缩预留 · Token', ['harnessPolicy', 'compaction', 'headroomTokens'], 0, 32768, '留空时按所选模型计算')}
+        {number('摘要输出上限 · Token', ['harnessPolicy', 'compaction', 'maxTokens'], 1, 32768, '不得超过模型输出上限')}
+      </div>,
+    }]} />
+  </Card>;
 }

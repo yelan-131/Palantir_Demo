@@ -24,6 +24,8 @@ class MaterialEdit(MaterialBody):
 class MaterialAction(BaseModel):
     expected_status: Literal['draft', 'pending', 'approved', 'rejected']
     comment: str = Field(default='', max_length=10000)
+    expected_workflow_id: int | None = None
+    expected_step: int | None = None
 
 async def _context(db, user, action='view'):
     form = await db.scalar(select(Form).where(Form.tenant_id == current_tenant_id(user), Form.code == 'material-application'))
@@ -73,6 +75,7 @@ async def _present(db, form, record, user):
         'legacy_status':data.get('status') if legacy else None, 'is_legacy':legacy,
         'approval_source':data.get('approval_source') if legacy else None,
         'workflow_id':inst.id if inst else None,'workflow_version':inst.workflow_version if inst else None,
+        'current_step':state.get('current_step'),
         'current_assignees':[{'id':u.id,'name':u.display_name or u.username} for u in actors],
         'history':history,'can_edit':can_edit,'can_submit':can_edit,'can_approve':can_approve}
 
@@ -159,13 +162,15 @@ async def _act(record_id,body,db,user,action):
     inst=await latest_instance(db,form,record_id,lock=True)
     if not inst:
         raise HTTPException(409,'此申请尚未绑定审批流程')
+    if body.expected_workflow_id is not None and body.expected_workflow_id != inst.id:
+        raise HTTPException(409, '申请已重新提交，请刷新后再处理')
     if action=='reject' and not body.comment.strip():
         raise HTTPException(422,'驳回时必须填写原因')
     presented=await _present(db,form,record,user)
     if not presented['can_approve']:
         raise HTTPException(403,'仅当前指定审批人或管理员可审批')
     from app.api.workflow import _act_on_step, StepApprovalRequest
-    await _act_on_step(inst.id,StepApprovalRequest(comment=body.comment.strip()),action,user=user,db=db)
+    await _act_on_step(inst.id,StepApprovalRequest(comment=body.comment.strip(), expected_step=body.expected_step),action,user=user,db=db)
     await db.commit()
     return await get_material_application(record_id,db,user)
 

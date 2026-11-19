@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.production_errors import coded_error
 from app.core.principal import current_tenant_id, current_user_id
 from app.core.permissions import get_user_role_ids, allowed_form_fields
 from app.models.relational import ComponentPage, ComponentPageVersion, OrgUnit, UserOrgMembership
@@ -57,7 +58,7 @@ async def save_page_definition(code, body, db, user, *, releasing):
     updated = await db.execute(update(ComponentPage).where(ComponentPage.id == page.id,
         ComponentPage.tenant_id == page.tenant_id, ComponentPage.revision == body.expectedRevision).values(**values))
     if updated.rowcount != 1:
-        raise HTTPException(409, '页面已被其他编辑更新，请重新加载')
+        raise coded_error(409, 'COMPONENT_PAGE_VERSION_CONFLICT', '页面已被其他编辑更新，请重新加载')
     await db.refresh(page)
     if releasing:
         db.add(ComponentPageVersion(tenant_id=page.tenant_id, page_id=page.id, version=page.published_version,
@@ -142,13 +143,17 @@ def resolve_display_groups(widget, roles, user_id=None, org_unit_ids=None):
     return {**widget, 'listSettings': {**settings, **presentation, 'displayGroups': matching, 'columns': columns}}
 
 
+def invalid_runtime_query(message: str) -> HTTPException:
+    return coded_error(422, 'COMPONENT_QUERY_INVALID', message)
+
+
 async def runtime_data(db, user, page, definition, filters, widget_filters=None, filter_queries=None, chart_values=None):
     widget_filters = widget_filters or {}
     statistical_ids = {w.id for w in definition.widgets if w.type in {'metric', 'chart'}}
     if set(widget_filters) - statistical_ids:
-        raise HTTPException(422, '组件筛选目标无效')
+        raise invalid_runtime_query('组件筛选目标无效')
     if set(filters) - set(definition.filterFields):
-        raise HTTPException(422, '筛选字段未配置')
+        raise invalid_runtime_query('筛选字段未配置')
     record_queries = linked_record_queries(definition, filter_queries or {}, chart_values or {})
     groups = source_definitions(definition)
     result = {'widgets': {}, 'metricValues': {}, 'filterOptions': {}, 'errors': [],
@@ -188,9 +193,9 @@ async def runtime_source_data(db, user, page, definition, filters, widget_filter
     widget_filters = widget_filters or {}
     statistical_ids = {w.id for w in definition.widgets if w.type in {'chart', 'metric'}}
     if set(widget_filters) - statistical_ids or any(len(value) > 2000 for conditions in widget_filters.values() for value in conditions.values()):
-        raise HTTPException(422, '组件筛选目标无效或筛选值过长')
+        raise invalid_runtime_query('组件筛选目标无效或筛选值过长')
     if set(filters) - set(definition.filterFields) or any(len(value) > 2000 for value in filters.values()):
-        raise HTTPException(422, '筛选字段未配置或筛选值过长')
+        raise invalid_runtime_query('筛选字段未配置或筛选值过长')
     form = await source_form(db, user, definition)
     if not any(w.type in {'metric', 'chart'} for w in definition.widgets):
         fields = await runtime_fields(db, form)
@@ -208,26 +213,26 @@ def linked_record_queries(definition, filter_queries, chart_values):
     for source_id, query in filter_queries.items():
         widget = by_id.get(source_id)
         if not widget or widget.type != 'record-filter':
-            raise HTTPException(422, '筛选组件不存在或不可访问')
+            raise invalid_runtime_query('筛选组件不存在或不可访问')
         scheme = None
         if widget.filterSettings.schemes is not None:
             scheme = next((item for item in widget.filterSettings.schemes if item.id == query.schemeId), None)
             if scheme is None:
-                raise HTTPException(422, '筛选方案不存在或不可访问')
+                raise invalid_runtime_query('筛选方案不存在或不可访问')
             allowed = {field for group in scheme.groups for field in (group.columns or [])}
         else:
             allowed = set(widget.filterFields) if widget.filterFields is not None else None
         for condition in query.filters:
             field, op = condition.get('field'), condition.get('op', 'equals')
             if not isinstance(field, str) or len(field)>200 or (allowed is not None and field not in allowed):
-                raise HTTPException(422, '筛选字段未在组件中配置')
+                raise invalid_runtime_query('筛选字段未在组件中配置')
             if op not in {'contains', 'equals', 'between', 'gte', 'lte', 'in'}:
-                raise HTTPException(422, '筛选操作符无效')
+                raise invalid_runtime_query('筛选操作符无效')
             value = condition.get('value')
             if isinstance(value, (dict, list)) and not (isinstance(value, list) and ((op == 'between' and len(value) == 2) or (op == 'in' and 0 < len(value) <= 100 and all(isinstance(item, (str, int, float, bool)) for item in value)))):
-                raise HTTPException(422, '筛选值格式无效')
+                raise invalid_runtime_query('筛选值格式无效')
             if len(str(value))>2000:
-                raise HTTPException(422, '筛选值过长')
+                raise invalid_runtime_query('筛选值过长')
         def filled(value):
             return value not in (None, '') and (not isinstance(value, list) or bool(value) and all(filled(part) for part in value))
         present = {c.get('field') for c in query.filters if filled(c.get('value'))}
@@ -242,7 +247,7 @@ def linked_record_queries(definition, filter_queries, chart_values):
     for source_id, value in chart_values.items():
         widget = by_id.get(source_id)
         if not widget or widget.type != 'chart' or widget.interaction != 'filter' or not widget.dimension or len(value)>2000:
-            raise HTTPException(422, '图表联动来源无效')
+            raise invalid_runtime_query('图表联动来源无效')
         for target in widget.targetWidgetIds:
             result.setdefault(target, []).append({'ready': True, 'search': '', 'filters': [{'field': widget.dimension, 'op': 'equals', 'value': value}]})
     return {target: {'ready': all(q['ready'] for q in queries), 'search': ' '.join(q['search'] for q in queries if q['search']), 'filters': [c for q in queries for c in q['filters']]} for target, queries in result.items()}
@@ -273,7 +278,7 @@ async def get_page(*, code: str, db: AsyncSession, user):
     page = await find_page(db, user, code)
     definition = await published(db, page)
     if definition is None:
-        raise HTTPException(404, '页面尚未发布')
+        raise coded_error(404, 'COMPONENT_PAGE_UNPUBLISHED', '页面尚未发布')
     await check_audience(db, user, definition)
     host = await bound_host(db, page)
     if host:

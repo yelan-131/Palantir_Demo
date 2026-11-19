@@ -52,6 +52,7 @@ import {
   listApplicationMenus,
   listApplications,
 } from './services/api';
+import { CLIENT_RENDER_ERROR } from './services/errorDiagnostics';
 
 const NavigationAreaPage = lazy(() => import('./pages/NavigationArea'));
 const AccountEntry = lazy(() => import('./pages/NavigationArea').then(module => ({ default: module.AccountEntry })));
@@ -279,6 +280,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
           <Alert type="error" showIcon message="页面暂时无法显示" description="请重新加载页面。如果问题持续出现，可查看错误详情并联系管理员。" />
           <details className="shell-error-details">
             <summary>错误详情</summary>
+            <div>错误码 {CLIENT_RENDER_ERROR}</div>
             <pre>{this.state.error}</pre>
           </details>
           <Button type="primary" onClick={() => window.location.reload()}>{'\u91cd\u65b0\u52a0\u8f7d\u9875\u9762'}</Button>

@@ -268,8 +268,6 @@ def designer_permission_error(user, settings):
     decision = decide_ai_permission(user, settings, 'config', domain='low-code', skill=TOOL)
     if not user.get('is_admin') or not decision.allowed:
         reason = decision.reason if not decision.allowed else '需要管理员权限'
-        if reason == '业务域未开放':
-            return '低代码业务域未开放。请在「AI 与平台设置 → 执行与安全 → 开放业务范围」启用「低代码」后重试。'
         return '当前用户无权操作表单设计器：' + reason
     resolved, reason = PermissionResolver(build_default_rules() + load_permission_rules(settings)).resolve(TOOL, user, 'low', 'low-code')
     if resolved == PermissionDecision.DENY or action_is_forbidden(settings, TOOL, side_effect='read'):
@@ -313,6 +311,8 @@ def _validate_page_receipt(command, receipt):
     operations = (draft or command).get('layout_operations')
     if command['action'] in {'draft_new', 'configure_layout'} and operations and state.get('layout_operation_count') != len(operations):
         return {**receipt, 'ok': False, 'error': '设计器未确认全部布局操作，请核对当前画布。'}
+    if command['action'] == 'configure_layout' and command['form_id'] and state.get('form_id') != command['form_id']:
+        return {**receipt, 'ok': False, 'error': '设计器回执中的目标表单不一致。'}
     return receipt
 
 
@@ -324,8 +324,8 @@ async def dispatch_page_action(bridge, command):
         title += f'「{mask_sensitive_text(field)[:80]}」'
     item = build_agent_item(type='page_action', item_id=action_id, title=title, status='running')
 
-    async def finish(status, summary=''):
-        result = {**item, 'status': status, 'summary': summary}
+    async def finish(status, summary='', payload=None):
+        result = {**item, 'status': status, 'summary': summary, 'payload': payload or {}}
         bridge.items.append(result)
         await bridge.event_sink('item.updated', result)
 
@@ -343,7 +343,13 @@ async def dispatch_page_action(bridge, command):
             raise
         receipt = _validate_page_receipt(command, receipt)
         if receipt.get('ok'):
-            await finish('completed')
+            state = receipt.get('state') or {}
+            layout_review = None
+            if command['action'] == 'configure_layout' and command['form_id'] and state.get('layout_review_ready') is True:
+                layout_review = {'form_layout_review': {
+                    'form_id': command['form_id'], 'operation_count': len(command['layout_operations']),
+                }}
+            await finish('completed', payload=layout_review)
         else:
             await finish('failed', mask_sensitive_text(receipt.get('error') or '画布操作失败')[:240])
         return receipt
@@ -456,7 +462,10 @@ async def call_page_control(bridge, arguments):
             if request.action in {'draft_new', 'configure_fields', 'add_field', 'set_field_properties'}:
                 bridge.configuration_outcome = {'status': 'ui_draft', 'reason': '已在现有设计器更新本地草稿，请复核工作区并点击最终确认卡片。'}
             elif request.action == 'configure_layout':
-                bridge.configuration_outcome = {'status': 'ui_draft', 'reason': '布局已更新在设计器草稿，请复核画布后保存草稿。'}
+                reason = ('布局已更新。复核画布后，可在对话中点击「确认保存草稿」。'
+                          if action['form_id'] and (result.get('state') or {}).get('layout_review_ready') is True
+                          else '布局已更新在设计器草稿，请复核画布后保存草稿。')
+                bridge.configuration_outcome = {'status': 'ui_draft', 'reason': reason}
             elif (bridge.configuration_outcome or {}).get('status') != 'ui_draft':
                 messages = {'open': '已打开现有表单设计器，未修改、保存或发布。',
                             'select_field': '已在现有设计器选中指定字段，未保存或发布。',
@@ -466,7 +475,7 @@ async def call_page_control(bridge, arguments):
         return {'status': 'completed' if result.get('ok') else 'blocked',
                 'result': result.get('state') or {}, 'message': result.get('error') or
                 ('已读取当前表单画布。' if request.action == 'inspect_layout' else
-                 '布局仅已应用到当前画布，请复核并保存草稿。' if request.action == 'configure_layout' else
+                 bridge.configuration_outcome['reason'] if request.action == 'configure_layout' and result.get('ok') else
                  '页面调用已完成。修改仅存在于当前设计器，未保存或发布；等待用户点击最终确认卡片。')}
     except asyncio.TimeoutError:
         return {'status': 'blocked', 'message': '等待页面操作回执超时，已通知页面移除该操作。页面可能保留部分草稿修改，请检查当前设计器；未检测到是否存在未保存修改弹窗，不要据此认定有弹窗，也不要直接重复新建草稿。'}
@@ -483,7 +492,7 @@ def page_control_model_result(result: dict) -> dict:
         return result
     state = result.get('result') or {}
     compact = {key: state[key] for key in ('draft_id', 'form_id', 'form_code', 'saved', 'published') if key in state}
-    for key in ('layout_controls', 'layout_operation_count'):
+    for key in ('layout_controls', 'layout_operation_count', 'unplaced_fields'):
         if key in state:
             compact[key] = state[key]
     fields = state.get('fields')
@@ -499,3 +508,4 @@ class PageControlResult(BaseModel):
     ok: bool
     state: dict = Field(default_factory=dict)
     error: str | None = Field(default=None, max_length=500)
+    error_code: Literal['AI_FORM_LAYOUT_TARGET_INVALID'] | None = None

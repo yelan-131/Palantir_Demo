@@ -41,7 +41,7 @@ import './aiPanels.css';
 import { ChatComposer } from './ChatComposer';
 import type { ChatAttachment } from './ChatComposer';
 import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
-import { NativeDesignerReview } from './NativeDesignerReview';
+import { NativeDesignerReview, NativeLayoutReview } from './NativeDesignerReview';
 
 type ChatRole = 'assistant' | 'user';
 type MockSkillStatus = 'draft_created' | 'ready_for_review' | 'completed' | 'failed';
@@ -1879,6 +1879,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                 </Button>
               </>;
               const actionStateReview = message.role === 'assistant' ? getActionStateReview(message.actionState) : undefined;
+              const layoutReviewItem = message.role === 'assistant' && [...(message.items || [])].reverse().find(item =>
+                item.type === 'page_action' && item.status === 'completed' && asRecord(item.payload).form_layout_review);
+              const layoutReview = layoutReviewItem ? asRecord(asRecord(layoutReviewItem.payload).form_layout_review) : {};
+              const layoutReviewId = layoutReviewItem ? layoutReviewItem.item_id || layoutReviewItem.id : undefined;
               const traceItems = message.trace || [];
               const hasDshTrace = traceItems.some((item) => item.source === 'dsh');
               const executionHref = message.executionResult?.href;
@@ -2132,6 +2136,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                       )}
                     </div>
                   ) : null}
+                  {typeof layoutReviewId === 'string' && typeof layoutReview.form_id === 'number' && typeof layoutReview.operation_count === 'number' && (
+                    <NativeLayoutReview key={layoutReviewId} reviewId={layoutReviewId} formId={layoutReview.form_id}
+                      operationCount={layoutReview.operation_count} disabled={sending || Boolean(confirmingRunId)} />
+                  )}
                 </div>
                 <span>{message.createdAt}</span>
               </div>

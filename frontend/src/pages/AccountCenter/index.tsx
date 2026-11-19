@@ -124,7 +124,9 @@ interface AuditLogRecord {
 function normalizeAISettings(settings: Record<string, any>): Record<string, any> {
   // Presets fill a draft explicitly. Saving never rewrites a custom model ID
   // or a user-provided gateway URL based on its spelling.
-  return { ...settings, provider: settings.provider || 'glm' };
+  const normalized: Record<string, any> = { ...settings, provider: settings.provider || 'glm' };
+  delete normalized.domains;
+  return normalized;
 }
 
 function normalizeLocalAISettings(settings: Record<string, any>) {
@@ -350,7 +352,6 @@ function AIPlatformPanel() {
             fallbackModel: 'gpt-4o-mini',
             temperature: 'balanced',
             streaming: true,
-            domains: ['production', 'quality', 'maintenance'],
             tools: ['query', 'report'],
             auditEnabled: true,
             retentionDays: 90,
@@ -388,17 +389,6 @@ function AIPlatformPanel() {
 
       <Card size="small" title="知识与工具权限" className="account-panel-card">
         <Form form={form} layout="vertical">
-          <Form.Item name="domains" label="业务动作域" extra="限制标注业务域的工具；通用表单数据仍按用户的表单权限读取。">
-            <Select
-              mode="multiple"
-              options={[
-                { label: '生产', value: 'production' },
-                { label: '质量', value: 'quality' },
-                { label: '设备维护', value: 'maintenance' },
-                { label: '供应链', value: 'supply-chain' },
-              ]}
-            />
-          </Form.Item>
           <Form.Item name="tools" label="允许调用的工具">
             <Select
               mode="multiple"
@@ -500,7 +490,6 @@ export function AIPlatformPanelV2() {
     assistEnabled: true,
     proactiveEnabled: false,
     agentMode: 'draft',
-    domains: ['production', 'quality', 'maintenance', 'supply-chain'],
     tools: ['query', 'report', 'draft'],
     highRiskConfirm: true,
     sensitiveMasking: true,
@@ -654,7 +643,6 @@ export function AIPlatformPanelV2() {
     { label: '结果非空', value: 'non_empty_result' },
   ];
   const watchedSettings = Form.useWatch([], { form, preserve: true }) || {};
-  const activeDomains = watchedSettings.domains || defaultSettings.domains;
   const rolePolicies = watchedSettings.rolePolicies || defaultSettings.rolePolicies;
   const safetyPolicy = watchedSettings.safetyPolicy || defaultSettings.safetyPolicy;
   const permissionRules = Array.isArray(safetyPolicy.permissionRules) ? safetyPolicy.permissionRules : [];
@@ -1085,112 +1073,149 @@ export function AIPlatformPanelV2() {
     { key: 'connection', children: <ServiceCatalogPanel form={form} values={watchedSettings} onChange={() => { setDirty(true); setConnectionResult(null); }} onTest={handleTestConnection} testing={testing} /> },
     { key: 'models', children: <PurposeModelsPanel values={watchedSettings} onTest={handleTestConnection} testing={testing} /> },
     ...advancedSections.filter(section => section.key === 'agent-registry'),
-    { key: 'safety', children: <div className="ai-settings-safety"><Card title="执行策略" className="settings-section"><div className="ai-execution-controls"><Form.Item name="agentMode" label="Agent 执行模式"><Select options={[{ value: 'off', label: '关闭' }, { value: 'readonly', label: '只读查询' }, { value: 'draft', label: '仅生成草稿' }, { value: 'confirm', label: '确认后执行' }]} /></Form.Item><Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒"><Input type="number" min={1} max={180} /></Form.Item></div><NativeCompactionPanel /></Card>
-      <Card title="安全护栏" className="settings-section">
-                  <Form.Item name="domains" label="开放业务范围" extra="仅开放所选范围内的工具；创建表单和查询应用配置需要选择低代码，写入仍须确认并遵守角色权限。">
-                    <Select mode="multiple" options={aiDomainOptions} aria-label="开放业务范围" />
+    {
+      key: 'safety',
+      children: <div className="ai-settings-safety">
+        <div className="ai-safety-grid">
+          <div className="ai-safety-column">
+            <Card title="执行策略" className="settings-section ai-safety-card">
+              <div className="ai-safety-fields">
+                <Form.Item name="agentMode" label="Agent 执行模式">
+                  <Select options={[
+                    { value: 'off', label: '关闭' },
+                    { value: 'readonly', label: '只读查询' },
+                    { value: 'draft', label: '仅生成草稿' },
+                    { value: 'confirm', label: '确认后执行' },
+                  ]} />
+                </Form.Item>
+                <Form.Item name={['safetyPolicy', 'toolTimeoutSeconds']} label="工具超时 · 秒">
+                  <Input type="number" min={1} max={180} />
+                </Form.Item>
+              </div>
+            </Card>
+            <NativeCompactionPanel />
+          </div>
+          <div className="ai-safety-column">
+            <Card title="安全护栏" className="settings-section ai-safety-card">
+              <div className="ai-safety-rows">
+                <div className="ai-safety-row">
+                  <span>数据访问</span>
+                  <span className="ai-safety-rule">按当前用户的权限访问</span>
+                </div>
+                <div className="ai-safety-row">
+                  <span>写入平台数据</span>
+                  <span className="ai-safety-rule">执行前必须确认</span>
+                </div>
+              </div>
+              <Form.Item name="forbiddenActions" label="禁止动作" extra="保存后，后端会拦截这里选中的操作类别或工具。">
+                <Select mode="multiple" placeholder="选择要禁止的操作或工具" options={[
+                  { label: '操作类别', options: [
+                    { label: '自动下单', value: 'auto_order' },
+                    { label: '删除数据', value: 'delete_data' },
+                    { label: '修改权限', value: 'change_permission' },
+                    { label: '所有配置写入', value: 'publish_config' },
+                  ] },
+                  { label: '注册工具', options: registryToolOptions },
+                ]} />
+              </Form.Item>
+              <div className="ai-safety-rows">
+                <label className="ai-safety-row">
+                  <span>AI 上下文脱敏</span>
+                  <Form.Item name={['safetyPolicy', 'sensitiveMasking']} valuePropName="checked" noStyle>
+                    <Switch aria-label="AI 上下文脱敏" />
                   </Form.Item>
-                  <div className="ai-policy-toggle-list">
-
-
-                    <div className="ai-policy-toggle-item">
-                      <span>业务与配置写入</span>
-                      <Tag>所有写入必须确认</Tag>
-                    </div>
-                    <div className="ai-policy-toggle-item">
-                      <span>上下文敏感信息脱敏</span>
-                      <Form.Item name={['safetyPolicy', 'sensitiveMasking']} valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
-
-                  </div>
-
-                  <Collapse ghost items={[{ key: 'advanced-rules', label: '高级工具规则', children: <>
-                  <Form.Item name={['safetyPolicy', 'enabledHooks']} label="平台工具校验与审计" className="ai-policy-compact-item">
-                    <Select mode="multiple" options={hookOptions} />
+                </label>
+              </div>
+              <p className="ai-safety-note">遮盖发送给模型的上下文和工具结果中的常见密钥与令牌。</p>
+            </Card>
+            <Card title="审计记录" className="settings-section ai-safety-card">
+              <div className="ai-safety-rows">
+                <label className="ai-safety-row">
+                  <span>记录 AI 审计事件</span>
+                  <Form.Item name="auditEnabled" valuePropName="checked" noStyle>
+                    <Switch aria-label="记录 AI 审计事件" />
                   </Form.Item>
-                  <Form.Item name="forbiddenActions" label="禁止动作清单" className="ai-policy-compact-item">
-                    <Select mode="multiple" options={[
-                      { label: '自动下单', value: 'auto_order' },
-                      { label: '删除数据', value: 'delete_data' },
-                      { label: '修改权限', value: 'change_permission' },
-                      { label: '所有配置写入', value: 'publish_config' },
-                      ...registryToolOptions,
-                    ]} />
+                </label>
+                <label className="ai-safety-row">
+                  <span>记录工具调用</span>
+                  <Form.Item name="recordToolCalls" valuePropName="checked" noStyle>
+                    <Switch aria-label="记录工具调用" />
                   </Form.Item>
-                  <div className="ai-policy-rule-head">
-                    <Text strong>工具权限规则</Text>
-                    <Button size="small" onClick={() => openPermissionRuleEditor(null)}>添加规则</Button>
-                  </div>
-                  <Table
-                    size="small"
-                    pagination={false}
-                    rowKey={(_, index) => `permission-${index}`}
-                    dataSource={permissionRules}
-                    columns={[
-                      { title: '策略', dataIndex: 'action', width: 90, render: (value) => <Tag color={value === 'deny' ? 'red' : value === 'ask' ? 'gold' : 'green'}>{String(value || 'ask')}</Tag> },
-                      { title: '工具', dataIndex: 'tool', ellipsis: true },
-                      { title: '角色', dataIndex: 'role', ellipsis: true },
-                      { title: '风险', dataIndex: 'riskThreshold', width: 90 },
-                      {
-                        title: '',
-                        width: 120,
-                        render: (_, __, index) => (
-                          <Space size={4}>
-                            <Button size="small" onClick={() => openPermissionRuleEditor(index)}>编辑</Button>
-                            <Button size="small" danger onClick={() => updateSafetyRules('permissionRules', permissionRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
-                          </Space>
-                        ),
-                      },
-                    ]}
-                    locale={{ emptyText: '尚未设置额外权限规则' }}
-                  />
-                  <div className="ai-policy-rule-head">
-                    <Text strong>工具校验规则</Text>
-                    <Button size="small" onClick={() => openValidationRuleEditor(null)}>添加规则</Button>
-                  </div>
-                  <Table
-                    size="small"
-                    pagination={false}
-                    rowKey={(_, index) => `validation-${index}`}
-                    dataSource={validationRules}
-                    columns={[
-                      { title: '阶段', dataIndex: 'phase', width: 130 },
-                      { title: '工具', dataIndex: 'tool', ellipsis: true },
-                      { title: '级别', dataIndex: 'severity', width: 90, render: (value) => <Tag color={value === 'error' ? 'red' : 'gold'}>{String(value || 'warning')}</Tag> },
-                      { title: '规则', dataIndex: 'ruleType', width: 140 },
-                      {
-                        title: '',
-                        width: 120,
-                        render: (_, __, index) => (
-                          <Space size={4}>
-                            <Button size="small" onClick={() => openValidationRuleEditor(index)}>编辑</Button>
-                            <Button size="small" danger onClick={() => updateSafetyRules('validationRules', validationRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
-                          </Space>
-                        ),
-                      },
-                    ]}
-                    locale={{ emptyText: '尚未设置额外校验规则' }}
-                  />                  </> }]} />
-                </Card>
-
-                <Card title="审计记录" className="settings-section">
-                  <div className="ai-policy-toggle-list compact">
-                    <div className="ai-policy-toggle-item">
-                      <span>记录 AI 审计事件</span>
-                      <Form.Item name="auditEnabled" valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
-                    <div className="ai-policy-toggle-item">
-                      <span>记录工具调用</span>
-                      <Form.Item name="recordToolCalls" valuePropName="checked" noStyle><Switch /></Form.Item>
-                    </div>
-                  </div>
-                  <div className="ai-settings-quiet-note">执行记录统一在“审计与日志”中查看。</div>
-                </Card>
-
-                <div className="ai-settings-quiet-note">可调用工具由工具启用状态、角色权限、业务权限与本页执行规则共同约束。</div>
-
-
-</div> },
+                </label>
+              </div>
+              <p className="ai-safety-note">在「审计与日志」查看执行记录。</p>
+            </Card>
+          </div>
+        </div>
+        <Collapse className="ai-safety-advanced" items={[{
+          key: 'advanced-rules',
+          label: '高级规则',
+          children: <>
+            <div className="ai-safety-fields">
+              <Form.Item name={['safetyPolicy', 'enabledHooks']} label="平台工具校验与审计" className="ai-policy-compact-item">
+                <Select mode="multiple" options={hookOptions} />
+              </Form.Item>
+            </div>
+            <div className="ai-policy-rule-head">
+              <Text strong>工具权限规则</Text>
+              <Button size="small" onClick={() => openPermissionRuleEditor(null)}>添加规则</Button>
+            </div>
+            <Table
+              size="small"
+              pagination={false}
+              scroll={{ x: 560 }}
+              rowKey={(_, index) => `permission-${index}`}
+              dataSource={permissionRules}
+              columns={[
+                { title: '策略', dataIndex: 'action', width: 90, render: (value) => <Tag color={value === 'deny' ? 'red' : value === 'ask' ? 'gold' : 'green'}>{String(value || 'ask')}</Tag> },
+                { title: '工具', dataIndex: 'tool', ellipsis: true },
+                { title: '角色', dataIndex: 'role', ellipsis: true },
+                { title: '风险', dataIndex: 'riskThreshold', width: 90 },
+                {
+                  title: '',
+                  width: 120,
+                  render: (_, __, index) => (
+                    <Space size={4}>
+                      <Button size="small" onClick={() => openPermissionRuleEditor(index)}>编辑</Button>
+                      <Button size="small" danger onClick={() => updateSafetyRules('permissionRules', permissionRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
+                    </Space>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: '尚未设置额外权限规则' }}
+            />
+            <div className="ai-policy-rule-head">
+              <Text strong>工具校验规则</Text>
+              <Button size="small" onClick={() => openValidationRuleEditor(null)}>添加规则</Button>
+            </div>
+            <Table
+              size="small"
+              pagination={false}
+              scroll={{ x: 560 }}
+              rowKey={(_, index) => `validation-${index}`}
+              dataSource={validationRules}
+              columns={[
+                { title: '阶段', dataIndex: 'phase', width: 130 },
+                { title: '工具', dataIndex: 'tool', ellipsis: true },
+                { title: '级别', dataIndex: 'severity', width: 90, render: (value) => <Tag color={value === 'error' ? 'red' : 'gold'}>{String(value || 'warning')}</Tag> },
+                { title: '规则', dataIndex: 'ruleType', width: 140 },
+                {
+                  title: '',
+                  width: 120,
+                  render: (_, __, index) => (
+                    <Space size={4}>
+                      <Button size="small" onClick={() => openValidationRuleEditor(index)}>编辑</Button>
+                      <Button size="small" danger onClick={() => updateSafetyRules('validationRules', validationRules.filter((_: any, itemIndex: number) => itemIndex !== index))}>删除</Button>
+                    </Space>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: '尚未设置额外校验规则' }}
+            />
+          </>,
+        }]} />
+      </div>,
+    },
   ];
   const onDraftChange = (changed: Record<string, any>, values: Record<string, any>) => {
     if (changed.modelServices && persistedSettings?.modelServices) {

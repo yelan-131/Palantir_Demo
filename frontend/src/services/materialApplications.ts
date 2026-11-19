@@ -23,6 +23,7 @@ export interface MaterialApplication {
   applied_at?: string;
   workflow_id?: number;
   workflow_version?: number;
+  current_step?: number | null;
   current_assignees?: { id: number; name: string }[];
   history?: MaterialHistory[];
   is_legacy: boolean;
@@ -41,7 +42,9 @@ export const listMaterialApplications = (params: { q?: string; status?: string; 
 export const getMaterialApplication = (id: number) => api.get<{ data: MaterialApplication }>(`/material-applications/${id}`);
 export const createMaterialApplication = (data: { part_no: string; title: string }) => api.post<{ data: MaterialApplication }>('/material-applications', data);
 export const editMaterialApplication = (id: number, data: { part_no: string; title: string; expected_status: MaterialStatus }) => api.put<{ data: MaterialApplication }>(`/material-applications/${id}`, data);
-export const actOnMaterialApplication = (id: number, action: MaterialAction, data: { expected_status: MaterialStatus; comment?: string }) => api.post<{ data: MaterialApplication }>(`/material-applications/${id}/${action}`, data).then(response => { window.dispatchEvent(new CustomEvent('approval-notifications-changed')); return response; });
+export const actOnMaterialApplication = (id: number, action: MaterialAction, data: {
+  expected_status: MaterialStatus; comment?: string; expected_workflow_id?: number; expected_step?: number;
+}) => api.post<{ data: MaterialApplication }>(`/material-applications/${id}/${action}`, data).then(response => { window.dispatchEvent(new CustomEvent('approval-notifications-changed')); return response; });
 export function materialError(error: unknown): string {
   if (!axios.isAxiosError(error)) return '操作失败，请稍后重试。';
   const status = error.response?.status;

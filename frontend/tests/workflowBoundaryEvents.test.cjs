@@ -55,6 +55,46 @@ test('workflow annotations survive a save and load and discard references to del
   assert.equal(annotations.readFlowAnnotations(restored.annotations, []), undefined);
 });
 
+test('approval result rules survive a save and reload independently of the line name', () => {
+  const workflow = createDefaultFlowConfig(params);
+  const [start, task, end] = workflow.nodes;
+  const rejectionEnd = { ...end, id: 'rejection-end', label: '结束' };
+  workflow.nodes.push(rejectionEnd);
+  workflow.edges.push({
+    ...workflow.edges[1], id: 'rejection', source: task.id, target: rejectionEnd.id,
+    label: '退回申请', approvalOutcome: 'reject',
+  });
+  const payload = makeWorkflowConfigPayload(workflow, { id: 1, code: params.formId }, { name: params.formName });
+  const restored = normalizeProfessionalFlowConfig(plain(payload), workflow);
+  assert.equal(restored.edges.at(-1).approvalOutcome, 'reject');
+  assert.equal(restored.edges.at(-1).label, '退回申请');
+  const invalidApprovalRoutes = () => validateFlowDesignerConfig(restored)
+    .some((check) => check.title === '审批结果连线' && check.level === 'error');
+  assert.equal(invalidApprovalRoutes(), false);
+  restored.edges.at(-1).source = start.id;
+  assert.equal(invalidApprovalRoutes(), true);
+});
+
+test('custom rejection targets include only adjacent nodes and are remapped when copied', () => {
+  const workflow = createDefaultFlowConfig(params);
+  const [start, review, end] = workflow.nodes;
+  const unrelated = { ...end, id: 'unrelated' };
+  workflow.nodes.push(unrelated);
+  review.rejectionTargetId = start.id;
+  const neighbors = designer.approvalRejectionTargets(workflow, review.id);
+  assert.deepEqual(plain(neighbors.previous.map((node) => node.id)), [start.id]);
+  assert.deepEqual(plain(neighbors.next.map((node) => node.id)), [end.id]);
+  const payload = makeWorkflowConfigPayload(workflow, { id: 1, code: params.formId }, { name: params.formName });
+  const restored = normalizeProfessionalFlowConfig(plain(payload), workflow);
+  assert.equal(restored.nodes.find((node) => node.id === review.id).rejectionTargetId, start.id);
+  let nextId = 0;
+  const copied = clipboard.cloneFlowSelection(clipboard.copyFlowSelection(workflow,
+    new Set([start.id, review.id]), new Set()), { x: 24, y: 24 }, (prefix) => `${prefix}-${++nextId}`);
+  assert.equal(copied.nodes[1].rejectionTargetId, copied.nodes[0].id);
+  review.rejectionTargetId = unrelated.id;
+  assert.ok(validateFlowDesignerConfig(workflow).some((check) => check.title === '自定义驳回' && check.level === 'error'));
+});
+
 test('annotation frames stay behind and resize to fit their current members', () => {
   const annotation = { id: 'note-1', nodeIds: ['a', 'b'], title: '审批阶段', color: '#527d9b' };
   const fixed = { id: 'a', x: 90, y: 120 };

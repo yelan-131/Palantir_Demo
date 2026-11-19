@@ -32,5 +32,11 @@ export function cloneFlowSelection(selection: FlowClipboard, delta: FlowRoutePoi
     const nodeIds = annotation.nodeIds.map((id) => newIds.get(id)).filter((id) => id !== undefined);
     return nodeIds.length ? [{ ...annotation, id: makeId('annotation'), nodeIds }] : [];
   });
-  return { nodes, edges, annotations };
+  return {
+    nodes: nodes.map((node) => node.rejectionTargetId
+      ? { ...node, rejectionTargetId: newIds.get(node.rejectionTargetId) }
+      : node),
+    edges,
+    annotations,
+  };
 }

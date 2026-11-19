@@ -11,9 +11,10 @@ from app.core.principal import current_tenant_id, ensure_admin
 from app.models.relational import Form, FormField, WorkflowBinding, WorkflowDef
 from app.services.field_uniqueness import lock
 from app.services.form_versions import preview_form_publish, publish_form
+from app.services.workflow_approvals import _resolve_step_approver_ids
 from app.services.workflow_definitions import WorkflowDefCreate, stage_workflow_definition, update_workflow_definition
 from app.services.workflow_routing import _condition, validate_graph
-from app.services.workflow_views import STARTABLE_DEFINITION_STATUSES, _definition_config
+from app.services.workflow_views import STARTABLE_DEFINITION_STATUSES, _definition_config, _workflow_config_steps
 
 from .application_admin_tools import _snapshot_digest
 
@@ -83,6 +84,7 @@ class WorkflowNode(BaseModel):
     assigneeSource: Literal["fixed", "role", "departmentOwner", "initiatorManager", "field"] | None = None
     assigneeValue: str | None = None
     assigneeRules: list[AssigneeRule] | None = None
+    rejectionTargetId: Key | None = None
     ccRecipients: list[CcRecipient] | None = None
     fieldPermissions: dict[str, dict] | None = None
     externalAction: ExternalAction | None = None
@@ -102,6 +104,7 @@ class WorkflowEdge(BaseModel):
     sourceSide: Port = "bottom"
     targetSide: Port = "top"
     label: str = ""
+    approvalOutcome: Literal["approve", "reject"] | None = None
     priority: int = 999
     isDefault: bool = False
     conditionField: Key | None = None
@@ -160,7 +163,7 @@ class PublishRequest(FormRequest):
 REQUESTS = {GET: FormRequest, VALIDATE: DesignRequest, SAVE: SaveRequest, PUBLISH: PublishRequest}
 DETAILS = {
     GET: ("读取表单流程设计", "读取表单流程草稿、已发布流程或当前绑定的流程，以及可用触发动作和版本。"),
-    VALIDATE: ("校验表单流程设计", "只读校验流程起止、分支、触发入口、处理人、抄送收件人及注释引用。"),
+    VALIDATE: ("校验表单流程设计", "只读校验流程结构、触发入口、审批处理对象可用性、抄送配置及注释引用。"),
     SAVE: ("保存表单流程草稿", "用完整设计保存流程草稿，保留节点坐标、拐点、注释和入口配置。需要当前流程版本及用户确认。"),
     PUBLISH: ("发布表单流程草稿", "按已复核的草稿 ID 和版本发布表单配置及流程入口。需要单独确认。"),
 }
@@ -267,9 +270,48 @@ def _check_design(config, form):
                 raise HTTPException(422, f"条件网关「{label}」需要至少两条分支，并为非默认分支配置条件")
 
 
-def _validation(config, form):
+async def _check_approvers(db, tenant_id, config):
+    for step in _workflow_config_steps(config):
+        if step["type"] != "approval":
+            continue
+        rules = step.get("assignee_rules") or []
+        fixed = [(index, rule) for index, rule in enumerate(rules, 1)
+                 if rule.get("type") in {"role", "user", "fixed", "organization"}]
+        if not fixed:
+            continue
+
+        # Approval groups require an approver in every group. Older node-wide rules
+        # can resolve an approver from any rule, including a record-dependent rule.
+        grouped = any("approvalMode" in rule or "approval_mode" in rule for rule in rules)
+        if not grouped and len(fixed) != len(rules):
+            continue
+        if grouped:
+            checks = [(f"第 {index} 个处理对象「{rule.get('value') or ''}」", [rule]) for index, rule in fixed]
+        else:
+            names = "、".join(str(rule.get("value") or "") for _, rule in fixed)
+            checks = [(f"处理对象「{names}」", rules)]
+        for label, candidates in checks:
+            try:
+                members = await _resolve_step_approver_ids(
+                    db, tenant_id, {"assignee_rules": candidates, "approval_mode": step.get("approval_mode")},
+                    {}, {}, None, None, allow_fallback=False,
+                )
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    raise
+                members = []
+            if not members:
+                raise HTTPException(422, f"审批节点「{step['name']}」的{label}没有有效审批人")
+
+
+async def _validate_design(db, form, config):
+    _check_design(config, form)
+    await _check_approvers(db, form.tenant_id, config)
+
+
+async def _validation(db, config, form):
     try:
-        _check_design(config, form)
+        await _validate_design(db, form, config)
     except HTTPException as exc:
         return {"valid": False, "issues": [str(exc.detail)]}
     return {"valid": True, "issues": []}
@@ -329,7 +371,7 @@ async def execute_workflow_design_tool(operation, db, *, user, payload, prepare=
                          "published_definition_id": published_id,
                          "trigger_action": _trigger_action(form), "design": _definition_config(definition)}}
     if operation == VALIDATE:
-        return {"data": _validation(request.design.model_dump(exclude_unset=True), form)}
+        return {"data": await _validation(db, request.design.model_dump(exclude_unset=True), form)}
     _require_revision(definition, request.expected_definition)
     arguments = request.model_dump(exclude_unset=True)
     snapshot = {"operation": operation, "tenant_id": tenant_id, "form": form.name, "arguments": arguments}
@@ -341,14 +383,14 @@ async def execute_workflow_design_tool(operation, db, *, user, payload, prepare=
 
     if operation == SAVE:
         config = request.design.model_dump(exclude_unset=True)
-        _check_design(config, form)
+        await _validate_design(db, form, config)
         if writing:
             return await _save(db, form, meta, definition, config, user)
     else:
         if definition is None or definition.status != "draft" or meta.get("draftWorkflowId") != definition.id:
             raise HTTPException(409, "请先保存并复核此表单的流程草稿")
         config = _design_payload(_definition_config(definition))
-        _check_design(config, form)
+        await _validate_design(db, form, config)
         if writing:
             published = await publish_form(form.id, db, user, workflow_draft_id=request.expected_definition.id,
                                            workflow_draft_version=request.expected_definition.version)

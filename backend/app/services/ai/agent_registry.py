@@ -184,6 +184,7 @@ def _refresh_stored_input_schemas(tools: dict[str, dict[str, Any]]) -> None:
         if tools[name]["handler_key"] == name:
             tools[name]["input_schema"] = platform_tools[name]["input_schema"]
     previous_descriptions = {
+        "forms.validate_workflow_design": {"只读校验流程起止、分支、触发入口、处理人、抄送收件人及注释引用。"},
         "applications.create": {"按名称和编码新建草稿应用。可选设置说明、图标、启动页面、排序和置顶。"},
         "applications.update": {
             "按应用 ID 修改名称、编码、说明、图标、启动页面、排序或置顶。只传需要修改的字段。",

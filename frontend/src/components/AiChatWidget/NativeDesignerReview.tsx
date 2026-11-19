@@ -62,3 +62,42 @@ export function NativeDesignerReview({ draftId, disabled, menuTarget, onSaved }:
     <div className="ai-confirm-actions"><Button type="primary" icon={<CheckCircleOutlined />} disabled={disabled || !fields.length} loading={saving} onClick={() => void confirm()}>确认创建草稿</Button></div>
   </article>;
 }
+
+export function NativeLayoutReview({ reviewId, formId, operationCount, disabled }: {
+  reviewId: string; formId: number; operationCount: number; disabled: boolean;
+}) {
+  const { designerContext, getPageController } = useAiWorkbench();
+  const locked = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  if (saved) return <article className="ai-skill-action-card ai-confirm-review">
+    <Tag color="green">表单草稿已保存</Tag>
+  </article>;
+  if (designerContext?.form_id !== formId || designerContext.layout_review_id !== reviewId) return null;
+
+  const confirm = async () => {
+    if (locked.current || disabled) return;
+    const controller = getPageController(formId);
+    if (!controller) { setError('请打开对应的表单设计器。'); return; }
+    locked.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      const state = await controller({ id: reviewId, type: 'form_designer', form_id: formId, action: 'confirm_layout_draft' });
+      if (state.saved !== true || state.form_id !== formId) throw new Error('草稿保存未完成，请检查设计器提示后重试。');
+      setSaved(true);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '草稿保存失败，请重试。');
+    } finally {
+      locked.current = false;
+      setSaving(false);
+    }
+  };
+  return <article className="ai-skill-action-card ai-confirm-review" aria-label="保存表单布局草稿">
+    <Space><strong>{String(designerContext.form_name || '表单')}</strong><Tag color="orange">待确认</Tag></Space>
+    <p>已应用 {operationCount} 项布局操作。请复核画布，确认后会保存表单设计器中的全部未保存修改。</p>
+    {error && <Alert type="error" message={error} />}
+    <div className="ai-confirm-actions"><Button type="primary" icon={<CheckCircleOutlined />} disabled={disabled} loading={saving} onClick={() => void confirm()}>确认保存草稿</Button></div>
+  </article>;
+}

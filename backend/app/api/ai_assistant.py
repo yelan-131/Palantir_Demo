@@ -8,7 +8,7 @@ from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,7 +16,7 @@ from sqlalchemy import desc, select, update
 
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, require_admin
 from app.core.db import db_session
-from app.core.production_errors import database_unavailable, seed_data_required
+from app.core.production_errors import coded_error, database_unavailable, seed_data_required
 from app.models.relational import AIAgentRun, AIConversation, AIDraft, AIMessage, AIToolCall
 from app.services.ai.agent_runs import cancel_agent_run, confirm_agent_run, create_agent_run, get_agent_run
 from app.services.ai.agent_definition import use_agent_registry
@@ -1515,7 +1515,7 @@ async def _latest_saved_confirmation(conversation_id, run_id, user):
 
 
 @router.post('/page-actions/{action_id}/result')
-async def receive_page_action_result(action_id: str, body: PageControlResult, user: dict = Depends(get_current_user)):
+async def receive_page_action_result(action_id: str, body: PageControlResult, request: Request, user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
     from app.services.ai.harness_runtime import BRIDGES
     for bridge in tuple(BRIDGES.values()):
@@ -1523,7 +1523,12 @@ async def receive_page_action_result(action_id: str, body: PageControlResult, us
             continue
         future = bridge.page_actions.get(action_id)
         if future is not None and not future.done():
-            future.set_result(body.model_dump())
+            receipt = body.model_dump()
+            if not body.ok and body.error_code:
+                from app.core.request_diagnostics import mark_partial_failure
+                mark_partial_failure(request, body.error_code, 1)
+                receipt['error'] = f'{body.error or "布局操作失败"}（{body.error_code}）'
+            future.set_result(receipt)
             return {'ok': True}
     raise HTTPException(404, '页面操作不存在或已结束')
 
@@ -1797,7 +1802,7 @@ async def check_harness_updates(user: dict = Depends(require_admin)):
     try:
         return await check_harness_update()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="DSH 更新检查失败，请稍后重试或检查服务器到 PyPI 的网络连接") from exc
+        raise coded_error(502, "AI_HARNESS_UPDATE_FAILED", "DSH 更新检查失败，请稍后重试或检查服务器到 PyPI 的网络连接") from exc
 
 
 @router.get("/settings")
@@ -1831,7 +1836,7 @@ async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(requi
     try:
         await save_persisted_ai_settings(body.settings, updated_by=str(current_user_id(user) or user.get("sub") or "admin"))
     except CredentialStoreError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise coded_error(503, "AI_CREDENTIAL_STORE_UNAVAILABLE", str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

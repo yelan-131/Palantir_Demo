@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { businessDataDesignPath, newBusinessFormDesignPath } from '@/config/navigation';
 import { acknowledgePageAction } from '@/services/api';
 import { useAiWorkbench } from './context';
-import type { AiLayoutOperation } from '@/utils/aiFormLayout';
+import { AiLayoutTargetError, type AiLayoutOperation } from '@/utils/aiFormLayout';
 import type { ComponentOperation } from '@/pages/ComponentPages/componentOperations';
 
 export interface FieldProperties {
@@ -30,7 +30,7 @@ export interface PageAction {
   id: string;
   type: 'form_designer';
   form_id: number;
-  action: 'draft_new' | 'add_field' | 'review' | 'confirm_draft' | 'open' | 'select_field' | 'set_field_properties' | 'preview' | 'inspect_layout' | 'configure_layout';
+  action: 'draft_new' | 'add_field' | 'review' | 'confirm_draft' | 'confirm_layout_draft' | 'open' | 'select_field' | 'set_field_properties' | 'preview' | 'inspect_layout' | 'configure_layout';
   draft_id?: string;
   draft?: NewFormDraft;
   field?: NewFormDraft['fields'][number];
@@ -90,7 +90,10 @@ export function AiPageActionRouter({ onOpenWorkspaceTarget, applicationReady }: 
         if (activeAction.current !== action.id) return;
         await acknowledgePageAction(action.id, { ok: true, state });
       } catch (error) {
-        if (activeAction.current === action.id) await acknowledgePageAction(action.id, { ok: false, error: error instanceof Error ? error.message : '页面操作失败' }).catch(() => undefined);
+        if (activeAction.current === action.id) await acknowledgePageAction(action.id, {
+          ok: false, error: error instanceof Error ? error.message : '页面操作失败',
+          ...(error instanceof AiLayoutTargetError && { error_code: 'AI_FORM_LAYOUT_TARGET_INVALID' }),
+        }).catch(() => undefined);
       } finally {
         running.current.delete(action.id);
         navigating.current.delete(action.id);

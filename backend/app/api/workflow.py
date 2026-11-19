@@ -30,6 +30,7 @@ class ApprovalAction(BaseModel):
     action: str  # approve / reject
     comment: Optional[str] = None
     expected_node_id: Optional[str] = None
+    expected_step: Optional[int] = None
 
 
 class StepApprovalRequest(BaseModel):
@@ -42,6 +43,7 @@ class StepApprovalRequest(BaseModel):
     comment: Optional[str] = None
     user_id: Optional[int] = None
     expected_node_id: Optional[str] = None
+    expected_step: Optional[int] = None
 
 
 # DB session helper — unified via core.db.safe_db_call
@@ -652,12 +654,12 @@ async def approve_step(inst_id: int, body: StepApprovalRequest, user: dict = Dep
 
 @router.post("/instances/{inst_id}/reject")
 async def reject_step(inst_id: int, body: StepApprovalRequest, user: dict = Depends(get_current_user)):
-    """驳回当前步骤 (marks instance as rejected)."""
+    """驳回当前步骤，按配置进入驳回路线或结束实例。"""
     return await _act_on_step(inst_id, body, action="reject", user=user)
 
 
 async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, user: dict | None = None, db=None):
-    """Core step action logic — approve moves forward, reject terminates.
+    """Core step action logic for approval and rejection.
 
     Authorization: the acting identity comes from the auth token only. The
     actor must own a pending approval on the current node; admins (and, for
@@ -743,6 +745,8 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         current_node_id = current_step.get("node_id", current_step.get("name", state.get("current_node", "")))
         if body.expected_node_id is not None and body.expected_node_id != current_node_id:
             raise HTTPException(409, '审批节点已变化，请刷新后再处理')
+        if body.expected_step is not None and body.expected_step != current_step_idx:
+            raise HTTPException(409, '审批轮次已变化，请刷新后再处理')
         approval_mode = current_step.get("approval_mode") or "single"
 
         node_approvals = (await db.execute(
@@ -750,6 +754,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             .where(
                 WorkflowApproval.instance_id == inst_id,
                 WorkflowApproval.node_id == current_node_id,
+                WorkflowApproval.id > (state.get('current_approval_after_id') or 0),
             )
             .order_by(WorkflowApproval.id)
         )).scalars().all()
@@ -800,14 +805,19 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                     approval.action = 'skipped'
                     approval.comment = '当前节点已被驳回'
                     approval.acted_at = datetime.now()
-            inst.status = 'rejected'
-            state['current_node'] = 'end'
-            _set_current_assignees(state, [])
-            inst.workflow_state = json.dumps(state, ensure_ascii=False)
-            await finalize()
-            return {'id': inst.id, 'status': 'rejected', 'current_step': current_step_idx}
-
-        if groups:
+            from app.services.workflow_routing import rejection_route
+            pinned_route = state.get('execution_node_ids') or []
+            route = rejection_route(config, form_data, pinned_route[:current_step_idx + 1])
+            if route is None:
+                inst.status = 'rejected'
+                state['current_node'] = 'end'
+                _set_current_assignees(state, [])
+                inst.workflow_state = json.dumps(state, ensure_ascii=False)
+                await finalize()
+                return {'id': inst.id, 'status': 'rejected', 'current_step': current_step_idx}
+            state['execution_node_ids'] = route
+            steps = _instance_steps(config, state)
+        elif groups:
             from app.services.approval_groups import evaluate_approval_groups
             complete, outstanding = evaluate_approval_groups(groups, [*node_approvals, acting_approval])
             for approval in pending_approvals:
@@ -836,12 +846,11 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
                     approval.comment = '同节点其他待办已由他人处理'
                     approval.acted_at = datetime.now()
 
-        # Approve: move to next step
         next_step_idx = _find_next_actionable_step(steps, current_step_idx)
         from app.services.workflow_dispatch import enqueue
         from app.services.workflow_cc import notify_reached
         stop = next_step_idx if next_step_idx is not None else len(steps)
-        enqueue(state, steps, current_step_idx + 1, stop)
+        enqueue(state, steps, current_step_idx + 1, stop, on_rejection=action == 'reject' and next_step_idx is None)
         await notify_reached(db, inst, state, steps[current_step_idx + 1:stop])
         if next_step_idx is not None:
             next_step = steps[next_step_idx]
@@ -851,6 +860,12 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
 
             # Create new approval record for next step
             if next_step.get("type") == "approval":
+                state.pop('current_approval_after_id', None)
+                if any(step.get('node_id', step.get('name')) == state['current_node'] for step in steps[:next_step_idx]):
+                    await db.flush()
+                    state['current_approval_after_id'] = await db.scalar(select(func.max(WorkflowApproval.id)).where(
+                        WorkflowApproval.instance_id == inst_id, WorkflowApproval.node_id == state['current_node'],
+                    ))
                 next_approval_groups: list[dict] = []
                 approver_ids = await _resolve_step_approver_ids(
                     db,
@@ -879,7 +894,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
             inst.workflow_state = json.dumps(state, ensure_ascii=False)
         else:
             # No more steps — workflow completed
-            inst.status = "approved"
+            inst.status = "rejected" if action == "reject" else "approved"
             state["current_node"] = "end"
             state["current_step"] = len(steps) - 1 if steps else current_step_idx
             _set_current_assignees(state, [])
@@ -889,7 +904,7 @@ async def _act_on_step(inst_id: int, body: StepApprovalRequest, action: str, use
         return {
             "id": inst.id, "status": inst.status,
             "current_step": state.get("current_step", current_step_idx),
-            "message": "已通过" if inst.status == "approved" else "已进入下一步",
+            "message": {"approved": "已通过", "rejected": "已驳回"}.get(inst.status, "已进入下一步"),
         }
 
     result = await _query(shared_db) if shared_db is not None else await _try_db(_query)
@@ -905,7 +920,7 @@ async def approve_or_reject(inst_id: int, body: ApprovalAction, user: dict = Dep
     if body.action not in ("approve", "reject"):
         raise HTTPException(400, "action must be 'approve' or 'reject'")
 
-    step_body = StepApprovalRequest(comment=body.comment, expected_node_id=body.expected_node_id)
+    step_body = StepApprovalRequest(comment=body.comment, expected_node_id=body.expected_node_id, expected_step=body.expected_step)
     return await _act_on_step(inst_id, step_body, action=body.action, user=user)
 
 
@@ -1091,12 +1106,13 @@ async def list_dispatches(inst_id: int, user: dict = Depends(require_admin)):
 async def retry_dispatch(inst_id: int, node_id: str, user: dict = Depends(require_admin)):
     async def query(db):
         from app.models.relational import WorkflowInstance
+        from app.services.workflow_dispatch import dispatch_allowed
         instance=await db.scalar(select(WorkflowInstance).where(WorkflowInstance.id==inst_id,WorkflowInstance.tenant_id==current_tenant_id(user)).with_for_update())
         if not instance:
             raise HTTPException(404,'Workflow not found')
         state=json.loads(instance.workflow_state or '{}')
         job=next((job for job in state.get('dispatch_jobs',[]) if job['node_id']==node_id),None)
-        if instance.status in {'cancelled','canceled','rejected'}:
+        if not dispatch_allowed(instance.status, job or {}):
             raise HTTPException(409,'已撤销或驳回的流程不能重试下发')
         if not job or job['status']!='failed':
             raise HTTPException(409,'只能重试失败的下发任务')

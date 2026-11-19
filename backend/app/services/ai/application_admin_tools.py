@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from app.services.applications import ApplicationAccessGroup, ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, update_application, validate_application_code_change, validate_tenant_roles
+from app.services.applications import ApplicationAccessGroup, ApplicationCreate, ApplicationUpdate, _application_to_dict, create_application, delete_application, ensure_application_code_available, get_tenant_application, require_deletable_application, update_application, validate_application_code_change, validate_tenant_roles
 from app.core.principal import ensure_admin
 from app.models.relational import ApplicationForm, ApplicationMenuNode
 from app.services.field_uniqueness import lock
@@ -166,8 +166,7 @@ async def execute_application_tool(operation, session, *, user, payload, prepare
         changes["access_groups"] = [*before["access_groups"], group]
     fields = {}
     if operation == "applications.delete":
-        if app.status != "draft":
-            raise HTTPException(409, "只能删除草稿应用")
+        require_deletable_application(app)
         snapshot["references"] = await _delete_impact(session, tenant_id, app.id)
         fields = {label: len(references) for label, references in snapshot["references"].items()}
     elif operation in STATUS_TRANSITIONS:

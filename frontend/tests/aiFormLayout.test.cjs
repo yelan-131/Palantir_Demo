@@ -5,8 +5,8 @@ const { join } = require('node:path');
 const { runInThisContext } = require('node:vm');
 const ts = require('typescript');
 
-function load(name, imports = {}) {
-  const source = readFileSync(join(__dirname, '../src/utils', name + '.ts'), 'utf8');
+function load(name, imports = {}, dir = '../src/utils') {
+  const source = readFileSync(join(__dirname, dir, name + '.ts'), 'utf8');
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const exports = {};
   runInThisContext('(function(exports, require) {' + js + '\n})')(exports, path => imports[path]);
@@ -65,4 +65,44 @@ test('invalid later changes leave the original layout intact', () => {
     ], create));
     assert.equal(JSON.stringify(initial), previous);
   }
+});
+
+test('a field already saved in the field library can be placed directly into a newly created tab', () => {
+  const batch = [
+    { op: 'add', control_id: 'business', control_type: 'tabs', properties: { layout: { tabs: [{ id: 'home', label: '家用' }] } } },
+    { op: 'move', field_name: 'home_sales_org', parent_id: 'business', slot_id: 'home' },
+  ];
+  const makeField = name => name === 'home_sales_org' ? { id: 'field-home', controlType: 'field', fieldKey: name } : undefined;
+  const next = applyAiLayoutOperations(fields, batch, create, makeField);
+  assert.equal(next.length, 4);
+  assert.equal(next.find(control => control.id === 'field-home').slotId, 'home');
+  assert.equal(applyAiLayoutOperations(next, [batch[1]], create, makeField).filter(control => control.fieldKey === 'home_sales_org').length, 1);
+  assert.throws(() => applyAiLayoutOperations(fields, batch, create, () => undefined), { name: 'Error', message: /字段不在/ });
+  assert.equal(fields.length, 2);
+});
+
+test('the designer restores independently saved tabs without dropping existing field settings', () => {
+  const fieldModel = {
+    makeAiLayoutControl: create,
+    makeFieldControl: field => ({ ...create('field', 'new-' + field.key), source: 'field', fieldKey: field.key, name: field.name }),
+    normalizeControlRules: rules => rules || {},
+  };
+  const { restoreDesignerLayout } = load('designerLayout', { '@/utils/formLayout': layout, './fieldModel': fieldModel }, '../src/pages/FormSettings');
+  const library = [{ key: 'material_code', name: '物料编码' }, { key: 'home_sales_org', name: '家用销售组织' }];
+  const old = [{ ...fieldModel.makeFieldControl(library[0]), id: 'code', placeholder: '原占位文字' },
+    { ...create('divider', 'hidden'), source: 'component', rules: { visible: { enabled: false } } }];
+  const baseline = layout.buildRuntimeLayout(old, () => ({}));
+  const stored = { ...baseline, nodes: [{
+    id: 'business', kind: 'tabs', layout: { tabs: [{ id: 'home', label: '家用' }] },
+    children: [
+      { id: 'code', kind: 'field', fieldName: 'material_code', slotId: 'home' },
+      { id: 'org', kind: 'field', fieldName: 'home_sales_org', slotId: 'home' },
+    ],
+  }] };
+  const restored = restoreDesignerLayout(library, old, baseline, stored);
+  assert.equal(restored.find(control => control.id === 'code').placeholder, '原占位文字');
+  assert.equal(restored.find(control => control.id === 'org').parentId, 'business');
+  assert.equal(restored.find(control => control.id === 'org').slotId, 'home');
+  assert.equal(restored.find(control => control.id === 'hidden').rules.visible.enabled, false);
+  assert.equal(restoreDesignerLayout(library, old, baseline, baseline).length, old.length);
 });

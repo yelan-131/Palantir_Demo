@@ -10,8 +10,11 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import HTTPException
 from sqlalchemy import select
+from app.core.error_catalog import CATALOG
 
 logger = logging.getLogger(__name__)
+DISPATCH_FAILED = 'WORKFLOW_DISPATCH_FAILED'
+WORKER_FAILED = 'WORKFLOW_DISPATCH_WORKER_FAILED'
 
 
 def validate_actions(config):
@@ -44,7 +47,7 @@ def validate_actions(config):
             raise HTTPException(422, '下发目标字段不能重复')
 
 
-def enqueue(state, steps, start, stop):
+def enqueue(state, steps, start, stop, *, on_rejection=False):
     jobs = copy.deepcopy(state.get('dispatch_jobs') or [])
     known = {job['node_id'] for job in jobs}
     for index, step in enumerate(steps[start:stop], start):
@@ -52,7 +55,8 @@ def enqueue(state, steps, start, stop):
         node_id = step.get('node_id')
         if action.get('enabled') and node_id not in known:
             jobs.append({'node_id': node_id, 'node_title': step.get('name'), 'action': copy.deepcopy(action),
-                         'status': 'pending', 'attempts': 0, 'step': index})
+                         'status': 'pending', 'attempts': 0, 'step': index,
+                         **({'on_rejection': True} if on_rejection else {})})
             known.add(node_id)
     state['dispatch_jobs'] = jobs
     state['dispatch_pending'] = any(job['status']=='pending' for job in jobs)
@@ -103,13 +107,19 @@ async def _deliver(db, instance, state, job):
             return {'http_status': response.status_code, 'idempotency_key': key}
 
 
+def dispatch_allowed(instance_status, job):
+    return instance_status not in {'cancelled', 'canceled'} and (
+        instance_status != 'rejected' or job.get('on_rejection') is True
+    )
+
+
 async def process_instance(db, instance):
     state = json.loads(instance.workflow_state or '{}')
     jobs = state.get('dispatch_jobs') or []
     for job in jobs:
         if job['status'] != 'pending':
             continue
-        if instance.status in {'cancelled', 'canceled', 'rejected'}:
+        if not dispatch_allowed(instance.status, job):
             job['status']='cancelled'
             continue
         job['attempts'] += 1
@@ -118,10 +128,14 @@ async def process_instance(db, instance):
                 result = await _deliver(db, instance, state, job)
             job.update(status='succeeded', result=result)
             job.pop('error', None)
+            job.pop('error_code', None)
         except Exception as error:
             detail = error.detail if isinstance(error, HTTPException) else '下发失败，请检查目标配置或网络后重试'
-            job.update(status='failed', error=str(detail)[:300])
-            logger.warning('Workflow delivery failed: instance=%s node=%s error=%s', instance.id, job['node_id'], type(error).__name__)
+            job.update(status='failed', error=str(detail)[:300], error_code=DISPATCH_FAILED)
+            logger.warning(
+                'workflow_diagnosis error_code=%s instance_id=%s node_id=%r exception_type=%s action=%s',
+                DISPATCH_FAILED, instance.id, job['node_id'], type(error).__name__, CATALOG[DISPATCH_FAILED][1],
+            )
         job['finished_at'] = datetime.now(timezone.utc).isoformat()
         from app.services.records import change_audit
         await change_audit(db,tenant_id=instance.tenant_id,user_id=instance.initiator_id,action='workflow_dispatch',resource_type='workflow_instance',resource_id=instance.id,new_values={'node_id':job['node_id'],'status':job['status'],'attempt':job['attempts'],'result':job.get('result')})
@@ -145,5 +159,5 @@ async def run_worker():
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception('Workflow delivery worker failed')
+            logger.exception('workflow_diagnosis error_code=%s action=%s', WORKER_FAILED, CATALOG[WORKER_FAILED][1])
         await asyncio.sleep(5)

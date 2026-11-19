@@ -9,7 +9,7 @@ from app.core.audit import write_audit_log
 from app.core.principal import current_user_id
 from app.models.relational import Application, ApplicationMenuNode, ComponentPage, Form, SystemSetting
 from app.services.application_menu_nodes import _ensure_application_form_binding
-from app.services.application_menus import lock_application, menu_nodes, validate_tree
+from app.services.application_menus import lock_application, menu_nodes, require_group_parent, validate_tree
 from app.services.applications import ApplicationCreate, stage_application
 from app.services.field_uniqueness import lock
 
@@ -81,6 +81,12 @@ async def get_application_template(db, tenant_id, template_id):
 
 
 async def validate_template_references(db, tenant_id, menus):
+    validate_tree({node["id"]: node["parent_id"] for node in menus})
+    groups = {node["id"] for node in menus if node["node_type"] == "group"}
+    for node in menus:
+        require_group_parent(node["parent_id"], groups)
+        if node["id"] in groups and node["default_entry"]:
+            raise HTTPException(422, "菜单分组不能设为默认入口")
     form_ids = {node["form_id"] for node in menus if node["form_id"] is not None}
     if form_ids and form_ids != set(await db.scalars(select(Form.id).where(Form.id.in_(form_ids), Form.tenant_id == tenant_id))):
         raise HTTPException(409, "模板引用的表单已不存在，请更新模板")

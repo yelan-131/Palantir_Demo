@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.production_errors import database_unavailable
+from app.core.production_errors import coded_error, database_unavailable, operation_error_code
 from app.core.logging import get_logger
 from app.database import AsyncSessionLocal
 
@@ -55,6 +55,10 @@ async def safe_db_call(fn, *, default=None):
             return await fn(session)
     except HTTPException:
         raise
+    except SQLAlchemyError as exc:
+        raise database_unavailable() from exc
     except Exception as exc:  # noqa: BLE001 — intentional broad catch with logging
+        if code := operation_error_code(fn):
+            raise coded_error(500, code, "Internal server error") from exc
         logger.warning("safe_db_call database unavailable: %s", exc)
         raise database_unavailable() from exc

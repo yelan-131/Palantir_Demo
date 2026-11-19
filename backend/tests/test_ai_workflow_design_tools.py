@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core import db as db_module
 from app.core.application_menu_registry_schema import install_workflow_design_tools
 from app.models.relational import (
-    AIAgentSkillDefinition, AIAgentToolDefinition, Base, ComponentPage, Form, FormField, Tenant, WorkflowBinding, WorkflowDef,
+    AIAgentSkillDefinition, AIAgentToolDefinition, Base, ComponentPage, Form, FormField, Role, Tenant, User, UserRole,
+    WorkflowBinding, WorkflowDef,
 )
 from app.services import form_versions
 from app.services.ai import agent_registry, harness_runtime as runtime, tool_handlers, workbench_preview
@@ -41,6 +42,53 @@ def design():
                          "color": "#527d9b", "size": {"width": 260, "height": 260},
                          "titleStyle": {"underline": True}, "frameStyle": {"borderStyle": "dashed"}}],
     }
+
+
+@pytest.mark.asyncio
+async def test_workflow_tools_reject_unresolvable_approval_groups():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    try:
+        async with engine.begin() as db:
+            await db.run_sync(Base.metadata.create_all)
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            db.add_all([
+                Tenant(id=1, name="Test", slug="test"),
+                Form(id=10, tenant_id=1, name="异常台账", code="issues", storage_mode="dynamic", status="draft"),
+                Role(id=20, tenant_id=1, name="review", label="审批组"),
+                User(id=30, tenant_id=1, username="reviewer", hashed_password="test", is_active=True),
+                UserRole(tenant_id=1, user_id=30, role_id=20),
+            ])
+            await db.commit()
+            config = design()
+            stage = config["nodes"][1]
+            stage.pop("ccRecipients")
+            stage.update(type="userTask", label="审批", assigneeRules=[
+                {"id": "review", "type": "role", "value": "流程审批人", "approvalMode": "single"},
+                {"id": "dynamic", "type": "field", "value": "reviewer"},
+            ])
+            payload = {"form_id": 10, "design": config}
+
+            async def run(tool, arguments, **kwargs):
+                return await execute_workflow_design_tool(tool, db, user=ADMIN, payload=arguments, **kwargs)
+
+            result = (await run(VALIDATE, payload))["data"]
+            assert result == {"valid": False, "issues": ["审批节点「审批」的第 1 个处理对象「流程审批人」没有有效审批人"]}
+            with pytest.raises(HTTPException, match="没有有效审批人"):
+                await run(SAVE, {**payload, "expected_definition": None}, prepare=True)
+
+            stage["assigneeRules"][0]["value"] = "审批组"
+            assert (await run(VALIDATE, payload))["data"]["valid"] is True
+            pending = await run(SAVE, {**payload, "expected_definition": None}, prepare=True)
+            saved = (await run(SAVE, pending))["data"]
+
+            reviewer = await db.get(User, 30)
+            reviewer.is_active = False
+            await db.commit()
+            with pytest.raises(HTTPException, match="没有有效审批人"):
+                await run(PUBLISH, {"form_id": 10, "expected_definition": saved["revision"]}, prepare=True)
+            assert await db.scalar(select(WorkflowBinding.id)) is None
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

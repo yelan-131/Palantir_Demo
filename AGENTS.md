@@ -3,6 +3,12 @@
 - Version changes must follow `docs/operations/version-policy.md`. Daily releases increment the last number; milestone/major changes require explicit scope confirmation. Continue the current draft rather than creating duplicate releases.
 - Use `scripts/bump_release.py`; preserve published history. Missing legacy status means frozen history. Document-only updates do not bump versions. Never claim deployment or successful verification without evidence.
 
+## Error diagnostics
+
+- When the user reports a project error or asks to fix one, check whether `backend/app/core/error_catalog.json` and `docs/operations/error-diagnostics.md` cover the verified failure. Reuse the existing code when it fits and update the troubleshooting steps if needed. When the failure requires a distinct diagnosis, add a code and its troubleshooting steps as part of the same work. For fixes, connect the code at the actual failure point through the shared diagnostics module and verify it through the affected entry point. Keep diagnostic logic out of the main application entry point.
+
+## Deployment
+
 - When the user asks to "更新服务器", "把服务器更新", "同步到服务器", or similar, treat it as a request to deploy the current project updates to the configured server.
 - Deployment flow for this project:
   1. Commit and push local changes to GitHub.

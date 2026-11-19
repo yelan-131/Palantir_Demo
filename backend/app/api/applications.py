@@ -17,7 +17,8 @@ from app.api.deps import current_tenant_id, current_user_id, get_current_user, g
 from app.core.audit import write_audit_log
 from app.core.db import safe_db_call
 from app.core.permissions import has_permission
-from app.core.production_errors import database_unavailable, seed_data_required
+from app.core.production_errors import database_unavailable, diagnose_operation, seed_data_required
+from app.services.application_menus import empty_menu_key
 from app.services.field_uniqueness import lock as lock_tenant_writes
 from app.services.applications import (
     ApplicationCreate,
@@ -425,8 +426,9 @@ async def list_applications(
 
 @router.get("/{app_id}/menus")
 async def list_application_menus(app_id: int, user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    @diagnose_operation("APPLICATION_MENU_LOAD_FAILED")
     async def _query(session):
-        from app.models.relational import Application, ApplicationForm, ApplicationMenu, ApplicationMenuNode, Form, MenuItem
+        from app.models.relational import Application, ApplicationForm, ApplicationMenu, ApplicationMenuNode, Form, MenuItem, SystemSetting
 
         tenant_id = current_tenant_id(user)
         app = await session.get(Application, app_id)
@@ -436,7 +438,7 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
             raise HTTPException(403, "Application access denied")
         platform_nodes = (await session.execute(
             select(ApplicationMenuNode)
-            .where(ApplicationMenuNode.application_id == app_id, ApplicationMenuNode.tenant_id == tenant_id, ApplicationMenuNode.visible.is_(True))
+            .where(ApplicationMenuNode.application_id == app_id, ApplicationMenuNode.tenant_id == tenant_id)
             .order_by(ApplicationMenuNode.sort_order, ApplicationMenuNode.id)
         )).scalars().all()
         if platform_nodes:
@@ -444,9 +446,11 @@ async def list_application_menus(app_id: int, user: dict = Depends(get_current_u
             allowed_nodes = [
                 node
                 for node in platform_nodes
-                if await _user_can_access_menu_node(session, user, node, role_ids)
+                if node.visible and await _user_can_access_menu_node(session, user, node, role_ids)
             ]
             return {"data": _menu_tree([_platform_menu_payload(node) for node in allowed_nodes])}
+        if await session.scalar(select(SystemSetting.id).where(SystemSetting.key == empty_menu_key(app))) is not None:
+            return {"data": []}
         form_rows = await session.execute(
             select(ApplicationForm, Form)
             .join(Form, Form.id == ApplicationForm.form_id)
@@ -548,6 +552,7 @@ async def admin_list_applications(user: dict = Depends(require_admin), db: Async
 
 @admin_router.post("/applications")
 async def admin_create_application(body: ApplicationCreate, user: dict = Depends(require_admin)):
+    @diagnose_operation("APPLICATION_CREATE_FAILED")
     async def _query(db):
         await lock_tenant_writes(db, current_tenant_id(user))
         return await create_application(db, body, user)

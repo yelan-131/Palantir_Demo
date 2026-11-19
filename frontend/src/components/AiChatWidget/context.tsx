@@ -63,7 +63,8 @@ export function AiWorkbenchProvider({ children }: { children: ReactNode }) {
       setPageActions(current => current.some(item => item.id === action.id) ? current : [...current, action]);
       return;
     }
-    if (action.action === 'confirm_draft') return; // Only a user's final confirmation may invoke this local command.
+    // Only the confirmation buttons can invoke these local commands.
+    if (action.action === 'confirm_draft' || action.action === 'confirm_layout_draft') return;
     if (action.type !== 'form_designer' || !Number.isInteger(action.form_id) || action.form_id < 0 || !action.id) return;
     if (action.form_id === 0 && (!action.draft_id || !/^[a-f0-9]{32}$/.test(action.draft_id))) return;
     if (action.action === 'draft_new' && (action.form_id !== 0 || !Array.isArray(action.draft?.fields))) return;

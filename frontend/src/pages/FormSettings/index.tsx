@@ -17,6 +17,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeViewConfig } from '@/utils/viewConfig';
 import type { ViewConfig } from '@/utils/viewConfig';
 import { applyAiLayoutOperations, describeAiLayout } from '@/utils/aiFormLayout';
+import { restoreDesignerLayout } from './designerLayout';
 import { createPortal } from 'react-dom';
 import { createUuid } from '@/utils/uuid';
 import { normalizeSelection, parseStaticOptions, selectionConfigErrors, selectionCountError, staticOptionErrors } from '@/utils/selectOptions';
@@ -430,19 +431,22 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         setPlatformForm(formDetail);
         const savedCanvas=formDetail.config?.canvasSettings as {columns?:number;gap?:number}|undefined;
         setCanvasSettings({columns:[1,2,3].includes(Number(savedCanvas?.columns))?Number(savedCanvas?.columns):2,gap:[8,12,16].includes(Number(savedCanvas?.gap))?Number(savedCanvas?.gap):12});
-        const savedControls = formDetail.config?.formDesignerControls as LayoutControl[] | undefined;
-        if (Array.isArray(savedControls)) {
-          const knownFields = new Set(databaseFields.map((field) => field.key));
-          const restoredControls = normalizeLayout(savedControls.filter((control) => control && typeof control.id === 'string'
-            && typeof control.controlType === 'string' && ['field', 'component'].includes(control.source)
-            && (control.source !== 'field' || knownFields.has(String(control.fieldKey))))
-            .map((control) => ({ ...control, computed: control.computed === undefined ? databaseFields.find(field => field.key === control.fieldKey)?.calculationRule : control.computed, rules: normalizeControlRules(control.rules) })));
-          setLayoutControls(restoredControls);
-          setSelectedControlId(restoredControls[0]?.id || '');
-        } else {
-          setLayoutControls(databaseFields.map(makeFieldControl));
-          setSelectedControlId('');
+        let layouts: Array<{ layout_type?: string; config?: Record<string, unknown>; updated_at?: string }> = [];
+        try {
+          const response = await listPlatformFormLayouts(formDetail.id);
+          layouts = response.data?.data || [];
+        } catch (error) {
+          console.warn('form layouts load failed', error);
         }
+        if (cancelled) return;
+        const formLayout = layouts.find(layout => layout.layout_type === 'form');
+        const designerSavedAt = Date.parse(getViewConfigMeta(formDetail).draftSavedAt || '');
+        const layoutSavedAt = Date.parse(formLayout?.updated_at || '');
+        const storedLayout = designerSavedAt > layoutSavedAt ? undefined : formLayout?.config;
+        const restoredControls = restoreDesignerLayout(databaseFields, formDetail.config?.formDesignerControls,
+          formDetail.config?.formLayout, storedLayout);
+        setLayoutControls(restoredControls);
+        setSelectedControlId(restoredControls[0]?.id || '');
         const storedAnalyticsDesign = getStoredAnalyticsDesign(formDetail, {
           ...baseConfig,
           kind: inferFormDesignerKind(formDetail),
@@ -461,21 +465,12 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         const viewSourceFields = databaseFields;
         let persistedViewConfig = getStoredViewConfig(formDetail, baseConfig);
         if (!persistedViewConfig && restoredDesignFormId.current !== formDetail.id) {
-          try {
-            const layoutsResponse = await listPlatformFormLayouts(formDetail.id);
-            const layouts = (layoutsResponse.data?.data || []) as Array<{ layout_type?: string; config?: Record<string, unknown> }>;
-            const viewLayout = layouts.find((layout) => layout.layout_type === 'view');
-            const layoutConfig = viewLayout?.config || {};
-            const layoutView = layoutConfig.draft || layoutConfig.published;
-            if (layoutView) {
-              persistedViewConfig = normalizeViewConfig(
-                layoutView,
-                designerFieldsToViewFields(viewSourceFields),
-                baseConfig.filters.map((filter) => filter.key),
-              );
-            }
-          } catch (error) {
-            console.warn('view layout load failed', error);
+          const layoutConfig = layouts.find(layout => layout.layout_type === 'view')?.config || {};
+          const layoutView = layoutConfig.draft || layoutConfig.published;
+          if (layoutView) {
+            persistedViewConfig = normalizeViewConfig(
+              layoutView, designerFieldsToViewFields(viewSourceFields), baseConfig.filters.map(filter => filter.key),
+            );
           }
         }
         if (!cancelled) {
@@ -1149,10 +1144,11 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
     return true;
   };
 
+  const savingDraft = useRef(false);
   const saveDraft = async () => {
-    if (!checkSelectionConfiguration()) return false;
+    if (isPersistingFlow || savingDraft.current || !checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
-    if (isPersistingFlow) return false;
+    savingDraft.current = true;
     setPersistingFlow(true);
     try {
       await persistDesignerDraft();
@@ -1170,12 +1166,13 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       }
       return false;
     } finally {
+      savingDraft.current = false;
       setPersistingFlow(false);
     }
   };
 
   const publishConfig = async () => {
-    if (isPersistingFlow || !checkSelectionConfiguration()) return false;
+    if (isPersistingFlow || savingDraft.current || !checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
     setPersistingFlow(true);
     try {
@@ -1415,22 +1412,55 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   };
 
   const { registerPageController, setDesignerContext } = useAiWorkbench();
-  const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields });
-  aiNativeState.current = { layoutControls, selectedControlId, platformForm, hasUnsavedChanges, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields };
-  const [pageCallCompletion, setPageCallCompletion] = useState<{ resolve: (state: Record<string, unknown>) => void; layoutOperationCount?: number; includeLayout: boolean } | null>(null);
+  const draftSaveSnapshot = useMemo(() => ({
+    baseConfig, canvasSettings, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig,
+  }), [baseConfig, canvasSettings, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig]);
+  const [layoutReview, setLayoutReview] = useState<{ id: string; snapshot: typeof draftSaveSnapshot }>();
+  const layoutReviewId = hasUnsavedChanges && layoutReview?.snapshot === draftSaveSnapshot ? layoutReview.id : undefined;
+  const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, layoutReviewId, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields });
+  aiNativeState.current = { layoutControls, selectedControlId, platformForm, layoutReviewId, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields };
+  const [pageCallCompletion, setPageCallCompletion] = useState<{
+    resolve: (state: Record<string, unknown>) => void;
+    layoutOperationCount?: number;
+    includeLayout: boolean;
+    layoutReviewId?: string;
+  } | null>(null);
   useEffect(() => {
     if (permissionOnly || (!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig || isAnalysisDesigner) return;
     return registerPageController(platformForm?.id || 0, async (action: PageAction) => {
-      const current = aiNativeState.current;
+      let current = aiNativeState.current;
       if (action.draft_id ? (current.platformForm || action.draft_id !== aiFormDraft?.id) : current.platformForm?.id !== action.form_id) throw new Error('当前设计器与目标表单不一致');
       if (action.action === 'confirm_draft') {
         if (!aiFormDraft || !await current.saveDraft()) throw new Error('草稿未保存，请检查页面提示后重试');
         return { form_id: lastSavedForm.current?.id, saved: true, published: false };
       }
+      if (action.action === 'confirm_layout_draft') {
+        if (!current.platformForm || current.layoutReviewId !== action.id) {
+          throw new Error('当前草稿已变更，请重新复核布局后保存。');
+        }
+        if (!await current.saveDraft()) throw new Error('草稿保存未完成，请检查设计器提示后重试。');
+        return { form_id: action.form_id, saved: true, published: false };
+      }
+      if (savingDraft.current) throw new Error('正在保存表单草稿，请保存完成后重试。');
       const operations = action.action === 'draft_new' ? action.draft?.layout_operations : action.layout_operations;
       if (action.action === 'configure_layout') {
         if (!operations?.length) throw new Error('未收到布局操作');
-        const next = applyAiLayoutOperations(current.layoutControls, operations, makeAiLayoutControl);
+        let fields = current.fields;
+        if (action.form_id && operations.some(operation => operation.op === 'move' && operation.field_name
+          && !fields.some(field => field.key === operation.field_name) && !current.layoutControls.some(control => control.fieldKey === operation.field_name))) {
+          const response = await getPlatformForm(action.form_id, { schema: 'draft', scope: 'designer' });
+          fields = platformFieldsToDesignerFields(response.data?.data?.fields);
+          current = aiNativeState.current;
+          if (current.platformForm?.id !== action.form_id || savingDraft.current) throw new Error('表单已切换或正在保存，请重试。');
+        }
+        const fieldsByName = new Map(fields.map(field => [field.key, field]));
+        const next = applyAiLayoutOperations(current.layoutControls, operations, makeAiLayoutControl, name => {
+          const field = fieldsByName.get(name);
+          return field ? makeFieldControl(field) : undefined;
+        });
+        if (!areDesignerFieldsSame(current.fields, fields)) {
+          setDatabaseFieldsByForm(previous => ({ ...previous, [staticBaseConfig.id]: fields }));
+        }
         current.commitLayoutChange(() => next);
       }
       if (action.action === 'draft_new') {
@@ -1491,14 +1521,20 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       return new Promise<Record<string, unknown>>(resolve => setPageCallCompletion({
         resolve, layoutOperationCount: operations?.length,
         includeLayout: action.action === 'inspect_layout' || Boolean(operations?.length),
+        layoutReviewId: action.action === 'configure_layout' && action.form_id > 0 ? action.id : undefined,
       }));
     });
   }, [platformForm?.id, aiFormDraft, isResolvingPlatformConfig, isAnalysisDesigner, permissionOnly, registerPageController, baseConfig.fields]);
   useEffect(() => {
     if (!pageCallCompletion) return;
+    const reviewId = hasUnsavedChanges ? pageCallCompletion.layoutReviewId : undefined;
+    if (reviewId) setLayoutReview({ id: reviewId, snapshot: draftSaveSnapshot });
     const selected = layoutControls.find(control => control.id === selectedControlId);
     pageCallCompletion.resolve({ form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id,
+      ...(reviewId && { layout_review_ready: true }),
       ...(pageCallCompletion.includeLayout && { layout_controls: describeAiLayout(layoutControls),
+        unplaced_fields: baseConfig.fields.filter(field => !layoutControls.some(control => control.fieldKey === field.key))
+          .map(field => ({ field_name: field.key, label: field.name })),
         layout_operation_count: pageCallCompletion.layoutOperationCount }),
       fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey, label: control.name,
         control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
@@ -1507,10 +1543,10 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       readonly: selected?.rules.readonly.enabled, unsaved_changes: hasUnsavedChanges,
       review_ready: draftReviewReady, saved: false, published: false });
     setPageCallCompletion(null);
-  }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.fields]);
+  }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.fields, draftSaveSnapshot]);
   useEffect(() => {
     if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig) return;
-    setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, unsaved_changes: hasUnsavedChanges,
+    setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, layout_review_id: layoutReviewId, unsaved_changes: hasUnsavedChanges,
       selected_field: layoutControls.find(control => control.id === selectedControlId)?.fieldKey,
       fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey,
         label: control.name, required: control.rules.required.enabled, readonly: control.rules.readonly.enabled,
@@ -1518,7 +1554,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
         width: control.width, settings: control.typeSettings, presentation: control.presentation,
         options: enumOptions(control.optionSource), encoding: control.encodingRule ? { prefix: control.encodingRule.prefix, date_pattern: control.encodingRule.datePattern, sequence_length: control.encodingRule.sequenceLength, reset_cycle: control.encodingRule.resetCycle } : undefined })) });
-  }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.kind, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, selectedControlId, hasUnsavedChanges, setDesignerContext]);
+  }, [platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.kind, baseConfig.name, baseConfig.fields, isResolvingPlatformConfig, layoutControls, layoutReviewId, selectedControlId, hasUnsavedChanges, setDesignerContext]);
   useEffect(() => {
     if (aiFormDraft && platformForm?.id && !hasUnsavedChanges && !isPersistingFlow) {
       navigate(businessDataDesignPath(platformForm.id, 'form'), { replace: true });

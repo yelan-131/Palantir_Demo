@@ -21,7 +21,8 @@ from sqlalchemy import delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
-from app.services.application_menus import lock_application, menu_nodes, validate_tree
+from app.services.application_menus import lock_application, menu_nodes, require_group_parent, validate_tree
+from app.services.applications import _application_to_dict
 from app.config import settings
 from app.database import DB_TYPE
 from app.core.audit import write_audit_log
@@ -950,6 +951,10 @@ async def save_application_menu_order(application_id: int, body: MenuOrderWrite,
     if len(proposed) != len(body.nodes) or set(proposed) != set(current):
         raise HTTPException(422, "必须提交当前应用的完整菜单结构")
     validate_tree(proposed)
+    group_ids = {node.id for node in nodes if node.node_type == "group"}
+    for item in body.nodes:
+        if item.parent_id != current[item.id][0]:
+            require_group_parent(item.parent_id, group_ids)
     orders = {(item.parent_id, item.sort_order) for item in body.nodes}
     if len(orders) != len(body.nodes):
         raise HTTPException(422, "同级菜单顺序不能重复")
@@ -983,9 +988,18 @@ async def delete_application_menu_node(
     user: dict = Depends(require_admin),
 ):
     from app.services.field_uniqueness import lock
+    from app.models.relational import Application
 
     await lock(db, current_tenant_id(user))
-    return await _delete_application_menu_node(application_id, node_id, db, user)
+    result = await _delete_application_menu_node(application_id, node_id, db, user, defer_commit=True)
+    await db.flush()
+    app = await db.get(Application, application_id)
+    nodes = sorted(await menu_nodes(db, app), key=lambda node: (node.sort_order, node.id))
+    result["data"] = [await _menu_node_payload(db, node) for node in nodes]
+    state = await _application_to_dict(db, app)
+    result["application"] = {field: state[field] for field in ("default_route", "edit_token")}
+    await db.commit()
+    return result
 
 
 @router.get("/{form_id}/publish/preview")

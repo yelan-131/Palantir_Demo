@@ -86,7 +86,7 @@ Harness 子进程通过 `POST /api/v1/ai/harness/mcp`（`backend/app/api/ai_harn
 - 去掉处理器为 `not_implemented` 的工具，以及当前用户权限判定不通过的工具（判定规则见[契约第 7 节](skill-contract.md#7-权限判定)）。
 - 知识中心对话只保留 `knowledge.*` 工具。
 - 组件页面画布工具 `ui.component_page.*` 只在以下条件同时满足时出现：不是知识中心对话、浏览器声明支持页面联动（`pageControlsSupported`）、当前用户是管理员、上下文中有当前组件页面编码（`componentPageContext.code`）。
-- 表单设计器工具 `ui.form_designer` 在浏览器支持页面联动、用户是管理员且 `low-code` 业务域开放时出现。
+- 表单设计器工具 `ui.form_designer` 在浏览器支持页面联动且当前管理员通过角色能力与工具规则校验时出现。
 - 工作台导航使用两个独立工具。`ui.open_application` 接受应用名或编码，`ui.open_page` 接受菜单名和可选的所属应用。浏览器按当前账号可访问的应用及菜单解析入口，页面切换完成后才回执成功。导航使用工作台现有权限和离开编辑器的拦截机制。
 - 除知识中心对话外，总会加入 `platform.report_configuration_status`，供模型报告无法生成确认卡片的原因。
 

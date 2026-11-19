@@ -49,7 +49,23 @@ export default function MaterialApplications({ embedded = false }: { embedded?: 
   };
   const performAction = async () => {
     if (saving || !action || !detail) return; let values; try { values = await actionForm.validateFields(); } catch { return; } setSaving(true);
-    try { const response = await actOnMaterialApplication(detail.id, action, { expected_status: detail.status, ...(action !== 'submit' ? { comment: values.comment?.trim() || '' } : {}) }); setDetail(response.data.data); setAction(null); setRevision((r) => r + 1); message.success(action === 'submit' ? '申请已提交审批' : action === 'approve' ? '申请已通过' : '申请已驳回，申请人可修改后重新提交'); } catch (error) { await failure(error, detail.id); } finally { setSaving(false); }
+    try {
+      const response = await actOnMaterialApplication(detail.id, action, {
+        expected_status: detail.status,
+        ...(action !== 'submit' && {
+          comment: values.comment?.trim() || '',
+          expected_workflow_id: detail.workflow_id,
+          expected_step: detail.current_step ?? undefined,
+        }),
+      });
+      const row = response.data.data;
+      setDetail(row);
+      setAction(null);
+      setRevision((r) => r + 1);
+      if (action === 'submit') message.success('申请已提交审批');
+      else if (row.status === 'pending') message.success(action === 'reject' ? '已驳回并流转至配置节点' : '已通过当前审批，流程仍在审批中');
+      else message.success(row.status === 'approved' ? '申请已通过' : '申请已驳回，申请人可修改后重新提交');
+    } catch (error) { await failure(error, detail.id); } finally { setSaving(false); }
   };
   const openAction = (next: MaterialAction) => { actionForm.resetFields(); setAction(next); };
   return <div className="material-applications" style={embedded ? { padding: '8px 0 24px' } : undefined}>

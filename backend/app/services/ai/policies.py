@@ -83,8 +83,6 @@ def decide_ai_permission(
         reason = "辅助操作能力已关闭"
     elif settings.get("agentMode") == "readonly" and capability in {"draft", "save_draft", "workflow", "config"}:
         reason = "只读模式不允许生成或执行操作"
-    elif domain and "domains" in settings and domain not in settings["domains"]:
-        reason = "业务域未开放"
     if reason:
         return AIPermissionDecision(allowed=False, reason=reason, capability=capability)
 

@@ -20,7 +20,7 @@ function harness(analysis = false) {
   const savedView = { ...form, config: { view: true } };
   const savedWorkflow = { ...form, config: { workflow: true } };
   const ctx = {
-    lastSavedForm: { current: null },
+    lastSavedForm: { current: null }, savingDraft: { current: false },
     aiFormDraft: undefined, platformForm: form,
     flowLoadError: '', isPersistingFlow: false, isAnalysisDesigner: analysis,
     storedViewConfig: {}, analyticsDesign: {}, layoutControls: [], baseConfig: { fields: [] }, console: { error() {} },

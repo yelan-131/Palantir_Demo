@@ -2,21 +2,19 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from time import perf_counter
-from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.core.error_catalog import ERROR_CODE, REQUEST_ID
 from app.core.logging import get_logger, setup_logging
+from app.core.request_diagnostics import METRICS, install_request_diagnostics
 
 # Initialize logging before anything else
 setup_logging(level=settings.LOG_LEVEL)
 logger = get_logger(__name__)
 settings.validate_runtime()
-METRICS = {"requests_total": 0, "errors_total": 0, "route_counts": {}, "route_errors": {}, "route_latency_ms": {}}
 
 
 async def cleanup_ai_memories():
@@ -70,6 +68,7 @@ app = FastAPI(
     redoc_url=None if settings.IS_PRODUCTION else "/redoc",
     openapi_url=None if settings.IS_PRODUCTION else "/openapi.json",
 )
+install_request_diagnostics(app)
 
 
 # ── CORS ──────────────────────────────────────────────────
@@ -84,47 +83,8 @@ app.add_middleware(
     allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", ERROR_CODE, REQUEST_ID],
 )
-
-
-@app.middleware("http")
-async def observability_middleware(request: Request, call_next):
-    request_id = request.headers.get("x-request-id") or uuid4().hex
-    start = perf_counter()
-    status_code = 500
-    try:
-        response = await call_next(request)
-        status_code = response.status_code
-        response.headers["x-request-id"] = request_id
-        return response
-    finally:
-        elapsed_ms = round((perf_counter() - start) * 1000, 2)
-        route_key = f"{request.method} {request.url.path}"
-        METRICS["requests_total"] += 1
-        METRICS["route_counts"][route_key] = METRICS["route_counts"].get(route_key, 0) + 1
-        METRICS["route_latency_ms"][route_key] = elapsed_ms
-        if status_code >= 500:
-            METRICS["errors_total"] += 1
-            METRICS["route_errors"][route_key] = METRICS["route_errors"].get(route_key, 0) + 1
-        logger.info(
-            "request_completed request_id=%s method=%s path=%s status=%s duration_ms=%s",
-            request_id,
-            request.method,
-            request.url.path,
-            status_code,
-            elapsed_ms,
-        )
-
-
-# ── Global exception handler ──────────────────────────────
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "type": exc.__class__.__name__},
-    )
 
 
 # ── System endpoints ──────────────────────────────────────

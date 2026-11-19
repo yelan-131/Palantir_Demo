@@ -11,6 +11,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user, require_admin, current_tenant_id, current_user_id
+from app.core.production_errors import coded_error, diagnose_operation
+from app.core.request_diagnostics import mark_partial_failure
 from app.models.relational import (
     ComponentPage,
     ComponentPageVersion,
@@ -128,6 +130,7 @@ async def delete_permission_template(template_id: str, db: AsyncSession = Depend
 
 
 @router.post('')
+@diagnose_operation('COMPONENT_PAGE_WRITE_FAILED')
 async def create_page(definition: PageDefinition, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     return await component_page_editor_service.create_page(definition=definition, db=db, user=user)
 
@@ -175,11 +178,13 @@ async def initialize_workspace(db: AsyncSession = Depends(get_db), user=Depends(
 
 
 @router.get('/{code}/editor')
+@diagnose_operation('COMPONENT_PAGE_LOAD_FAILED')
 async def get_editor(code: str, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     return await component_page_editor_service.get_editor(code=code, db=db, user=user)
 
 
 @router.get('/forms/{slug}/binding')
+@diagnose_operation('COMPONENT_PAGE_LOAD_FAILED')
 async def resolve_form_page(slug: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     query = select(Form).where(Form.tenant_id == current_tenant_id(user))
     form = await db.scalar(query.where(Form.id == int(slug) if slug.isdigit() else Form.code == slug))
@@ -245,27 +250,42 @@ async def bind_form_page(form_id: int, body: PageBinding | None = None,
 
 @router.put('/{code}/draft')
 @router.post('/{code}/publish')
+@diagnose_operation('COMPONENT_PAGE_WRITE_FAILED')
 async def write_page(code: str, body: PageWrite, request: Request,
                      db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     return await save_page_definition(code, body, db, user, releasing=request.url.path.endswith('/publish'))
 
 
 @router.get('/{code}')
+@diagnose_operation('COMPONENT_PAGE_LOAD_FAILED')
 async def get_page(code: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     return await component_page_editor_service.get_page(code=code, db=db, user=user)
 
 
 @router.post('/{code}/data')
-async def page_data(code: str, query: RuntimeQuery, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return await component_page_editor_service.page_data(code=code, query=query, db=db, user=user)
+@diagnose_operation('COMPONENT_DATA_LOAD_FAILED')
+async def page_data(code: str, query: RuntimeQuery, request: Request,
+                    db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    payload = await component_page_editor_service.page_data(code=code, query=query, db=db, user=user)
+    diagnose_component_data(request, payload['analyticsData'])
+    return payload
 
 
 @router.post('/{code}/preview')
-async def preview_page(code: str, body: PagePreview, db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
+@diagnose_operation('COMPONENT_DATA_LOAD_FAILED')
+async def preview_page(code: str, body: PagePreview, request: Request,
+                       db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     page = await find_page(db, user, code)
     await validate_publish(db, user, body.definition)
     data = await runtime_data(db, user, page, body.definition, body.filters, body.widget_filters, body.filter_queries, body.chart_values)
+    diagnose_component_data(request, data)
     return {'analyticsData': data}
+
+
+def diagnose_component_data(request: Request, data: dict) -> None:
+    affected = sum(bool(errors) for errors in data.get('widgetErrors', {}).values())
+    if affected or data.get('errors'):
+        mark_partial_failure(request, 'COMPONENT_DATA_PARTIAL_FAILURE', affected)
 
 
 # A section release stores a complete runtime snapshot but merges only its own fields.
@@ -330,6 +350,7 @@ async def section_versions(code: str, widget_id: str, section: Literal['basic', 
 
 
 @router.post('/{code}/widgets/{widget_id}/{section}/publish')
+@diagnose_operation('COMPONENT_PAGE_WRITE_FAILED')
 async def publish_section(code: str, widget_id: str, section: Literal['basic', 'data'], body: PageWrite,
                           db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     page = await find_page(db, user, code)
@@ -352,7 +373,7 @@ async def publish_section(code: str, widget_id: str, section: Literal['basic', '
         ComponentPage.tenant_id == page.tenant_id, ComponentPage.revision == body.expectedRevision).values(
         draft=body.definition.model_dump(), revision=ComponentPage.revision + 1, published_version=ComponentPage.published_version + 1))
     if updated.rowcount != 1:
-        raise HTTPException(409, '页面已被其他编辑更新，请重新加载')
+        raise coded_error(409, 'COMPONENT_PAGE_VERSION_CONFLICT', '页面已被其他编辑更新，请重新加载')
     await db.refresh(page)
     db.add(ComponentPageVersion(tenant_id=page.tenant_id, page_id=page.id, version=page.published_version,
                                definition=validated.model_dump(), published_by=current_user_id(user)))

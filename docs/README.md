@@ -1,8 +1,8 @@
 # ManuFoundry 文档索引
 
-更新日期：2026-11-18
+更新日期：2026-11-19
 
-当前发布版本为 [0.3.24](releases/release-0.3.24.md)，发布于 2026-11-18。
+当前发布版本为 [0.3.25](releases/release-0.3.25.md)，发布于 2026-11-19。
 版本编号与发布流程见[版本策略](operations/version-policy.md)。
 
 ## 1. 目录结构
@@ -62,6 +62,7 @@
 | [部署](operations/deployment.md) | Compose 文件、端口、生产服务器更新流程、迁移、验证、回滚 |
 | [私有化部署](operations/private-deployment.md) | 预构建镜像的在线与离线安装、诊断、备份与回滚，以及全新安装需要手动补充的配置 |
 | [测试说明](operations/testing.md) | 后端与前端测试命令、PostgreSQL 专项测试、CI、覆盖范围与缺口 |
+| [错误码与排查手册](operations/error-diagnostics.md) | 错误码目录、离线查询和按请求编号定位日志 |
 | [已知问题](operations/known-issues.md) | 核对文档时发现、尚未修复的安全、部署与功能问题，以及未使用的代码 |
 | [项目版本与发布规则](operations/version-policy.md) | 版本号规则、草稿与发布状态、`scripts/bump_release.py` 的用法 |
 | [演示知识资产](operations/demo-knowledge-assets.md) | 生成与导入演示知识文件的脚本，以及它们会覆盖或删除哪些数据 |
@@ -86,6 +87,7 @@
 
 | 版本 | 日期 | 标题 |
 | --- | --- | --- |
+| [0.3.25](releases/release-0.3.25.md) | 2026-11-19 | 应用入口、错误诊断与 AI 表单和审批修复 |
 | [0.3.24](releases/release-0.3.24.md) | 2026-11-18 | AI 确认续接、设计入口统一与工作流修复 |
 | [0.3.23](releases/release-0.3.23.md) | 2026-11-18 | 应用菜单页面编辑与属性面板统一 |
 | [0.3.22](releases/release-0.3.22.md) | 2026-11-18 | 应用发布与表单版本、AI 业务技能及工作台更新 |

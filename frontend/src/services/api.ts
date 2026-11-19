@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { reportApiFailure, streamHttpError } from './errorDiagnostics';
 
 const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
@@ -258,7 +259,7 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
-// ── Response interceptor: auto-logout on 401 ──────────────────────
+// ── Response interceptor: report failures and auto-logout on 401 ──
 api.interceptors.response.use(
   (resp) => resp,
   (err) => {
@@ -271,6 +272,7 @@ api.interceptors.response.use(
         window.location.href = '/login';
       }
     }
+    if (axios.isAxiosError(err)) reportApiFailure(err);
     return Promise.reject(err);
   },
 );
@@ -557,9 +559,8 @@ const readAgentEventStream = async (
   response: Response,
   onEvent: (event: AgentStreamEvent) => void,
 ) => {
-  if (!response.ok || !response.body) {
-    throw new Error(`Agent stream failed: ${response.status}`);
-  }
+  if (!response.ok) throw streamHttpError(response);
+  if (!response.body) throw new Error('AI 响应为空');
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -1299,7 +1300,9 @@ export const updatePlatformMenuNode = (
   data: Record<string, unknown>,
 ) => api.put(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`, data);
 export const deletePlatformMenuNode = (applicationId: number | string, nodeId: number | string) =>
-  api.delete(`/forms/applications/${applicationId}/menu-nodes/${nodeId}`);
+  api.delete<{ ok: boolean; data: PlatformMenuNode[]; application: { default_route: string; edit_token: string } }>(
+    `/forms/applications/${applicationId}/menu-nodes/${nodeId}`,
+  );
 
 export const listWorkflowBindings = (formId: number | string) =>
   api.get(`/forms/${formId}/workflow-bindings`);

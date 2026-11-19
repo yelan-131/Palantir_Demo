@@ -169,6 +169,7 @@ export function normalizeProfessionalFlowConfig(
         assigneeSource: node.assigneeSource || (node.assigneeType as FlowDesignerNode['assigneeSource']) || fallbackNode?.assigneeSource,
         assigneeValue: node.assigneeValue || fallbackNode?.assigneeValue,
         assigneeRules: node.assigneeRules || fallbackNode?.assigneeRules,
+        rejectionTargetId: typeof node.rejectionTargetId === 'string' ? node.rejectionTargetId : undefined,
         ccRecipients: Array.isArray(node.ccRecipients)
           ? node.ccRecipients.filter((rule) => rule && typeof rule.id === 'string' && ['user', 'role'].includes(rule.type))
             .map((rule) => ({ ...rule, value: typeof rule.value === 'string' ? rule.value : undefined }))
@@ -199,6 +200,7 @@ export function normalizeProfessionalFlowConfig(
         target: String(edge.target || edge.toId || ''),
         targetSide: edge.targetSide || 'top',
         label: String(edge.label || ''),
+        approvalOutcome: edge.approvalOutcome === 'approve' || edge.approvalOutcome === 'reject' ? edge.approvalOutcome : undefined,
         condition: edge.condition,
         conditionField: edge.conditionField,
         conditionOperator: edge.conditionOperator,

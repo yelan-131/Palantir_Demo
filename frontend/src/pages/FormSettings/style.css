@@ -576,6 +576,13 @@
   justify-content: flex-end;
 }
 
+.professional-flow-edge-rule-toggle small {
+  overflow: hidden;
+  color: #667085;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .professional-flow-node-kind {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);

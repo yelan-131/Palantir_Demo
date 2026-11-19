@@ -5,18 +5,29 @@ from unittest.mock import AsyncMock
 import pytest
 
 
-def test_low_code_scope_controls_both_application_lookup_and_confirmed_creation():
+def test_legacy_platform_categories_do_not_block_tools_or_bypass_explicit_rules():
     from app.services.ai.policies import decide_tool_permission
     from app.services.ai.settings import merge_ai_settings
+
     user = {'tenant_id': 1, 'sub': 'scope-test', 'is_admin': True}
-    settings = merge_ai_settings({'agentMode': 'confirm', 'domains': ['quality']})
-    tools = ['platform.application_settings.query', 'forms.create_form_definition']
-    for tool in tools:
-        assert not decide_tool_permission(user, settings, tool).allowed
-    opened = merge_ai_settings({'domains': ['quality', 'low-code']}, existing=settings)
-    assert decide_tool_permission(user, opened, tools[0]).allowed
-    creation = decide_tool_permission(user, opened, tools[1])
+    settings = merge_ai_settings({'agentMode': 'confirm', 'domains': []})
+    assert 'domains' not in settings
+    lookup = 'platform.application_settings.query'
+    create = 'forms.create_form_definition'
+
+    # The runtime may receive an older settings snapshot during an upgrade.
+    settings['domains'] = ['quality']
+    assert decide_tool_permission(user, settings, lookup).allowed
+    creation = decide_tool_permission(user, settings, create)
     assert creation.allowed and creation.requires_confirmation
+
+    restricted = merge_ai_settings({'safetyPolicy': {
+        'permissionRules': [{'tool': create, 'domain': 'low-code', 'action': 'deny'}],
+    }}, existing=settings)
+    assert decide_tool_permission(user, restricted, lookup).allowed
+    assert not decide_tool_permission(user, restricted, create).allowed
+
+
 from fastapi import HTTPException, FastAPI
 from fastapi.testclient import TestClient
 

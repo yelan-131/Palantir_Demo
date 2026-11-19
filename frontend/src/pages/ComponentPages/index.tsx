@@ -9,6 +9,7 @@ import RecordListWidget from './RecordListWidget';
 import ResizeHandle from './ResizeHandle';
 import {dashboardStyleDefaults} from '../AppPrograms/analyticsWidgetAppearance';
 import api, {getPlatformForm, listPlatformForms, type PlatformForm} from '@/services/api';
+import {diagnosticReference} from '@/services/errorDiagnostics';
 import {useAuthStore} from '@/stores/authStore';
 import {useShellPageTitle} from '@/components/ShellPageTitle';
 import {useAiWorkbench} from '@/components/AiChatWidget/context';
@@ -28,11 +29,14 @@ import {resolvePresentation} from './presentation';
 
 const FormSettings = lazy(() => import('../FormSettings'));
 const errorText = (error: unknown) => {
-  const detail = (error as {response?: {data?: {detail?: unknown}}})?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  if(Array.isArray(detail))return detail.map(item=>`${(item.loc||[]).filter((part:unknown)=>part!=='body').join(' / ')}：${item.msg||'配置无效'}`).join('；');
-  if (detail && typeof detail === 'object' && 'errors' in detail) return String((detail as {errors: unknown[]}).errors.join('；'));
-  return '操作失败，请重试';
+  const response = (error as {response?: {data?: {detail?: unknown}; headers?: Record<string, unknown>}})?.response;
+  const detail = response?.data?.detail;
+  let text = '操作失败，请重试';
+  if (typeof detail === 'string') text = detail;
+  else if(Array.isArray(detail))text = detail.map(item=>`${(item.loc||[]).filter((part:unknown)=>part!=='body').join(' / ')}：${item.msg||'配置无效'}`).join('；');
+  else if (detail && typeof detail === 'object' && 'errors' in detail) text = (detail as {errors: unknown[]}).errors.join('；');
+  const diagnostic = diagnosticReference(response?.headers);
+  return diagnostic ? `${text}（${diagnostic}）` : text;
 };
 const unwrap = <T,>(response: {data: unknown}): T => {
   const value = response.data as {data?: T};
@@ -90,7 +94,10 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
   const [drilldown, setDrilldown] = useState<{formId:number;field:string;value:string;title:string;search:string;filters:FilterContribution['filters']}>();
   const [widgetFilters, setWidgetFilters] = useState<Record<string, FilterContribution>>({});
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [data, setData] = useState<RuntimeAnalyticsData & {widgetErrors?: Record<string,string[]>}>();
+  const [data, setData] = useState<RuntimeAnalyticsData & {
+    widgetErrors?: Record<string, string[]>;
+    diagnostic?: string;
+  }>();
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -255,7 +262,8 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
       if (!editing && !draftPreview && response.data.publishedVersion !== publishedVersion) {
         setDataError('页面已发布新版本，请重新加载页面'); return;
       }
-      setData(response.data.analyticsData || undefined);
+      const analytics = response.data.analyticsData;
+      setData(analytics ? {...analytics, diagnostic: diagnosticReference(response.headers)} : undefined);
     }).catch(failure => { if (current) setDataError(errorText(failure)); })
       .finally(() => { if (current) setLoadingData(false); });
     return () => { current = false; };
@@ -459,7 +467,8 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     if (item.type === 'record-list') return source?.status==='published' ? <RecordListWidget key={`${item.id}:${source.id}:${item.showFilters !== false}`} widget={item} sourceId={source.id} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
     if (loadingData) return <div className="component-widget-preview"><Spin /></div>;
     const widgetErrors = data?.widgetErrors?.[item.id] ?? data?.errors;
-    if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用" description={dataError || widgetErrors?.join('；')} />;
+    if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用"
+      description={dataError || <>{widgetErrors?.join('；')}{data?.diagnostic && <div>{data.diagnostic}</div>}</>} />;
     const result = data?.widgets?.[item.id];
     if (!result) return <Alert type="info" message="暂无统计结果" />;
     return <StatisticalWidget widget={item} result={result} style={{...active?.style,tableDensity:resolvePresentation(active || {}, item).content.density}} labels={labels} onInteract={value=>{

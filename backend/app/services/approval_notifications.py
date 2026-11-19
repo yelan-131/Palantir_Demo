@@ -24,6 +24,8 @@ async def notify_pending(db, tenant_id, approver_ids, title, instance_id):
     state = _state(inst)
     stage = str(state.get('current_node') or state.get('current_step') or 'start')
     link = f'/workflow?tab=pending&instance_id={instance_id}&node_id={quote(stage, safe="")}'
+    if state.get('current_approval_after_id'):
+        link += f'&step={state["current_step"]}'
     ids = set(approver_ids)
     if not ids:
         return
@@ -82,6 +84,8 @@ async def notification_context(db, notifications, user):
             state = _state(instance)
             contexts[instance.id]['notification_stage'] = str(
                 state.get('current_node') or state.get('current_step') or 'start')
+            if state.get('current_approval_after_id'):
+                contexts[instance.id]['notification_step'] = str(state['current_step'])
     return contexts
 
 
@@ -95,8 +99,10 @@ def notification_navigation(notification, contexts):
         return output
     actionable = bool(item.get('can_approve'))
     # An older stage's reminder is history even when this user is assigned again.
-    notified_stage = parse_qs(urlparse(notification.link or '').query).get('node_id', [None])[0]
-    if notified_stage is not None and notified_stage != item.get('notification_stage'):
+    params = parse_qs(urlparse(notification.link or '').query)
+    notified_stage = params.get('node_id', [None])[0]
+    notified_step = params.get('step', [None])[0]
+    if notified_stage is not None and (notified_stage != item.get('notification_stage') or notified_step != item.get('notification_step')):
         actionable = False
     views = item.get('views', [])
     tab = 'pending' if actionable else 'initiated' if 'initiated' in views else 'processed' if 'processed' in views else None

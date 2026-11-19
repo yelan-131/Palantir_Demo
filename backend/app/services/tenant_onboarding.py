@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.core.logging import get_logger
+from app.core.production_errors import coded_error
 
 logger = get_logger(__name__)
 
@@ -130,7 +131,7 @@ async def assert_tenant_quota(db, tenant_id: int, quota_key: str, *, extra_count
         return
     count = await db.scalar(select(func.count(model.id)).where(model.tenant_id == tenant_id))
     if (count or 0) + max(0, int(extra_count)) >= limit:
-        raise HTTPException(403, f"Tenant quota exceeded: {quota_key}")
+        raise coded_error(403, "TENANT_RESOURCE_QUOTA_EXCEEDED", f"Tenant quota exceeded: {quota_key}")
 
 
 async def create_invite(db, *, tenant_id: int, email: str, role: str, invited_by: int | None = None) -> dict[str, Any]:

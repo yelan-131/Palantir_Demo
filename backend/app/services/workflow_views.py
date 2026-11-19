@@ -628,6 +628,7 @@ async def _workflow_business_dataset(db, user: dict, *, source_form_id=None, sou
                 "initiator_id": inst.initiator_id,
                 "initiator_name": (initiator.display_name or initiator.username) if initiator else None,
                 "current_node_id": state.get('current_node'),
+                "current_step": current_step,
                 "approvals": [
                     {"id": approval.id, "node_id": approval.node_id, "approver_id": approval.approver_id,
                      "approver_name": (

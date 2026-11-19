@@ -8,8 +8,13 @@ const ts = require('typescript');
 function loadApi(fetch) {
   const client = { interceptors: { request: { use() {} }, response: { use() {} } } };
   const source = fs.readFileSync(path.join(__dirname, '../src/services/api.ts'), 'utf8').replaceAll('import.meta.env', '({})');
-  const context = { exports: {}, require: () => ({ __esModule: true, default: { create: () => client } }), localStorage: { getItem: () => 'unit-test-token' }, fetch, TextDecoder, Uint8Array, console };
-  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, context);
+  const compilerOptions = { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true };
+  const diagnostics = { exports: {}, require: () => ({}) };
+  const diagnosticsSource = fs.readFileSync(path.join(__dirname, '../src/services/errorDiagnostics.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(diagnosticsSource, { compilerOptions }).outputText, diagnostics);
+  const modules = { './errorDiagnostics': diagnostics.exports, axios: { __esModule: true, default: { create: () => client } } };
+  const context = { exports: {}, require: (name) => modules[name], localStorage: { getItem: () => 'unit-test-token' }, fetch, TextDecoder, Uint8Array, console };
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions }).outputText, context);
   return context.exports;
 }
 
@@ -62,6 +67,12 @@ test('HTTP failures propagate without reporting a successful answer', async () =
   const api = loadApi(async () => ({ ok: false, status: 401, body: null }));
   await assert.rejects(api.streamAgentChat({ message: 'test' }, event => events.push(event)), /401/);
   assert.equal(events.length, 0);
+});
+
+test('stream HTTP failures include the backend error code and request reference', async () => {
+  const headers = new Headers({ 'X-Error-Code': 'DATABASE_UNAVAILABLE', 'X-Request-ID': 'request-42' });
+  const api = loadApi(async () => ({ ok: false, status: 503, headers }));
+  await assert.rejects(api.streamAgentChat({ message: 'test' }, () => {}), /DATABASE_UNAVAILABLE.*request-42/);
 });
 
 test('a chat connection that ends during a tool call rejects without a result', async () => {

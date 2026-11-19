@@ -86,11 +86,14 @@ function placeControl<T extends LayoutPlacement>(controls: T[], control: T, plac
   return placeLayoutControl(controls, control.id, parent?.id, slot, placement.before_id);
 }
 
+export class AiLayoutTargetError extends Error {}
+
 /** Build and validate the whole batch before the designer commits a single undo entry. */
 export function applyAiLayoutOperations<T extends LayoutPlacement>(
   current: T[],
   operations: AiLayoutOperation[],
   createControl: (type: AiLayoutControlType, id: string) => T,
+  createFieldControl?: (fieldName: string) => T | undefined,
 ): T[] {
   let next = current;
   for (const operation of operations) {
@@ -104,7 +107,13 @@ export function applyAiLayoutOperations<T extends LayoutPlacement>(
     const matches = next.filter(item => operation.control_id
       ? item.id === operation.control_id
       : operation.op === 'move' && item.fieldKey === operation.field_name);
-    if (matches.length !== 1) throw new Error('控件不存在或匹配了多个控件，请先读取当前画布');
+    if (!matches.length && operation.op === 'move' && operation.field_name) {
+      const field = createFieldControl?.(operation.field_name);
+      if (!field) throw new AiLayoutTargetError('字段不在当前画布或字段库中，请核对字段编码。');
+      next = placeControl([...next, field], field, operation);
+      continue;
+    }
+    if (matches.length !== 1) throw new AiLayoutTargetError('控件不存在或匹配了多个控件，请先读取当前画布。');
     const [control] = matches;
     if (operation.op === 'move') {
       next = placeControl(next, control, operation);

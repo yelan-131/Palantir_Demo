@@ -3,7 +3,7 @@ import copy
 import pytest
 from fastapi import HTTPException
 from app.services.workflow_views import _workflow_config_steps, _instance_steps
-from app.services.workflow_routing import route_node_ids, validate_graph
+from app.services.workflow_routing import rejection_route, route_node_ids, validate_graph
 from tests.test_workflow import client, _definition_payload, _uid, _seed_users, _headers, _ok
 
 
@@ -117,6 +117,131 @@ def test_parallel_graph_cannot_be_published_as_a_misleading_sequential_flow(clie
         json={'name': '不支持的并行网关', 'status': 'published', 'config': config})
     assert response.status_code == 422
     assert '并行网关' in response.json()['detail']
+
+
+@pytest.mark.parametrize('action, target, status', [
+    ('approve', 'passed', 'approved'),
+    ('reject', 'rejection-end', 'rejected'),
+    ('reject', 'review', 'pending'),
+])
+def test_approval_actions_follow_the_configured_outcome_edge(client, action, target, status):
+    admin, initiator, approver, reviewer = [_uid() for _ in range(4)]
+    _seed_users([admin, initiator, approver, reviewer], admin_uid=admin)
+    config = {
+        'nodes': [
+            {'id': 'start', 'type': 'startEvent'},
+            {'id': 'approval', 'type': 'userTask', 'assigneeRules': [{'type': 'user', 'value': str(approver)}]},
+            {'id': 'review', 'type': 'userTask', 'assigneeRules': [{'type': 'user', 'value': str(reviewer)}]},
+            *[{'id': end, 'type': 'endEvent'} for end in ('passed', 'rejection-end')],
+        ],
+        'edges': [
+            {'source': 'start', 'target': 'approval'},
+            {'source': 'approval', 'target': 'passed', 'approvalOutcome': 'approve', 'label': '自定义连线名称'},
+            {'source': 'approval', 'target': target if action == 'reject' else 'review', 'approvalOutcome': 'reject', 'priority': 1},
+            {'source': 'review', 'target': 'passed'},
+        ],
+    }
+    definition = _ok(client.post('/api/v1/workflow/definitions', headers=_headers(admin, is_admin=True),
+        json={'name': '按审批结果分流', 'status': 'published', 'config': config}), 'publish')
+    started = _ok(client.post(f'/api/v1/workflow/definitions/{definition["id"]}/start', headers=_headers(initiator),
+        json={'title': '审批结果连线'}), 'start')
+    resource = f'/api/v1/workflow/instances/{started["instance_id"]}'
+    _ok(client.post(f'{resource}/{action}', headers=_headers(approver), json={'comment': '测试审批'}), action)
+    detail = _ok(client.get(resource, headers=_headers(initiator)), 'detail')
+    assert detail['status'] == status
+    expected = ['start', 'approval', target] + (['passed'] if target == 'review' else [])
+    assert detail['workflow_state']['execution_node_ids'] == expected
+    if target == 'review':
+        assert detail['workflow_state']['current_assignee_ids'] == [reviewer]
+        result = _ok(client.post(f'{resource}/approve', headers=_headers(reviewer), json={}), 'review')
+        assert result['status'] == 'approved'
+
+
+def test_duplicate_outcome_is_rejected_at_publish_with_a_diagnostic_code(client):
+    admin = _uid()
+    _seed_users([admin], admin_uid=admin)
+    config = graph()
+    config['edges'].append({'source': 'final', 'target': 'end', 'approvalOutcome': 'approve'})
+    response = client.post('/api/v1/workflow/definitions', headers=_headers(admin, is_admin=True),
+        json={'name': '重复通过连线', 'status': 'published', 'config': config})
+    assert response.status_code == 422
+    assert '一条通过连线' in response.json()['detail']
+    assert response.headers['x-error-code'] == 'WORKFLOW_APPROVAL_ROUTE_INVALID'
+
+
+def test_custom_rejection_requires_a_direct_neighbor_and_can_target_start_or_next():
+    config = graph()
+    path = route_node_ids(config, {'amount': 1})
+    pre_review = config['nodes'][2]
+    pre_review['rejectionTargetId'] = 'start'
+    with pytest.raises(HTTPException, match='直接相连'):
+        validate_graph(config)
+    pre_review['rejectionTargetId'] = 'final'
+    assert rejection_route(config, {'amount': 1}, path[:3]) == path
+    config['nodes'][4]['rejectionTargetId'] = 'end'
+    assert rejection_route(config, {'amount': 1}, path[:-1]) == path
+    config['edges'][0]['target'] = 'low'
+    pre_review['rejectionTargetId'] = 'start'
+    assert rejection_route(config, {'amount': 1}, ['start', 'low']) == ['start', 'low', 'start']
+
+
+@pytest.mark.parametrize('custom_target', [False, True])
+def test_rejection_reopens_prior_approval_with_fresh_votes_and_notification(client, custom_target):
+    admin, initiator, first, second, final = [_uid() for _ in range(5)]
+    _seed_users([admin, initiator, first, second, final], admin_uid=admin)
+    config = {
+        'nodes': [
+            {'id': 'start', 'type': 'startEvent'},
+            {'id': 'review', 'type': 'userTask', 'approvalMode': 'countersign',
+             'assigneeRules': [{'type': 'user', 'value': [str(first), str(second)]}]},
+            {'id': 'final', 'type': 'userTask', 'rejectionTargetId': 'review',
+             'assigneeRules': [{'type': 'user', 'value': str(final)}]},
+            {'id': 'end', 'type': 'endEvent'},
+        ],
+        'edges': [
+            {'source': 'start', 'target': 'review'}, {'source': 'review', 'target': 'final'},
+            {'source': 'final', 'target': 'end'},
+        ],
+    }
+    if not custom_target:
+        config['nodes'][2].pop('rejectionTargetId')
+    definition = _ok(client.post('/api/v1/workflow/definitions', headers=_headers(admin, is_admin=True),
+        json={'name': '退回上一节点', 'status': 'published', 'config': config}), 'publish')
+    started = _ok(client.post(f'/api/v1/workflow/definitions/{definition["id"]}/start', headers=_headers(initiator),
+        json={'title': '退回重新会签'}), 'start')
+    resource = f'/api/v1/workflow/instances/{started["instance_id"]}'
+
+    def act(uid, action, node, step):
+        return client.post(f'{resource}/act', headers=_headers(uid), json={
+            'action': action, 'expected_node_id': node, 'expected_step': step, 'comment': '测试退回',
+        })
+
+    _ok(act(first, 'approve', 'review', 1), 'first initial vote')
+    _ok(act(second, 'approve', 'review', 1), 'second initial vote')
+    result = _ok(act(final, 'reject', 'final', 2), 'return to review')
+    assert (result['status'], result['current_step']) == ('pending', 3)
+    feed = _ok(client.get('/api/v1/workflow/notifications', headers=_headers(first)), 'review reminders')
+    links = [row['link'] for row in feed['data'] if row['resource_id'] == started['instance_id'] and row['type'] == 'approval']
+    assert len(links) == 2
+    assert any(link.endswith('node_id=review&step=3') for link in links)
+    assert act(first, 'approve', 'review', 1).status_code == 409
+    assert _ok(act(first, 'approve', 'review', 3), 'new vote')['current_step'] == 3
+    assert _ok(act(second, 'approve', 'review', 3), 'new second vote')['current_step'] == 4
+    assert _ok(act(final, 'approve', 'final', 4), 'final approve')['status'] == 'approved'
+    detail = _ok(client.get(resource, headers=_headers(initiator)), 'approval history')
+    assert [row['action'] for row in detail['approvals']] == ['approve', 'approve', 'reject', 'approve', 'approve', 'approve']
+
+
+@pytest.mark.parametrize('amount, branch', [(1, 'low'), (10001, 'high')])
+def test_default_rejection_uses_the_actual_incoming_route_after_a_return(amount, branch):
+    config = graph()
+    data = {'amount': amount}
+    path = route_node_ids(config, data)
+    returned = rejection_route(config, data, path[:-1])
+    assert returned == ['start', 'gate', branch, 'final', branch, 'final', 'end']
+    # The gateway is passed on return to the trigger, and the old reviewer
+    # that sent the record back is no longer the predecessor of this round.
+    assert rejection_route(config, data, returned[:5]) == [*returned[:5], 'start']
 
 
 @pytest.mark.parametrize('endpoint', ['approve', 'act'])
