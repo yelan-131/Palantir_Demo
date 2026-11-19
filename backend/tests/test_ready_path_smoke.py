@@ -45,12 +45,22 @@ def test_ready_path_api_smoke_and_audit_contract():
                     "code": f"ready_path_{suffix}",
                     "description": "Production ready path smoke application",
                     "default_route": "/",
-                    "status": "published",
+                    "status": "draft",
                 },
             ),
             context="create application",
         )["data"]
         app_id = app_payload["id"]
+        assert app_payload["status"] == "draft"
+        published = _assert_ok(
+            client.put(
+                f"/api/v1/admin/applications/{app_id}",
+                headers=headers,
+                json={"status": "published"},
+            ),
+            context="publish application",
+        )["data"]
+        assert published["status"] == "published"
 
         role = _assert_ok(
             client.post(

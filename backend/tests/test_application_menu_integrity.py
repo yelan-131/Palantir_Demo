@@ -25,7 +25,7 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
         roots = ['Tenant', 'User', 'Role', 'UserRole', 'Form', 'FormField', 'FormLayout',
                  'FormAction', 'FormPermission', 'FormVersion', 'FormCodeSequence', 'DynamicRecord',
                  'Application', 'ApplicationForm', 'ApplicationRole', 'ApplicationMenuNode', 'ApplicationMenu', 'MenuItem',
-                 'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'RolePermission', 'AuditLog']
+                 'WorkflowBinding', 'WorkflowDef', 'WorkflowDefVersion', 'RolePermission', 'AuditLog', 'SystemSetting']
         selected = {getattr(relational, name).__table__ for name in roots}
         pending = list(selected)
         while pending:

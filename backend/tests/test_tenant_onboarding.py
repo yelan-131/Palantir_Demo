@@ -155,7 +155,7 @@ def test_tenant_domain_status_and_quota_guards():
             client.post(
                 "/api/v1/admin/applications",
                 headers=_headers(owner["token"]),
-                json={"name": f"App {suffix}", "code": f"app_{suffix}", "status": "published"},
+                json={"name": f"App {suffix}", "code": f"app_{suffix}", "status": "draft"},
             ),
             "create first app",
         )
@@ -163,7 +163,7 @@ def test_tenant_domain_status_and_quota_guards():
         second_app = client.post(
             "/api/v1/admin/applications",
             headers=_headers(owner["token"]),
-            json={"name": f"App 2 {suffix}", "code": f"app2_{suffix}", "status": "published"},
+            json={"name": f"App 2 {suffix}", "code": f"app2_{suffix}", "status": "draft"},
         )
         assert second_app.status_code == 403
 

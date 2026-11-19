@@ -53,3 +53,8 @@
 [错误码目录](../../backend/app/core/error_catalog.json) 是运行时日志与离线命令共用的数据源。每个键对应一个稳定的错误码，值由简短标题和排查步骤组成。先在目录注册新码，再通过 `app.core.production_errors.coded_error()` 发出有明确原因的 HTTP 错误，或用 `@diagnose_operation(...)` 为路由和数据库调用声明未预期程序异常的默认码。已识别的数据库错误和业务错误优先使用各自的错误码。后端启动时加载目录，修改后随代码发布或重启后端。其他 4xx 或 5xx 归入 `HTTP_4XX` 或 `HTTP_5XX`，离线命令也接受具体 HTTP 状态查询。
 
 诊断模块由应用入口注册，覆盖到达 API 的 HTTP 错误，并保留既有业务接口的 `detail` 结构。组件取数和预览的局部失败通过 `mark_partial_failure()` 接入，在日志中记为 WARNING。表单导入失败可在响应里核对出错行，流程下发可按实例和节点排查。后端响应已发送时，后续异常通过日志里的 `RESPONSE_INTERRUPTED` 定位。其他业务事件、后台任务及进程启动通过相应的事件或日志排查。自动排查匹配排查步骤并记录上下文，健康探测由操作人员按需运行。
+
+## CI 测试初始化
+
+- 创建应用返回 HTTP_422 且提示状态只能为 draft 时，核对测试是否仍传入 published。应先创建草稿，再通过应用更新接口发布。配额测试应使用有效的草稿请求，确保失败来自配额校验。
+- PostgreSQL 隔离测试提示 relation "system_settings" does not exist 时，核对测试选建表清单是否包含 SystemSetting。菜单空状态标记依赖该表。业务环境的 DATABASE_UNAVAILABLE 继续按迁移与数据库检查流程排查。
