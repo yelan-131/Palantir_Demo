@@ -5,6 +5,7 @@ import {CopyOutlined, DeleteOutlined, PlusOutlined} from '@ant-design/icons';
 import {PropertyHelp, PropertyRow} from '@/components/PropertyInspector';
 import ConfigurationTabs from './ConfigurationTabs';
 import api from '@/services/api';
+import {createUuid} from '@/utils/uuid';
 import {mergePermissionAudience, type ToolbarGroup} from './businessComponents';
 import './toolbar-groups.css';
 
@@ -102,13 +103,13 @@ export default function ToolbarGroups({groups,roles,disabled,onChange,renderGrou
   const [displayRenameId, setDisplayRenameId] = useState<string>();
   const patch = (id:string,update:Partial<ToolbarGroup>)=>onChange(groups.map(group=>group.id===id?{...group,...update}:group));
   const addGroup = () => {
-    const group = {id:crypto.randomUUID(),name:`权限组 ${groups.length+1}`,roleIds:[],actions:[],...initialValues};
+    const group = {id:createUuid(),name:`权限组 ${groups.length+1}`,roleIds:[],actions:[],...initialValues};
     onChange([...groups,group]);
     return group.id;
   };
   const copyGroup = (group:ToolbarGroup) => {
     const index = groups.indexOf(group);
-    const copy = {...structuredClone(group),id:crypto.randomUUID(),name:(group.name+' 副本').slice(0,50)};
+    const copy = {...structuredClone(group),id:createUuid(),name:(group.name+' 副本').slice(0,50)};
     onChange([...groups.slice(0,index+1),copy,...groups.slice(index+1)]);
     return copy.id;
   };
@@ -258,11 +259,11 @@ export function GroupAudience({group,roles,disabled,onChange,title='适用对象
   useEffect(load,[]);
   type Kind = 'roleIds'|'userIds'|'orgUnitIds';
   type Row = {id:string;kind?:Kind;values:number[]};
-  const blankRow=():Row=>({id:crypto.randomUUID(),values:[]});
+  const blankRow=():Row=>({id:createUuid(),values:[]});
   const signature=JSON.stringify([group.roleIds,group.userIds||[],group.orgUnitIds||[]]);
   const makeRows=():Row[] => {
     const configured=(['roleIds','userIds','orgUnitIds'] as Kind[]).filter(kind=>group[kind]?.length)
-      .map(kind=>({id:crypto.randomUUID(),kind,values:[...(group[kind]||[])]}));
+      .map(kind=>({id:createUuid(),kind,values:[...(group[kind]||[])]}));
     return configured.length ? configured : [blankRow()];
   };
   const [rows,setRows]=useState<Row[]>(makeRows);

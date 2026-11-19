@@ -31,3 +31,26 @@ test('business form import component mounts on HTTP even with its modal closed',
  const Component=load('components/FormImport/index.tsx',httpCrypto,{'antd':antd,'@/services/api':{},'@/utils/uuid':uuids}).default;
  assert.doesNotThrow(()=>renderToString(React.createElement(Component,{formId:61,open:false,onClose(){},onImported(){}})));
 });
+
+test('component audience editor mounts on HTTP for new and existing permission groups', () => {
+ const renderChildren = ({children}) => React.createElement('div', null, children);
+ const Select = ({'aria-label': label}) => React.createElement('select', {'aria-label': label});
+ const ToolbarGroups = load('pages/ComponentPages/ToolbarGroups.tsx', httpCrypto, {
+  antd: {Button: renderChildren, Select, Tooltip: renderChildren},
+  '@ant-design/icons': {PlusOutlined: () => null, DeleteOutlined: () => null},
+  '@/components/PropertyInspector': {PropertyHelp: renderChildren},
+  '@/services/api': {},
+  '@/utils/uuid': load('utils/uuid.ts', httpCrypto),
+  './ConfigurationTabs': {},
+  './PermissionTemplates': {default: () => null},
+  './businessComponents': {},
+  './toolbar-groups.css': {},
+ });
+ const group = {id: 'default-access', name: '默认权限组', roleIds: [], actions: []};
+ for (const [attributes, expectedRows] of [[{}, 1], [{roleIds: [1], userIds: [2]}, 2]]) {
+  const html = renderToString(React.createElement(ToolbarGroups.GroupAudience, {
+   group: {...group, ...attributes}, roles: [], disabled: false, onChange() {},
+  }));
+  assert.equal((html.match(/aria-label="对象类型 /g) || []).length, expectedRows);
+ }
+});

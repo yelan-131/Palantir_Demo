@@ -3,6 +3,7 @@ import {Button, Input, Select, Switch, Tooltip} from 'antd';
 import {DeleteOutlined, PlusOutlined} from '@ant-design/icons';
 import ConfigurationTabs from './ConfigurationTabs';
 import {PropertyRow} from '@/components/PropertyInspector';
+import {createUuid} from '@/utils/uuid';
 import ToolbarGroups, {GroupAudience, PermissionGroupName, PropertySubgroup} from './ToolbarGroups';
 import ColumnPicker from './ColumnPicker';
 import {DEFAULT_FILTER_LAYOUT, type FilterControlMode, type FilterScheme, type FilterSettings} from './businessComponents';
@@ -36,9 +37,9 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
     const copy = structuredClone(active ?? legacy);
     commit([...schemes, {
       ...copy,
-      id: crypto.randomUUID(),
+      id: createUuid(),
       name: `方案 ${schemes.length + 1}`,
-      groups: copy.groups.map(group=>({...group,id:crypto.randomUUID()})),
+      groups: copy.groups.map(group=>({...group,id:createUuid()})),
     }]);
   };
   const deleteActiveScheme = () => {

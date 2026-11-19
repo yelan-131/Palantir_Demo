@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {Alert, Button, Checkbox, Empty, Input, Modal, Popconfirm, Space, message} from 'antd';
 import {ImportOutlined} from '@ant-design/icons';
 import api from '@/services/api';
+import {createUuid} from '@/utils/uuid';
 import {mergePermissionAudience, type ToolbarGroup} from './businessComponents';
 type Template = {id:string;name:string;groups:ToolbarGroup[]};
 export default function PermissionTemplates({groups,disabled,onImport,scope='toolbar',allowedRoleIds,accessTarget='应用'}: {scope?:'toolbar'|'access'|'display'|'filter'|'filter-fields'|'audience';groups:ToolbarGroup[];disabled:boolean;onImport:(groups:ToolbarGroup[])=>void;allowedRoleIds?:number[];accessTarget?:'应用'|'菜单'}) {
@@ -16,7 +17,7 @@ export default function PermissionTemplates({groups,disabled,onImport,scope='too
   const overLimit=audience?Object.values(subjects).some(ids=>ids.length>100):groups.length+imported.length>20;
 
   return <><Button type="text" size="small" title={audience?'导入适用对象模板':'导入通用权限模板'} aria-label={audience?'导入适用对象模板':'导入通用权限模板'} icon={<ImportOutlined/>} disabled={disabled} onClick={event=>{event.preventDefault();event.stopPropagation();setOpen(true);setSelected([]);void refresh();}}/>
-    <Modal title={audience?'适用对象模板':'通用权限模板'} open={open} onCancel={()=>setOpen(false)} okText="导入所选模板" cancelText="取消" confirmLoading={loading} okButtonProps={{disabled:!imported.length||overLimit||!!error}} onOk={()=>{onImport(imported.map(group=>({...structuredClone(group),id:crypto.randomUUID()})));setOpen(false);}}>
+    <Modal title={audience?'适用对象模板':'通用权限模板'} open={open} onCancel={()=>setOpen(false)} okText="导入所选模板" cancelText="取消" confirmLoading={loading} okButtonProps={{disabled:!imported.length||overLimit||!!error}} onOk={()=>{onImport(imported.map(group=>({...structuredClone(group),id:createUuid()})));setOpen(false);}}>
       <p>{allowedRoleIds ? `导入会将模板中当前可用的角色合并到这个权限组。保存${accessTarget}后生效。` : audience?'仅将角色、用户和组织合并到当前权限组的适用对象，不改变筛选字段、显示列或按钮。历史权限模板也可提取适用对象使用。':'模板可在不同表单页面间复用。导入为独立副本，后续修改互不影响。'}</p>
       {allowedRoleIds && selectedGroups.length > 0 && imported.length === 0 &&
         <Alert type="info" message="所选模板中没有可导入的角色" />}
