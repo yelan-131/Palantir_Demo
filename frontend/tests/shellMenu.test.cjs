@@ -9,7 +9,7 @@ const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/uti
 }).outputText;
 const context = { exports: {} };
 vm.runInNewContext(code, context);
-const { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage } = context.exports;
+const { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage, resolveApplicationEntry } = context.exports;
 
 test('group conversion preserves destinations, permissions and nested application menus without mutating input', () => {
   const input = [
@@ -61,4 +61,31 @@ test('application navigation keeps home above only the selected application page
   assert.equal(JSON.stringify(shellMenuAncestors(switched, '/quality')), '[]');
   assert.equal(applicationNavigation(home, [])[0], home);
   assert.equal(applicationNavigation(home, undefined).length, 1);
+});
+
+test('application entry opens an accessible default or the first reachable page', () => {
+  const pages = [
+    { key: '/' },
+    { key: '/dynamic/restricted', disabled: true },
+    { key: 'master-data', children: [
+      { key: '/dynamic/raw-material' },
+      { key: '/dynamic/finished-goods' },
+    ] },
+  ];
+  assert.equal(resolveApplicationEntry(pages, '/dynamic/finished-goods'), '/dynamic/finished-goods');
+  assert.equal(resolveApplicationEntry(pages, '/'), '/dynamic/raw-material');
+  assert.equal(resolveApplicationEntry(pages, '/dynamic/restricted'), '/dynamic/raw-material');
+  assert.equal(resolveApplicationEntry(pages, '/pages/unpublished'), '/dynamic/raw-material');
+});
+
+test('an application with no reachable pages has no startup route', () => {
+  const pages = [
+    { key: '/' },
+    { key: '/?home=true' },
+    { key: '//other-host/page' },
+    { key: 'empty-group', children: [] },
+    { key: 'disabled-group', disabled: true, children: [{ key: '/pages/hidden' }] },
+  ];
+  assert.equal(resolveApplicationEntry(pages, '/'), undefined);
+  assert.equal(hasApplicationPage(pages), false);
 });

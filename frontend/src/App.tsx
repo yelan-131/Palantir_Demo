@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   ConfigProvider,
+  Empty,
   Input,
   Layout,
   Menu,
@@ -33,7 +34,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, shellIcon, useApplicationLibrary, type LibraryApp } from './components/ShellNavigation';
-import { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage } from './utils/shellMenu';
+import { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage, resolveApplicationEntry } from './utils/shellMenu';
 import { useShellPreferences } from './hooks/useShellPreferences';
 import AiChatWidget from './components/AiChatWidget';
 import { AiPageActionRouter } from './components/AiChatWidget/pageControls';
@@ -288,8 +289,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
-  // Material requests belong to the workflow center rather than application menus.
-  items = items.filter(item => !['/program/material-application', '/workflow?section=materials'].includes((item.route_path || '').split('#')[0].replace(/\/$/, '')));
+  // The global workspace and material requests have their own navigation.
+  items = items.filter(item => {
+    const route = (item.route_path || '').split('#')[0].replace(/\/$/, '');
+    return item.is_visible !== false && !['/program/material-application', '/workflow?section=materials'].includes(route)
+      && item.route_path !== '/';
+  });
   if (items.some((item) => item.children?.length)) {
     return items.map((item) => ({
       key: normalizeRuntimeRoute(item.route_path) || `dynamic-${item.id}`,
@@ -314,11 +319,12 @@ function buildDynamicMenuTree(items: DynamicMenu[]): MenuProps['items'] {
     if (!node) continue;
     if (item.parent_id && map.has(item.parent_id)) {
       map.get(item.parent_id).children.push(node);
-    } else if (normalizeRuntimeRoute(item.route_path)) {
+    } else {
       roots.push(node);
     }
   }
-  return roots.map((node) => (node.children?.length ? node : { ...node, children: undefined }));
+  return roots.filter(node => node.children.length || !String(node.key).startsWith('dynamic-'))
+    .map(node => (node.children.length ? node : { ...node, children: undefined }));
 }
 
 function menuLabelToText(label: React.ReactNode): string {
@@ -343,17 +349,6 @@ function findMenuLabelPath(items: MenuProps['items'], route: string): string[] |
   return null;
 }
 
-
-function findFirstDynamicMenuRoute(items: DynamicMenu[]): string | undefined {
-  for (const item of items) {
-    if (item.is_visible === false) continue;
-    const routePath = normalizeRuntimeRoute(item.route_path);
-    if (routePath && routePath !== '/') return routePath;
-    const childRoute = item.children?.length ? findFirstDynamicMenuRoute(item.children) : undefined;
-    if (childRoute) return childRoute;
-  }
-  return undefined;
-}
 
 function AppContent() {
   const navigate = useNavigate();
@@ -396,14 +391,20 @@ function AppContent() {
     else updatePreferences({ sidebar: value ? 'collapsed' : 'expanded' });
   };
   useEffect(() => { setTemporaryMenuExpanded(false); }, [location.pathname]);
-  const [dynamicMenus, setDynamicMenus] = useState<MenuProps['items']>([]);
-  const [menusLoadedFor, setMenusLoadedFor] = useState<number | null>(null);
-  const [firstApplicationRoute, setFirstApplicationRoute] = useState<string>();
+  const [menuResult, setMenuResult] = useState<{ app: ApplicationInfo; items?: MenuProps['items']; failed: boolean }>();
+  const [menuRetry, setMenuRetry] = useState(0);
   const [applications, setApplications] = useState<ApplicationInfo[]>([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(true);
   const [selectedApplication, setSelectedApplication] = useState<ApplicationInfo | null>(null);
   // A navigation blocked by unsaved edits must keep the previous application selected.
   const routeApplication = applications.find(app => app.id === location.state?.applicationId);
-  const currentApplication = routeApplication ?? selectedApplication;
+  const currentApplication = location.state?.applicationId ? routeApplication : selectedApplication;
+  const currentMenus = menuResult?.app === currentApplication ? menuResult : undefined;
+  const dynamicMenus = currentMenus?.items;
+  const isApplicationEntry = location.pathname === '/' && Boolean(location.state?.applicationId);
+  const applicationEntryRoute = routeApplication && currentMenus && !currentMenus.failed
+    ? resolveApplicationEntry(dynamicMenus, normalizeRuntimeRoute(routeApplication.default_route))
+    : undefined;
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
   const [acknowledgedRelease, setAcknowledgedRelease] = useState(() => {
     try { return localStorage.getItem('mf_acknowledged_release'); } catch { return null; }
@@ -422,10 +423,9 @@ function AppContent() {
     const first = library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned))[0]?.application;
     if (!first) return;
     defaultApplicationPending.current = false;
-    const route = normalizeRuntimeRoute(first.default_route) || '/';
-    navigate(route, { replace: true, state: { ...location.state, applicationId: first.id } });
+    navigate('/', { replace: true, state: { ...location.state, applicationId: first.id } });
   }, [library, location.pathname, location.state, navigate]);
-  const isApplicationWorkspace = activeArea === 'business' && (location.pathname === '/' && Boolean(routeApplication) || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
+  const isApplicationWorkspace = activeArea === 'business' && (isApplicationEntry || !['/', '/workflow', '/account-center', '/scheduler', '/plugins', '/more'].includes(location.pathname));
   const isAccountPage = location.pathname === '/account-center';
   const isKnowledgeWorkspace = ['/data-center/knowledge', '/admin/knowledge'].includes(location.pathname);
   const railKey = isKnowledgeWorkspace ? 'knowledge' : isAccountPage || activeArea === 'admin' || activeArea === 'studio' || activeArea === 'data' || activeArea === 'plugins' ? 'account'
@@ -446,7 +446,6 @@ function AppContent() {
         setApplications(apps);
         if (!apps.length) {
           setSelectedApplication(null);
-          setDynamicMenus([]);
           return;
         }
         const storedId = Number(localStorage.getItem('mf_current_app_id'));
@@ -458,8 +457,8 @@ function AppContent() {
         message.error('\u5e94\u7528\u5217\u8868\u52a0\u8f7d\u5931\u8d25');
         setApplications([]);
         setSelectedApplication(null);
-        setDynamicMenus([]);
-      });
+      })
+      .finally(() => setApplicationsLoading(false));
     loadApplications();
     window.addEventListener('applications-changed', loadApplications);
     return () => window.removeEventListener('applications-changed', loadApplications);
@@ -477,31 +476,24 @@ function AppContent() {
     listApplicationMenus(currentApplication.id)
       .then((res) => {
         if (cancelled) return;
-        const apiItems = res.data?.data || [];
-        const items = apiItems
-          .filter((m: DynamicMenu) => m.is_visible !== false);
-        setDynamicMenus(buildDynamicMenuTree(items));
-        setFirstApplicationRoute(findFirstDynamicMenuRoute(apiItems));
-        setMenusLoadedFor(currentApplication.id);
+        setMenuResult({ app: currentApplication, items: buildDynamicMenuTree(res.data?.data || []), failed: false });
       })
       .catch(() => {
         if (cancelled) return;
-        setMenusLoadedFor(null);
-        message.error('\u5e94\u7528\u83dc\u5355\u52a0\u8f7d\u5931\u8d25');
-        setDynamicMenus([]);
+        setMenuResult({ app: currentApplication, failed: true });
       });
     return () => { cancelled = true; };
-  }, [currentApplication, activeArea]);
+  }, [currentApplication, activeArea, menuRetry]);
 
   useEffect(() => {
-    if (location.pathname === '/' && routeApplication && menusLoadedFor === routeApplication.id && firstApplicationRoute) {
-      navigate(firstApplicationRoute, { replace: true, state: location.state });
+    if (isApplicationEntry && applicationEntryRoute) {
+      navigate(applicationEntryRoute, { replace: true, state: location.state });
     }
-  }, [location.pathname, location.state, routeApplication, menusLoadedFor, firstApplicationRoute, navigate]);
+  }, [isApplicationEntry, applicationEntryRoute, location.state, navigate]);
 
   // Resolve bookmarked and search-result runtime pages to their actual application.
   useEffect(() => {
-    if (routeApplication || !isApplicationWorkspace || !currentApplication || menusLoadedFor !== currentApplication.id || location.pathname === '/') return;
+    if (location.state?.applicationId || !isApplicationWorkspace || !currentApplication || !currentMenus || currentMenus.failed || location.pathname === '/') return;
     const route = normalizeRuntimeRoute(location.pathname);
     if (normalizeRuntimeRoute(currentApplication.default_route) === route) return;
     if (findMenuLabelPath(dynamicMenus, route)) return;
@@ -514,7 +506,7 @@ function AppContent() {
         const results = await Promise.all(candidates.map(async app => {
           try {
             const response = await listApplicationMenus(app.id);
-            return findMenuLabelPath(buildDynamicMenuTree((response.data?.data || []).filter((item: DynamicMenu) => item.is_visible !== false)), route) ? app : undefined;
+            return findMenuLabelPath(buildDynamicMenuTree(response.data?.data || []), route) ? app : undefined;
           } catch { return undefined; }
         }));
         owner = results.find(Boolean);
@@ -526,7 +518,7 @@ function AppContent() {
     };
     void resolve();
     return () => { cancelled = true; };
-  }, [routeApplication, isApplicationWorkspace, currentApplication, menusLoadedFor, dynamicMenus, applications, location.pathname]);
+  }, [location, isApplicationWorkspace, currentApplication, currentMenus, dynamicMenus, applications]);
 
   useEffect(() => {
     getCurrentRelease()
@@ -551,8 +543,7 @@ function AppContent() {
   const showReleaseNotice = location.pathname === '/' && !isApplicationWorkspace
     && releaseInfo && releaseInfo.show_popup !== false && releaseInfo.version !== acknowledgedRelease;
 
-  const applicationMenuItems = useMemo(() => isApplicationWorkspace && menusLoadedFor === currentApplication?.id
-    ? dynamicMenus : [], [isApplicationWorkspace, menusLoadedFor, currentApplication?.id, dynamicMenus]);
+  const applicationMenuItems = isApplicationWorkspace ? dynamicMenus : undefined;
   const showContextMenu = !isKnowledgeWorkspace && (isSettingsWorkspace || hasApplicationPage(applicationMenuItems));
   const mobileMenuWasOpen = React.useRef(false);
   useEffect(() => {
@@ -602,7 +593,7 @@ function AppContent() {
     return path?.length ? path[path.length - 1] : undefined;
   }, [allMenuItems, selectedKey]);
   const isBusinessDataDesign = /^\/studio\/business-data\/[^/]+\/design\/?$/.test(location.pathname);
-  const runtimeTitle = isAccountPage ? '账号设置' : location.pathname === '/more' ? '应用中心' : location.pathname === '/scheduler' ? '日常任务' : location.pathname === '/plugins' ? '插件与扩展' : isBusinessDataDesign ? '业务数据设计' : areaEntry?.label || currentMenuTitle || (activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
+  const runtimeTitle = isApplicationEntry ? currentApplication?.name || '应用' : isAccountPage ? '账号设置' : location.pathname === '/more' ? '应用中心' : location.pathname === '/scheduler' ? '日常任务' : location.pathname === '/plugins' ? '插件与扩展' : isBusinessDataDesign ? '业务数据设计' : areaEntry?.label || currentMenuTitle || (activeArea !== 'business' ? activeAreaInfo.label : getRuntimePageTitle(location.pathname));
   const releaseRecords = normalizeReleaseRecords(releaseInfo);
   const activeReleaseIndex = releaseRecords.length
     ? Math.min(releaseRecordIndex, releaseRecords.length - 1)
@@ -620,9 +611,8 @@ function AppContent() {
   };
 
 
-  const switchApplication = (app: ApplicationInfo, target?: { id: string; path: string }) => {
-    const route = normalizeRuntimeRoute(target?.path || app.default_route) || '/';
-    navigate(route, { state: { applicationId: app.id, ...(target && { aiNavigationId: target.id }) } });
+  const switchApplication = (app: ApplicationInfo, target?: { id: string; path?: string }) => {
+    navigate(target?.path || '/', { state: { applicationId: app.id, ...(target && { aiNavigationId: target.id }) } });
   };
 
   const openAiWorkspaceTarget = async (action: ApplicationNavigationAction, active: () => boolean) => {
@@ -630,7 +620,7 @@ function AppContent() {
       ? resolveNavigationTarget(applications, action.application, item => item.name, item => item.code)
       : isApplicationWorkspace ? currentApplication : undefined;
     if (!app) throw new Error(action.application ? `没找到可访问的应用「${action.application}」。` : '请先指定菜单页所属的应用。');
-    let path = app.default_route || '/';
+    let path = '/';
     let pageName: string | undefined;
     if (action.action === 'open_page') {
       const response = await listApplicationMenus(app.id);
@@ -655,13 +645,32 @@ function AppContent() {
     if (entry.application) switchApplication(entry.application);
     else navigate(entry.path);
   };
+  const retryApplicationMenus = () => {
+    setMenuResult(undefined);
+    setMenuRetry(value => value + 1);
+  };
+
+  const renderHome = () => {
+    if (!isApplicationEntry) {
+      return defaultApplicationPending.current && (applicationsLoading || applications.length > 0)
+        ? <PageLoader /> : <WorkspacePage />;
+    }
+    if (applicationsLoading || routeApplication && (!currentMenus || applicationEntryRoute)) return <PageLoader />;
+    if (!routeApplication) return <div className="shell-page-error"><Alert type="warning" showIcon message="此应用不可用" /></div>;
+    return <div className="shell-page-error">
+      <Typography.Title level={2}>{sidebarTitle}</Typography.Title>
+      {currentMenus?.failed
+        ? <Alert type="error" showIcon message="应用菜单加载失败" action={<Button onClick={retryApplicationMenus}>重试</Button>} />
+        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此应用暂无可访问的页面" />}
+    </div>;
+  };
 
 
   return (
     <ShellPageTitleProvider fallback={runtimeTitle}>
     <AiWorkbenchProvider>
     <AiPageActionRouter onOpenWorkspaceTarget={openAiWorkspaceTarget}
-      applicationReady={location.pathname !== '/' || Boolean(routeApplication && menusLoadedFor === routeApplication.id && !firstApplicationRoute)} />
+      applicationReady={location.pathname !== '/' || Boolean(isApplicationEntry && currentMenus && !currentMenus.failed && !applicationEntryRoute)} />
     <Layout style={CANON_CSS_VARIABLES} className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <a className="shell-skip-link" href="#workspace-main">跳转到页面内容</a>
       <ApplicationRail library={library} onOpen={openLibraryApp} onHome={openWorkspace} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
@@ -672,7 +681,7 @@ function AppContent() {
           {!collapsed && <Typography.Text strong ellipsis>{sidebarTitle}</Typography.Text>}
           <Tooltip title={collapsed ? '展开菜单栏' : '折叠菜单栏'}><Button type="text" aria-label={collapsed ? '展开菜单栏' : '折叠菜单栏'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} /></Tooltip>
         </div>
-        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={8} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') openWorkspace(); else navigate(String(key)); } }} />
+        <Menu key={menuScope + String(collapsed)} className={`app-menu${activeArea === 'business' ? ' shell-workspace-menu' : ''}`} mode="inline" inlineIndent={8} inlineCollapsed={collapsed} selectedKeys={[selectedKey]} {...(!collapsed ? { openKeys: menuOpenKeys, onOpenChange: (keys: string[]) => setMenuOpenByScope(previous => ({ ...previous, [menuScope]: isSettingsWorkspace ? keys.slice(-1) : keys })) } : { defaultOpenKeys: [] })} items={allMenuItems} onClick={({ key }) => { if (smallViewport) setTemporaryMenuExpanded(false); if (String(key).startsWith('application:')) { const app = applications.find(item => item.id === Number(String(key).split(':')[1])); if (app) switchApplication(app); } else if (String(key).startsWith('/')) { if (key === '/') openWorkspace(); else navigate(String(key), { state: isApplicationWorkspace && currentApplication ? { applicationId: currentApplication.id } : undefined }); } }} />
       </Sider>}
       </ConfigProvider>
       <Layout className={`shell-workspace-layout${showContextMenu ? '' : ' shell-without-context-menu'}`} {...(showContextMenu && smallViewport && !collapsed ? { inert: '' } : {})}>
@@ -707,7 +716,7 @@ function AppContent() {
               <Suspense fallback={<PageLoader />}>
                 <WorkspaceRoutes allowPreview={isAdmin}>
                 <Routes>
-                  <Route path="/" element={<WorkspacePage />} />
+                  <Route path="/" element={renderHome()} />
                   <Route path="/more" element={<ApplicationLibrary library={library} onOpen={openLibraryApp} />} />
                   <Route path="/scheduler" element={<SchedulerPage />} />
                   <Route path="/plugins" element={<ExtensionLibrary isAdmin={isAdmin} />} />

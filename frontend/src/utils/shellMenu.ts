@@ -1,13 +1,23 @@
 import type { MenuProps } from 'antd';
 import type { ReactNode } from 'react';
 
+function applicationPageRoutes(items: MenuProps['items']): string[] {
+  return (items || []).flatMap(item => {
+    if (!item || ('disabled' in item && item.disabled)) return [];
+    if ('children' in item && item.children?.length) return applicationPageRoutes(item.children);
+    const route = 'key' in item ? item.key : undefined;
+    return typeof route === 'string' && /^\/(?!\/)[^?#\\]+/.test(route) && !route.includes('\\') ? [route] : [];
+  });
+}
+
 /** Show navigation as soon as the application has a reachable page. */
 export function hasApplicationPage(items: MenuProps['items']): boolean {
-  return (items || []).some(item => {
-    if (!item || ('disabled' in item && item.disabled)) return false;
-    if ('children' in item && item.children?.length) return hasApplicationPage(item.children);
-    return 'key' in item && typeof item.key === 'string' && item.key.startsWith('/');
-  });
+  return applicationPageRoutes(items).length > 0;
+}
+
+export function resolveApplicationEntry(items: MenuProps['items'], configuredRoute: string): string | undefined {
+  const routes = applicationPageRoutes(items);
+  return routes.includes(configuredRoute) ? configuredRoute : routes[0];
 }
 
 /** Keep a stable home link above the currently selected application's pages. */

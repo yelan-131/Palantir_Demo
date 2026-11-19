@@ -1819,7 +1819,7 @@ function AppConfigForm({ form, app, menus, roles, publishedPageCodes, disabled, 
   onRenameStarted: () => void;
 }) {
   const codeLocked = isApplicationCodeLocked(app);
-  const entryOptions = new Map([['/', '工作台首页']]);
+  const entryOptions = new Map([['/', '自动选择首个可访问页面']]);
   for (const node of getAllMenuNodes(menus)) {
     if (node.visible !== false && node.routePath && !entryOptions.has(node.routePath)
       && (!node.pageCode || publishedPageCodes.has(node.pageCode))) {
