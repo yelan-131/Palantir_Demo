@@ -14,7 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import desc, select, update
 
-from app.api.deps import current_tenant_id, current_user_id, get_current_user, require_admin
+from app.api.deps import (
+    current_tenant_id,
+    current_user_id,
+    get_current_user,
+    require_admin,
+    require_platform_admin,
+)
 from app.core.db import db_session
 from app.core.production_errors import coded_error, database_unavailable, seed_data_required
 from app.models.relational import AIAgentRun, AIConversation, AIDraft, AIMessage, AIToolCall
@@ -30,10 +36,12 @@ from app.services.ai.agent_items import (
     from_legacy_step,
     items_from_steps,
 )
-from app.services.ai.audit import list_ai_audit_logs, record_ai_event
+from app.services.ai.audit import record_ai_event
+from app.services.ai.query_audit import audit_query_policy_denial, list_query_audits
 from app.services.ai.client import get_provider
 from app.services.ai.page_controls import PageControlResult
 from app.services.ai.configuration_review import ConfigurationReviewEdit, revise_configuration
+from app.services.ai.record_review import RecordReviewEditRequest, RecordReviewRequest, review_record_fields, revise_record_review
 from app.services.ai.confirmation_stream import ConfirmationStream
 from app.services.ai.confirmations import consume_confirmation_token
 from app.services.ai.agent_context_router import agent_context_router
@@ -770,7 +778,10 @@ async def _run_agent_for_user(body: AgentRequest, current_user: dict, event_sink
     body.provider_config = _settings_to_provider_config(AI_SYSTEM_SETTINGS, purpose=purpose)
     semantic_context: dict[str, Any] = {"intent": context_need, "objects": [], "records": [], "relations": []}
     if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph"}:
-        _raise_for_ai_decision(decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "business_query"))
+        decision = decide_ai_permission(current_user, AI_SYSTEM_SETTINGS, "business_query")
+        if not decision.allowed:
+            await audit_query_policy_denial(current_user, AI_SYSTEM_SETTINGS, decision)
+            _raise_for_ai_decision(decision)
     if context_need in {"business_query", "visible_dataset", "current_object", "semantic_graph", "draft_action"}:
         async with db_session() as session:
             semantic_context = await agent_context_router.build_semantic_context(
@@ -1544,6 +1555,26 @@ async def edit_ai_configuration_review(run_id: str, body: ConfigurationReviewEdi
     return result
 
 
+@router.post("/agent-runs/{run_id}/record-review")
+async def get_ai_record_review(run_id: str, body: RecordReviewRequest, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    await _load_effective_ai_settings()
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        return await review_record_fields(run_id, body, current_user, AI_SYSTEM_SETTINGS)
+
+
+@router.post("/agent-runs/{run_id}/record-review/revise")
+async def revise_ai_record_review(run_id: str, body: RecordReviewEditRequest, user: dict = Depends(get_current_user)):
+    current_user = await _normalize_user(user)
+    await _load_effective_ai_settings()
+    registry = await load_agent_registry(tenant_id=current_tenant_id(current_user))
+    with use_agent_registry(registry):
+        result = await revise_record_review(run_id, body, current_user, AI_SYSTEM_SETTINGS)
+    _audit_ai_event(current_user, "agent_record_revised", {"run_id": run_id, "action_indexes": [edit.action_index for edit in body.edits]})
+    return result
+
+
 @router.post("/agent-runs/{run_id}/confirm")
 async def confirm_ai_agent_run(run_id: str, body: AgentRunConfirmRequest, user: dict = Depends(get_current_user)):
     current_user = await _normalize_user(user)
@@ -1790,9 +1821,8 @@ async def _test_provider_config(provider_config: AIProviderConfig) -> dict[str, 
 
 
 @router.post("/provider/test")
-async def test_provider(body: ProviderTestRequest, user: dict = Depends(require_admin)):
+async def test_provider(body: ProviderTestRequest, user: dict = Depends(require_platform_admin)):
     """Validate provider configuration without persisting secrets."""
-    current_tenant_id(user)
     return await _test_provider_config(body.provider_config)
 
 
@@ -1828,11 +1858,10 @@ async def preview_effective_ai_settings(body: AISettingsRequest, user: dict = De
 
 
 @router.put("/settings")
-async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(require_admin)):
-    """Update backend-owned AI system settings for the demo runtime."""
+async def update_ai_settings(body: AISettingsRequest, user: dict = Depends(require_platform_admin)):
+    """Update the shared AI system settings for the platform."""
     from app.services.ai.credential_store import CredentialStoreError
 
-    current_tenant_id(user)
     try:
         await save_persisted_ai_settings(body.settings, updated_by=str(current_user_id(user) or user.get("sub") or "admin"))
     except CredentialStoreError as exc:
@@ -1894,9 +1923,8 @@ async def _test_catalog_settings(candidate: dict, target: dict, user: dict):
 
 
 @router.post("/settings/test")
-async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: dict = Depends(require_admin)):
-    """Validate the saved backend AI settings."""
-    current_tenant_id(user)
+async def test_saved_ai_settings(body: AISettingsRequest | None = None, user: dict = Depends(require_platform_admin)):
+    """Test saved or draft settings with the platform model services."""
     await _load_effective_ai_settings()
     try:
         supplied = dict(body.settings) if body else {}
@@ -1989,11 +2017,8 @@ async def update_agent_registry(body: AIAgentRegistryRequest, user: dict = Depen
 
 
 @router.get("/audit")
-async def list_ai_audit_logs(user: dict = Depends(get_current_user)):
-    current_user = await _normalize_user(user)
-    if not current_user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin privilege required")
-    return {"data": list_ai_audit_logs(100)}
+async def list_ai_audit_logs(limit: int = Query(100, ge=1, le=100), user: dict = Depends(require_admin)):
+    return {"data": await list_query_audits(current_tenant_id(user), limit)}
 
 
 @router.get("/sessions")

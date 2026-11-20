@@ -12,11 +12,14 @@ import './dataAssetWorkspace.css';
 import { DataAssetView } from './DataAssetView';
 import { OntologyView } from './OntologyView';
 import { SemanticMappingView } from './SemanticMappingView';
+import MappedFormSyncDialog from '../DataSource/MappedFormSyncDialog';
+import { useAuthStore } from '@/stores/authStore';
 
 export { KnowledgeCenter } from './KnowledgeCenter';
 
 export default function SemanticAssetCenter({ view, onViewChange, embedded = false }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void; embedded?: boolean } = {}) {
   const navigate = useNavigate();
+  const isAdmin = Boolean(useAuthStore(state => state.user?.is_admin));
   const [params] = useSearchParams();
   const requestedSource = Number(params.get('sourceId')) || undefined;
   const requestedCandidate = Number(params.get('candidateId')) || undefined;
@@ -32,6 +35,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   const [ontologyVersions, setOntologyVersions] = useState<OntologyVersion[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState<number | undefined>();
   const [selectedTableId, setSelectedTableId] = useState<string | undefined>();
+  const [syncTarget, setSyncTarget] = useState<{ id: number; name: string; entity: string }>();
   const [selectedObjectId, setSelectedObjectId] = useState<string | undefined>();
   const [selectedCandidateId, setSelectedCandidateId] = useState(requestedCandidate);
   const [assetSearch, setAssetSearch] = useState('');
@@ -72,7 +76,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     [selectedAsset],
   );
   const allTables = useMemo(
-    () => assets.flatMap((asset) => asset.tables.map((table) => ({ ...table, assetName: asset.name, assetType: asset.type, owner: asset.owner, freshness: asset.freshness, status: asset.status }))),
+    () => assets.flatMap((asset) => asset.tables.map((table) => ({ ...table, assetId: asset.id, assetName: asset.name, assetType: asset.type, owner: asset.owner, freshness: asset.freshness, status: asset.status }))),
     [assets],
   );
   const selectedTable = useMemo(() => selectedAssetTables.find((item) => item.id === selectedTableId) ?? selectedAssetTables[0], [selectedAssetTables, selectedTableId]);
@@ -140,22 +144,25 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       return inKeyword && tableMatchesBusinessDomain(table, activeDomain);
     });
   }, [activeDomain, assetSearch, selectedAsset]);
+  const mappedTables = useMemo(() => new Set(ontologyMappings
+    .filter(mapping => ['approved', 'published'].includes(mapping.status) && mapping.target_field_code)
+    .map(mapping => JSON.stringify([mapping.source_system, mapping.source_entity]))), [ontologyMappings]);
   const assetStats = useMemo(() => {
     const tableCount = allTables.length;
     const totalRows = allTables.reduce((sum, table) => sum + Number(table.rows || 0), 0);
     const avgQuality = tableCount ? Math.round(allTables.reduce((sum, table) => sum + Number(table.quality_score || 0), 0) / tableCount) : 0;
-    const mappedCount = allTables.filter((table) => objects.some((object) => object.source === table.id)).length;
+    const mappedCount = allTables.filter(table => mappedTables.has(JSON.stringify([String(table.assetId), table.name]))).length;
     return { tableCount, totalRows, avgQuality, mappedCount };
-  }, [allTables, objects]);
+  }, [allTables, mappedTables]);
   const selectedAssetStats = useMemo(() => {
     const tables = selectedAsset?.tables ?? [];
     const tableCount = tables.length;
     const fieldCount = tables.reduce((sum, table) => sum + table.fields.length, 0);
     const totalRows = tables.reduce((sum, table) => sum + Number(table.rows || 0), 0);
     const avgQuality = tableCount ? Math.round(tables.reduce((sum, table) => sum + Number(table.quality_score || 0), 0) / tableCount) : 0;
-    const mappedCount = tables.filter((table) => objects.some((object) => object.source === table.id)).length;
+    const mappedCount = tables.filter(table => mappedTables.has(JSON.stringify([String(selectedAsset?.id), table.name]))).length;
     return { tableCount, fieldCount, totalRows, avgQuality, mappedCount };
-  }, [objects, selectedAsset]);
+  }, [mappedTables, selectedAsset]);
   const load = async () => {
     setLoading(true);
     try {
@@ -799,6 +806,9 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         clearMetadataView,
         openMapping,
         scanMetadata,
+        openSync: isAdmin && selectedAsset?.persisted && selectedAsset.type === 'postgresql' && selectedTable
+          ? () => setSyncTarget({ id: selectedAsset.id, name: selectedAsset.name, entity: selectedTable.name })
+          : undefined,
       }}
     />
   );
@@ -894,6 +904,10 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
           <Button icon={<ReloadOutlined />} onClick={load}>重新读取</Button>
         </Space>
       </section>}
+      {isAdmin && syncTarget && <MappedFormSyncDialog
+        sourceId={syncTarget.id} sourceName={syncTarget.name} initialEntity={syncTarget.entity}
+        onClose={() => setSyncTarget(undefined)} onSynced={() => void load()}
+      />}
       {embedded ? (view === 'ontology' ? ontologyView : view === 'mapping' ? semanticMappingView : dataAssetView) : view === 'ontology' ? ontologyView : <Tabs
         activeKey={semanticCenterTab}
         onChange={(key) => {

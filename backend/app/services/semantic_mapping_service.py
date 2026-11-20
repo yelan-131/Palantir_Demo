@@ -112,11 +112,12 @@ async def get_semantic_mapping_workbench(
         add_node(_node(object_node_id, "object", obj.name or obj.code, {"object": object_payload(obj)}, 720, 80 + object_index * 220))
         for field_index, field in enumerate(obj.fields or []):
             field_node_id = f"object-field:{obj.code}.{field.code}"
+            label = field.name or field.code
             add_node(_node(
                 field_node_id,
                 "object_field",
-                field.label or field.code,
-                {"object_code": obj.code, "field": {"code": field.code, "label": field.label, "type": field.field_type}},
+                label,
+                {"object_code": obj.code, "field": {"code": field.code, "label": label, "type": field.field_type}},
                 980,
                 120 + field_index * 80,
             ))

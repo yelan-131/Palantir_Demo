@@ -1,6 +1,7 @@
 """Project the platform's visible skill definitions into a single DSH run."""
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -32,11 +33,12 @@ def _portable_metadata(skill) -> dict:
     return result
 
 
-def stage_native_skills(root: Path, user, settings, context, *, allow_form_designer: bool) -> None:
+def stage_native_skills(root: Path, user, settings, context, *, allow_form_designer: bool) -> dict[str, tuple[str, str]]:
     registry = skill_registry()
     catalog = available_skill_catalog(user, settings, context, native=True, registry=registry)
     # Reserve valid IDs first, so a legacy alias never replaces an imported name.
     reserved = {name for name in registry if len(name) <= 64 and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)}
+    staged = {}
     for item in catalog:
         name = item["name"]
         if name == FORM_SKILL and not allow_form_designer:
@@ -67,3 +69,35 @@ def stage_native_skills(root: Path, user, settings, context, *, allow_form_desig
         package = root / alias
         package.mkdir()
         (package / 'SKILL.md').write_text(f"---\n{frontmatter}---\n\n{body.lstrip()}", encoding="utf-8")
+        staged[alias] = (name, maybe_mask_sensitive_payload(skill.title.strip() or name, settings))
+    return staged
+
+
+def completed_native_skill(
+    notification, session_id: str, staged: dict[str, tuple[str, str]], pending: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    """Resolve a successful native skill tool call without exposing its output."""
+    payload = notification.payload
+    if notification.method != 'session.event' or payload.get('sessionId') != session_id:
+        return None
+    event = payload.get('event') or {}
+    kind, data = event.get('type'), event.get('data') or {}
+    if kind == 'tool/call' and data.get('name') == 'skill':
+        call_id, raw_arguments = data.get('callId'), data.get('arguments')
+        if not isinstance(call_id, str) or not isinstance(raw_arguments, str):
+            return None
+        try:
+            arguments = json.loads(raw_arguments)
+        except ValueError:
+            return None
+        alias = arguments.get('name') if isinstance(arguments, dict) else None
+        if isinstance(alias, str) and alias in staged:
+            pending[call_id] = staged[alias]
+    elif kind == 'tool/result':
+        message = data.get('message') or {}
+        call_id = message.get('toolCallId')
+        if isinstance(call_id, str):
+            identity = pending.pop(call_id, None)
+            if message.get('isError') is False:
+                return identity
+    return None

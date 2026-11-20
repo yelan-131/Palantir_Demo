@@ -48,7 +48,7 @@ import {
 } from 'antd';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
-import { useAuthStore } from '../../stores/authStore';
+import { isPlatformAdmin, useAuthStore } from '../../stores/authStore';
 import WorkspacePreferences from './WorkspacePreferences';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
 import {
@@ -437,6 +437,12 @@ function AIPlatformPanel() {
 }
 
 export function AIPlatformPanelV2() {
+  const user = useAuthStore(state => state.user);
+  const canManageGlobalSettings = isPlatformAdmin(user);
+  return <AISettingsPanel key={`${user?.tenant_id}:${user?.id}:${canManageGlobalSettings}`} canManageGlobalSettings={canManageGlobalSettings} />;
+}
+
+function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings: boolean }) {
   const { notify, contextHolder: aiNoticeHolder } = useAISettingsNotification();
   const [form] = Form.useForm();
   const [permissionRuleForm] = Form.useForm();
@@ -455,9 +461,20 @@ export function AIPlatformPanelV2() {
   const [testing, setTesting] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [registryLoaded, setRegistryLoaded] = useState(false);
+  const [registryLoadError, setRegistryLoadError] = useState('');
   const [aiParams, setAIParams] = useSearchParams();
-  const requestedSection = aiParams.get('tab') || 'connection';
-  const activeSettingsSection = ['connection', 'models', 'agent-registry', 'safety'].includes(requestedSection) ? requestedSection : 'connection';
+  const requestedSection = aiParams.get('tab');
+  const activeSettingsSection = canManageGlobalSettings
+    ? requestedSection === 'models' || requestedSection === 'agent-registry' || requestedSection === 'safety' ? requestedSection : 'connection'
+    : 'agent-registry';
+  useEffect(() => {
+    if (!canManageGlobalSettings && requestedSection && requestedSection !== 'agent-registry') {
+      const next = new URLSearchParams(aiParams);
+      next.set('tab', 'agent-registry');
+      setAIParams(next, { replace: true });
+    }
+  }, [aiParams, canManageGlobalSettings, requestedSection, setAIParams]);
   const setActiveSettingsSection = (section: string) => setAIParams(previous => {
     const next = new URLSearchParams(previous);
     next.set('tab', section);
@@ -468,12 +485,13 @@ export function AIPlatformPanelV2() {
   const [runtimeStatus, setRuntimeStatus] = useState<Record<string, any>>({});
   const [connectionResult, setConnectionResult] = useState<{ ok: boolean; message: string } | null>(null);
   const savedSettings = useMemo(() => {
+    if (!canManageGlobalSettings) return {};
     try {
       return readLocalAISettings();
     } catch {
       return {};
     }
-  }, []);
+  }, [canManageGlobalSettings]);
 
   const defaultSettings = useMemo(() => ({
     aiEnabled: true,
@@ -553,28 +571,20 @@ export function AIPlatformPanelV2() {
 
     const loadBackendSettings = async () => {
       try {
-        const [response, registryResponse] = await Promise.all([
-          getAISettings(),
-          getAIAgentRegistry().catch(() => null),
-        ]);
+        const response = await getAISettings();
         const backendSettings = response.data?.settings || response.data?.data?.settings || response.data?.data;
-        if (!cancelled && backendSettings && typeof backendSettings === 'object' && !Array.isArray(backendSettings)) {
-          const registryData = registryResponse?.data?.data;
-          const agentRegistry = registryData
-            ? {
-                skills: Object.values(registryData.skills || {}),
-                tools: Object.values(registryData.tools || {}),
-                handlerKeys: registryData.handlerKeys || [],
-                source: registryData.source,
-              }
-            : defaultSettings.agentRegistry;
-          const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings, agentRegistry });
+        if (cancelled) return;
+        if (backendSettings && typeof backendSettings === 'object' && !Array.isArray(backendSettings)) {
+          const mergedSettings = normalizeAISettings({ ...defaultSettings, ...savedSettings, ...backendSettings });
+          delete mergedSettings.agentRegistry;
           form.setFieldsValue(mergedSettings);
           saveLocalAISettings(mergedSettings);
           setRuntimeStatus(response.data?.runtime || {});
           setPersistedSettings(mergedSettings);
           setLoaded(true);
           setDirty(false);
+        } else {
+          setLoadError('后端返回的 AI 设置格式有误，请刷新后重试。');
         }
       } catch {
         if (!cancelled) {
@@ -583,12 +593,31 @@ export function AIPlatformPanelV2() {
       }
     };
 
-    loadBackendSettings();
+    const loadRegistry = async () => {
+      try {
+        const response = await getAIAgentRegistry();
+        const registry = response.data?.data;
+        if (cancelled) return;
+        if (!registry) throw new Error('注册表响应为空');
+        form.setFieldsValue({ agentRegistry: {
+          skills: Object.values(registry.skills || {}),
+          tools: Object.values(registry.tools || {}),
+          handlerKeys: registry.handlerKeys || [],
+          source: registry.source,
+        } });
+        setRegistryLoaded(true);
+      } catch {
+        if (!cancelled) setRegistryLoadError('技能和工具加载失败，请刷新后重试。');
+      }
+    };
+
+    if (canManageGlobalSettings) void loadBackendSettings();
+    void loadRegistry();
 
     return () => {
       cancelled = true;
     };
-  }, [defaultSettings, form, savedSettings]);
+  }, [canManageGlobalSettings, defaultSettings, form, savedSettings]);
 
   const saveLocalSettings = (values: Record<string, unknown>) => {
     saveLocalAISettings(values);
@@ -884,6 +913,7 @@ export function AIPlatformPanelV2() {
     return typeof detail === 'string' ? detail : detail?.message || error?.message || '请检查配置后重试';
   };
   const handleSaveToBackend = async () => {
+    if (!canManageGlobalSettings) return;
     setSaving(true);
     try {
       const values = await collectSettings();
@@ -901,6 +931,7 @@ export function AIPlatformPanelV2() {
     } finally { setSaving(false); }
   };
   const handleTestConnection = async (target?: TestTarget) => {
+    if (!canManageGlobalSettings) return;
     setTesting(true);
     setConnectionResult(null);
     try {
@@ -1009,7 +1040,7 @@ export function AIPlatformPanelV2() {
       key: 'agent-registry',
       label: '技能与工具注册表',
       children: (
-        <div className="ai-registry-workspace"><SettingsTabs className="ai-registry-tabs" defaultActiveKey="skills" items={[{ key: 'skills', label: `技能 (${registrySkills.length})`, children: <Card className="ai-registry-card" title="技能注册表" extra={registryActions('skills')}>
+        <div className="ai-registry-workspace">{registryLoadError && <Alert type="error" showIcon message={registryLoadError} />}<SettingsTabs className="ai-registry-tabs" defaultActiveKey="skills" items={[{ key: 'skills', label: `技能 (${registrySkills.length})`, children: <Card className="ai-registry-card" title="技能注册表" extra={registryActions('skills')}>
           <Table
             size="small"
             pagination={false}
@@ -1236,7 +1267,7 @@ export function AIPlatformPanelV2() {
     <div className={`account-admin-section ai-settings-page${activeSettingsSection === 'agent-registry' ? ' ai-settings-registry-active' : ''}`}>
       {aiNoticeHolder}
       <Form form={form} layout="vertical" initialValues={{ ...defaultSettings, ...savedSettings }} className="ai-platform-form" onValuesChange={onDraftChange}>
-        <AISettingsWorkspace effectivePreview={<EffectiveHarnessPreview onError={description => notify('error', '参数预览失败', description)} values={watchedSettings} onPreview={async () => (await previewAISettings(await collectSettings())).data} />} sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} saveActions={activeSettingsSection !== 'agent-registry' || dirty ? saveActions : null} />
+        <AISettingsWorkspace canManageGlobalSettings={canManageGlobalSettings} registryLoaded={registryLoaded} effectivePreview={<EffectiveHarnessPreview onError={description => notify('error', '参数预览失败', description)} values={watchedSettings} onPreview={async () => (await previewAISettings(await collectSettings())).data} />} sections={settingsSections} active={activeSettingsSection} onSelect={setActiveSettingsSection} loaded={loaded} saving={saving} testing={testing} loadError={loadError} sdkVersion={runtimeStatus.sdkVersion} connectionResult={connectionResult} saveActions={activeSettingsSection !== 'agent-registry' || dirty ? saveActions : null} />
       </Form>
       <Modal
         title={permissionRuleEditor.index === null ? '添加工具权限规则' : '编辑工具权限规则'}
@@ -1961,6 +1992,19 @@ function ClosedLoopPolicyTable({ policies }: { policies: ClosedLoopPolicy[] }) {
     />
   );
 }
+
+const aiQueryAuditActionLabels: Record<string, string> = {
+  ai_query_succeeded: 'AI 查询成功',
+  ai_query_denied: 'AI 查询被拦截',
+};
+
+const aiQueryAuditStageLabels: Record<string, string> = {
+  ai_policy: 'AI 角色策略',
+  form_data: '表单数据权限',
+  tool_policy: '工具权限',
+  tool_result: '工具查询结果',
+};
+
 export function AuditPanel() {
   const [logs, setLogs] = useState<AuditLogRecord[]>([]);
   const [usersById, setUsersById] = useState<Record<number, string>>({});
@@ -2074,7 +2118,7 @@ export function AuditPanel() {
         <div className="audit-toolbar">
           <Input.Search
             allowClear
-            placeholder="搜索动作、资源、变更内容"
+            placeholder="搜索动作、资源、原因或变更内容"
             value={filters.keyword}
             onChange={(event) => setFilters((prev) => ({ ...prev, keyword: event.target.value }))}
             onSearch={() => applyFilters()}
@@ -2127,6 +2171,7 @@ export function AuditPanel() {
               { label: '确认', value: 'confirm' },
               { label: '发起', value: 'start' },
               { label: '查询', value: 'query' },
+              ...Object.entries(aiQueryAuditActionLabels).map(([value, label]) => ({ label, value })),
               { label: '导出', value: 'export' },
               { label: '同步', value: 'sync' },
               { label: '上传', value: 'upload' },
@@ -2204,7 +2249,10 @@ export function AuditPanel() {
             },
             {
               title: '摘要',
-              render: (_, record) => <Text ellipsis>{auditSummaryText(record)}</Text>,
+              render: (_, record) => {
+                const text = auditSummaryText(record);
+                return <Text ellipsis={{ tooltip: text }}>{text}</Text>;
+              },
             },
           ]}
         />
@@ -2214,6 +2262,35 @@ export function AuditPanel() {
 }
 
 function AuditDetail({ record }: { record: AuditLogRecord }) {
+  const context = aiQueryAuditContext(record);
+  if (context) {
+    const stage = typeof context.stage === 'string' ? aiQueryAuditStageLabels[context.stage] : null;
+    const fields = [
+      ['tool', '查询工具'],
+      ['capability', '所需 AI 能力'],
+      ['matched_role', '命中的角色策略'],
+      ['form_code', '表单编码'],
+      ['form_id', '表单 ID'],
+      ['record_id', '记录 ID'],
+      ['reason_code', '原因代码'],
+      ['run_id', '运行 ID'],
+    ] as const;
+    const items = fields.flatMap(([key, label]) => {
+      const value = context[key];
+      return (typeof value === 'string' && value) || typeof value === 'number'
+        ? [{ key, label, children: <Text code>{value}</Text> }]
+        : [];
+    });
+    return (
+      <Space direction="vertical" size={8}>
+        {typeof context.reason === 'string' && context.reason && (
+          <Text><Text strong>原因</Text> {context.reason}</Text>
+        )}
+        {stage && <Text type="secondary">检查阶段 · {stage}</Text>}
+        {items.length > 0 && <Descriptions size="small" column={{ xs: 1, md: 2 }} items={items} />}
+      </Space>
+    );
+  }
   return (
     <div className="audit-detail">
       <div>
@@ -2243,7 +2320,18 @@ function formatAuditJson(value?: string | null) {
   return typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
 }
 
+function aiQueryAuditContext(record: AuditLogRecord): Record<string, unknown> | undefined {
+  if (record.resource_type !== 'ai_assistant' || !Object.prototype.hasOwnProperty.call(aiQueryAuditActionLabels, record.action)) {
+    return undefined;
+  }
+  const payload = parseAuditJson(record.new_values);
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) return payload;
+  return undefined;
+}
+
 function auditSummaryText(record: AuditLogRecord) {
+  const context = aiQueryAuditContext(record);
+  if (typeof context?.reason === 'string' && context.reason) return context.reason;
   const payload = parseAuditJson(record.new_values);
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     const data = payload as Record<string, unknown>;
@@ -2273,6 +2361,7 @@ function auditActionLabel(action?: string) {
     confirm: '确认',
     start: '发起',
     query: '查询',
+    ...aiQueryAuditActionLabels,
     export: '导出',
     sync: '同步',
     upload: '上传',
@@ -2286,8 +2375,8 @@ function auditActionLabel(action?: string) {
 
 function auditActionColor(action?: string) {
   if (!action) return 'default';
-  if (/failed|delete|reject|disable/i.test(action)) return 'error';
-  if (/approve|confirm|success/i.test(action)) return 'success';
+  if (/denied|failed|delete|reject|disable/i.test(action)) return 'error';
+  if (/approve|confirm|succeed|success/i.test(action)) return 'success';
   if (/create|start/i.test(action)) return 'processing';
   return 'warning';
 }

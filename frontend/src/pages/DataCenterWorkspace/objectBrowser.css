@@ -1,0 +1,68 @@
+.object-browser {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.object-browser-toolbar,
+.object-browser-filters,
+.object-browser-actions,
+.object-browser-record-title,
+.object-browser-relation-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.object-browser-toolbar {
+  justify-content: space-between;
+}
+
+.object-browser-filters .ant-select {
+  width: min(100%, 220px);
+}
+
+.object-browser-filters .ant-input-search {
+  width: min(100%, 300px);
+}
+
+.object-browser-back {
+  justify-self: start;
+}
+
+.object-browser-property-value {
+  overflow-wrap: anywhere;
+}
+
+.object-browser-relations {
+  display: grid;
+  gap: 12px;
+}
+
+.object-browser-relation {
+  padding: 12px 16px;
+  border: 1px solid var(--mf-border);
+  border-radius: 8px;
+}
+
+.object-browser-relation ul {
+  margin: 8px 0 0;
+  padding-inline-start: 20px;
+}
+
+.object-binding-fields .ant-select {
+  width: 100%;
+  min-width: 160px;
+}
+
+@media (max-width: 600px) {
+  .object-browser-filters {
+    width: 100%;
+  }
+
+  .object-browser-filters .ant-select,
+  .object-browser-filters .ant-input-search {
+    width: 100%;
+  }
+}

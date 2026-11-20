@@ -1,9 +1,53 @@
 import { useRef, useState } from 'react';
-import { Alert, Button, Space, Tag } from 'antd';
+import { Alert, Button } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import { useAiWorkbench } from './context';
 import { createUuid } from '@/utils/uuid';
 import type { NewFormDraft } from './pageControls';
+
+interface ReviewField {
+  field_name: string;
+  label: string;
+  required: boolean;
+  readonly?: boolean;
+  min?: number;
+  max?: number;
+  control_type?: string;
+  options?: Array<{ label: string }>;
+  settings?: { precision?: number; rows?: number; maxFiles?: number; maxFileSize?: number };
+}
+
+const controlLabels: Record<string, string> = {
+  text: '短文本', textarea: '多行文本', code: '自动编号', select: '选择', relation: '关联记录',
+  number: '数值', datetime: '日期与时间', upload: '附件', switch: '是 / 否',
+  'editable-table': '明细表格', 'readonly-table': '关联表格',
+};
+
+function FieldDetails({ fields }: { fields: ReviewField[] }) {
+  if (!fields.length) return null;
+
+  return <details className="ai-confirmation-details">
+    <summary>查看 {fields.length} 个字段</summary>
+    <dl className="ai-confirmation-field-list">
+      {fields.map(field => (
+        <div key={field.field_name}>
+          <dt>{field.label}</dt>
+          <dd>{[
+            controlLabels[field.control_type || ''],
+            field.required ? '必填' : '选填',
+            field.readonly && '只读',
+            field.settings?.precision !== undefined && `保留 ${field.settings.precision} 位小数`,
+            field.settings?.rows && `${field.settings.rows} 行`,
+            field.settings?.maxFiles && `最多 ${field.settings.maxFiles} 个文件`,
+            field.settings?.maxFileSize && `单个文件最多 ${field.settings.maxFileSize} MB`,
+            field.options?.length && field.options.map(option => option.label).join(' / '),
+            (field.min !== undefined || field.max !== undefined) && `范围 ${field.min ?? '不限'}～${field.max ?? '不限'}`,
+          ].filter(Boolean).join(' · ')}</dd>
+        </div>
+      ))}
+    </dl>
+  </details>;
+}
 
 /** A review of the live native editor, never a second configuration form. */
 export function NativeDesignerReview({ draftId, disabled, menuTarget, onSaved }: {
@@ -14,23 +58,14 @@ export function NativeDesignerReview({ draftId, disabled, menuTarget, onSaved }:
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  if (saved) return <article className="ai-skill-action-card ai-confirm-review">
-    <Tag color="green">表单草稿已确认创建</Tag>
-    <p>{menuTarget ? `目标菜单：${menuTarget.destination}` : '尚未挂载应用菜单。可以继续告诉 AI 要放到哪个应用。'}</p>
-  </article>;
+  if (saved) return <details className="ai-confirmation-receipt">
+    <summary><span className="ai-confirmation-receipt-title">表单草稿已创建</span></summary>
+    <div className="ai-confirmation-receipt-body">
+      {menuTarget ? `发布并挂载到「${menuTarget.destination}」需要另行确认。` : '可继续指定要挂载草稿的应用菜单。'}
+    </div>
+  </details>;
   if (designerContext?.draft_id !== draftId || !designerContext.review_ready) return null;
-  const fields = (designerContext.fields || []) as Array<{ field_name: string; label: string; required: boolean; readonly?: boolean; min?: number; max?: number;
-    control_type?: string; options?: Array<{ label: string }>; settings?: { precision?: number; rows?: number; maxFiles?: number; maxFileSize?: number } }>;
-  const kindNames: Record<string, string> = { text: '短文本', textarea: '多行说明', code: '自动编号', select: '选择', number: '数值', datetime: '日期', upload: '附件', switch: '是 / 否' };
-  const describe = (field: typeof fields[number]) => [
-    kindNames[field.control_type || ''] || '', field.required ? '必填' : '选填',
-    field.readonly ? '只读' : '',
-    field.settings?.precision !== undefined ? `保留 ${field.settings.precision} 位小数` : '',
-    field.settings?.rows ? `${field.settings.rows} 行` : '',
-    field.settings?.maxFiles ? `最多 ${field.settings.maxFiles} 个文件` : '',
-    field.options?.length ? field.options.map(option => option.label).join(' / ') : '',
-    field.min !== undefined || field.max !== undefined ? `范围 ${field.min ?? '不限'}～${field.max ?? '不限'}` : '',
-  ].filter(Boolean).join(' · ');
+  const fields = (designerContext.fields || []) as ReviewField[];
   const confirm = async () => {
     if (locked.current || disabled) return;
     const controller = getPageController(0);
@@ -51,15 +86,20 @@ export function NativeDesignerReview({ draftId, disabled, menuTarget, onSaved }:
       setSaving(false);
     }
   };
-  return <article className="ai-skill-action-card ai-confirm-review" aria-label="表单搭建最终确认">
-    <Space><strong>{String(designerContext.form_name || '新表单')}</strong><Tag color="orange">待最终确认</Tag></Space>
-    <p>请复核工作区。确认后创建并保存当前草稿。</p>
-    <p>{menuTarget ? `保存后继续准备发布挂载：${menuTarget.destination}` : '本次保存为草稿，应用菜单待指定。'}</p>
-    <div className="ai-confirm-field-list">{fields.map(field => <div className="ai-confirm-field-item" key={field.field_name}>
-      <span>{field.label}</span><small>{describe(field)}</small>
-    </div>)}</div>
+  return <article className="ai-confirmation-card" aria-label="表单搭建最终确认">
+    <header className="ai-confirmation-head">
+      <h4>创建表单草稿</h4>
+      <span className="ai-confirmation-status">待确认</span>
+    </header>
+    <p className="ai-confirmation-subject">{String(designerContext.form_name || '新表单')}</p>
+    <p className="ai-confirmation-meta">
+      {menuTarget ? `保存后准备「${menuTarget.destination}」的发布挂载确认。` : '请复核设计器中的草稿，应用菜单待指定。'}
+    </p>
+    <FieldDetails fields={fields} />
     {error && <Alert type="error" message={error} />}
-    <div className="ai-confirm-actions"><Button type="primary" icon={<CheckCircleOutlined />} disabled={disabled || !fields.length} loading={saving} onClick={() => void confirm()}>确认创建草稿</Button></div>
+    <footer className="ai-confirmation-footer">
+      <Button size="small" type="primary" icon={<CheckCircleOutlined />} disabled={disabled || !fields.length} loading={saving} onClick={() => void confirm()}>确认创建草稿</Button>
+    </footer>
   </article>;
 }
 
@@ -71,10 +111,12 @@ export function NativeLayoutReview({ reviewId, formId, operationCount, disabled 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  if (saved) return <article className="ai-skill-action-card ai-confirm-review">
-    <Tag color="green">表单草稿已保存</Tag>
-  </article>;
+  if (saved) return <details className="ai-confirmation-receipt">
+    <summary><span className="ai-confirmation-receipt-title">表单草稿已保存</span></summary>
+    <div className="ai-confirmation-receipt-body">已保存确认时表单设计器中的全部未保存修改。</div>
+  </details>;
   if (designerContext?.form_id !== formId || designerContext.layout_review_id !== reviewId) return null;
+  const fields = (designerContext.fields || []) as ReviewField[];
 
   const confirm = async () => {
     if (locked.current || disabled) return;
@@ -94,10 +136,17 @@ export function NativeLayoutReview({ reviewId, formId, operationCount, disabled 
       setSaving(false);
     }
   };
-  return <article className="ai-skill-action-card ai-confirm-review" aria-label="保存表单布局草稿">
-    <Space><strong>{String(designerContext.form_name || '表单')}</strong><Tag color="orange">待确认</Tag></Space>
-    <p>已应用 {operationCount} 项布局操作。请复核画布，确认后会保存表单设计器中的全部未保存修改。</p>
+  return <article className="ai-confirmation-card" aria-label="保存表单布局草稿">
+    <header className="ai-confirmation-head">
+      <h4>保存表单布局草稿</h4>
+      <span className="ai-confirmation-status">待确认</span>
+    </header>
+    <p className="ai-confirmation-subject">{String(designerContext.form_name || '表单')}</p>
+    <p className="ai-confirmation-meta">已应用 {operationCount} 项布局操作。确认将保存设计器中的全部未保存修改。</p>
+    <FieldDetails fields={fields} />
     {error && <Alert type="error" message={error} />}
-    <div className="ai-confirm-actions"><Button type="primary" icon={<CheckCircleOutlined />} disabled={disabled} loading={saving} onClick={() => void confirm()}>确认保存草稿</Button></div>
+    <footer className="ai-confirmation-footer">
+      <Button size="small" type="primary" icon={<CheckCircleOutlined />} disabled={disabled} loading={saving} onClick={() => void confirm()}>确认保存草稿</Button>
+    </footer>
   </article>;
 }

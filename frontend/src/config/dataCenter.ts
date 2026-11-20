@@ -25,6 +25,7 @@ export const DATA_WORKSPACES = {
     description: '定义业务对象与关系模型，探索实际数据之间的关联。',
     parameter: 'view',
     tabs: [
+      { key: 'browse', label: '对象浏览', adminOnly: false },
       { key: 'ontology', label: '模型设计', adminOnly: true },
       { key: 'graph', label: '关系探索', adminOnly: false },
     ],

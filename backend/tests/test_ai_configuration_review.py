@@ -66,11 +66,20 @@ async def test_revision_rotates_nonce_and_rejects_stale_or_foreign_requests(monk
     user = {'tenant_id': 1, 'sub': 'owner'}
     confirmation = {'confirmation_token': 'old', 'user': 'owner', 'actions': [action()],
                     'expires_at': (datetime.now() + timedelta(minutes=10)).isoformat()}
-    row = SimpleNamespace(run_id='review-test', tenant_id=1, items=[confirmation_item(confirmation_payload=confirmation)],
+    row = SimpleNamespace(id=1, run_id='review-test', tenant_id=1, items=[confirmation_item(confirmation_payload=confirmation)],
                           confirmation_payload=confirmation, actions=[], status='waiting_confirmation', evidence=[],
                           risk_level='high', answer='', mode='agent', conversation_id='review-conversation')
     db = AsyncMock()
     db.scalar.side_effect = lambda query: row if query.column_descriptions[0]['entity'].__name__ == 'AIAgentRun' else None
+
+    def persist_revision(statement):
+        values = statement.compile().params
+        row.items = values['items']
+        row.actions = values['actions']
+        row.confirmation_payload = values['confirmation_payload']
+        return SimpleNamespace(rowcount=1)
+
+    db.execute.side_effect = persist_revision
     manager = AsyncMock()
     manager.__aenter__.return_value = db
     monkeypatch.setattr(mod, 'db_session', lambda: manager)
@@ -90,6 +99,7 @@ async def test_revision_rotates_nonce_and_rejects_stale_or_foreign_requests(monk
     with pytest.raises(HTTPException) as failure:
         await mod.revise_configuration('review-test', edit(confirmation_token=current['confirmation_token']), user, {})
     assert failure.value.status_code == 409
+    db.execute.assert_awaited_once()
 
 
 @pytest.mark.asyncio

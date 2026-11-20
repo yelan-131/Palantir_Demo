@@ -72,7 +72,7 @@ export const LEGACY_ACCOUNT_SECTIONS: Record<string, string> = {
   'ai-role-policies': '/admin/identity?tab=roles',
   'data-assets': '/data-center/assets', 'palantir-config': '/data-center/assets',
   'data-ontology': '/data-center/assets', 'semantic-mapping': '/data-center/assets?view=mapping',
-  'ontology-modeling': '/data-center/objects', 'reference-data': '/data-center/reference',
+  'ontology-modeling': '/data-center/objects?view=ontology', 'reference-data': '/data-center/reference',
   knowledge: '/data-center/knowledge', 'knowledge-graph': '/data-center/knowledge',
 };
 

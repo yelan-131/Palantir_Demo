@@ -46,6 +46,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import ConnectionWizard, { type ConnectionWizardActions } from './ConnectionWizard';
+import MappedFormSyncDialog from './MappedFormSyncDialog';
 import { formatServerDateTime } from '@/utils/dateTime';
 
 const { Option } = Select;
@@ -58,7 +59,7 @@ interface DataSource {
   port: number;
   database: string;
   status: string;
-  last_sync: string | null;
+  last_record_sync?: string | null;
   created_at: string;
   description: string;
 }
@@ -95,6 +96,7 @@ export default function DataSourcePage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [syncSource, setSyncSource] = useState<DataSource>();
   const [previewDataState, setPreviewDataState] = useState<{ columns: string[]; rows: Record<string, unknown>[] }>({
     columns: [],
     rows: [],
@@ -243,18 +245,18 @@ export default function DataSourcePage() {
       },
     },
     {
-      title: '最近同步',
-      dataIndex: 'last_sync',
-      key: 'last_sync',
+      title: '最近入表',
+      dataIndex: 'last_record_sync',
+      key: 'last_record_sync',
       width: 180,
       render: (text: string | null) => formatServerDateTime(text),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 280,
+      width: 365,
       render: (_: unknown, record: DataSource) => (
-        <Space size="small">
+        <Space size="small" wrap>
           {isAdmin && record.type === 'postgresql' && (
             <Button type="link" size="small" onClick={() => void connectionWizard.current?.edit(record)}>编辑</Button>
           )}
@@ -268,6 +270,11 @@ export default function DataSourcePage() {
           >
             测试
           </Button>
+          {isAdmin && record.type === 'postgresql' && (
+            <Button type="link" size="small" icon={<SyncOutlined />} onClick={() => setSyncSource(record)}>
+              同步绑定
+            </Button>
+          )}
           <Button
             type="link"
             size="small"
@@ -320,6 +327,14 @@ export default function DataSourcePage() {
   return (
     <div className="data-source-page">
       {isAdmin && <ConnectionWizard ref={connectionWizard} onSaved={fetchDataSources} />}
+      {isAdmin && syncSource && (
+        <MappedFormSyncDialog
+          sourceId={syncSource.id}
+          sourceName={syncSource.name}
+          onClose={() => setSyncSource(undefined)}
+          onSynced={fetchDataSources}
+        />
+      )}
       {loadFailed && <Alert type="error" message="无法读取数据源" action={<Button size="small" onClick={fetchDataSources}>重试</Button>} />}
       {dataSources.length === 0 ? (
         loading ? <div className="data-center-empty"><Spin /></div> : !loadFailed && <section className="data-center-empty">
@@ -379,7 +394,7 @@ export default function DataSourcePage() {
       >
         <Table
           rowKey="id"
-          scroll={{ x: 1100 }}
+          scroll={{ x: 1180 }}
           columns={columns}
           dataSource={dataSources}
           loading={loading}

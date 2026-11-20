@@ -59,6 +59,7 @@ type DataAssetActions = {
   clearMetadataView: () => void;
   openMapping: () => void;
   scanMetadata: () => Promise<void>;
+  openSync?: () => void;
 };
 
 export function DataAssetView({ catalog, quality, candidates, actions }: { catalog: DataAssetCatalog; quality: DataAssetQuality; candidates: DataAssetCandidates; actions: DataAssetActions }) {
@@ -116,7 +117,13 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
     clearMetadataView,
     openMapping,
     scanMetadata,
+    openSync,
   } = actions;
+  const mappedCodes = new Set(ontologyMappings.filter(mapping =>
+    mapping.source_system === String(selectedAsset?.id) && mapping.source_entity === selectedTable?.name
+    && ['approved', 'published'].includes(mapping.status) && mapping.target_field_code,
+  ).map(mapping => mapping.target_object_code));
+  const mappedObjects = objects.filter(object => mappedCodes.has(object.code));
   return (
     <>
     {!assets.length ? loading ? <div className="data-center-empty"><Spin /></div> : <section className="data-center-empty">
@@ -279,7 +286,7 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
                   const mapped = ontologyMappings.some(mapping =>
                     mapping.source_system === String(selectedAsset?.id)
                     && (mapping.source_entity === record.name || mapping.source_entity === record.id)
-                    && mapping.status === 'approved'
+                    && ['approved', 'published'].includes(mapping.status) && mapping.target_field_code
                   );
                   const count = candidatesForTable(record).length;
                   const status = count ? `${count} 条待审核` : mapped ? '已映射本体' : '暂无映射';
@@ -297,7 +304,10 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
       </section>
 
       <aside className="data-asset-detail">
-        <Card className="data-asset-detail-card" title={selectedTable?.label ?? '资产详情'} extra={<Tag color={selectedTable?.quality_score >= 95 ? 'success' : 'warning'}>质量 {selectedTable?.quality_score ?? '-'}</Tag>}>
+         <Card className="data-asset-detail-card" title={selectedTable?.label ?? '资产详情'} extra={<Space wrap>
+           <Tag color={selectedTable?.quality_score >= 95 ? 'success' : 'warning'}>质量 {selectedTable?.quality_score ?? '-'}</Tag>
+           {openSync && <Button size="small" onClick={openSync}>同步绑定</Button>}
+         </Space>}>
           {selectedTable ? (
             <Tabs
               size="small"
@@ -310,7 +320,7 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
                       <div className="data-asset-summary">
                         <span>物理表</span><strong>{selectedTable.name}</strong>
                         <span>负责人</span><strong>{selectedTable.owner}</strong>
-                        <span>同步状态</span><strong>{selectedTable.status}</strong>
+                         <span>连接状态</span><strong>{getDataSourceStatusLabel(selectedTable.status)}</strong>
                       </div>
                       <List
                         dataSource={selectedTable.fields}
@@ -427,8 +437,12 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
                   children: (
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
                       <div className="data-lineage-step"><Tag>来源</Tag><span>{selectedTable.assetName}</span></div>
-                      <div className="data-lineage-step"><Tag color="blue">本体</Tag><span>{objects.some((object) => object.source === selectedTable.id) ? '已绑定对象' : '等待建模'}</span></div>
-                      <div className="data-lineage-step"><Tag color="purple">图谱</Tag><span>查看实体与关系实例</span></div>
+                       <div className="data-lineage-step"><Tag color="blue">已审核映射</Tag>
+                         {mappedObjects.length ? <Space wrap>{mappedObjects.map(object => <Button type="link" size="small" key={object.code}
+                           onClick={() => navigate(`/data-center/objects?${new URLSearchParams({ view: 'browse', objectType: String(object.db_id ?? object.code) })}`)}>
+                           {object.name}
+                         </Button>)}</Space> : <span>暂无已审核字段</span>}
+                       </div>
 
                     </Space>
                   ),

@@ -7,12 +7,36 @@ import asyncio
 import json
 import socket
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+
+
+def test_native_skill_trace_waits_for_a_successful_staged_tool_result():
+    from app.services.ai.harness_skills import completed_native_skill
+
+    staged = {'review': ('registry.review', 'Review')}
+    pending = {}
+
+    def notify(kind, data, session='root'):
+        return completed_native_skill(SimpleNamespace(method='session.event', payload={
+            'sessionId': session, 'event': {'type': kind, 'data': data},
+        }), 'root', staged, pending)
+
+    call = {'name': 'skill', 'callId': 'read', 'arguments': '{"name":"review"}'}
+    success = {'message': {'toolCallId': 'read', 'isError': False, 'content': [{'text': 'PRIVATE_SKILL_BODY'}]}}
+    failed = {'message': {'toolCallId': 'read', 'isError': True}}
+    assert notify('tool/call', call, session='child') is None
+    assert notify('tool/result', success) is None
+    assert notify('tool/call', call) is None
+    assert notify('tool/result', failed) is None
+    assert notify('tool/result', success) is None
+    assert notify('tool/call', call) is None
+    assert notify('tool/result', success) == ('registry.review', 'Review')
 
 
 @pytest.mark.asyncio
@@ -96,7 +120,8 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
     monkeypatch.setattr(mod, 'load_persisted_ai_settings', AsyncMock())
     monkeypatch.setattr(mod, 'settings_snapshot', lambda: settings)
     monkeypatch.setattr(agent_registry, 'load_agent_registry', AsyncMock(return_value=dict(zip(('skills', 'tools'), agent_registry.load_seed_registry()))))
-    bridge = mod.PlatformBridge(user=user, settings=settings, context={})
+    event_sink = AsyncMock()
+    bridge = mod.PlatformBridge(user=user, settings=settings, context={}, event_sink=event_sink)
     token = uuid.uuid4().hex
     mod.BRIDGES[token] = bridge
     app = FastAPI()
@@ -146,7 +171,7 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
             await asyncio.sleep(.02)
         settings['baseUrl'] = f'http://127.0.0.1:{port}/v1'
         session_id = uuid.uuid4().hex
-        result = await mod.run_sdk(settings, user, '查询测试表单', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp')
+        result = await mod.run_sdk(settings, user, '查询测试表单', session_id, token=token, bridge_url=f'http://127.0.0.1:{port}/api/v1/ai/harness/mcp', event_sink=event_sink)
         assert result.finish_reason == 'completed'
         assert result.final_response
         assert len(calls) == 3 + bool(read_skill)
@@ -163,6 +188,13 @@ async def test_official_harness_calls_platform_tools_and_waits_for_confirmation(
         elif read_skill is True:
             assert bridge.loaded_skills[FORM_SKILL]['version'] == bundled_skill_package(FORM_SKILL)[0]['metadata']['version']
             assert 'draft_new' in str(calls[1]['messages'])
+        skill_items = [item for item in bridge.items if item['type'] == 'skill_use']
+        expected_skills = ['external-review'] if read_skill == 'registry' else [FORM_SKILL] if read_skill is True else []
+        assert [item['skill'] for item in skill_items] == expected_skills
+        assert [call.args[1] for call in event_sink.await_args_list
+                if call.args[0] == 'item.updated' and call.args[1].get('type') == 'skill_use'] == skill_items
+        for item in skill_items:
+            assert item['status'] == 'completed' and item['title'] and item['payload'] == {}
         assert calls[0]['model'] == 'test-model'
         assert calls[0]['max_tokens'] == 512
         assert calls[0]['reasoning_effort'] == 'low'

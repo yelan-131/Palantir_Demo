@@ -182,6 +182,7 @@ async def create_record(form_id, body, db, user, *, defer_commit=False, draft=Fa
 
 async def update_record(form_id, record_id, body, db, user, *, defer_commit=False):
     from app.services.form_workflow_start import _protect_pending_form_record
+    from app.services.field_uniqueness import enforce as enforce_uniqueness, lock as lock_tenant_writes
     from app.models.relational import DynamicRecord, Form
 
     tenant_id = current_tenant_id(user)
@@ -191,6 +192,8 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
     cache = {('form', form_id): form}
     await require_form_permission(db, user, form_id, "edit", cache=cache)
     from app.services.form_application_lifecycle import locked_record, guard_edit, decorate, metadata, audit as lifecycle_audit
+    # Acquire locks in the same order as mapped synchronization.
+    await lock_tenant_writes(db, tenant_id)
     fields = await runtime_fields(db, form, cache=cache)
     locked = await read_raw(db, form, record_id, lock=True, fields=fields)
     await require_record_permission(db, user, form, "edit", locked, cache=cache)
@@ -224,7 +227,6 @@ async def update_record(form_id, record_id, body, db, user, *, defer_commit=Fals
                                  enforce=True, partial=bool(tracked and tracked['status'] in {'draft', 'rejected'}), cache=cache)
     rule_patch = {key: value for key, value in rule_result['data'].items()
                   if key in (body.data or {}) or value != (locked.get('data') or {}).get(key)}
-    from app.services.field_uniqueness import enforce as enforce_uniqueness
     await enforce_uniqueness(db,form,fields,rule_result['data'],exclude_record_id=record_id)
     body = body.copy(update={'data': rule_patch})
     if _uses_physical_form_table(form):

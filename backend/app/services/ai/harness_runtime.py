@@ -12,16 +12,20 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import time
 import threading
 import tempfile
 import uuid
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from weakref import WeakValueDictionary
 from zoneinfo import ZoneInfo
+
+from app.core.error_catalog import CATALOG
 
 from .application_menu_registry import WRITE_REQUESTS as APPLICATION_MENU_REQUESTS, execute_application_menu_tool
 from .component_page_tools import PAGE_WRITE_REQUESTS, execute_page_tool
@@ -37,9 +41,11 @@ from .tenant_context import require_tenant_id
 from .context_builder import estimate_tokens, fit_context_to_budget
 from .tool_registry import tool_registry, to_openai_function
 from .skill_loader import FORM_SKILL, SKILL_TOOL, available_skill_catalog, read_business_skill
-from .harness_skills import stage_native_skills
+from .harness_skills import completed_native_skill, stage_native_skills
+from .skills import get_skill
 from .configuration_completion import REPORT_TOOL, REPORT_SCHEMA, REPORT_DESCRIPTION
 from .page_controls import designer_permission_error
+from .query_audit import FORM_QUERY_TOOLS, audit_query_policy_denial
 from .workbench_preview import PREVIEW_TOOLS, build_workbench_preview, merge_proposed_fields
 from . import application_navigation
 from . import component_page_controls
@@ -90,6 +96,11 @@ class PlatformBridge:
     call_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     native_skills: bool = field(default_factory=lambda: os.getenv("AI_HARNESS_NATIVE_SKILLS", "true").lower() != "false")
+
+    def record_skill_use(self, name: str, title: str) -> dict[str, Any]:
+        item = build_agent_item(type='skill_use', status='completed', skill=name, title=title)
+        self.items.append(item)
+        return item
 
     def tool_definitions(self) -> dict[str, dict[str, Any]]:
         definitions = {}
@@ -189,6 +200,9 @@ class PlatformBridge:
         if isinstance(name, str) and name in tool_registry() and name not in definitions:
             decision = decide_tool_permission(self.user, self.settings, name)
             if not decision.allowed and self.context.get('surface') != 'knowledge':
+                if (alias == tool_alias(INVOKE_TOOL) and name in FORM_QUERY_TOOLS
+                        and set(arguments) == {'name', 'arguments'} and isinstance(arguments['arguments'], dict)):
+                    await audit_query_policy_denial(self.user, self.settings, decision, tool=name)
                 return {'status': 'blocked', 'message': decision.reason}
         return {'status': 'blocked', 'message': '工具不可用或尚未加载定义'}
 
@@ -212,8 +226,10 @@ class PlatformBridge:
             if result['status'] == 'completed':
                 identity = {key: result['skill'][key] for key in ('name', 'version', 'digest')}
                 self.loaded_skills[identity['name']] = identity
-                item = build_agent_item(type='context', status='completed', summary='已读取业务技能', payload=identity)
-                self.items.append(item)
+                name = identity['name']
+                skill = get_skill(name)
+                title = (skill.title.strip() if skill else '') or name
+                item = self.record_skill_use(name, maybe_mask_sensitive_payload(title, self.settings))
                 if self.event_sink:
                     await self.event_sink('item.updated', item)
             return result
@@ -225,10 +241,10 @@ class PlatformBridge:
             if not decision.allowed:
                 return {'status': 'blocked', 'message': decision.reason}
             self.calls += 1
-            item = build_agent_item(type='tool_call', tool=canvas_tool, status='running')
-            self.items.append(item)
+            call_item = build_agent_item(type='tool_call', tool=canvas_tool, status='running')
+            self.items.append(call_item)
             if self.event_sink:
-                await self.event_sink('item.updated', item)
+                await self.event_sink('item.updated', call_item)
             try:
                 command = component_page_controls.tool_arguments(canvas_tool, arguments)
             except ValueError as exc:
@@ -236,7 +252,8 @@ class PlatformBridge:
             else:
                 result = await component_page_controls.call_component_page(self, command, tool=canvas_tool)
             item = build_agent_item(type='tool_result', tool=canvas_tool,
-                                   status=result['status'], summary=result['message'])
+                                   status=result['status'], summary=result['message'],
+                                   tool_call_id=call_item['tool_call_id'])
             self.items.append(item)
             if self.event_sink:
                 await self.event_sink('item.updated', item)
@@ -253,12 +270,13 @@ class PlatformBridge:
             await load_persisted_ai_settings(strict=True)
             self.settings = settings_snapshot()
             self.calls += 1
-            item = build_agent_item(type='tool_call', tool=TOOL, status='running', summary='正在调用现有表单设计器', payload={'action': arguments.get('action')})
-            self.items.append(item)
-            await self.event_sink('item.updated', item)
+            call_item = build_agent_item(type='tool_call', tool=TOOL, status='running', summary='正在调用现有表单设计器', payload={'action': arguments.get('action')})
+            self.items.append(call_item)
+            await self.event_sink('item.updated', call_item)
             result = await call_page_control(self, arguments)
             item = build_agent_item(type='tool_result', tool=TOOL, status=result.get('status', 'failed'),
-                summary=str(result.get('message') or ''), payload=result.get('result') or {})
+                summary=str(result.get('message') or ''), payload=result.get('result') or {},
+                tool_call_id=call_item['tool_call_id'])
             self.items.append(item)
             await self.event_sink('item.updated', item)
             if result.get('status') in {'blocked', 'validation_failed'}:
@@ -290,6 +308,8 @@ class PlatformBridge:
             return {"status": "blocked", "message": "工具已移除、禁用或尚未实现"}
         decision = decide_tool_permission(self.user, self.settings, tool.name)
         if not decision.allowed:
+            if tool.name in FORM_QUERY_TOOLS:
+                await audit_query_policy_denial(self.user, self.settings, decision, tool=tool.name)
             return {"status": "blocked", "message": decision.reason}
         self.calls += 1
         arguments = {**arguments}
@@ -500,8 +520,8 @@ class HarnessRunStopped(RuntimeError):
     pass
 
 
-def native_notification_payload(notification, physical_session: str) -> dict[str, Any] | None:
-    """Project only root-session progress and counters, never raw prompts or reasoning."""
+def native_notification_payload(notification, physical_session: str, *, include_reasoning: bool = False) -> dict[str, Any] | None:
+    """Project root-session progress and optionally the provider-reported reasoning blocks."""
     payload = notification.payload
     if payload.get('sessionId') != physical_session or notification.method != 'session.event':
         return None
@@ -509,7 +529,13 @@ def native_notification_payload(notification, physical_session: str) -> dict[str
     kind, data = event.get('type'), event.get('data') or {}
     result = {'phase': kind, 'step': data.get('step'), 'sequence': event.get('seq')}
     if kind == 'assistant/message':
-        result['text'] = ''.join(str(block.get('text') or '') for block in (data.get('message') or {}).get('content', []) if block.get('type') == 'text')
+        blocks = (data.get('message') or {}).get('content', [])
+        result['text'] = ''.join(str(block.get('text') or '') for block in blocks if block.get('type') == 'text')
+        if include_reasoning:
+            reasoning = ''.join(block['text'] for block in blocks
+                                if block.get('type') == 'reasoning' and isinstance(block.get('text'), str))
+            if reasoning.strip():
+                result['reasoning'] = reasoning
         result['usage'] = {key: value for key, value in (data.get('usage') or {}).items() if key in {'inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'} and isinstance(value, (int, float))}
     elif kind in {'llm/retry', 'llm/retry-started'}:
         result.update({key: data[key] for key in ('retry', 'maxRetries', 'delayMs') if isinstance(data.get(key), (int, float))})
@@ -520,39 +546,92 @@ def native_notification_payload(notification, physical_session: str) -> dict[str
     return result
 
 
+class HarnessSkillDirectoryError(RuntimeError):
+    code = 'AI_HARNESS_SKILL_DIR_UNAVAILABLE'
+
+
+@contextmanager
+def _temporary_skill_directory(parent: str):
+    if os.name != 'nt':
+        with tempfile.TemporaryDirectory(prefix='skills-', dir=parent) as directory:
+            yield Path(directory)
+        return
+
+    # Windows mkdir(0o700) replaces the inherited ACL. Use the existing
+    # per-actor Harness home's permissions for this private request directory.
+    directory = Path(parent) / f'skills-{uuid.uuid4().hex}'
+    directory.mkdir()
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory)
+
+
 async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | list[dict], session_id: str, *, token: str = "", bridge_url: str | None = None, model: str | None = None, purpose: str = 'reasoning', event_sink=None, isolated_home: str | None = None):
     from deepseek_harness import DeepSeekHarness
     options = harness_options(settings, user, token=token, bridge_url=bridge_url, model=model, purpose=purpose)
     if isolated_home:
         options.update(dsh_home=isolated_home, cwd=isolated_home)
     bridge = BRIDGES.get(token)
-    skill_directory = None
+    skill_directories = ExitStack()
+    staged_skills = {}
     try:
         if bridge and bridge.native_skills:
-            skill_directory = tempfile.TemporaryDirectory(prefix='skills-', dir=options['dsh_home'])
-            stage_native_skills(Path(skill_directory.name), user, settings, bridge.context,
-                                allow_form_designer=not designer_permission_error(user, settings))
+            try:
+                directory = skill_directories.enter_context(_temporary_skill_directory(options['dsh_home']))
+                staged_skills = stage_native_skills(
+                    directory, user, settings, bridge.context,
+                    allow_form_designer=not designer_permission_error(user, settings),
+                )
+            except PermissionError as exc:
+                code = HarnessSkillDirectoryError.code
+                raise HarnessSkillDirectoryError(f'{CATALOG[code][0]}（{code}）') from exc
             options['patches'] += (str(SKILLS_PATCH.resolve()),)
-            options['env']['MF_DSH_SKILL_DIR'] = skill_directory.name
+            options['env']['MF_DSH_SKILL_DIR'] = str(directory)
         harness = DeepSeekHarness(**options)
     except BaseException:
-        if skill_directory:
-            skill_directory.cleanup()
+        skill_directories.close()
         raise
     physical_session = hashlib.sha256(session_id.encode()).hexdigest() + "-" + uuid.uuid4().hex
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+    queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue(maxsize=256)
+    pending_skills = {}
 
-    def deliver(progress):
+    def deliver(event, data):
         # Keep model thread unblocked; phase events can coalesce under slow clients.
         if queue.full():
             queue.get_nowait()
-        queue.put_nowait(progress)
+        queue.put_nowait((event, data))
+
+    def deliver_skill(name, title):
+        if bridge:
+            item = bridge.record_skill_use(name, title)
+            if event_sink:
+                deliver('item.updated', item)
 
     def on_notification(notification):
-        progress = native_notification_payload(notification, physical_session)
-        if progress is not None and event_sink:
-            loop.call_soon_threadsafe(deliver, progress)
+        if staged_skills:
+            skill = completed_native_skill(notification, physical_session, staged_skills, pending_skills)
+            if skill:
+                loop.call_soon_threadsafe(deliver_skill, *skill)
+        if not event_sink:
+            return
+        progress = native_notification_payload(notification, physical_session, include_reasoning=True)
+        if progress is None:
+            return
+        reasoning = progress.pop('reasoning', None)
+        if reasoning:
+            from .settings import mask_sensitive_text
+            for secret in (options.get('env', {}).get('MF_DSH_KEY'), token):
+                if secret:
+                    reasoning = reasoning.replace(secret, '[REDACTED_SECRET]')
+            text = mask_sensitive_text(reasoning)
+            if len(text) > 16000:
+                text = text[:16000] + '\n\n（超出单步展示长度，已截断）'
+            loop.call_soon_threadsafe(deliver, 'harness.reasoning', {
+                'step': progress.get('step'), 'sequence': progress.get('sequence'), 'text': text,
+            })
+        loop.call_soon_threadsafe(deliver, 'harness.progress', progress)
 
     close_lock = threading.Lock()
     closed = False
@@ -578,7 +657,8 @@ async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | 
 
     async def emit():
         while True:
-            await event_sink('harness.progress', await queue.get())
+            event, data = await queue.get()
+            await event_sink(event, data)
 
     run = asyncio.create_task(asyncio.to_thread(execute))
     emitter = asyncio.create_task(emit()) if event_sink else None
@@ -588,9 +668,10 @@ async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | 
         if run not in done:
             raise HarnessRunStopped('已达到 Harness 执行超时，运行进程已停止')
         result = await run
-        if emitter:
-            # Drain committed root-session events before returning final answer.
+        if staged_skills or emitter:
+            # Commit root-session reads and deliver progress before returning the answer.
             await asyncio.sleep(0)
+        if emitter:
             while not queue.empty() and not emitter.done():
                 await asyncio.sleep(0)
             if emitter.done():
@@ -605,8 +686,7 @@ async def run_sdk(settings: dict[str, Any], user: dict[str, Any], prompt: str | 
             if emitter:
                 emitter.cancel()
                 await asyncio.gather(emitter, return_exceptions=True)
-            if skill_directory:
-                skill_directory.cleanup()
+            skill_directories.close()
 
 
 def run_document_sdk(settings: dict, content: list[dict]):
@@ -777,6 +857,10 @@ class HarnessRuntime:
                     risk_level=max((a.risk_level for a in bridge.pending), key=lambda r: {'low': 0, 'medium': 1, 'high': 2, 'critical': 3}[r]))
             message = '本轮执行超时，请稍后重试。'
             return AgentResponse(answer=message, items=[*bridge.items, build_agent_item(type='error', status='failed', summary=message)])
+        except HarnessSkillDirectoryError as exc:
+            message = str(exc)
+            item = build_agent_item(type='error', status='failed', summary=message, payload={'code': exc.code})
+            return AgentResponse(answer=message, items=[*bridge.items, item])
         except HarnessRunStopped as exc:
             return AgentResponse(answer=str(exc), actions=bridge.pending, evidence=bridge.evidence,
                 items=[*bridge.items, build_agent_item(type="error", status="failed", summary=str(exc))],

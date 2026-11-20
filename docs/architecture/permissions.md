@@ -158,12 +158,14 @@ sid        会话 ID（对应 user_sessions.session_id）
 | --- | --- | --- |
 | `get_current_user` | 已登录 | 几乎所有接口 |
 | `require_admin` | 当前租户管理员，否则 `403` | `/api/v1/admin/*`（整个路由器）、`/admin/applications`、表单配置接口、`/system/metrics` |
-| `require_platform_admin` | 租户 1 的管理员，否则 `403` | `/api/v1/platform/*`、`/api/v1/config/*`（配置导入导出） |
+| `require_platform_admin` | 租户 1 的管理员，否则 `403` | `/api/v1/platform/*`、`/api/v1/config/*`、`PUT /api/v1/ai/settings`、AI 模型连接测试 |
 | `require_platform_admin_for_writes` | `GET`、`HEAD`、`OPTIONS` 只需登录，其他方法需要平台管理员 | `/api/v1/model-driven/*`（平台共享的旧版元模型） |
 | `require_permission(type, key, action)` | 通用角色授权，见第 6 节 | 已提供，目前没有路由使用 |
 | `require_form_permission(action)` | 路径参数 `form_id` 上的表单授权，见第 8 节 | 已提供，目前没有路由使用；表单运行接口改为在服务层调用同名函数 `services/records.require_form_permission` |
 
 `/api/v1/admin` 下的能力包括：用户、角色、组织的增删改，角色授权设置（`PUT /admin/roles/{role_id}/permissions`），账号安全与会话管理，身份安全设置，权限模拟，审计日志，基础数据，以及应用管理（`/admin/applications` 及其绑定）。
+
+管理页的角色 AI 策略作用于平台共享设置，由平台管理员维护。各租户管理员可以通过 `/api/v1/ai/agent-registry` 管理本租户的技能和工具，接口从登录身份确定租户。
 
 ## 6. 通用权限判定
 

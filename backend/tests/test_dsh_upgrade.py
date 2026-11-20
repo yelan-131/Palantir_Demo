@@ -59,6 +59,48 @@ def test_native_event_projection_omits_other_sessions_prompts_and_reasoning():
 
 
 @pytest.mark.asyncio
+async def test_sdk_streams_only_owned_provider_reasoning_with_credentials_masked(monkeypatch):
+    import deepseek_harness
+    from app.services.ai import harness_runtime as mod
+
+    class Harness:
+        def __init__(self, **_kwargs): pass
+        def start(self): pass
+        def close(self): pass
+        def start_session(self, session_id):
+            self.session_id = session_id
+            return self
+
+        def run(self, _prompt, on_notification):
+            for session_id in ('another-session', self.session_id):
+                on_notification(SimpleNamespace(method='session.event', payload={
+                    'sessionId': session_id,
+                    'event': {'type': 'assistant/message', 'seq': 9, 'data': {'step': 2, 'message': {'content': [
+                        {'type': 'thinking', 'text': 'hidden-fixture-value'},
+                        {'type': 'reasoning', 'text': 'Provider output fixture-secret-key and fixture-bridge-token'},
+                        {'type': 'text', 'text': 'answer'},
+                    ]}}},
+                }))
+            return SimpleNamespace(final_response='answer', finish_reason='completed', events=[])
+
+    monkeypatch.setattr(deepseek_harness, 'DeepSeekHarness', Harness)
+    monkeypatch.setattr(mod, 'harness_options', lambda *args, **kwargs: {
+        'initialize_timeout_seconds': 1, 'request_timeout_seconds': 1,
+        'env': {'MF_DSH_KEY': 'fixture-secret-key'},
+    })
+    sink = AsyncMock()
+    await mod.run_sdk({}, USER, 'test', 'test', token='fixture-bridge-token', event_sink=sink)
+    events = [call.args for call in sink.await_args_list]
+    assert [event for event, _ in events] == ['harness.reasoning', 'harness.progress']
+    assert events[0][1] == {
+        'step': 2, 'sequence': 9, 'text': 'Provider output [REDACTED_SECRET] and [REDACTED_SECRET]',
+    }
+    assert events[1][1]['text'] == 'answer'
+    assert 'reasoning' not in events[1][1]
+    assert 'hidden-fixture-value' not in str(events)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['timeout', 'cancel'])
 async def test_stopping_runtime_closes_sdk_process(monkeypatch, mode):
     import deepseek_harness

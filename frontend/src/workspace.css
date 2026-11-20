@@ -528,9 +528,7 @@ body:has(.tech-white-shell) :is(.ai-session-history-search, .ai-session-history-
 body:has(.tech-white-shell) .ai-session-history-row:hover { background: var(--mf-hover); }
 body:has(.tech-white-shell) .ai-session-history-row.active { background: var(--mf-selected); border-color: var(--mf-border-strong); }
 body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-selected, .ant-segmented-thumb) { background: var(--mf-selected); color: var(--mf-text); }
-.tech-white-shell :is(.ai-skill-action-card, .ai-action-state-panel) { background: var(--mf-panel); border-color: var(--mf-border); border-radius: var(--mf-control-radius); }
-.tech-white-shell .ai-skill-action-card { box-shadow: inset 3px 0 0 var(--mf-primary); }
-.tech-white-shell .ai-skill-action-icon { color: var(--mf-primary); background: var(--mf-hover); }
+.tech-white-shell .ai-action-state-panel { background: var(--mf-panel); border-color: var(--mf-border); border-radius: var(--mf-control-radius); }
 .tech-white-shell .app-content .designer-width-option-active,
 .tech-white-shell .app-content .designer-layout-setting :is(.ant-segmented-item-selected, .ant-segmented-thumb) { background: var(--mf-selected); color: var(--mf-text); border-color: var(--mf-border-strong); box-shadow: none; }
 .tech-white-shell .app-content .designer-props label:not(.designer-prop-locked) .ant-input:not(:disabled):not([readonly]),

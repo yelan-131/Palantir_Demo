@@ -1613,6 +1613,44 @@ class DataSourceSyncStatus(TimestampMixin, Base):
     fields_scanned: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class MappedFormSyncBinding(TimestampMixin, Base):
+    __tablename__ = "mapped_form_sync_bindings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_id", "entity_name", "object_code", "form_id",
+                         name="uq_mapped_form_sync_binding_target"),
+        Index("ix_mapped_form_sync_bindings_scope", "tenant_id", "source_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id", ondelete="CASCADE"))
+    entity_name: Mapped[str] = mapped_column(String(200))
+    object_code: Mapped[str] = mapped_column(String(120))
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id", ondelete="CASCADE"))
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class MappedFormSyncRun(Base):
+    __tablename__ = "mapped_form_sync_runs"
+    __table_args__ = (
+        Index("ix_mapped_form_sync_runs_scope", "tenant_id", "binding_id", "finished_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    binding_id: Mapped[int] = mapped_column(ForeignKey("mapped_form_sync_bindings.id", ondelete="CASCADE"))
+    actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_key: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime] = mapped_column(DateTime)
+    read: Mapped[int] = mapped_column(Integer, default=0)
+    created: Mapped[int] = mapped_column(Integer, default=0)
+    updated: Mapped[int] = mapped_column(Integer, default=0)
+    unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class AIConversation(TimestampMixin, Base):
     __tablename__ = "ai_conversations"
     __table_args__ = (UniqueConstraint("tenant_id", "conversation_id", name="uq_ai_conversations_tenant_conversation_id"),)

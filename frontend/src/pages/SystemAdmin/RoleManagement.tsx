@@ -1,4 +1,5 @@
 import SettingsTabs from '@/components/SettingsTabs';
+import { isPlatformAdmin, useAuthStore } from '@/stores/authStore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -695,7 +696,7 @@ function AIRolePolicyPanel({ role }: { role: RoleItem }) {
           </Space>
         </Space>
         <Typography.Text type="secondary">
-          这里控制当前角色能使用哪些 AI 能力、可进入哪些业务域，以及写入动作是否必须先确认。
+          全局 AI 策略按角色编码匹配，控制 AI 能力、可访问的业务域和写入确认方式。
         </Typography.Text>
         <Form form={form} layout="vertical">
           <Form.Item name="enabled" label="启用该角色 AI 策略" valuePropName="checked">
@@ -734,6 +735,7 @@ function RolePreviewPanel({
   onDelete: (role: RoleItem) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+  const canManageGlobalSettings = useAuthStore(state => isPlatformAdmin(state.user));
 
   if (!role) {
     return (
@@ -889,9 +891,9 @@ function RolePreviewPanel({
 
       <SettingsTabs
         className="role-preview-tabs"
-        activeKey={activeTab}
+        activeKey={!canManageGlobalSettings && activeTab === 'ai-policy' ? 'overview' : activeTab}
         onChange={setActiveTab}
-        items={tabs}
+        items={canManageGlobalSettings ? tabs : tabs.filter(tab => tab.key !== 'ai-policy')}
       />
 
     </aside>

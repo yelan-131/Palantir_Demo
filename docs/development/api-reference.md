@@ -1,6 +1,6 @@
 # API 参考
 
-更新日期：2026-11-17（对应代码版本 0.3.22 草稿）
+更新日期 2026-11-20，对应代码版本 0.3.26。
 
 接口以代码为准：路由挂载见 `backend/app/main.py`，各模块实现见 `backend/app/api/*.py`。
 第 6 节的接口清单由 `scripts/docs/generate_api_reference.py` 静态解析路由装饰器生成，不需要安装后端依赖。
@@ -126,7 +126,7 @@ Authorization: Bearer <token>
 路径省略 `/api/v1` 前缀（`/` 与 `/health` 除外）。处理函数格式为 `模块.函数名`，可直接在 `backend/app/api/` 中搜索。
 
 <!-- api-routes:start -->
-共 407 个接口。
+共 427 个接口。
 
 ### 根路径（2）
 
@@ -135,12 +135,13 @@ Authorization: Bearer <token>
 | `GET` | `/` | 公开 | `main.root` |
 | `GET` | `/health` | 公开 | `main.health` |
 
-### `admin`（27）
+### `admin`（28）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
 | `GET` | `/admin/applications` | 管理员 | `applications.admin_list_applications` |
 | `POST` | `/admin/applications` | 管理员 | `applications.admin_create_application` |
+| `PUT` | `/admin/applications/order` | 管理员 | `applications.admin_reorder_applications` |
 | `PUT` | `/admin/applications/{app_id}` | 管理员 | `applications.admin_update_application` |
 | `DELETE` | `/admin/applications/{app_id}` | 管理员 | `applications.admin_delete_application` |
 | `PUT` | `/admin/applications/{app_id}/bindings` | 管理员 | `applications.admin_update_application_bindings` |
@@ -167,7 +168,7 @@ Authorization: Bearer <token>
 | `PUT` | `/admin/users/{user_id}/security` | 管理员 | `admin.update_user_security` |
 | `GET` | `/admin/users/{user_id}/sessions` | 管理员 | `admin.list_user_sessions` |
 
-### `ai`（37）
+### `ai`（42）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -183,15 +184,20 @@ Authorization: Bearer <token>
 | `POST` | `/ai/agent-runs/{run_id}/configuration-review` | 登录 | `ai_assistant.edit_ai_configuration_review` |
 | `POST` | `/ai/agent-runs/{run_id}/confirm` | 登录 | `ai_assistant.confirm_ai_agent_run` |
 | `POST` | `/ai/agent-runs/{run_id}/confirm/stream` | 登录 | `ai_assistant.confirm_ai_agent_run_stream` |
+| `POST` | `/ai/agent-runs/{run_id}/record-review` | 登录 | `ai_assistant.get_ai_record_review` |
+| `POST` | `/ai/agent-runs/{run_id}/record-review/revise` | 登录 | `ai_assistant.revise_ai_record_review` |
 | `POST` | `/ai/agent/attachment-preview` | 登录 | `ai_assistant.preview_agent_attachment` |
 | `GET` | `/ai/agent/conversations` | 登录 | `ai_assistant.list_agent_conversations` |
 | `POST` | `/ai/agent/conversations` | 登录 | `ai_assistant.create_agent_conversation` |
 | `PATCH` | `/ai/agent/conversations/{conversation_id}` | 登录 | `ai_assistant.update_agent_conversation` |
 | `DELETE` | `/ai/agent/conversations/{conversation_id}` | 登录 | `ai_assistant.close_agent_conversation` |
+| `POST` | `/ai/agent/conversations/{conversation_id}/confirmations/{run_id}/continue` | 登录 | `ai_assistant.continue_saved_ai_confirmation` |
+| `POST` | `/ai/agent/conversations/{conversation_id}/confirmations/{run_id}/stop` | 登录 | `ai_assistant.stop_ai_confirmation_follow_up` |
+| `GET` | `/ai/agent/conversations/{conversation_id}/confirmations/{run_id}/stream` | 登录 | `ai_assistant.resume_ai_confirmation_stream` |
 | `GET` | `/ai/agent/conversations/{conversation_id}/messages` | 登录 | `ai_assistant.list_agent_conversation_messages` |
 | `POST` | `/ai/agent/stream` | 登录 | `ai_assistant.agent_chat_stream` |
 | `POST` | `/ai/analyze` | 登录 | `ai_assistant.smart_analyze` |
-| `GET` | `/ai/audit` | 登录 | `ai_assistant.list_ai_audit_logs` |
+| `GET` | `/ai/audit` | 管理员 | `ai_assistant.list_ai_audit_logs` |
 | `POST` | `/ai/chat` | 登录 | `ai_assistant.chat` |
 | `GET` | `/ai/drafts` | 登录 | `ai_assistant.list_ai_drafts` |
 | `POST` | `/ai/drafts/save` | 登录 | `ai_assistant.save_ai_draft` |
@@ -199,13 +205,13 @@ Authorization: Bearer <token>
 | `GET` | `/ai/memories` | 登录 | `ai_assistant.list_ai_memories` |
 | `DELETE` | `/ai/memories/{memory_id}` | 登录 | `ai_assistant.delete_ai_memory` |
 | `POST` | `/ai/page-actions/{action_id}/result` | 登录 | `ai_assistant.receive_page_action_result` |
-| `POST` | `/ai/provider/test` | 管理员 | `ai_assistant.test_provider` |
+| `POST` | `/ai/provider/test` | 平台管理员 | `ai_assistant.test_provider` |
 | `GET` | `/ai/sessions` | 登录 | `ai_assistant.list_sessions` |
 | `GET` | `/ai/settings` | 管理员 | `ai_assistant.get_ai_settings` |
-| `PUT` | `/ai/settings` | 管理员 | `ai_assistant.update_ai_settings` |
+| `PUT` | `/ai/settings` | 平台管理员 | `ai_assistant.update_ai_settings` |
 | `POST` | `/ai/settings/effective` | 管理员 | `ai_assistant.preview_effective_ai_settings` |
 | `GET` | `/ai/settings/harness-update` | 管理员 | `ai_assistant.check_harness_updates` |
-| `POST` | `/ai/settings/test` | 管理员 | `ai_assistant.test_saved_ai_settings` |
+| `POST` | `/ai/settings/test` | 平台管理员 | `ai_assistant.test_saved_ai_settings` |
 | `GET` | `/ai/skills` | 登录 | `ai_assistant.get_ai_skills` |
 | `GET` | `/ai/tools` | 登录 | `ai_assistant.get_ai_tools` |
 
@@ -291,7 +297,7 @@ Authorization: Bearer <token>
 | `GET` | `/dashboard/programs/{program_id}/analytics/versions` | 管理员 | `dashboard.list_analytics_versions` |
 | `GET` | `/dashboard/programs/{program_id}/analytics/versions/{version_number}` | 管理员 | `dashboard.get_analytics_version` |
 
-### `data-sources`（14）
+### `data-sources`（19）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -301,6 +307,11 @@ Authorization: Bearer <token>
 | `GET` | `/data-sources/{source_id}` | 登录 | `data_sources.get_data_source` |
 | `PUT` | `/data-sources/{source_id}` | 登录 | `data_sources.update_data_source` |
 | `DELETE` | `/data-sources/{source_id}` | 登录 | `data_sources.delete_data_source` |
+| `POST` | `/data-sources/{source_id}/mapped-form-sync` | 管理员 | `data_sources.sync_mapped_form` |
+| `GET` | `/data-sources/{source_id}/mapped-form-sync-bindings` | 管理员 | `data_sources.list_mapped_form_sync_bindings` |
+| `POST` | `/data-sources/{source_id}/mapped-form-sync-bindings` | 管理员 | `data_sources.save_mapped_form_sync_binding` |
+| `GET` | `/data-sources/{source_id}/mapped-form-sync-bindings/{binding_id}/runs` | 管理员 | `data_sources.list_mapped_form_sync_runs` |
+| `POST` | `/data-sources/{source_id}/mapped-form-sync-bindings/{binding_id}/runs` | 管理员 | `data_sources.run_mapped_form_sync_binding` |
 | `GET` | `/data-sources/{source_id}/metadata` | 登录 | `data_sources.get_metadata` |
 | `POST` | `/data-sources/{source_id}/metadata-scan` | 登录 | `data_sources.scan_metadata` |
 | `GET` | `/data-sources/{source_id}/preview` | 登录 | `data_sources.preview_data` |
@@ -310,7 +321,7 @@ Authorization: Bearer <token>
 | `GET` | `/data-sources/{source_id}/sync-status` | 登录 | `data_sources.get_sync_status` |
 | `POST` | `/data-sources/{source_id}/test` | 登录 | `data_sources.test_connection` |
 
-### `forms`（56）
+### `forms`（57）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -321,6 +332,7 @@ Authorization: Bearer <token>
 | `DELETE` | `/forms/applications/{application_id}/forms/{form_id}` | 管理员 | `forms.delete_application_form_binding` |
 | `GET` | `/forms/applications/{application_id}/menu-nodes` | 管理员 | `forms.list_application_menu_nodes` |
 | `POST` | `/forms/applications/{application_id}/menu-nodes` | 管理员 | `forms.create_application_menu_node` |
+| `POST` | `/forms/applications/{application_id}/menu-nodes/paste` | 管理员 | `forms.paste_menu_nodes` |
 | `PUT` | `/forms/applications/{application_id}/menu-nodes/{node_id}` | 管理员 | `forms.update_application_menu_node` |
 | `DELETE` | `/forms/applications/{application_id}/menu-nodes/{node_id}` | 管理员 | `forms.delete_application_menu_node` |
 | `PUT` | `/forms/applications/{application_id}/menu-order` | 管理员 | `forms.save_application_menu_order` |
@@ -370,8 +382,6 @@ Authorization: Bearer <token>
 | `POST` | `/forms/{form_id}/workflow-bindings` | 管理员 | `forms.create_workflow_binding` |
 | `PUT` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.update_workflow_binding` |
 | `DELETE` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.delete_workflow_binding` |
-
-表单发布接口接受可选的 `workflow_draft_id`。该 ID 必须是当前表单保存的流程草稿；表单版本、流程定义和触发绑定在同一次事务中生效。
 
 ### `graph`（18）
 
@@ -507,7 +517,7 @@ Authorization: Bearer <token>
 | `POST` | `/ontology/relations` | 登录 | `ontology.create_relation` |
 | `GET` | `/ontology/timeline/{entity_id}` | 登录 | `ontology.get_entity_timeline` |
 
-### `pages`（19）
+### `pages`（20）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -528,6 +538,7 @@ Authorization: Bearer <token>
 | `POST` | `/pages/{code}/preview` | 管理员 | `component_pages.preview_page` |
 | `POST` | `/pages/{code}/publish` | 管理员 | `component_pages.write_page` |
 | `GET` | `/pages/{code}/versions` | 管理员 | `component_pages.page_versions` |
+| `GET` | `/pages/{code}/versions/{version_number}` | 管理员 | `component_pages.page_version` |
 | `POST` | `/pages/{code}/widgets/{widget_id}/{section}/publish` | 管理员 | `component_pages.publish_section` |
 | `GET` | `/pages/{code}/widgets/{widget_id}/{section}/versions` | 管理员 | `component_pages.section_versions` |
 
@@ -627,7 +638,7 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `GET` | `/search` | 登录 | `search.cross_entity_search` |
 
-### `semantic-assets`（24）
+### `semantic-assets`（28）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -642,8 +653,12 @@ Authorization: Bearer <token>
 | `GET` | `/semantic-assets/ontology-objects` | 登录 | `semantic_assets.list_ontology_objects` |
 | `POST` | `/semantic-assets/ontology-objects` | 登录 | `semantic_assets.create_ontology_object` |
 | `PUT` | `/semantic-assets/ontology-objects/{object_id}` | 登录 | `semantic_assets.update_ontology_object` |
+| `GET` | `/semantic-assets/ontology-objects/{object_id}/record` | 登录 | `semantic_assets.get_ontology_instance` |
+| `PUT` | `/semantic-assets/ontology-objects/{object_id}/record-binding` | 管理员 | `semantic_assets.bind_ontology_records` |
+| `GET` | `/semantic-assets/ontology-objects/{object_id}/records` | 登录 | `semantic_assets.list_ontology_instances` |
 | `GET` | `/semantic-assets/ontology-relations` | 登录 | `semantic_assets.list_ontology_relations` |
 | `POST` | `/semantic-assets/ontology-relations` | 登录 | `semantic_assets.create_ontology_relation` |
+| `PUT` | `/semantic-assets/ontology-relations/{relation_id}/record-link` | 管理员 | `semantic_assets.bind_ontology_link` |
 | `GET` | `/semantic-assets/ontology/impact` | 登录 | `semantic_assets.get_ontology_impact` |
 | `POST` | `/semantic-assets/ontology/publish` | 登录 | `semantic_assets.publish_ontology` |
 | `GET` | `/semantic-assets/ontology/versions` | 登录 | `semantic_assets.list_ontology_versions` |
@@ -673,11 +688,14 @@ Authorization: Bearer <token>
 | `GET` | `/system/metrics` | 管理员 | `main.metrics` |
 | `GET` | `/system/readiness` | 公开 | `main.readiness` |
 
-### `templates`（3）
+### `templates`（6）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
 | `GET` | `/templates` | 登录 | `templates.list_templates` |
+| `GET` | `/templates/applications` | 管理员 | `templates.list_saved_applications` |
+| `POST` | `/templates/applications/{application_id}` | 管理员 | `templates.save_application` |
+| `POST` | `/templates/applications/{template_id}/instantiate` | 管理员 | `templates.instantiate_application` |
 | `GET` | `/templates/{template_id}` | 登录 | `templates.get_template` |
 | `POST` | `/templates/{template_id}/instantiate` | 登录 | `templates.instantiate_template` |
 
@@ -712,3 +730,11 @@ Authorization: Bearer <token>
 | `POST` | `/workflow/notifications/{notif_id}/read` | 登录 | `workflow.mark_read` |
 | `GET` | `/workflow/stats` | 登录 | `workflow.workflow_stats` |
 <!-- api-routes:end -->
+
+## 7. 映射同步与对象记录
+
+映射同步请求提供 `entity_name`、`object_code` 和 `form_id`，可传 `source_key` 限定一个 PostgreSQL 主键值。响应 `data` 中的 `read`、`created`、`updated` 和 `unchanged` 是本次实际数量。配置条件见[数据接入与连接器](../architecture/integration.md#5-外部数据进入业务的现有路径)。
+
+保存绑定提供 `entity_name`、`object_code` 和 `form_id`。执行绑定可传 `source_key`，成功或失败都会生成运行回执。数据源列表的 `last_record_sync` 为最近一次成功执行已保存绑定的时间。`sync-status` 提供元数据扫描状态和用时。
+
+查询对象记录列表和详情时，调用者还需具备来源表单的记录读取权限。响应遵循来源表单的记录范围和字段权限。

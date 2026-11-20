@@ -80,6 +80,35 @@ async def test_ask_rule_stops_read_handler_until_confirmed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_repeated_tool_calls_keep_distinct_trace_ids_on_success_and_failure(monkeypatch):
+    from app.services.ai.tool_envelope import tool_execution_envelope
+
+    handler = AsyncMock(side_effect=[{'records': [], 'record_count': 0}, RuntimeError('query failed')])
+    monkeypatch.setattr(tool_execution_envelope, '_dispatch', handler)
+    event_sink = AsyncMock()
+    settings = config()
+    first = await tool_execution_envelope.execute_tool(
+        tool_name='forms.query_records', payload={'form_code': 'first'},
+        current_user=USER, settings=settings, event_sink=event_sink,
+    )
+    second = await tool_execution_envelope.execute_tool(
+        tool_name='forms.query_records', payload={'form_code': 'second'},
+        current_user=USER, settings=settings, event_sink=event_sink,
+    )
+
+    assert (first['status'], second['status']) == ('completed', 'failed')
+    assert first['item']['result_count'] == 0
+    assert first['item']['tool_call_id'] != second['item']['tool_call_id']
+    for attempt in (first, second):
+        call = attempt['items'][0]
+        result = attempt['item']
+        assert call['item_id'] == call['tool_call_id'] == result['tool_call_id']
+        assert result['item_id'] != call['item_id']
+        event_sink.assert_any_await('item.created', call)
+        event_sink.assert_any_await('item.updated', result)
+
+
+@pytest.mark.asyncio
 async def test_database_save_failure_is_reported_and_does_not_change_effective_settings(monkeypatch):
     from app.api import ai_assistant as api
     from app.services.ai.settings import settings_snapshot

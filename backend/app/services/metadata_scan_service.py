@@ -142,16 +142,9 @@ async def ensure_sync_status(db: AsyncSession, *, tenant_id: int, source_id: int
     return status
 
 
-def scan_postgresql(
-    config: dict[str, Any],
-    *,
-    limit_tables: int,
-    sample_limit: int,
-    selected_tables: list[str] | None = None,
-) -> list[dict[str, Any]]:
+def connect_postgresql(config: dict[str, Any], **options: Any):
     try:
         import psycopg2
-        from psycopg2 import sql
     except ImportError as exc:
         raise RuntimeError("PostgreSQL driver is not installed") from exc
 
@@ -167,8 +160,7 @@ def scan_postgresql(
     if missing:
         raise RuntimeError(f"PostgreSQL 连接配置不完整，缺少：{', '.join(missing)}")
 
-    schema = str(config.get("schema") or config.get("schema_name") or "public")
-    conn = psycopg2.connect(
+    return psycopg2.connect(
         host=config.get("host"),
         port=int(config.get("port") or 5432),
         dbname=config.get("database"),
@@ -176,8 +168,22 @@ def scan_postgresql(
         password=config.get("password"),
         connect_timeout=5,
         sslmode="require" if config.get("ssl_enabled") else "prefer",
+        **options,
     )
+
+
+def scan_postgresql(
+    config: dict[str, Any],
+    *,
+    limit_tables: int,
+    sample_limit: int,
+    selected_tables: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    conn = connect_postgresql(config)
     try:
+        from psycopg2 import sql
+
+        schema = str(config.get("schema") or config.get("schema_name") or "public")
         with conn.cursor() as cur:
             if selected_tables:
                 cur.execute(

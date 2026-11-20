@@ -53,7 +53,7 @@ AI 是业务服务之上的一层适配：模型通过 DeepSeek Harness 运行�
 | --- | --- | --- |
 | AI 助手浮窗 | 工作区右下角，`frontend/src/components/AiChatWidget/` | 主要入口。会话、流式回答、确认卡片、页面联动都在这里；在表单设计器和组件页面编辑器中会把当前页面状态作为上下文传给后端 |
 | 知识中心对话 | 数据中心的知识库页面，`frontend/src/pages/SystemAdmin/KnowledgeCenter.tsx` | 针对当前文档提问，只开放 `knowledge.*` 工具 |
-| AI 与平台设置 | `/admin/ai`（仅管理员） | 四个页签：模型服务、模型用途、工具与技能、执行与安全；页头有平台 AI 总开关和“检查 DSH 更新” |
+| AI 与平台设置 | `/admin/ai`（仅管理员） | 平台管理员可配置模型服务、模型用途和全局执行策略。平台 AI 总开关在「模型服务」。租户管理员进入「工具与技能」管理当前租户的注册表。 |
 | 模型与页面建议 | `/admin/ai-builder`（仅管理员） | 调用 `/ai-builder/*` 获取字段模板建议 |
 
 `frontend/src/pages/AIAssistant/index.tsx` 仍在仓库中，但没有被任何路由引用；访问 `/ai-assistant` 会重定向到首页。
@@ -70,7 +70,9 @@ AI 是业务服务之上的一层适配：模型通过 DeepSeek Harness 运行�
 | `POST /ai/agent-runs/{run_id}/configuration-review` | 确认前修改“新建表单”卡片中的表单名称、字段名称和是否必填 |
 | `POST /ai/page-actions/{action_id}/result` | 浏览器回传页面联动操作的执行回执 |
 | `/ai/agent/conversations/*` | 浮窗会话的创建、列表、消息、改名、关闭 |
-| `/ai/settings*`、`/ai/agent-registry*` | AI 设置与技能工具注册表管理（仅管理员） |
+| `PUT /ai/settings`、`POST /ai/settings/test`、`POST /ai/provider/test` | 平台管理员可保存全局 AI 设置或测试模型服务。 |
+| `GET /ai/settings`、`POST /ai/settings/effective` | 管理员可读取脱敏设置及预览生效参数。 |
+| `/ai/agent-registry*` | 管理员可管理当前租户的技能和工具。 |
 | `POST /ai/harness/mcp` | Harness 子进程回调平台工具的入口，不接受用户令牌，见[运行时文档](harness-runtime.md#4-请求级-mcp-桥) |
 
 `POST /ai/chat`、`/ai/analyze`、`/ai/agent`、`/ai/agent-runs` 是同一运行时的非流式兼容入口，浮窗不使用。其中只有带 `conversation_id` 调用的 `/ai/agent` 与 `/ai/agent/stream` 会把本轮写入数据库；`/ai/agent-runs` 的运行记录只保存在进程内存中。
@@ -85,6 +87,10 @@ AI 是业务服务之上的一层适配：模型通过 DeepSeek Harness 运行�
 6. 如果开启了审计（`auditEnabled`，默认开启）且请求带会话 ID，本轮的用户消息、助手回答和运行记录写入 `ai_conversations`、`ai_messages`、`ai_agent_runs`。
 
 各步骤的实现细节见[运行时文档](harness-runtime.md#3-一次运行的处理过程)。
+
+浮窗运行中展开「执行过程」，结束后先显示回答。新工具调用和结果共享 `tool_call_id`，每次操作标记为 Tools。成功读取已注册技能后记录 Skills。历史事件在相邻且归属明确时也可合并。展开单行可查看工具名、失败原因和支持的结果预览，预览最多列出 6 项。
+
+「执行说明」根据记录到的工具和技能事件生成。DeepSeek 等模型经 Harness 以公开 `reasoning` 块返回的文本走独立的 `harness.reasoning` 事件，经凭据遮蔽后显示在本轮的「模型推理」。这类文本随当前对话流显示。平台历史记录保留工具结果和技能事件。
 
 ## 5. 确认与执行
 
@@ -129,7 +135,8 @@ AI 是业务服务之上的一层适配：模型通过 DeepSeek Harness 运行�
 已实现但有限制：
 
 - 平台“记忆”已停用：保存设置时会强制关闭记忆收集和平台会话摘要，后台每小时的清理任务也不再删除数据。历史记忆条目仍可由本人通过 `/ai/memories` 查看和删除。
-- AI 审计事件（问答完成、确认、取消、配置卡片修改、草稿保存等）只写入进程内的环形缓冲区（最多 2000 条，`services/ai/audit.py`），通过 `GET /ai/audit`（仅管理员）查看，重启后丢失，不进入平台审计日志 `audit_logs`。确认后由业务服务执行的写入，仍按业务服务自身的规则记录审计。
+- 开启 AI 审计后，表单记录查询成功与权限拦截写入平台 `audit_logs`。管理员在「审计与日志」选择「AI 助手」查看本租户的发起人、结果和原因。`GET /ai/audit` 也从本租户的平台审计读取。日志记录执行元数据，用户提示词、模型回答和记录内容不写入这类条目。
+- 问答完成、确认、取消、配置卡片修改、草稿保存等运行事件仍写入进程内的环形缓冲区（最多 2000 条，`services/ai/audit.py`），重启后丢失。确认后由业务服务执行的写入，按业务服务自身的规则记录审计。
 - 知识检索没有语义能力（哈希伪向量加英文词面打分，中文查询排序基本随机，见[知识库](../knowledge/knowledge-base.md)），AI 设置中不能选择远程向量模型。
 - 后端必须以单进程单 worker 运行，原因见[运行时部署约束](harness-runtime.md#9-部署约束)。
 

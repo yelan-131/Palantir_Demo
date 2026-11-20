@@ -172,7 +172,7 @@ AI：
 | 工具注册与权限 | 已实现 | `services/ai/tool_registry.py`、`policies.py`、`permission_resolver.py`；技能与工具按租户维护（0.3.21） | 无 |
 | 主动监控 | 未实现 | 无。定时任务（`api/scheduler.py`）不调用 AI | 按规则或定时触发 AI 巡检 |
 | 评估与回放 | 未实现 | 无 | 建立评估集与回放 |
-| AI 审计 | 部分实现 | `services/ai/audit.py`（内存）、`GET /api/v1/ai/audit`；通用审计 `core/audit.py` 与 `/admin/audit` | 将 AI 行为审计持久化并在界面展示 |
+| AI 审计 | 部分实现 | 表单记录查询成功和权限拦截写入平台审计，在 `/admin/audit` 和 `GET /api/v1/ai/audit` 可查本租户记录。其他运行事件见 `services/ai/audit.py` | 扩展平台审计覆盖的 AI 操作 |
 
 ## 10. 参考资料
 

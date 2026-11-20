@@ -2,7 +2,7 @@
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.db import db_session
 from app.models.relational import AIAgentRun
@@ -54,6 +54,14 @@ async def cancel_pending_run(run_id, user):
         return restore_run(row)
 
 
+def waiting_confirmation_unchanged(row):
+    # SQLite ignores SELECT FOR UPDATE. The token predicate prevents a stale
+    # confirmation or editor from committing over a concurrent revision.
+    nonce = (row.confirmation_payload or {}).get('confirmation_token') or ''
+    return (AIAgentRun.id == row.id, AIAgentRun.status == 'waiting_confirmation',
+            func.coalesce(AIAgentRun.confirmation_payload['confirmation_token'].as_string(), '') == nonce)
+
+
 async def claim_confirmation(run_id, token, user):
     """CAS every persisted run, including the first in-memory confirmation."""
     async with db_session() as db:
@@ -82,8 +90,7 @@ async def claim_confirmation(run_id, token, user):
             raise HTTPException(409, '操作已取消或不可确认')
         if payload.get('expires_at') and datetime.fromisoformat(str(payload['expires_at'])) < datetime.now():
             raise HTTPException(400, 'Confirmation token has expired')
-        claimed = await db.execute(update(AIAgentRun).where(AIAgentRun.id == row.id,
-            AIAgentRun.status == 'waiting_confirmation').values(status='confirmed'))
+        claimed = await db.execute(update(AIAgentRun).where(*waiting_confirmation_unchanged(row)).values(status='confirmed'))
         if claimed.rowcount != 1:
             raise HTTPException(409, '操作已被其他请求确认，请稍后重试查看结果')
         await db.commit()

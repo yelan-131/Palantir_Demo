@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import and_, func, select, text
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db
+from app.api.deps import current_tenant_id, current_user_id, get_current_user, get_db, require_admin
+from app.core.production_errors import diagnose_operation
 from app.models.relational import (
     Application,
     AuditLog,
@@ -47,6 +48,7 @@ from app.services.ontology_candidate_service import (
 )
 from app.services.ontology_ai_candidate_service import OntologyAICandidateError, generate_ai_candidates_from_metadata
 from app.services.metadata_scan_service import parse_connection_config, scan_data_source_metadata
+from app.services.ontology_record_service import MAX_KEY_LENGTH, get_instance, list_instances, set_record_binding, set_record_link
 from app.services.ontology_service import (
     approve_candidate,
     candidate_payload,
@@ -60,6 +62,7 @@ from app.services.ontology_service import (
     publish_version,
     reject_candidate,
     relation_payload,
+    visible_version_snapshot,
 )
 from app.services.semantic_mapping_service import (
     create_manual_mapping_candidate,
@@ -91,6 +94,17 @@ class OntologyRelationBody(BaseModel):
     graph_enabled: bool = True
     source_type: str = "manual"
     source_ref: str | None = None
+
+
+class OntologyRecordBindingBody(BaseModel):
+    form_id: int = Field(gt=0)
+    key_field: str = Field(min_length=1, max_length=120)
+    property_fields: dict[str, str] | None = None
+
+
+class OntologyRecordLinkBody(BaseModel):
+    source_field: str = Field(min_length=1, max_length=120)
+    target_field: str = Field(min_length=1, max_length=120)
 
 
 class CandidateGenerateBody(BaseModel):
@@ -550,7 +564,12 @@ async def _count_table(db: AsyncSession, model, tenant_id: int) -> int:
 
 
 async def _table_exists(db: AsyncSession, table) -> bool:
-    schema = table.schema
+    if db.get_bind().dialect.name == "sqlite":
+        connection = await db.connection()
+        return await connection.run_sync(
+            lambda conn: table.name in inspect(conn).get_table_names(schema=table.schema)
+        )
+
     exists_stmt = text(
         """
         SELECT EXISTS (
@@ -562,7 +581,7 @@ async def _table_exists(db: AsyncSession, table) -> bool:
         )
         """
     )
-    return bool(await db.scalar(exists_stmt, {"schema_name": schema, "table_name": table.name}))
+    return bool(await db.scalar(exists_stmt, {"schema_name": table.schema, "table_name": table.name}))
 
 
 def _quality_rule_payload(
@@ -794,7 +813,7 @@ async def _quality_rules_for_table(db: AsyncSession, model, tenant_id: int, row_
 
 async def _data_asset_tables(db: AsyncSession, tenant_id: int, models: list[Any] | None = None) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
-    for index, model in enumerate(models or DATABASE_MODELS, start=1):
+    for model in models or DATABASE_MODELS:
         table = model.__table__
         if not await _table_exists(db, table):
             continue
@@ -1254,7 +1273,7 @@ async def list_ontology_objects(
     user: dict = Depends(get_current_user),
 ):
     tenant_id = current_tenant_id(user)
-    return {"data": await list_published_objects(db, tenant_id), "source": "ontology"}
+    return {"data": await list_published_objects(db, tenant_id, include_runtime_config=bool(user.get("is_admin"))), "source": "ontology"}
 
 
 @router.get("/ontology-relations")
@@ -1263,10 +1282,11 @@ async def list_ontology_relations(
     user: dict = Depends(get_current_user),
 ):
     tenant_id = current_tenant_id(user)
-    return {"data": await list_published_relations(db, tenant_id), "source": "ontology"}
+    return {"data": await list_published_relations(db, tenant_id, include_runtime_config=bool(user.get("is_admin"))), "source": "ontology"}
 
 
 @router.post("/ontology-objects")
+@diagnose_operation("ONTOLOGY_OBJECT_WRITE_FAILED")
 async def create_ontology_object(
     body: OntologyObjectBody,
     db: AsyncSession = Depends(get_db),
@@ -1280,12 +1300,13 @@ async def create_ontology_object(
         actor_id=current_user_id(user),
         status=body.status,
     )
+    payload = object_payload(obj, include_runtime_config=bool(user.get("is_admin")))
     await db.commit()
-    await db.refresh(obj)
-    return {"data": object_payload(obj)}
+    return {"data": payload}
 
 
 @router.put("/ontology-objects/{object_id}")
+@diagnose_operation("ONTOLOGY_OBJECT_WRITE_FAILED")
 async def update_ontology_object(
     object_id: int,
     body: OntologyObjectBody,
@@ -1305,9 +1326,9 @@ async def update_ontology_object(
         actor_id=current_user_id(user),
         status=body.status,
     )
+    payload = object_payload(obj, include_runtime_config=bool(user.get("is_admin")))
     await db.commit()
-    await db.refresh(obj)
-    return {"data": object_payload(obj)}
+    return {"data": payload}
 
 
 @router.post("/ontology-relations")
@@ -1324,8 +1345,58 @@ async def create_ontology_relation(
         actor_id=current_user_id(user),
         status="published",
     )
+    payload = relation_payload(relation, include_runtime_config=bool(user.get("is_admin")))
     await db.commit()
-    return {"data": relation_payload(relation)}
+    return {"data": payload}
+
+
+@router.put("/ontology-objects/{object_id}/record-binding")
+@diagnose_operation("ONTOLOGY_OBJECT_WRITE_FAILED")
+async def bind_ontology_records(
+    object_id: int,
+    body: OntologyRecordBindingBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    obj = await set_record_binding(db, user, object_id, body.model_dump())
+    payload = object_payload(obj, include_runtime_config=True)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.put("/ontology-relations/{relation_id}/record-link")
+async def bind_ontology_link(
+    relation_id: int,
+    body: OntologyRecordLinkBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    rel = await set_record_link(db, user, relation_id, body.model_dump())
+    payload = relation_payload(rel, include_runtime_config=True)
+    await db.commit()
+    return {"data": payload}
+
+
+@router.get("/ontology-objects/{object_id}/records")
+async def list_ontology_instances(
+    object_id: int,
+    q: str | None = Query(default=None, max_length=MAX_KEY_LENGTH),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    return {"data": await list_instances(db, user, object_id, q=q, page=page, page_size=page_size)}
+
+
+@router.get("/ontology-objects/{object_id}/record")
+async def get_ontology_instance(
+    object_id: int,
+    key: str = Query(min_length=1, max_length=MAX_KEY_LENGTH),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    return {"data": await get_instance(db, user, object_id, key)}
 
 
 @router.get("/ontology-mappings")
@@ -1370,6 +1441,7 @@ async def generate_ontology_candidates(
 
 
 @router.get("/semantic-mapping/workbench")
+@diagnose_operation("SEMANTIC_MAPPING_LOAD_FAILED")
 async def semantic_mapping_workbench(
     object_code: str | None = None,
     source_id: int | None = None,
@@ -1581,6 +1653,7 @@ async def publish_ontology(
 ):
     tenant_id = current_tenant_id(user)
     result = await publish_version(db, tenant_id=tenant_id, actor_id=current_user_id(user), title=(body.title if body else None))
+    result["snapshot"] = visible_version_snapshot(result["snapshot"], user)
     await db.commit()
     return {"data": result}
 
@@ -1607,7 +1680,7 @@ async def list_ontology_versions(
                 "title": row.title,
                 "status": row.status,
                 "published_at": row.published_at.isoformat() if row.published_at else None,
-                "snapshot": row.snapshot,
+                "snapshot": visible_version_snapshot(row.snapshot, user),
             }
             for row in rows
         ]

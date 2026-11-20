@@ -27,8 +27,9 @@ from app.models.relational import (
 )
 
 
-def object_payload(obj: OntologyObject) -> dict[str, Any]:
-    return {
+def object_payload(obj: OntologyObject, *, include_runtime_config: bool = False) -> dict[str, Any]:
+    binding = (obj.metadata_json or {}).get("record_binding")
+    payload = {
         "id": str(obj.id),
         "db_id": obj.id,
         "name": obj.name,
@@ -40,6 +41,7 @@ def object_payload(obj: OntologyObject) -> dict[str, Any]:
         "version": obj.version,
         "confidence": obj.confidence,
         "review_status": obj.review_status,
+        "record_bound": bool(binding),
         "fields": [
             {
                 "id": field.id,
@@ -57,10 +59,14 @@ def object_payload(obj: OntologyObject) -> dict[str, Any]:
             for field in sorted(obj.fields, key=lambda item: item.id)
         ],
     }
+    if include_runtime_config:
+        payload["record_binding"] = binding
+    return payload
 
 
-def relation_payload(rel: OntologyRelation) -> dict[str, Any]:
-    return {
+def relation_payload(rel: OntologyRelation, *, include_runtime_config: bool = False) -> dict[str, Any]:
+    link = (rel.metadata_json or {}).get("record_link")
+    payload = {
         "id": str(rel.id),
         "db_id": rel.id,
         "code": rel.code,
@@ -75,7 +81,11 @@ def relation_payload(rel: OntologyRelation) -> dict[str, Any]:
         "confidence": rel.confidence,
         "review_status": rel.review_status,
         "source_ref": rel.source_ref,
+        "record_linked": bool(link),
     }
+    if include_runtime_config:
+        payload["record_link"] = link
+    return payload
 
 
 def mapping_payload(mapping: OntologyMapping) -> dict[str, Any]:
@@ -111,7 +121,7 @@ def candidate_payload(candidate: OntologyCandidate) -> dict[str, Any]:
     }
 
 
-async def list_published_objects(db: AsyncSession, tenant_id: int) -> list[dict[str, Any]]:
+async def list_published_objects(db: AsyncSession, tenant_id: int, *, include_runtime_config: bool = False) -> list[dict[str, Any]]:
     rows = (
         await db.execute(
             select(OntologyObject)
@@ -120,10 +130,10 @@ async def list_published_objects(db: AsyncSession, tenant_id: int) -> list[dict[
             .order_by(OntologyObject.code)
         )
     ).scalars().all()
-    return [object_payload(row) for row in rows]
+    return [object_payload(row, include_runtime_config=include_runtime_config) for row in rows]
 
 
-async def list_published_relations(db: AsyncSession, tenant_id: int) -> list[dict[str, Any]]:
+async def list_published_relations(db: AsyncSession, tenant_id: int, *, include_runtime_config: bool = False) -> list[dict[str, Any]]:
     rows = (
         await db.execute(
             select(OntologyRelation)
@@ -131,7 +141,7 @@ async def list_published_relations(db: AsyncSession, tenant_id: int) -> list[dic
             .order_by(OntologyRelation.code)
         )
     ).scalars().all()
-    return [relation_payload(row) for row in rows]
+    return [relation_payload(row, include_runtime_config=include_runtime_config) for row in rows]
 
 
 async def create_or_update_object(
@@ -180,6 +190,8 @@ async def create_or_update_object(
 
     for field in data.get("fields") or []:
         await create_or_update_field(db, tenant_id=tenant_id, obj=obj, data=field)
+    await db.flush()
+    await db.refresh(obj, attribute_names=["fields"])
     return obj
 
 
@@ -245,12 +257,16 @@ async def create_or_update_relation(
     target_obj = await db.scalar(select(OntologyObject).where(OntologyObject.tenant_id == tenant_id, OntologyObject.code == data.get("target_object_code")))
     now = datetime.now()
     if existing:
+        source_code = str(data.get("source_object_code") or existing.source_object_code)
+        target_code = str(data.get("target_object_code") or existing.target_object_code)
+        if (source_code, target_code) != (existing.source_object_code, existing.target_object_code):
+            existing.metadata_json = {key: value for key, value in (existing.metadata_json or {}).items() if key != "record_link"}
         existing.name = str(data.get("name") or existing.name)
         existing.relation_type = str(data.get("relation_type") or existing.relation_type)
         existing.source_object_id = source_obj.id if source_obj else existing.source_object_id
         existing.target_object_id = target_obj.id if target_obj else existing.target_object_id
-        existing.source_object_code = str(data.get("source_object_code") or existing.source_object_code)
-        existing.target_object_code = str(data.get("target_object_code") or existing.target_object_code)
+        existing.source_object_code = source_code
+        existing.target_object_code = target_code
         existing.description = data.get("description") if data.get("description") is not None else existing.description
         existing.status = status
         existing.review_status = "approved"
@@ -403,8 +419,8 @@ async def publish_version(
     actor_id: int | None = None,
     title: str | None = None,
 ) -> dict[str, Any]:
-    objects = await list_published_objects(db, tenant_id)
-    relations = await list_published_relations(db, tenant_id)
+    objects = await list_published_objects(db, tenant_id, include_runtime_config=True)
+    relations = await list_published_relations(db, tenant_id, include_runtime_config=True)
     mappings = [
         mapping_payload(row)
         for row in (await db.execute(select(OntologyMapping).where(OntologyMapping.tenant_id == tenant_id).order_by(OntologyMapping.id))).scalars().all()
@@ -423,6 +439,16 @@ async def publish_version(
     await log_ontology_action(db, tenant_id=tenant_id, action="publish", resource_type="ontology_version", resource_id=None, actor_id=actor_id, detail={"version": next_version})
     await db.flush()
     return {"version": version.version, "title": version.title, "snapshot": version.snapshot, "published_at": version.published_at.isoformat() if version.published_at else None}
+
+
+def visible_version_snapshot(snapshot: dict, user: dict) -> dict:
+    if user.get("is_admin"):
+        return snapshot
+    return {
+        **snapshot,
+        "objects": [{key: value for key, value in item.items() if key != "record_binding"} for item in snapshot.get("objects", [])],
+        "relations": [{key: value for key, value in item.items() if key != "record_link"} for item in snapshot.get("relations", [])],
+    }
 
 
 async def impact_analysis(db: AsyncSession, *, tenant_id: int, object_code: str | None = None, field_code: str | None = None) -> dict[str, Any]:

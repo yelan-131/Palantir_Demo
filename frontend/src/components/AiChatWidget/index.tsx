@@ -3,7 +3,6 @@ import { Button, Dropdown, Input, Modal, Popover, Segmented, Space, Tag, Tooltip
 import {
   CheckCircleOutlined,
   CloseOutlined,
-  CodeOutlined,
   DeleteOutlined,
   EllipsisOutlined,
   HistoryOutlined,
@@ -22,15 +21,17 @@ import {
   listAgentConversationMessages,
   listAgentConversations,
   resumeAgentConfirmation,
+  reviseAgentRecordReview,
   stopAgentConfirmation,
   streamAgentChat,
   streamConfirmAgentRun,
   getAgentRunState,
   updateAgentConversation,
 } from '@/services/api';
-import type { AgentStreamEvent } from '@/services/api';
+import type { AgentStreamEvent, RecordReviewResponse } from '@/services/api';
 import { formatServerTime as formatServerClockTime, parseServerDate } from '@/utils/dateTime';
 import { LEGACY_ACCOUNT_SECTIONS, navigationAreaForPath } from '@/config/navigation';
+import { getSkillDisplayTitle, getToolHelp } from '@/pages/AccountCenter/aiRegistryHelp';
 import { useAiWorkbench } from './context';
 import { confirmationDesignPreview, designPreviewPath, parseDesignPreview } from './designPreview';
 import type { DesignPreview } from './designPreview';
@@ -41,7 +42,11 @@ import './aiPanels.css';
 import { ChatComposer } from './ChatComposer';
 import type { ChatAttachment } from './ChatComposer';
 import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
+import RecordConfirmationReview from './RecordConfirmationReview';
 import { NativeDesignerReview, NativeLayoutReview } from './NativeDesignerReview';
+import { AgentExecutionTrace } from './AgentExecutionTrace';
+import { getTraceQueryContext, getTraceStatusLabel } from './tracePresentation';
+import type { TracePresentationInput as AgentTraceItem } from './tracePresentation';
 
 type ChatRole = 'assistant' | 'user';
 type MockSkillStatus = 'draft_created' | 'ready_for_review' | 'completed' | 'failed';
@@ -57,23 +62,18 @@ interface MockSkillAction {
   payload?: Record<string, unknown>;
 }
 
+interface RecordCardDraft {
+  review?: RecordReviewResponse;
+  changes: Record<string, unknown>;
+  displayValues?: Record<string, string>;
+  valid: boolean;
+}
+
 interface AgentProcessStep {
   id: string;
   label: string;
   status: string;
   detail?: string;
-}
-
-interface AgentTraceItem {
-  id: string;
-  kind: 'note' | 'tool' | 'result' | 'page';
-  content: string;
-  status?: string;
-  tool?: string;
-  stepId?: string;
-  pageTitle?: string;
-  resultCount?: number;
-  source?: 'dsh';
 }
 
 interface AgentActionState {
@@ -110,6 +110,8 @@ interface ChatMessage {
   confirmationPayload?: Record<string, unknown>;
   actionState?: AgentActionState;
   executionResult?: AgentExecutionResult;
+  confirmationCancelled?: boolean;
+  confirmationError?: string;
 }
 
 interface AgentSession {
@@ -435,6 +437,8 @@ function mapServerMessage(message: AgentMessagePayload): ChatMessage {
   const confirmationPayload = terminal ? undefined : getConfirmationItemPayload(items);
   const actions = message.run_status === 'cancelled' ? undefined : getConfirmationActions(items);
   const mappedActions = isAssistant ? mapAgentActions(actions) : undefined;
+  const executionSnapshot = [...items].reverse().find(item => item.execution_snapshot === true);
+  const failedResult = asRecordArray(asRecord(executionSnapshot?.payload).tool_results).find(item => item.status === 'failed');
   return {
     id: message.message_id || message.id || `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role: isAssistant ? 'assistant' : 'user',
@@ -452,6 +456,10 @@ function mapServerMessage(message: AgentMessagePayload): ChatMessage {
     requiresConfirmation: isAssistant && !terminal ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : false,
     confirmationPayload: isAssistant ? confirmationPayload : undefined,
     executionResult: isAssistant && message.run_status === 'completed' ? getStoredExecutionResult(items) : undefined,
+    confirmationCancelled: isAssistant && message.run_status === 'cancelled' && Boolean(getConfirmationItemPayload(items)),
+    confirmationError: isAssistant && message.run_status === 'failed' && typeof failedResult?.error === 'string'
+      ? failedResult.error
+      : undefined,
   };
 }
 
@@ -555,21 +563,30 @@ function traceNoteFromStep(step: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function createSkillTraceItem(data: Record<string, unknown>): AgentTraceItem | undefined {
+  const legacyRead = data.type === 'context' && data.summary === '已读取业务技能';
+  if ((!legacyRead && data.type !== 'skill_use') || data.status !== 'completed') return undefined;
+  const skillId = legacyRead ? asRecord(data.payload).name : data.skill;
+  if (typeof skillId !== 'string' || !/^[\w.-]{1,160}$/.test(skillId)) return undefined;
+  const stepId = `skill-${String(data.item_id || data.id || skillId)}`;
+  return {
+    id: stepId,
+    stepId,
+    kind: 'skill',
+    content: getSkillDisplayTitle(skillId, !legacyRead && typeof data.title === 'string' ? data.title : undefined),
+    skillId,
+    status: 'completed',
+  };
+}
+
 function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceItem[] | undefined {
   const trace = (items || [])
     .map((step, index) => {
+      const skill = createSkillTraceItem(step);
+      if (skill) return skill;
       if (step.type === 'page_action') return createTraceItem('item.updated', step);
-      const tool = stringifyStepValue(step.tool);
-      if (['tool_call', 'tool_result'].includes(String(step.type || '')) && tool) {
-        const completed = String(step.type || '') === 'tool_result';
-        return {
-          id: `history-trace-tool-${String(step.id || index)}`,
-          kind: completed ? 'result' as const : 'tool' as const,
-          content: getTraceToolText(step, completed),
-          status: String(step.status || 'completed'),
-          tool,
-          resultCount: typeof step.result_count === 'number' ? step.result_count : undefined,
-        };
+      if (step.type === 'tool_call' || step.type === 'tool_result') {
+        return createToolTraceItem(`history-trace-tool-${String(step.item_id || step.id || index)}`, step, step.type === 'tool_result');
       }
       const content = traceNoteFromStep(step);
       if (!content) return undefined;
@@ -583,40 +600,34 @@ function mapTraceFromItems(items?: Array<Record<string, unknown>>): AgentTraceIt
   return trace.length ? trace : undefined;
 }
 
-const traceStatusLabels: Record<string, string> = {
-  active: '执行中',
-  running: '执行中',
-  completed: '已完成',
-  waiting_confirmation: '待确认',
-  validation_failed: '参数校验失败',
-  blocked: '操作受阻',
-  failed: '执行失败',
-  error: '执行失败',
-  timeout: '执行超时',
-  cancelled: '已取消',
-  interrupted: '未收到结果',
-  stopped: '已停止',
-};
-
-function getTraceToolText(data: Record<string, unknown>, completed: boolean): string {
-  const tool = stringifyStepValue(data.tool) || '工具';
-  const resultCount = data.result_count !== undefined ? ` · 结果 ${data.result_count}` : '';
-  const summary = data.summary ? ` · ${stringifyStepValue(data.summary)}` : '';
-  const status = String(data.status || '');
-  const label = traceStatusLabels[status || 'completed'] || '已收到结果';
-  return completed
-    ? `${tool} ${label}${resultCount}${summary}`
-    : `调用 ${tool}`;
+function createToolTraceItem(id: string, data: Record<string, unknown>, completed: boolean, stepId?: string): AgentTraceItem {
+  const tool = stringifyStepValue(data.tool);
+  return {
+    id,
+    kind: completed ? 'result' : 'tool',
+    content: tool || '工具',
+    status: String(data.status || (completed ? 'completed' : 'running')),
+    tool,
+    stepId,
+    toolCallId: typeof data.tool_call_id === 'string' ? data.tool_call_id : undefined,
+    resultCount: typeof data.result_count === 'number' ? data.result_count : undefined,
+    resultPayload: completed ? data.payload : undefined,
+    queryContext: completed ? undefined : getTraceQueryContext(tool, data.payload),
+    summary: typeof data.summary === 'string' ? data.summary : undefined,
+    error: typeof data.error === 'string' ? data.error : undefined,
+  };
 }
 
 function getPageTraceText(title: string, status: string, summary?: string): string {
-  return [title, traceStatusLabels[status], summary].filter(Boolean).join(' · ');
+  return [title, getTraceStatusLabel(status), summary].filter(Boolean).join(' · ');
 }
 
-function finishPendingPageTrace(trace: AgentTraceItem[] | undefined, status: 'interrupted' | 'stopped') {
-  return trace?.map(item => item.kind === 'page' && item.status === 'running'
-    ? { ...item, status, content: getPageTraceText(item.pageTitle || '画布操作', status) }
-    : item);
+function finishPendingTrace(trace: AgentTraceItem[] | undefined, status: 'interrupted' | 'stopped') {
+  return trace?.map(item => {
+    if (item.status !== 'running' && item.status !== 'active') return item;
+    if (item.kind === 'page') return { ...item, status, content: getPageTraceText(item.pageTitle || '画布操作', status) };
+    return item.kind === 'tool' ? { ...item, status } : item;
+  });
 }
 
 function appendAgentTraceItem(
@@ -636,6 +647,10 @@ function appendAgentTraceItem(
 }
 
 function createTraceItem(event: string, data: Record<string, unknown>): AgentTraceItem | undefined {
+  if (event === 'harness.reasoning' && typeof data.text === 'string' && data.text.trim()) {
+    const stepId = `reasoning-${String(data.sequence ?? data.step ?? 0)}`;
+    return { id: stepId, stepId, kind: 'note', content: data.text, source: 'reasoning' };
+  }
   if (event === 'harness.progress') {
     const phase = String(data.phase || '');
     const step = data.step ?? 1;
@@ -664,6 +679,8 @@ function createTraceItem(event: string, data: Record<string, unknown>): AgentTra
     return undefined;
   }
   if (event === 'item.created' || event === 'item.updated') {
+    const skill = createSkillTraceItem(data);
+    if (skill) return skill;
     const type = String(data.type || '');
     if (type === 'page_action') {
       const stepId = `page-action-${String(data.item_id || data.id)}`;
@@ -680,32 +697,24 @@ function createTraceItem(event: string, data: Record<string, unknown>): AgentTra
     }
     if (!['tool_call', 'tool_result', 'confirmation', 'validation', 'error'].includes(type)) return undefined;
     const tool = stringifyStepValue(data.tool);
-    const completed = type !== 'tool_call';
     const stepId = `${type}-${String(data.item_id || data.id || data.tool || Date.now())}`;
+    if (type === 'tool_call' || type === 'tool_result') {
+      return createToolTraceItem(`trace-item-${stepId}`, data, type === 'tool_result', stepId);
+    }
     return {
       id: `trace-item-${stepId}`,
-      kind: type === 'tool_call' ? 'tool' : type === 'tool_result' ? 'result' : 'note',
-      content: type === 'tool_call' || type === 'tool_result'
-        ? getTraceToolText(data, completed)
-        : [getAgentStepLabel(data), tool].filter(Boolean).join(' · '),
-      status: String(data.status || (completed ? 'completed' : 'active')),
+      kind: 'note',
+      content: [getAgentStepLabel(data), tool].filter(Boolean).join(' · '),
+      status: String(data.status || 'completed'),
       tool,
       stepId,
-      resultCount: typeof data.result_count === 'number' ? data.result_count : undefined,
+      source: type === 'validation' ? 'validation' : undefined,
     };
   }
   if (event === 'tool.started' || event === 'tool.completed') {
     const completed = event === 'tool.completed';
     const stepId = `${event}-${String(data.step_id || data.tool || Date.now())}`;
-    return {
-      id: `trace-tool-${stepId}`,
-      kind: completed ? 'result' : 'tool',
-      content: getTraceToolText(data, completed),
-      status: completed ? String(data.status || 'completed') : 'active',
-      tool: stringifyStepValue(data.tool),
-      stepId,
-      resultCount: typeof data.result_count === 'number' ? data.result_count : undefined,
-    };
+    return createToolTraceItem(`trace-tool-${stepId}`, data, completed, stepId);
   }
   return undefined;
 }
@@ -759,14 +768,13 @@ function getLowCodeReview(action: MockSkillAction) {
     menuEnabled: Boolean(menu.create),
     menuTitle: formatActionValue(menu.title),
     fieldCount: fields.length,
-    fields: fields.slice(0, 8).map((field) => ({
+    fields: fields.map((field) => ({
       name: formatActionValue(field.field_name),
       label: formatActionValue(field.label),
       type: formatActionValue(field.field_type),
       required: Boolean(field.required),
       options: Array.isArray(field.enum_values) ? field.enum_values.map(formatActionValue).join(' / ') : '',
     })),
-    hiddenFieldCount: Math.max(0, fields.length - 8),
   };
 }
 
@@ -787,6 +795,27 @@ function formatSlotName(slot: string): string {
     item: '物料/对象',
     quantity: '数量',
     usage: '用途',
+    application_id: '应用编号',
+    application_name: '应用名称',
+    form_id: '表单编号',
+    form_code: '表单编码',
+    form_name: '表单名称',
+    page_id: '页面编号',
+    page_code: '页面编码',
+    record_id: '记录编号',
+    field_id: '字段编号',
+    field_name: '字段编码',
+    field_type: '字段类型',
+    name: '名称',
+    title: '标题',
+    code: '编码',
+    description: '说明',
+    status: '状态',
+    values: '字段值',
+    config: '配置',
+    layout: '布局',
+    operation: '操作方式',
+    revision: '修订号',
   };
   return labels[slot] || slot;
 }
@@ -808,27 +837,135 @@ function getActionStateReview(state?: AgentActionState) {
   };
 }
 
+const confirmationStatusNames: Record<string, string> = {
+  draft: '草稿', published: '已发布', active: '已启用', disabled: '已停用', archived: '已归档',
+};
+
 function getDraftPreviewFields(payload?: Record<string, unknown>) {
   return Object.entries(payload || {})
     .filter(([key]) => !key.startsWith('_'))
-    .slice(0, 4)
-    .map(([label, value]) => ({ label: formatSlotName(label), value: formatActionValue(value) }));
+    .map(([key, value]) => {
+      const label = formatSlotName(key);
+      const text = typeof value === 'boolean' ? (value ? '是' : '否') : formatActionValue(value);
+      return {
+        label,
+        value: label === '状态'
+          ? text.split(' → ').map(part => confirmationStatusNames[part] || part).join(' → ')
+          : text,
+      };
+    });
 }
 
 function getGenericActionReview(action: MockSkillAction) {
-  if (getLowCodeReview(action)) return undefined;
   const payload = asRecord(action.payload);
   const preview = asRecord(payload._preview);
-  const fields = typeof preview.target === 'string'
-    ? [
-        { label: '操作对象', value: preview.target },
-        ...Object.entries(asRecord(preview.fields)).map(([label, value]) => ({ label, value: formatActionValue(value) })),
-      ]
-    : getDraftPreviewFields(payload);
+  const subject = [preview.target, payload.form_name, payload.application_name, payload.name, payload.title]
+    .find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+  const fields = typeof preview.target === 'string' ? getDraftPreviewFields(asRecord(preview.fields))
+    : action.skill === 'forms.publish_to_menu' ? action.fields.filter(field => field.label !== '业务表单')
+      : getDraftPreviewFields(payload);
+  return { subject, fields };
+}
+
+function getConfirmationToolTitle(action: MockSkillAction): string {
+  const payload = asRecord(action.payload);
+  const tool = payload._harness_tool || asRecord(payload._contract).tool || action.skill;
+  const title = getToolHelp(String(tool))?.title || getSkillDisplayTitle(action.skill, action.title);
+  return /\p{Script=Han}/u.test(title) ? title : '执行业务操作';
+}
+
+function supportsRecordReview(action: MockSkillAction): boolean {
+  const tool = action.payload?._harness_tool || asRecord(action.payload?._contract).tool || action.skill;
+  return tool === 'forms.create_dynamic_record_draft' || tool === 'forms.update_record';
+}
+
+function recordReviewError(error: unknown): string {
+  const response = (error as { response?: { data?: { detail?: unknown } } })?.response;
+  const detail = response?.data?.detail;
+  return typeof detail === 'string' ? detail : String(asRecord(detail).message || '明细校验暂未完成，请检查修改后重试。');
+}
+
+function recordCardChanges(draft: RecordCardDraft): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(draft.changes).map(([name, value]) => {
+    const numeric = draft.review?.fields.some(field => field.name === name && field.kind === 'number');
+    if (!numeric || typeof value !== 'string') return [name, value];
+    return [name, value.trim() ? Number(value) : null];
+  }));
+}
+
+const confirmationTitles: Record<string, { title?: string; confirm?: string; completed?: string }> = {
+  'applications.create': { title: '新建应用草稿', confirm: '确认创建草稿', completed: '应用草稿已创建' },
+  'applications.publish': { title: '发布应用', confirm: '确认发布', completed: '已发布应用' },
+  'applications.enable': { confirm: '确认启用', completed: '已启用应用' },
+  'applications.disable': { confirm: '确认停用', completed: '已停用应用' },
+  'applications.delete': { confirm: '确认删除草稿', completed: '已删除应用草稿' },
+  'forms.create_form_definition': { confirm: '确认保存草稿' },
+  'low_code.create_form_definition': { confirm: '确认保存草稿' },
+  'forms.create_dynamic_record_draft': { confirm: '确认保存草稿' },
+  'forms.create_record_draft': { confirm: '确认保存草稿' },
+  'forms.update_record': { confirm: '确认修改', completed: '记录已更新' },
+  'forms.publish': { confirm: '确认发布', completed: '表单已发布' },
+  'forms.publish_to_menu': { confirm: '确认挂载菜单' },
+  'forms.save_layout': { confirm: '确认保存草稿' },
+  'pages.save_draft': { confirm: '确认保存草稿', completed: '页面草稿已保存' },
+  'dashboards.save_draft': { confirm: '确认保存草稿', completed: '看板草稿已保存' },
+  'dashboards.publish': { confirm: '确认发布', completed: '看板已发布' },
+};
+
+function getConfirmationTitle(action: MockSkillAction): string {
+  return confirmationTitles[action.skill]?.title
+    || (/\p{Script=Han}/u.test(action.title) ? action.title : getConfirmationToolTitle(action));
+}
+
+const fieldTypeNames: Record<string, string> = {
+  string: '单行文本', text: '多行文本', number: '数字', integer: '整数', decimal: '小数',
+  date: '日期', datetime: '日期时间', boolean: '开关', enum: '选项', relation: '关联记录',
+  code: '编号', attachment: '附件', json: '结构化数据',
+};
+
+function ConfirmationFields({ fields }: { fields: MockSkillAction['fields'] }) {
+  return (
+    <dl className="ai-confirmation-field-list">
+      {fields.map(({ label, value }, index) => (
+        <div key={index}><dt>{label}</dt><dd>{value}</dd></div>
+      ))}
+    </dl>
+  );
+}
+
+function getConfirmationReview(action: MockSkillAction) {
+  const form = getLowCodeReview(action);
+  const toolField = { label: '执行工具', value: getConfirmationToolTitle(action) };
+  if (form) {
+    const meta = '保存为草稿 · ' + form.fieldCount + ' 个字段';
+    const effect = form.menuEnabled ? '待挂载到「' + form.menuTitle + '」，发布及挂载需另行确认。' : '发布需另行确认。';
+    return {
+      subject: form.formName,
+      meta,
+      effect,
+      highlights: [],
+      fields: [
+        { label: '表单编码', value: form.formCode },
+        ...(form.description === '待补充' ? [] : [{ label: '说明', value: form.description }]),
+        ...form.fields.map(field => ({
+          label: field.label,
+          value: [fieldTypeNames[field.type] || '其他类型', field.required ? '必填' : '选填', field.options].filter(Boolean).join(' · '),
+        })),
+        toolField,
+      ],
+    };
+  }
+  const generic = getGenericActionReview(action);
+  const status = generic.fields.find(field => field.label === '状态')?.value;
+  const highlights = generic.fields.filter(field => (
+    field.label !== '状态' && field.value !== generic.subject && field.value.length <= 100 && !/^[{\[]/.test(field.value)
+  )).slice(0, 2);
   return {
-    title: action.title,
-    sourceDraftId: typeof payload._source_draft_id === 'string' ? payload._source_draft_id : '',
-    fields,
+    ...generic,
+    meta: status,
+    effect: action.skill === 'applications.publish' ? '发布后，有访问权限的成员可以打开应用。' : undefined,
+    highlights,
+    fields: [...generic.fields, toolField],
   };
 }
 
@@ -973,10 +1110,6 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
   };
 }
 
-function getStatusLabel(status: MockSkillStatus) {
-  return status === 'failed' ? '执行失败' : status === 'completed' ? '已执行' : status === 'draft_created' ? '草稿已生成' : '待复核';
-}
-
 function generateUnavailableReply(): AssistantReply {
   return {
     content: '当前无法连接后端 AI 服务。请先确认后端服务、登录状态和大模型配置可用后再试。',
@@ -1008,6 +1141,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [confirmingRunId, setConfirmingRunId] = useState<string>();
   const confirmationLocks = useRef(new Set<string>());
   const [confirmationNotes, setConfirmationNotes] = useState<Record<string, string>>({});
+  const [recordCardDrafts, setRecordCardDrafts] = useState<Record<string, Record<number, RecordCardDraft>>>({});
   const [renamingSessionId, setRenamingSessionId] = useState<string>();
   const [renamingTitle, setRenamingTitle] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -1478,13 +1612,18 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         content: '',
         fullContent: errorContent,
         typing: true,
-        trace: finishPendingPageTrace(message.trace, 'interrupted'),
+        trace: finishPendingTrace(message.trace, 'interrupted'),
         source: 'Agent 事件流',
       }));
     }
   };
 
-  const sendMessage = async (content: string, extraContext?: Record<string, unknown>, attachments: ChatAttachment[] = []) => {
+  const sendMessage = async (
+    content: string,
+    extraContext?: Record<string, unknown>,
+    attachments: ChatAttachment[] = [],
+    onAnswered?: () => void,
+  ) => {
     const trimmed = content.trim();
     if (!trimmed || streamController.current || confirmationLocks.current.size || !activeSession?.messages.length) return;
 
@@ -1523,11 +1662,15 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       });
       Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {},
         { componentPageContext, followDesignTools: true });
+      const handleEvent = turnEventHandler(sessionId, assistantMessageId, pageActionIds, () => { accepted = true; });
       await streamAgentChat({
         message: messageText,
         page: AI_WORKBENCH_PAGE,
         context: attachments.length ? { ...runtimeContext, chatAttachments: attachments } : runtimeContext,
-      }, turnEventHandler(sessionId, assistantMessageId, pageActionIds, () => { accepted = true; }), controller.signal);
+      }, (event) => {
+        handleEvent(event);
+        if (event.event === 'answer.completed') onAnswered?.();
+      }, controller.signal);
     } catch {
       if (controller.signal.aborted) {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
@@ -1535,7 +1678,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           content: '已停止本次执行。',
           fullContent: undefined,
           typing: false,
-          trace: finishPendingPageTrace(message.trace, 'stopped'),
+          trace: finishPendingTrace(message.trace, 'stopped'),
         }));
         return;
       }
@@ -1547,7 +1690,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         content: interrupted,
         fullContent: undefined,
         typing: false,
-        trace: finishPendingPageTrace(message.trace, 'interrupted'),
+        trace: finishPendingTrace(message.trace, 'interrupted'),
       }));
     } finally {
       for (const actionId of pageActionIds) finishPageAction(actionId);
@@ -1556,11 +1699,55 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     }
   };
 
+  const updateRecordCardDraft = (runId: string, actionIndex: number, update: Partial<RecordCardDraft>) => {
+    setRecordCardDrafts(previous => ({
+      ...previous,
+      [runId]: {
+        ...previous[runId],
+        [actionIndex]: {
+          ...(previous[runId]?.[actionIndex] ?? { changes: {}, valid: true }), ...update,
+        },
+      },
+    }));
+  };
+
+  const clearRecordCardDrafts = (runId: string) => {
+    setRecordCardDrafts(previous => {
+      if (!previous[runId]) return previous;
+      const next = { ...previous };
+      delete next[runId];
+      return next;
+    });
+  };
+
+  const applyRecordReviewRevision = (sessionId: string, messageId: string, items: Array<Record<string, unknown>>) => {
+    const confirmationPayload = getConfirmationItemPayload(items);
+    const token = getConfirmationToken(confirmationPayload);
+    const actions = mapAgentActions(getConfirmationActions(items));
+    if (!token || !actions) return undefined;
+    updateSessionMessage(sessionId, messageId, current => ({
+      ...current,
+      items: [
+        ...(current.items || []).filter(item => item.type !== 'confirmation'),
+        ...items.filter(item => item.type === 'confirmation'),
+      ],
+      actions: actions.map((action, index) => ({ ...action, id: current.actions?.[index]?.id || action.id })),
+      confirmationPayload,
+    }));
+    return token;
+  };
+
   const confirmAgentAction = async (message: ChatMessage, intent: 'confirm' | 'reconnect' | 'continue' = 'confirm') => {
     const runId = message.runId;
-    const token = getConfirmationToken(message.confirmationPayload);
+    let token = getConfirmationToken(message.confirmationPayload);
     if (!runId || (!token && intent === 'confirm') || !activeSession) return;
     if (confirmationLocks.current.size || streamController.current) return;
+    const edits = intent === 'confirm'
+      ? Object.entries(recordCardDrafts[runId] || {})
+        .filter(([index, draft]) => Object.keys(draft.changes).length && message.actions?.[Number(index)]
+          && supportsRecordReview(message.actions[Number(index)]))
+      : [];
+    if (edits.some(([, draft]) => !draft.valid)) return;
     confirmationLocks.current.add(runId);
     setConfirmingRunId(runId);
     const sessionId = activeSession.id;
@@ -1574,6 +1761,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     let continuationFinished = false;
     let streamFinished = false;
 
+    if (intent === 'confirm') {
+      updateSessionMessage(sessionId, message.id, item => ({ ...item, confirmationError: undefined }));
+    }
+
     const applyCompletedRun = (run: Record<string, unknown>) => {
       if (receiptShown) return;
       receiptShown = true;
@@ -1582,8 +1773,9 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         const failed = results.find(result => result.status === 'failed');
         const detail = String(failed?.error || '操作未完成，请重新读取记录后确认。');
         updateSessionMessage(sessionId, message.id, item => ({ ...item,
-          content: `${item.fullContent || item.content}\n\n未保存：${detail}`, fullContent: undefined,
+          content: item.fullContent || item.content, fullContent: undefined,
           typing: false, requiresConfirmation: false, executionResult: undefined,
+          confirmationError: detail, confirmationPayload: undefined, actionState: undefined,
           actions: item.actions?.map(action => ({ ...action, status: 'failed' as const, summary: detail, nextSteps: [] })),
         }));
         return;
@@ -1592,23 +1784,18 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       setDesignPreview(current => current?.sessionId === sessionId && current.runId === runId ? undefined : current);
       const executionResult = pickExecutionResult(results) || getExecutionResult({});
       if (results.some(result => result.menu_id)) window.dispatchEvent(new Event('applications-changed'));
-      const routePath = executionResult.href || '';
-      updateSessionMessage(sessionId, message.id, (item) => {
-        const currentContent = item.fullContent || item.content;
-        return {
-          ...item,
-          content: routePath
-            ? `${currentContent}\n\n已确认执行，${executionResult.title}：${routePath}`
-            : `${currentContent}\n\n已确认执行。`,
-          fullContent: undefined,
-          typing: false,
-          requiresConfirmation: false,
-          actionState: undefined,
-          executionResult,
-          actions: item.actions?.map(action => ({ ...action, status: 'completed' as const, summary: '已确认并执行，结果见上方。', nextSteps: [] })),
-          source: 'backend Agent: confirmed execution',
-        };
-      });
+      updateSessionMessage(sessionId, message.id, item => ({
+        ...item,
+        content: item.fullContent || item.content,
+        fullContent: undefined,
+        typing: false,
+        requiresConfirmation: false,
+        confirmationPayload: undefined,
+        confirmationError: undefined,
+        actionState: undefined,
+        executionResult,
+        actions: item.actions?.map(action => ({ ...action, status: 'completed' as const, nextSteps: [] })),
+      }));
     };
 
     const onEvent = ({ event, data }: AgentStreamEvent) => {
@@ -1634,7 +1821,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
           continuationFinished = true;
           updateSessionMessage(sessionId, continuationMessageId, item => ({
             ...item, content: '已停止继续处理。', fullContent: undefined, typing: false,
-            trace: finishPendingPageTrace(item.trace, 'stopped'),
+            trace: finishPendingTrace(item.trace, 'stopped'),
           }));
           return;
         }
@@ -1685,16 +1872,51 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         return;
       }
       if (event === 'run.failed') {
-        const detail = String(data.detail || 'unknown error');
+        const detail = String(data.detail || '暂时无法确认执行结果。');
         updateSessionMessage(sessionId, message.id, (item) => ({
           ...item,
-          content: `${item.fullContent || item.content}\n\n确认执行失败：${detail}`,
+          content: item.fullContent || item.content,
           fullContent: undefined,
           typing: false,
+          confirmationError: detail,
         }));
       }
     };
     try {
+      if (token && edits.length) {
+        try {
+          const { data } = await reviseAgentRecordReview(runId, {
+            confirmation_token: token,
+            edits: edits.map(([index, draft]) => ({ action_index: Number(index), data: recordCardChanges(draft) })),
+          });
+          const revisedToken = applyRecordReviewRevision(sessionId, message.id, data.items);
+          if (!revisedToken) throw new Error('未收到更新后的确认卡');
+          token = revisedToken;
+          clearRecordCardDrafts(runId);
+        } catch (error) {
+          let detail = recordReviewError(error);
+          const status = (error as { response?: { status?: number } }).response?.status;
+          if (!status || status === 409) {
+            try {
+              const latest = asRecord((await getAgentRunState(runId)).data?.data);
+              const items = asRecordArray(latest.items);
+              if (latest.status === 'completed' || latest.status === 'failed') {
+                applyRecordReviewRevision(sessionId, message.id, items);
+                clearRecordCardDrafts(runId);
+                applyCompletedRun(latest);
+                return;
+              }
+              const latestToken = getConfirmationToken(getConfirmationItemPayload(items));
+              if (latest.status === 'waiting_confirmation' && latestToken && latestToken !== token) {
+                applyRecordReviewRevision(sessionId, message.id, items);
+                detail = '已重新读取待确认卡，请核对明细后再确认。';
+              }
+            } catch { /* Retry remains tied to this run. */ }
+          }
+          updateSessionMessage(sessionId, message.id, item => ({ ...item, confirmationError: detail }));
+          return;
+        }
+      }
       let originalError: unknown;
       if (intent !== 'reconnect') {
         try {
@@ -1743,12 +1965,13 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       } catch { /* Retain the owner-bound card so the same run can be retried. */ }
       const detail = (error as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail
         || (error as { message?: string })?.message
-        || 'unknown error';
+        || '原因未知';
       updateSessionMessage(sessionId, message.id, (item) => ({
         ...item,
-        content: `${item.fullContent || item.content}\n\n暂未收到执行结果：${detail}。请重试此确认卡，系统会查询原操作结果。`,
+        content: item.fullContent || item.content,
         fullContent: undefined,
         typing: false,
+        confirmationError: `暂未收到执行结果（${detail}）。重试时会查询原操作结果。`,
       }));
     } finally {
       if (continuationStarted) {
@@ -1759,7 +1982,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
             content: '后续对话连接已中断，刷新后可恢复进度。',
             fullContent: undefined,
             typing: false,
-            trace: finishPendingPageTrace(item.trace, 'interrupted'),
+            trace: finishPendingTrace(item.trace, 'interrupted'),
           }));
         }
         activeContinuation.current = null;
@@ -1782,50 +2005,55 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
 
   const cancelAgentAction = async (message: ChatMessage) => {
     const runId = message.runId;
-    if (!runId || !activeSession) return;
+    const sessionId = activeSession?.id;
+    if (!runId || !sessionId || confirmingRunId) return;
     setConfirmingRunId(runId);
     try {
       await cancelAgentRun(runId);
-      setDesignPreview(current => current?.sessionId === activeSession.id && current.runId === runId ? undefined : current);
-      const nextMessages = messages.map((item) => (
-        item.id === message.id
-          ? {
-            ...item,
-            content: `${item.fullContent || item.content}\n\n已取消执行。`,
-            fullContent: undefined,
-            typing: false,
-            requiresConfirmation: false,
-            actionState: undefined,
-            source: 'backend Agent: cancelled',
-          }
-          : item
-      ));
-      setSessionMessages(activeSession.id, nextMessages);
+      clearRecordCardDrafts(runId);
+      setDesignPreview(current => current?.sessionId === sessionId && current.runId === runId ? undefined : current);
+      updateSessionMessage(sessionId, message.id, item => ({
+        ...item,
+        content: item.fullContent || item.content,
+        fullContent: undefined,
+        typing: false,
+        requiresConfirmation: false,
+        confirmationPayload: undefined,
+        confirmationError: undefined,
+        confirmationCancelled: true,
+        actionState: undefined,
+        actions: undefined,
+      }));
     } catch {
-      const nextMessages = messages.map((item) => (
-        item.id === message.id
-          ? {
-            ...item,
-            content: `${item.fullContent || item.content}\n\n取消失败，请稍后再试。`,
-            fullContent: undefined,
-            typing: false,
-          }
-          : item
-      ));
-      setSessionMessages(activeSession.id, nextMessages);
+      updateSessionMessage(sessionId, message.id, item => ({
+        ...item,
+        confirmationError: '取消失败，请稍后再试。',
+      }));
     } finally {
       setConfirmingRunId(undefined);
     }
   };
 
-  const sendConfirmationAdjustment = (action: MockSkillAction) => {
-    const note = messageScopedNote(action.id).trim();
-    if (!note) return;
-    setConfirmationNotes((prev) => ({ ...prev, [action.id]: '' }));
+  const sendConfirmationAdjustment = (action: MockSkillAction, changes?: Record<string, unknown>) => {
+    const inputNote = messageScopedNote(action.id);
+    const note = inputNote.trim();
+    if (!note || streamController.current || confirmationLocks.current.size) return;
     const pendingActionState = getPendingStateFromAction(action);
-    void sendMessage(`请调整刚才的 ${action.title}：${note}`, {
+    if (changes && Object.keys(changes).length) {
+      const slots = pendingActionState.collected_slots || {};
+      const record = asRecord(slots.record);
+      const data = { ...asRecord(record.data), ...asRecord(slots.data), ...changes };
+      pendingActionState.collected_slots = {
+        ...slots, data, ...(slots.record ? { record: { ...record, data } } : {}),
+      };
+    }
+    void sendMessage(`请调整刚才的 ${getConfirmationTitle(action)}：${note}`, {
       pendingActionState,
       pending_action_state: pendingActionState,
+    }, [], () => {
+      setConfirmationNotes(previous => (
+        previous[action.id] === inputNote ? { ...previous, [action.id]: '' } : previous
+      ));
     });
   };
 
@@ -1865,15 +2093,30 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const hasTraceOrSteps = Boolean(message.trace?.length || message.steps?.length);
               const isPendingAssistant = message.role === 'assistant' && hasTraceOrSteps && !hasAnswer;
               const canShowAssistantMeta = message.role === 'assistant' && !isTypingAssistant;
-              const hasBatchReview = (message.actions?.length || 0) > 1;
+              const actions = message.actions || [];
+              const firstAction = actions[0];
+              const firstReview = firstAction && getConfirmationReview(firstAction);
+              const hasBatchReview = actions.length > 1;
+              const canConfirm = Boolean(message.requiresConfirmation && message.runId);
+              const confirmationToken = getConfirmationToken(message.confirmationPayload);
+              const recordDrafts = message.runId ? recordCardDrafts[message.runId] : undefined;
+              const hasInvalidChanges = Object.values(recordDrafts || {})
+                .some(draft => !draft.valid && Object.keys(draft.changes).length);
+              const failedReview = firstAction?.status === 'failed';
+              const receipt = message.executionResult;
+              const showReceipt = Boolean(receipt || firstAction?.status === 'completed');
+              const canContinue = Boolean(message.runId && message.runId === activeSession?.continuableConfirmationRunId);
+              const receiptTitle = hasBatchReview ? '已完成 ' + actions.length + ' 项操作'
+                : (firstAction && confirmationTitles[firstAction.skill]?.completed)
+                  || (receipt && receipt.kind !== 'generic' ? receipt.title : '操作已完成');
               const confirmationButtons = (label = '确认执行', cancelLabel = '取消') => <>
-                <Button size="small" disabled={sending || confirmingRunId === message.runId}
+                <Button size="small" disabled={sending || Boolean(confirmingRunId)}
                   onClick={() => { void cancelAgentAction(message); }}>
                   {cancelLabel}
                 </Button>
-                <Button type="primary" size="small" icon={<CheckCircleOutlined />}
+                <Button type="primary" size="small"
                   loading={confirmingRunId === message.runId}
-                  disabled={sending || Boolean(confirmingRunId && confirmingRunId !== message.runId)}
+                  disabled={sending || hasInvalidChanges || Boolean(confirmingRunId && confirmingRunId !== message.runId)}
                   onClick={() => { void confirmAgentAction(message); }}>
                   {label}
                 </Button>
@@ -1884,37 +2127,20 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const layoutReview = layoutReviewItem ? asRecord(asRecord(layoutReviewItem.payload).form_layout_review) : {};
               const layoutReviewId = layoutReviewItem ? layoutReviewItem.item_id || layoutReviewItem.id : undefined;
               const traceItems = message.trace || [];
-              const hasDshTrace = traceItems.some((item) => item.source === 'dsh');
               const executionHref = message.executionResult?.href;
               const activeRun = (sending && message.id === messages[messages.length - 1]?.id)
                 || Boolean(confirmingRunId && confirmingRunId === message.runId);
-              const traceSummary = activeRun ? '执行过程 · 执行中'
-                : message.requiresConfirmation ? '执行过程 · 待确认' : '执行过程';
 
               return (
               <div className={`ai-chat-message ${message.role}`} key={message.id}>
                 <div className="ai-chat-bubble">
-                  {message.role === 'assistant' && traceItems.length ? (
-                    <details className="ai-agent-trace" open={activeRun || hasDshTrace || isPendingAssistant}>
-                      <summary>{traceSummary}</summary>
-                      <div className="ai-agent-trace-list" role="log" aria-label="执行步骤" aria-relevant="additions text">
-                        {traceItems.map((item) => (
-                          <div className={`ai-agent-trace-item ${item.kind}`} data-status={item.status} key={item.id}>
-                            <span className="ai-agent-trace-marker" />
-                            <div>
-                              {item.kind === 'tool' ? <small>工具调用</small> : null}
-                              {item.kind === 'result' ? <small>工具结果</small> : null}
-                              <span>{item.content}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
                   <Typography.Text className={isPendingAssistant ? 'ai-chat-pending-text' : undefined} type={isPendingAssistant ? 'secondary' : undefined}>
                     {hasContent ? message.content : (isPendingAssistant ? '正在处理...' : '')}
                     {isTypingAssistant ? <span className="ai-typing-cursor" /> : null}
                   </Typography.Text>
+                   {message.role === 'assistant' && traceItems.length > 0 && (
+                     <AgentExecutionTrace items={traceItems} active={activeRun} awaitingConfirmation={message.requiresConfirmation} />
+                   )}
                   {canShowAssistantMeta && message.source ? (
                     <span className="ai-chat-source">{message.source}</span>
                   ) : null}
@@ -1948,199 +2174,182 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                       ) : null}
                     </div>
                   ) : null}
-                  {canShowAssistantMeta && message.executionResult ? (
-                    <div className="ai-execution-result">
-                      <div>
-                        <strong>{message.executionResult.title}</strong>
-                        {message.executionResult.detail ? <small>{message.executionResult.detail}</small> : null}
-                      </div>
-                      <Space size={6}>
-                        {executionHref ? (
-                          <Button size="small" onClick={() => navigate(executionHref)}>打开</Button>
-                        ) : null}
-                        {message.runId && message.runId === activeSession?.continuableConfirmationRunId && (
-                          <Button size="small" disabled={sending || Boolean(confirmingRunId)}
-                            onClick={() => { void confirmAgentAction(message, 'continue'); }}>
-                            继续处理
-                          </Button>
-                        )}
-                      </Space>
-                    </div>
-                  ) : null}
-                  {canShowAssistantMeta && message.actions?.length ? (
-                    <div className="ai-skill-action-list">
-                      {message.actions.map((action, actionIndex) => {
-                        const review = getLowCodeReview(action);
-                        const genericReview = getGenericActionReview(action);
-                        const actionPreview = message.requiresConfirmation
-                          ? confirmationDesignPreview(message.items, actionIndex, action.payload) : undefined;
-                        const note = messageScopedNote(action.id);
+                </div>
+                {typeof layoutReviewId === 'string' && typeof layoutReview.form_id === 'number' && typeof layoutReview.operation_count === 'number' && (
+                  <NativeLayoutReview key={layoutReviewId} reviewId={layoutReviewId} formId={layoutReview.form_id}
+                    operationCount={layoutReview.operation_count} disabled={sending || Boolean(confirmingRunId)} />
+                )}
+                {canShowAssistantMeta && message.confirmationCancelled && (
+                  <div className="ai-confirmation-card ai-confirmation-cancelled">已取消操作</div>
+                )}
+                {canShowAssistantMeta && showReceipt && (
+                  <details className="ai-confirmation-receipt" data-status="completed">
+                    <summary>
+                      <CheckCircleOutlined />
+                      <span className="ai-confirmation-receipt-title">
+                        <strong>{receiptTitle}</strong>
+                        {!hasBatchReview && firstReview?.subject ? ' · ' + firstReview.subject : null}
+                        {canContinue ? <small className="ai-confirmation-meta"> · 待继续处理</small> : null}
+                      </span>
+                    </summary>
+                    <div className="ai-confirmation-receipt-body">
+                      {actions.map((action, index) => {
+                        const review = index === 0 && firstReview ? firstReview : getConfirmationReview(action);
                         return (
-                        <article className="ai-skill-action-card" key={action.id}>
-                          <div className="ai-skill-action-head">
-                            <span className="ai-skill-action-icon">
-                              <CodeOutlined />
-                            </span>
-                            <div>
-                              <Typography.Text strong>{action.title}</Typography.Text>
-                              <code>{action.skill}</code>
-                            </div>
-                            <Tag color={action.status === 'failed' ? 'red' : action.status === 'completed' ? 'green' : 'orange'}>
-                              {getStatusLabel(action.status)}
-                            </Tag>
+                          <div className="ai-confirmation-operation" key={action.id}>
+                            {hasBatchReview && <strong>{getConfirmationTitle(action)}</strong>}
+                            <ConfirmationFields fields={[
+                              ...(review.subject ? [{ label: '操作对象', value: review.subject }] : []),
+                              ...review.fields,
+                            ]} />
                           </div>
-                          <Typography.Paragraph className="ai-skill-action-summary">
-                            {action.summary}
-                          </Typography.Paragraph>
-                          {actionPreview && activeSession && (
-                            <Button type="link" size="small" aria-label={`查看${action.title}预览`}
-                              onClick={() => showDesignPreview(actionPreview, activeSession.id, message.id, message.runId)}>
-                              查看预览
-                            </Button>
-                          )}
-                          {review ? (
-                            <div className="ai-confirm-review">
-                              <div className="ai-confirm-review-head">
-                                <div>
-                                  <Typography.Text strong>{review.formName}</Typography.Text>
-                                  <small>{review.formCode}</small>
-                                </div>
-                                <Tag color={review.menuEnabled ? 'blue' : 'default'}>
-                                  {review.menuEnabled ? `待挂载：${review.menuTitle}` : '保存为草稿'}
-                                </Tag>
-                              </div>
-                              {message.requiresConfirmation && message.runId && action.payload?._harness_tool === 'forms.create_form_definition' ? (
-                                <ConfigurationReviewEditor
-                                  runId={message.runId}
-                                  token={getConfirmationToken(message.confirmationPayload) || ''}
-                                  actionIndex={actionIndex}
-                                  payload={action.payload}
-                                  disabled={sending || Boolean(confirmingRunId)}
-                                  onSaved={(items) => {
-                                    if (!activeSessionId) return;
-                                    updateSessionMessage(activeSessionId, message.id, current => ({
-                                      ...current, items,
-                                      actions: mapAgentActions(getConfirmationActions(items)),
-                                      confirmationPayload: getConfirmationItemPayload(items),
-                                    }));
-                                  }}
-                                />
-                              ) : null}
-                              <div className="ai-confirm-review-meta">
-                                <span>字段 {review.fieldCount} · 发布需单独确认</span>
-                                <span>{review.description}</span>
-                              </div>
-                              <div className="ai-confirm-field-list">
-                                {review.fields.map((field) => (
-                                  <div className="ai-confirm-field-item" key={`${action.id}-${field.name}`}>
-                                    <span>{field.label}</span>
-                                    <small>{field.name} · {field.type}{field.required ? ' · 必填' : ''}{field.options ? ` · ${field.options}` : ''}</small>
-                                  </div>
-                                ))}
-                                {review.hiddenFieldCount ? (
-                                  <div className="ai-confirm-field-more">还有 {review.hiddenFieldCount} 个字段</div>
-                                ) : null}
-                              </div>
-                              {message.requiresConfirmation && message.runId ? (
-                                <div className="ai-confirm-adjust">
-                                  <Input.TextArea
-                                    value={note}
-                                    rows={2}
-                                    placeholder="需要调整就写在这里，例如：字段增加供应商等级，菜单放到供应链风险下面"
-                                    disabled={sending || confirmingRunId === message.runId}
-                                    onChange={(event) => {
-                                      setConfirmationNotes((prev) => ({ ...prev, [action.id]: event.target.value }));
-                                    }}
-                                  />
-                                  <div className="ai-confirm-actions">
-                                    <Button
-                                      size="small"
-                                      disabled={!note.trim() || sending || confirmingRunId === message.runId}
-                                      onClick={() => sendConfirmationAdjustment(action)}
-                                    >
-                                      提交调整
-                                    </Button>
-                                    {!hasBatchReview && confirmationButtons('确认保存草稿')}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : genericReview ? (
-                            <div className="ai-confirm-review ai-generic-confirm-review">
-                              <div className="ai-confirm-review-head">
-                                <div>
-                                  <Typography.Text strong>{genericReview.title}</Typography.Text>
-                                  <small>{genericReview.sourceDraftId ? `来源草稿 ${genericReview.sourceDraftId}` : action.skill}</small>
-                                </div>
-                                <Tag color={action.status === 'failed' ? 'red' : action.status === 'completed' ? 'green' : 'orange'}>{getStatusLabel(action.status)}</Tag>
-                              </div>
-                              <div className="ai-confirm-field-list">
-                                {genericReview.fields.map((field) => (
-                                  <div className="ai-confirm-field-item" key={`${action.id}-${field.label}`}>
-                                    <span>{field.label}</span>
-                                    <small>{field.value}</small>
-                                  </div>
-                                ))}
-                              </div>
-                              {message.requiresConfirmation && message.runId ? (
-                                <div className="ai-confirm-adjust">
-                                  <Input.TextArea
-                                    value={note}
-                                    rows={2}
-                                    placeholder="需要补充或调整，就写在这里；Agent 会重新整理确认清单。"
-                                    disabled={sending || confirmingRunId === message.runId}
-                                    onChange={(event) => {
-                                      setConfirmationNotes((prev) => ({ ...prev, [action.id]: event.target.value }));
-                                    }}
-                                  />
-                                  <div className="ai-confirm-actions">
-                                    <Button
-                                      size="small"
-                                      disabled={!note.trim() || sending || confirmingRunId === message.runId}
-                                      onClick={() => sendConfirmationAdjustment(action)}
-                                    >
-                                      提交调整
-                                    </Button>
-                                    {!hasBatchReview && confirmationButtons()}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <dl className="ai-skill-action-fields">
-                              {action.fields.map((field) => (
-                                <div key={`${action.id}-${field.label}`}>
-                                  <dt>{field.label}</dt>
-                                  <dd>{field.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          )}
-                          <div className="ai-skill-action-next">
-                            <Typography.Text type="secondary">后续动作</Typography.Text>
-                            <ol>
-                              {action.nextSteps.map((step) => (
-                                <li key={`${action.id}-${step}`}>{step}</li>
-                              ))}
-                            </ol>
-                          </div>
-                          {!hasBatchReview && !review && !genericReview && message.requiresConfirmation && message.runId
-                            ? <Space size={6}>{confirmationButtons()}</Space> : null}
-                        </article>
                         );
                       })}
-                      {hasBatchReview && message.requiresConfirmation && message.runId && (
-                        <div className="ai-confirm-actions">
-                          {confirmationButtons(`确认执行 ${message.actions.length} 项`, '取消这批')}
+                      {receipt?.detail && receipt.detail !== executionHref && receipt.kind !== 'ai_draft' && (
+                        <p className="ai-confirmation-meta">{receipt.detail}</p>
+                      )}
+                      {message.confirmationError && <p className="ai-confirmation-error" role="alert">{message.confirmationError}</p>}
+                      {(executionHref || canContinue) && (
+                        <div className="ai-confirmation-secondary">
+                          {executionHref && <Button size="small" onClick={() => navigate(executionHref)}>打开</Button>}
+                          {canContinue && (
+                            <Button size="small" disabled={sending || Boolean(confirmingRunId)}
+                              onClick={() => { void confirmAgentAction(message, 'continue'); }}>
+                              继续处理
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
-                  ) : null}
-                  {typeof layoutReviewId === 'string' && typeof layoutReview.form_id === 'number' && typeof layoutReview.operation_count === 'number' && (
-                    <NativeLayoutReview key={layoutReviewId} reviewId={layoutReviewId} formId={layoutReview.form_id}
-                      operationCount={layoutReview.operation_count} disabled={sending || Boolean(confirmingRunId)} />
-                  )}
-                </div>
+                  </details>
+                )}
+                {canShowAssistantMeta && !showReceipt && firstAction && (
+                  <article className="ai-confirmation-card">
+                    <div className="ai-confirmation-head">
+                      <h4>{hasBatchReview ? '确认 ' + actions.length + ' 项操作' : getConfirmationTitle(firstAction)}</h4>
+                      <span className="ai-confirmation-status" data-status={failedReview ? 'failed' : undefined}>
+                        {failedReview ? '执行未完成' : canConfirm ? '待确认' : '操作建议'}
+                      </span>
+                    </div>
+                    {message.confirmationError || failedReview ? (
+                      <p className="ai-confirmation-error" role="alert">{message.confirmationError || firstAction.summary}</p>
+                    ) : null}
+                    {actions.map((action, actionIndex) => {
+                      const review = actionIndex === 0 && firstReview ? firstReview : getConfirmationReview(action);
+                      const actionPreview = canConfirm ? confirmationDesignPreview(message.items, actionIndex, action.payload) : undefined;
+                      const note = messageScopedNote(action.id);
+                      const disabled = sending || Boolean(confirmingRunId);
+                      const recordDraft = recordDrafts?.[actionIndex];
+                      const canEditRecord = canConfirm && Boolean(confirmationToken) && supportsRecordReview(action);
+                      const editedFields = canEditRecord ? Object.entries(recordDraft?.changes || {}) : [];
+                      const highlights = editedFields.length ? editedFields.slice(0, 2).map(([key, value]) => ({
+                        label: recordDraft?.review?.fields.find(field => field.name === key)?.label || formatSlotName(key),
+                        value: recordDraft?.displayValues?.[key] || (value === null || value === '' ? '已清空' : formatActionValue(value)),
+                      })) : review.highlights;
+                      const subject = canEditRecord ? recordDraft?.review?.form_name || review.subject : review.subject;
+                      const status = editedFields.length ? '已修改 ' + editedFields.length + ' 项' : review.meta;
+                      return (
+                        <div className="ai-confirmation-operation" key={action.id}>
+                          {hasBatchReview && <h5>{getConfirmationTitle(action)}</h5>}
+                          {(subject || status) && (
+                            <div className="ai-confirmation-subject">
+                              {subject && <strong>{subject}</strong>}
+                              {status && <span className="ai-confirmation-meta">{status}</span>}
+                            </div>
+                          )}
+                          {review.effect && <p className="ai-confirmation-meta">{review.effect}</p>}
+                          {highlights.length > 0 && <ConfirmationFields fields={highlights} />}
+                          <div className="ai-confirmation-secondary">
+                            {canEditRecord && message.runId && confirmationToken ? (
+                              <details className="ai-confirmation-details"
+                                onToggle={event => {
+                                  if (event.currentTarget.open && !recordDraft && message.runId) {
+                                    updateRecordCardDraft(message.runId, actionIndex, {});
+                                  }
+                                }}>
+                                <summary>查看并编辑</summary>
+                                {recordDraft && (
+                                  <RecordConfirmationReview
+                                    runId={message.runId}
+                                    token={confirmationToken}
+                                    actionIndex={actionIndex}
+                                    disabled={disabled}
+                                    changes={recordDraft.changes}
+                                    onChange={(changes, valid, displayValues) => {
+                                      if (message.runId) updateRecordCardDraft(message.runId, actionIndex, { changes, valid, displayValues });
+                                    }}
+                                    onReview={(recordReview, valid) => {
+                                      if (message.runId) updateRecordCardDraft(message.runId, actionIndex, { review: recordReview, valid });
+                                    }}
+                                  />
+                                )}
+                              </details>
+                            ) : (
+                              <details className="ai-confirmation-details">
+                                <summary>查看详情</summary>
+                                <ConfirmationFields fields={review.fields} />
+                              </details>
+                            )}
+                            {actionPreview && activeSession && (
+                              <Button type="link" size="small" aria-label={'查看' + getConfirmationTitle(action) + '预览'}
+                                onClick={() => showDesignPreview(actionPreview, activeSession.id, message.id, message.runId)}>
+                                查看预览
+                              </Button>
+                            )}
+                            {canConfirm && message.runId && action.payload?._harness_tool === 'forms.create_form_definition' && (
+                              <ConfigurationReviewEditor
+                                runId={message.runId}
+                                token={getConfirmationToken(message.confirmationPayload) || ''}
+                                actionIndex={actionIndex}
+                                payload={action.payload}
+                                disabled={disabled}
+                                onSaved={(items) => {
+                                  if (!activeSessionId) return;
+                                  updateSessionMessage(activeSessionId, message.id, current => ({
+                                    ...current, items,
+                                    actions: mapAgentActions(getConfirmationActions(items)),
+                                    confirmationPayload: getConfirmationItemPayload(items),
+                                  }));
+                                }}
+                              />
+                            )}
+                          </div>
+                          {canConfirm && (
+                            <div className="ai-confirmation-note">
+                              <label htmlFor={'confirmation-note-' + action.id}>备注（可选）</label>
+                              <div className="ai-confirmation-note-input">
+                                <Input id={'confirmation-note-' + action.id} size="small" value={note} disabled={disabled}
+                                  placeholder="补充需要 AI 调整的内容"
+                                  onChange={event => {
+                                    setConfirmationNotes(prev => ({ ...prev, [action.id]: event.target.value }));
+                                  }}
+                                />
+                                {note.trim() && (
+                                  <Button size="small" disabled={disabled || Boolean(editedFields.length && !recordDraft?.valid)}
+                                    onClick={() => sendConfirmationAdjustment(action, recordDraft && recordCardChanges(recordDraft))}>
+                                    更新方案
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {canConfirm && (
+                      <footer className="ai-confirmation-footer">
+                        {hasBatchReview
+                          ? confirmationButtons('确认执行 ' + actions.length + ' 项', '取消这批')
+                          : confirmationButtons(firstAction.skill === 'forms.publish_to_menu' && firstAction.payload?.publish_required
+                            ? '确认发布并挂载'
+                            : confirmationTitles[firstAction.skill]?.confirm)}
+                      </footer>
+                    )}
+                  </article>
+                )}
+                {canShowAssistantMeta && !firstAction && !showReceipt && message.confirmationError && (
+                  <p className="ai-confirmation-error" role="alert">{message.confirmationError}</p>
+                )}
                 <span>{message.createdAt}</span>
               </div>
               );

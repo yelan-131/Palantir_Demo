@@ -8,6 +8,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.db import db_session
@@ -23,6 +24,7 @@ from .low_code_tools import execute_add_form_field, execute_create_form_definiti
 from .semantic_planner import plan_agent_turn_semantic
 from .settings import safety_policy_snapshot, settings_snapshot
 from .policies import decide_tool_permission
+from .query_audit import FORM_QUERY_TOOLS, audit_form_query_result, audit_query_policy_denial
 from .tenant_context import require_tenant_id
 from .tool_handlers import dispatch_tool_handler
 from .tool_registry import get_tool
@@ -202,6 +204,9 @@ class ToolExecutionEnvelope:
                 if not validation.valid:
                     result_status = "failed"
                     result_error = validation.summary()
+            await audit_form_query_result(
+                current_user or {}, settings, tool=tool_name, status=result_status, output=output, run_id=run_id,
+            )
             return await self._finish(
                 tool_name=tool_name,
                 skill_name=skill_name,
@@ -242,6 +247,11 @@ class ToolExecutionEnvelope:
                 emitted_items=emitted_items,
             )
         except Exception as exc:  # noqa: BLE001 - envelope converts failures to items
+            if isinstance(exc, HTTPException) and exc.status_code == 403:
+                await audit_form_query_result(
+                    current_user or {}, settings, tool=tool_name, status="failed", output={}, run_id=run_id,
+                    denied_detail=exc.detail if isinstance(exc.detail, str) else "",
+                )
             return await self._finish(
                 tool_name=tool_name,
                 skill_name=skill_name,
@@ -517,11 +527,16 @@ class ToolExecutionEnvelope:
         emitted_items: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         duration_ms = int((time.perf_counter() - started_at) * 1000)
+        tool_call_id = next(
+            (entry["tool_call_id"] for entry in emitted_items or () if entry["type"] == "tool_call"),
+            None,
+        )
         item = tool_result_item(
             tool=tool_name,
             skill=skill_name,
             output=output,
             run_id=run_id,
+            tool_call_id=tool_call_id,
             status=status,
             duration_ms=duration_ms,
             error=error,
@@ -566,6 +581,8 @@ class ToolExecutionEnvelope:
         decision = decide_tool_permission(user, settings, tool_name, skill_name=skill_name)
         if decision.allowed and (confirmed or not decision.requires_confirmation):
             return None
+        if not decision.allowed and tool_name in FORM_QUERY_TOOLS:
+            await audit_query_policy_denial(user, settings, decision, tool=tool_name, run_id=run_id)
         tool = get_tool(tool_name)
         status = "waiting_confirmation" if decision.allowed else "failed"
         return await self._finish(

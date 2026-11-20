@@ -4,10 +4,21 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_tenant_id, get_current_user,require_admin
+from app.api.deps import current_tenant_id, get_current_user, get_db, require_admin
+from app.core.production_errors import diagnose_operation
+from app.services.mapped_form_sync import (
+    delete_source_sync_history,
+    last_record_sync_by_source,
+    list_sync_bindings,
+    list_sync_runs,
+    run_sync_binding,
+    save_sync_binding,
+    sync_to_form,
+)
 from app.services.metadata_scan_service import scan_data_source_metadata
 
 router = APIRouter()
@@ -146,6 +157,20 @@ class DataSourceMetadataScanBody(BaseModel):
     sample_limit: int = 3
 
 
+class MappedFormSyncBindingBody(BaseModel):
+    entity_name: str = Field(min_length=1, max_length=200)
+    object_code: str = Field(min_length=1, max_length=120)
+    form_id: int = Field(gt=0)
+
+
+class MappedFormSyncBody(MappedFormSyncBindingBody):
+    source_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class MappedFormSyncRunBody(BaseModel):
+    source_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 # ── Mock data ──────────────────────────────────────────────
 
 MOCK_DATA_SOURCES = [
@@ -203,6 +228,7 @@ async def list_data_sources(
             query = query.where(DataSource.status == status)
         result = await db.execute(query)
         sources = result.scalars().all()
+        latest_record_sync = await last_record_sync_by_source(db, tenant_id)
         return {
             "data": [
                 {
@@ -213,6 +239,7 @@ async def list_data_sources(
                     "connection_address":_public_address(s.connection_config),
                     "status": s.status,
                     "last_sync": s.last_sync.isoformat() if s.last_sync else None,
+                     "last_record_sync": latest_record_sync[s.id].astimezone().isoformat() if s.id in latest_record_sync else None,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
                 }
                 for s in sources
@@ -229,7 +256,7 @@ async def list_data_sources(
         filtered = [s for s in filtered if s["source_type"] == source_type]
     if status:
         filtered = [s for s in filtered if s["status"] == status]
-    return {"data": filtered, "source": "fallback"}
+    return {"data": [{**source, "last_record_sync": None} for source in filtered], "source": "fallback"}
 
 
 @router.post("")
@@ -428,13 +455,20 @@ async def get_sync_status(source_id: int, user: dict = Depends(get_current_user)
             )
         )
         if not row:
-            return {"data": {"source_id": source_id, "status": "idle", "tables_scanned": 0, "fields_scanned": 0}}
+            return {"data": {
+                "source_id": source_id, "status": "idle", "tables_scanned": 0, "fields_scanned": 0,
+                "last_started_at": None, "last_finished_at": None, "elapsed_ms": None, "last_error": None,
+            }}
+        elapsed_ms = None
+        if row.status in {"completed", "failed"} and row.last_started_at and row.last_finished_at:
+            elapsed_ms = max(0, int((row.last_finished_at - row.last_started_at).total_seconds() * 1000))
         return {
             "data": {
                 "source_id": source_id,
                 "status": row.status,
-                "last_started_at": row.last_started_at.isoformat() if row.last_started_at else None,
-                "last_finished_at": row.last_finished_at.isoformat() if row.last_finished_at else None,
+                 "last_started_at": row.last_started_at.astimezone().isoformat() if row.last_started_at else None,
+                 "last_finished_at": row.last_finished_at.astimezone().isoformat() if row.last_finished_at else None,
+                "elapsed_ms": elapsed_ms,
                 "last_error": row.last_error,
                 "tables_scanned": row.tables_scanned,
                 "fields_scanned": row.fields_scanned,
@@ -519,6 +553,7 @@ async def delete_data_source(source_id: int, user: dict = Depends(get_current_us
         if not ds or ds.tenant_id != tenant_id:
             raise HTTPException(404, "Data source not found")
         if ds.source_type in {'api','rest_api'} and not user.get('is_admin'):raise HTTPException(403,'外部接口数据源由管理员维护')
+        await delete_source_sync_history(db, tenant_id, source_id)
         await db.execute(delete(DataSourceMetadata).where(DataSourceMetadata.tenant_id == tenant_id, DataSourceMetadata.source_id == source_id))
         await db.execute(delete(DataSourceSyncStatus).where(DataSourceSyncStatus.tenant_id == tenant_id, DataSourceSyncStatus.source_id == source_id))
         await db.delete(ds)
@@ -576,6 +611,63 @@ async def trigger_sync(source_id: int, user: dict = Depends(get_current_user)):
     if result is not None:
         return result
     return {"status": "syncing", "message": f"已触发数据源 {source_id} 的数据同步"}
+
+
+@router.post("/{source_id}/mapped-form-sync")
+@diagnose_operation("MAPPED_FORM_SYNC_FAILED")
+async def sync_mapped_form(
+    source_id: int,
+    body: MappedFormSyncBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    return {"data": await sync_to_form(db, user, source_id=source_id, **body.model_dump())}
+
+
+@router.get("/{source_id}/mapped-form-sync-bindings")
+@diagnose_operation("MAPPED_FORM_SYNC_FAILED")
+async def list_mapped_form_sync_bindings(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    return {"data": await list_sync_bindings(db, user, source_id)}
+
+
+@router.post("/{source_id}/mapped-form-sync-bindings")
+@diagnose_operation("MAPPED_FORM_SYNC_FAILED")
+async def save_mapped_form_sync_binding(
+    source_id: int,
+    body: MappedFormSyncBindingBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    return {"data": await save_sync_binding(db, user, source_id=source_id, **body.model_dump())}
+
+
+@router.get("/{source_id}/mapped-form-sync-bindings/{binding_id}/runs")
+@diagnose_operation("MAPPED_FORM_SYNC_FAILED")
+async def list_mapped_form_sync_runs(
+    source_id: int,
+    binding_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    return {"data": await list_sync_runs(db, user, source_id, binding_id, limit)}
+
+
+@router.post("/{source_id}/mapped-form-sync-bindings/{binding_id}/runs")
+@diagnose_operation("MAPPED_FORM_SYNC_FAILED")
+async def run_mapped_form_sync_binding(
+    source_id: int,
+    binding_id: int,
+    body: MappedFormSyncRunBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    return {"data": await run_sync_binding(db, user, source_id=source_id, binding_id=binding_id,
+                                           source_key=body.source_key)}
 
 
 @router.get("/{source_id}/status")

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.db import db_session
 from app.models.relational import AIAgentRun, AIConversation
@@ -13,6 +13,7 @@ from .agent_runs import AGENT_RUNS
 from .agent_validation import agent_validation_service
 from .confirmations import create_confirmation_payload
 from .policies import decide_tool_permission
+from .run_recovery import waiting_confirmation_unchanged
 
 
 class FieldReviewEdit(BaseModel):
@@ -65,7 +66,7 @@ async def revise_configuration(run_id, edit, user, settings):
             raise HTTPException(409, '配置已更新或操作已结束，请刷新后重试')
         if confirmation.get('expires_at') and datetime.fromisoformat(confirmation['expires_at']) < datetime.now():
             raise HTTPException(409, '确认卡片已过期，请重新生成')
-        actions = deepcopy(confirmation.get('actions') or [])
+        actions = deepcopy(row.actions or confirmation.get('actions') or [])
         if edit.action_index >= len(actions):
             raise HTTPException(422, '待确认操作不存在')
         action = edit_form_proposal(actions[edit.action_index], edit)
@@ -80,8 +81,14 @@ async def revise_configuration(run_id, edit, user, settings):
         updated = create_confirmation_payload(user=user, actions=actions, evidence=row.evidence, risk_level=row.risk_level)
         # The new nonce invalidates confirmation requests from stale tabs.
         items = [item for item in (row.items or []) if item.get('type') != 'confirmation']
-        items.append(confirmation_item(confirmation_payload=updated, run_id=run_id))
-        row.items, row.actions, row.confirmation_payload = items, actions, updated
+        public_actions = list(confirmation.get('actions') or actions)
+        public_actions[edit.action_index] = action
+        public = {**updated, 'actions': public_actions}
+        items.append(confirmation_item(confirmation_payload=public, run_id=run_id))
+        written = await db.execute(update(AIAgentRun).where(*waiting_confirmation_unchanged(row))
+                                   .values(items=items, actions=actions, confirmation_payload=updated))
+        if written.rowcount != 1:
+            raise HTTPException(409, '配置已更新或操作已结束，请刷新后重试')
         conversation = await db.scalar(select(AIConversation).where(
             AIConversation.conversation_id == row.conversation_id,
             AIConversation.tenant_id == user['tenant_id'], AIConversation.user_id == owner))

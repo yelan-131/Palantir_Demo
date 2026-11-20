@@ -1,6 +1,6 @@
 # 错误码与排查手册
 
-更新日期：2026-11-19（对应代码版本 0.3.25）
+更新日期 2026-11-20，对应代码版本 0.3.26。
 
 ## 拿到错误码后
 
@@ -30,9 +30,15 @@
 | 登录失效、没权限、找不到页面或数据 | `HTTP_401`、`HTTP_403`、`HTTP_404` |
 | 表单校验、版本冲突、附件过大、频率受限 | `HTTP_400`、`HTTP_422`、`HTTP_409`、`HTTP_413`、`HTTP_429` |
 | 后端异常、上游故障、服务不可用 | `HTTP_500`、`HTTP_502`、`HTTP_503`、`HTTP_504` |
+| Windows 本地后端启动时提示 Python 文件含空字节 | `BACKEND_SOURCE_NULL_BYTES`，见下方启动排查。 |
 | 业务数据库、Neo4j 或初始化数据 | `DATABASE_UNAVAILABLE`、`GRAPH_UNAVAILABLE`、`SEED_DATA_REQUIRED` |
+| 保存对象后页面报错，或字段映射画布无法打开 | `ONTOLOGY_OBJECT_WRITE_FAILED`、`SEMANTIC_MAPPING_LOAD_FAILED`，见下方排查。 |
+| PostgreSQL 来源读不到，或映射同步到表单失败 | `MAPPED_FORM_SYNC_SOURCE_FAILED`、`MAPPED_FORM_SYNC_FAILED`，见下方排查。 |
 | AI 移动字段时找不到唯一目标 | `AI_FORM_LAYOUT_TARGET_INVALID`。核对字段库编码、画布控件和页签，字段已存在于字段库时可按编码放入。 |
 | AI 更新检查或凭据存储 | `AI_HARNESS_UPDATE_FAILED`、`AI_CREDENTIAL_STORE_UNAVAILABLE` |
+| 保存全局 AI 设置或测试模型连接时被拒绝 | `HTTP_403`。核对登录账号是否为租户 1 的管理员。租户管理员从「工具与技能」管理本租户注册表。 |
+| AI 助手运行时无法准备临时技能目录 | `AI_HARNESS_SKILL_DIR_UNAVAILABLE`，见下方 Harness 排查。 |
+| AI 业务查询被拦截 | `AI_QUERY_POLICY_DENIED` 表示 AI 角色策略拒绝，`AI_QUERY_ACCESS_DENIED` 表示业务数据权限拒绝。在「审计与日志」的「AI 助手」资源中查看发起人和原因。 |
 | 新增应用出现程序异常、应用编码重复或权限组角色无效 | `APPLICATION_CREATE_FAILED`、`APPLICATION_CODE_CONFLICT`、`APPLICATION_ROLES_INVALID` |
 | 应用菜单加载异常 | `APPLICATION_MENU_LOAD_FAILED` |
 | 应用状态不允许操作、编辑期间配置被更新或租户资源达到配额 | `APPLICATION_STATE_CONFLICT`、`CONFIG_EDIT_CONFLICT`、`TENANT_RESOURCE_QUOTA_EXCEEDED` |
@@ -47,6 +53,30 @@
 | 浏览器断网、等待超时或后端响应发送中断 | `CLIENT_NETWORK_ERROR`、`CLIENT_TIMEOUT`、`RESPONSE_INTERRUPTED` |
 
 `/health` 检查进程能否响应，`/api/v1/system/readiness` 用来查看数据库、迁移等依赖状态。写入操作出现超时或断连时，先查询原操作结果，再决定是否重新提交。
+
+### 本地数据资产目录读取失败
+
+如果 `GET /api/v1/semantic-assets/data-assets` 返回 `DATABASE_UNAVAILABLE`，先用请求编号查后端日志。如果 readiness 的 `database` 为 `ready`、`backend` 为 `sqlite`，日志却出现 `no such table: information_schema.tables`，说明运行中的后端仍用 PostgreSQL 的表目录查询 SQLite。重启本地后端以加载数据库方言兼容修复，再打开「数据中心 → 数据资产 → 资产目录」确认查询返回 200。
+
+### 对象保存、映射画布与同步排查
+
+- 新建对象返回 `DATABASE_UNAVAILABLE` 且日志中有 `MissingGreenlet` 时，先按对象编码确认对象和字段是否已保存，因为该旧故障可发生在提交后的响应生成阶段。加载修复后，从「对象与关系」新建对象并检查响应中的字段。
+- 映射画布读取失败时，用请求编号检查 `/api/v1/semantic-assets/semantic-mapping/workbench` 日志。旧版的 `OntologyField` 缺少 `label` 错误发生在对象字段节点组装阶段。加载修复后，选择已扫描的来源表与带字段的对象，确认两侧节点都出现。
+- 「同步到表单」返回来源错误时，核对只读连接、数据库 schema 和来源列，表结构变更后重新扫描。写入失败时，核对来源主键的已审核映射、目标表单已发布版本的单字段唯一规则及审批设置。使用该操作的读取、新增、更新、无变化计数核对目标表单。
+
+### 本地后端源码含空字节
+
+Windows 的 `scripts/run-backend-local.cmd` 在 Uvicorn 导入应用前检查 `backend/app` 下的 Python 源码。发现空字节时会停止启动，并将错误码与文件路径写入 `runtime-logs/backend.err.log`。直接运行 Uvicorn 遇到 `source code string cannot contain null bytes` 时，可以在仓库根目录执行同一检查。
+
+```powershell
+.\.venv\Scripts\python.exe backend/app/core/error_catalog.py --check-python-source backend/app
+```
+
+先备份列出的文件，再核对 Git 索引或可用备份中的版本，确认后恢复受影响的源码。重新运行启动脚本后，访问 `http://127.0.0.1:8000/health` 验证后端响应。
+
+### Harness 临时技能目录不可访问
+
+如果 AI 助手报告 `AI_HARNESS_SKILL_DIR_UNAVAILABLE`，核对正在运行后端的账户是否能在 `AI_HARNESS_HOME` 对应的用户目录下创建子目录、读写文件并清理。默认根目录是后端工作目录下的 `storage/ai_harness`。Windows 上的新临时技能目录继承该用户目录的 ACL。修复父目录访问权限并重启本地后端后，发起一条只读业务查询，在「执行过程」核对工具调用。模型连接测试跳过临时技能目录准备，需用实际对话核验。
 
 ## 目录维护与覆盖范围
 

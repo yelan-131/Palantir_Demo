@@ -55,7 +55,8 @@ function harness() {
 test('a matching review saves only when clicked and waits for the save receipt', async () => {
   const { render, actions, finish } = harness();
   const card = render();
-  const button = card.props.children.find(child => child?.props?.className === 'ai-confirm-actions').props.children;
+  const footer = card.props.children.find(child => child?.type === 'footer');
+  const button = footer.props.children;
   assert.equal(button.props.children, '确认保存草稿');
   assert.equal(actions.length, 0);
   button.props.onClick();
@@ -64,7 +65,10 @@ test('a matching review saves only when clicked and waits for the save receipt',
   assert.equal(render().props['aria-label'], '保存表单布局草稿');
   finish({ form_id: 7, saved: true, published: false });
   await new Promise(setImmediate);
-  assert.equal(render().props.children.props.children, '表单草稿已保存');
+  const receipt = render();
+  assert.equal(receipt.type, 'details');
+  assert.equal(receipt.props.open, undefined);
+  assert.equal(receipt.props.children[0].props.children.props.children, '表单草稿已保存');
 });
 
 test('a review is hidden when the designer moves on to a different draft', () => {

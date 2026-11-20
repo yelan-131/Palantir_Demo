@@ -66,6 +66,10 @@ export function isAdmin(user: UserInfo | null): boolean {
   return user?.is_admin ?? false;
 }
 
+export function isPlatformAdmin(user: UserInfo | null): boolean {
+  return user?.is_admin === true && user.tenant_id === 1;
+}
+
 export function getVisibleMenus(user: UserInfo | null) {
   const adminOnly = new Set(['system-admin']);
   const techMenus = new Set(['data-sources', 'ontology', 'graph', 'pipeline']);

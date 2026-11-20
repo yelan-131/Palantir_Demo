@@ -16,6 +16,8 @@ export const AI_SETTINGS_SECTIONS = [
 
 interface Props {
   sections: AISettingsSection[];
+  canManageGlobalSettings: boolean;
+  registryLoaded: boolean;
   effectivePreview?: ReactNode;
   saveActions: ReactNode;
   active: string;
@@ -70,10 +72,15 @@ export default function AISettingsWorkspace(props: Props) {
     } catch { notify('error', 'DSH 更新检查失败', '请稍后重试，或检查服务器到 PyPI 的网络连接。'); }
     finally { setChecking(false); }
   };
-  const active = AI_SETTINGS_SECTIONS.some(section => section.key === props.active) ? props.active : 'connection';
+  const sections = props.canManageGlobalSettings ? AI_SETTINGS_SECTIONS : AI_SETTINGS_SECTIONS.filter(section => section.key === 'agent-registry');
   return <div className="ai-settings-workspace ai-settings-tabs-workspace">
     {contextHolder}
-    <SettingsTabs className="ai-primary-tabs" activeKey={active} onChange={props.onSelect} items={AI_SETTINGS_SECTIONS.map(item => ({
+    {!props.canManageGlobalSettings && <Alert
+      type="info"
+      showIcon
+      message="当前账号可管理本租户的技能和工具。模型服务、AI 总开关和全局执行策略由平台管理员管理。"
+    />}
+    <SettingsTabs className="ai-primary-tabs" activeKey={props.active} onChange={props.onSelect} items={sections.map(item => ({
       key: item.key,
       label: <span>{item.icon}{item.title}</span>,
       disabled: props.saving || props.testing,
@@ -101,12 +108,12 @@ export default function AISettingsWorkspace(props: Props) {
             description={<span>SDK：{update.currentVersion || '未安装'} · Runtime：{update.runtimeVersion || '未安装'} · 最新可用：{update.latestVersion}。<a href={update.releaseUrl} target="_blank" rel="noreferrer">查看版本说明</a>（检查不会自动升级）</span>}
           />}
         </>}
-        <fieldset disabled={!props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">
+        <fieldset disabled={item.key === 'agent-registry' ? !props.registryLoaded : !props.loaded || props.saving || props.testing} className="ai-settings-fieldset ai-tab-content">
           {props.sections.find(section => section.key === item.key)?.children}
         </fieldset>
       </>,
     }))} />
-    {active !== 'agent-registry' && props.effectivePreview}
-    {props.saveActions && <footer className="ai-settings-save-footer">{props.saveActions}</footer>}
+    {props.canManageGlobalSettings && props.active !== 'agent-registry' && props.effectivePreview}
+    {props.canManageGlobalSettings && props.saveActions && <footer className="ai-settings-save-footer">{props.saveActions}</footer>}
   </div>;
 }

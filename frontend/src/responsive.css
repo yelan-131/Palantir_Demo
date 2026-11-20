@@ -137,7 +137,7 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell .ai-chat-header { min-width: 0; gap: 4px; }
   .tech-white-shell .ai-chat-body { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .tech-white-shell :is(.ai-chat-input, .ai-chat-footer, .ai-chat-context, .ai-chat-actions) { flex-shrink: 0; }
-  .tech-white-shell :is(.ai-confirm-actions, .ai-chat-actions, .ai-chat-footer) { flex-wrap: wrap; }
+  .tech-white-shell :is(.ai-chat-actions, .ai-chat-footer) { flex-wrap: wrap; }
   .tech-white-shell .ai-chat-bubble { min-width: 0; overflow-wrap: anywhere; }
   .tech-white-shell .ai-chat-bubble pre { max-width: 100%; overflow-x: auto; }
   body:has(.tech-white-shell) .ai-session-history { max-height: calc(100dvh - 112px); grid-template-rows: auto minmax(0,1fr); }
@@ -147,7 +147,4 @@ body:has(.tech-white-shell), body:has(.tech-white-shell) #root { min-width: 0; }
   .tech-white-shell .ai-workbench-panel.ai-chat-panel { right: 8px; bottom: 72px; width: calc(100vw - 68px); max-width: calc(100vw - 68px); }
   .tech-white-shell .ai-agent-title-actions { gap: 0 !important; }
   .tech-white-shell .ai-agent-title-actions .ant-btn { width: 28px; }
-  .tech-white-shell .ai-confirm-review-head { grid-template-columns: minmax(0,1fr); }
-  .tech-white-shell .ai-skill-action-head { grid-template-columns: 30px minmax(0,1fr); }
-  .tech-white-shell .ai-skill-action-head > .ant-tag { grid-column: 2; justify-self: start; }
 }

@@ -10,6 +10,7 @@ const Pipelines = lazy(() => import('../Pipeline'));
 const Assets = lazy(() => import('../SystemAdmin/SemanticAssetCenter'));
 const Entities = lazy(() => import('../Ontology'));
 const Graph = lazy(() => import('../GraphExplorer'));
+const ObjectBrowser = lazy(() => import('./ObjectBrowser'));
 
 export default function DataCenterWorkspace({ workspace }: { workspace: DataWorkspace }) {
   const [params, setParams] = useSearchParams();
@@ -32,7 +33,9 @@ export default function DataCenterWorkspace({ workspace }: { workspace: DataWork
   } else if (workspace === 'assets') {
     content = activeKey === 'entities' ? <Entities /> : <Assets key={activeKey} embedded view={activeKey === 'mapping' ? 'mapping' : 'data'} onViewChange={selectTab} />;
   } else {
-    content = activeKey === 'graph' ? <Graph /> : <Assets embedded view="ontology" />;
+    content = activeKey === 'browse'
+      ? <ObjectBrowser isAdmin={isAdmin} openModelDesign={() => selectTab('ontology')} />
+      : activeKey === 'graph' ? <Graph /> : <Assets embedded view="ontology" />;
   }
 
   return <div className="data-center-workspace">

@@ -6,7 +6,7 @@ import { getFieldOptions, getFormReferenceOptions, previewFormReferenceOptions, 
 
 interface Props extends FieldPolicy, FieldA11yProps {
   allowClear?: boolean; showSearch?: boolean; modelName: string; labelField?: string;
-  value?: number|string; onChange?: (val: number | string | undefined) => void;
+  value?: number|string; onChange?: (val: number | string | undefined, label?: string) => void;
   placeholder?: string; disabled?: boolean; draftControls?: unknown[];
   formId?: number; fieldName?: string; contextData?: Record<string, unknown>; id?: string;
 }
@@ -45,7 +45,7 @@ export default function RelationPicker({allowClear=true, showSearch=true, copyMo
   const displayed=selectedOption&&!options.some(item=>String(item.value)===String(selectedOption.value))?[selectedOption,...options]:options;
   return <FieldProtection copyMode={copyMode} copyText={copyText}><Select
     id={id} aria-required={ariaRequired} aria-invalid={ariaInvalid} aria-describedby={ariaDescribedBy} aria-label={placeholder} value={value==null?undefined:displayed.find(item=>String(item.value)===String(value))?.value??value}
-    onChange={onChange} options={displayed} loading={loading} placeholder={placeholder||`请选择${modelName}`} disabled={disabled}
+    onChange={next => onChange?.(next, displayed.find(item=>item.value===next)?.label)} options={displayed} loading={loading} placeholder={placeholder||`请选择${modelName}`} disabled={disabled}
     showSearch={showSearch} allowClear={allowClear} onSearch={remote?setInput:undefined}
     filterOption={remote?false:(input,option)=>(option?.label??'').toLowerCase().includes(input.toLowerCase())}
     onOpenChange={open=>{if(open&&error){setError('');setPage(1);setRetry(current=>current+1);setInput('');}if(!open)setInput('');}}

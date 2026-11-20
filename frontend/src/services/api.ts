@@ -207,6 +207,21 @@ export interface DataSourceMetadataInfo {
   error?: string | null;
 }
 
+export interface MappedFormSyncRequest {
+  entity_name: string;
+  object_code: string;
+  form_id: number;
+  source_key?: string;
+}
+
+export interface MappedFormSyncResult extends Omit<MappedFormSyncRequest, 'source_key'> {
+  source_id: number;
+  read: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+}
+
 export interface DataQualityRuleInfo {
   key?: string;
   name?: string;
@@ -295,6 +310,8 @@ export const deleteDataSource = (id: number) => api.delete(`/data-sources/${id}`
 export const testConnection = (id: number) => api.post(`/data-sources/${id}/test`);
 export const testDataSourceConfig = (data: Record<string, unknown>) => api.post('/data-sources/test-config', data);
 export const triggerSync = (id: number) => api.post(`/data-sources/${id}/sync`);
+export const syncMappedForm = (id: number, data: MappedFormSyncRequest) =>
+  api.post<{ data: MappedFormSyncResult }>(`/data-sources/${id}/mapped-form-sync`, data);
 export const getSyncStatus = (id: number) => api.get(`/data-sources/${id}/status`);
 export const previewData = (id: number, limit?: number) => api.get(`/data-sources/${id}/preview`, { params: { limit } });
 export const scanDataSourceMetadata = (id: number, data?: { limit_tables?: number; sample_limit?: number }) =>
@@ -643,6 +660,50 @@ export const acknowledgePageAction = (actionId: string, data: Record<string, unk
   api.post(`/ai/page-actions/${actionId}/result`, data);
 export const reviseAgentConfiguration = (runId: string, data: Record<string, unknown>) =>
   api.post(`/ai/agent-runs/${runId}/configuration-review`, data);
+
+export interface RecordReviewField {
+  name: string;
+  label: string;
+  kind: 'text' | 'textarea' | 'number' | 'select' | 'relation' | 'readonly';
+  value: unknown;
+  display_value?: string | null;
+  readonly: boolean;
+  required?: boolean;
+  multiple?: boolean;
+  min?: number;
+  max?: number;
+  precision?: number;
+  unit?: string;
+  max_length?: number;
+  options?: Array<{ value: string | number; label: string }>;
+}
+
+export interface RecordReviewResponse {
+  form_id: number;
+  form_name: string;
+  form_code: string;
+  record_id?: number | null;
+  context_data?: Record<string, unknown>;
+  fields: RecordReviewField[];
+}
+
+export interface RecordReviewEdit {
+  action_index: number;
+  data: Record<string, unknown>;
+}
+
+export interface RecordReviewRevision {
+  run_id: string;
+  items: Array<Record<string, unknown>>;
+  requires_confirmation: boolean;
+}
+
+const recordReviewPath = (runId: string) => `/ai/agent-runs/${encodeURIComponent(runId)}/record-review`;
+export const getAgentRecordReview = (runId: string, data: { confirmation_token: string; action_index: number }, signal?: AbortSignal) =>
+  api.post<RecordReviewResponse>(recordReviewPath(runId), data, { signal });
+export const reviseAgentRecordReview = (runId: string, data: { confirmation_token: string; edits: RecordReviewEdit[] }) =>
+  api.post<RecordReviewRevision>(`${recordReviewPath(runId)}/revise`, data);
+
 export const confirmAgentRun = (runId: string, data: Record<string, unknown>) =>
   api.post(`/ai/agent-runs/${runId}/confirm`, data);
 export const streamConfirmAgentRun = async (

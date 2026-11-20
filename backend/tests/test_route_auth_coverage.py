@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -89,3 +91,61 @@ def test_platform_config_routes_require_platform_admin():
     for route in app.routes:
         if isinstance(route, APIRoute) and route.path.startswith("/api/v1/config/"):
             assert require_platform_admin in _dependency_calls(route.dependant), route.path
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "operation"),
+    [
+        ("PUT", "/settings", {"settings": {"aiEnabled": False}}, "save_persisted_ai_settings"),
+        ("POST", "/settings/test", {"settings": {}}, "_test_catalog_settings"),
+        ("POST", "/provider/test", {"provider_config": {"provider": "glm"}}, "_test_provider_config"),
+    ],
+)
+def test_ai_global_settings_actions_require_platform_admin(monkeypatch, method, path, payload, operation):
+    from app.api import ai_assistant as api
+
+    ai_app = FastAPI()
+    ai_app.include_router(api.router, prefix="/ai")
+    run_operation = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(api, operation, run_operation)
+    monkeypatch.setattr(api, "_load_effective_ai_settings", AsyncMock())
+    monkeypatch.setattr(api, "merge_ai_settings", lambda supplied: {"modelServices": []})
+    with TestClient(ai_app) as client:
+        for actor in (
+            {"uid": 2, "tenant_id": 2, "is_admin": True},
+            {"uid": 3, "tenant_id": 1, "is_admin": False},
+        ):
+            ai_app.dependency_overrides[get_current_user] = lambda: actor
+            assert client.request(method, f"/ai{path}", json=payload).status_code == 403
+        run_operation.assert_not_awaited()
+
+        ai_app.dependency_overrides[get_current_user] = lambda: {"uid": 1, "tenant_id": 1, "is_admin": True}
+        response = client.request(method, f"/ai{path}", json=payload)
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        run_operation.assert_awaited_once()
+
+
+def test_tenant_admin_can_read_masked_ai_settings_and_manage_own_registry(monkeypatch):
+    from app.api import ai_assistant as api
+    from app.services.ai.settings import settings_snapshot
+
+    ai_app = FastAPI()
+    ai_app.include_router(api.router, prefix="/ai")
+    principal = {"uid": 2, "tenant_id": 2, "is_admin": True}
+    ai_app.dependency_overrides[get_current_user] = lambda: principal
+    monkeypatch.setattr(api, "_load_effective_ai_settings", AsyncMock())
+    monkeypatch.setattr(api, "AI_SYSTEM_SETTINGS", {**settings_snapshot(), "apiKey": "fixture-shared-api-key"})
+    registry = {"skills": {}, "tools": {}}
+    save_registry = AsyncMock(return_value=registry)
+    monkeypatch.setattr(api, "save_agent_registry_payload", save_registry)
+    with TestClient(ai_app) as client:
+        response = client.get("/ai/settings")
+        assert response.status_code == 200
+        assert response.json()["data"]["apiKey"] == "********"
+        assert "fixture-shared-api-key" not in response.text
+
+        response = client.put("/ai/agent-registry", json={**registry, "tenant_id": 1})
+        assert response.status_code == 200
+        assert response.json()["data"] == registry
+        save_registry.assert_awaited_once_with(registry, updated_by="2", tenant_id=2)

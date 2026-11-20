@@ -14,6 +14,7 @@ AgentItemType = Literal[
     "plan",
     "tool_call",
     "tool_result",
+    "skill_use",
     "page_action",
     "confirmation",
     "validation",
@@ -48,6 +49,7 @@ def build_agent_item(
     run_id: str | None = None,
     item_id: str | None = None,
     legacy_id: str | None = None,
+    tool_call_id: str | None = None,
     tool: str | None = None,
     skill: str | None = None,
     risk_level: str | None = None,
@@ -70,6 +72,10 @@ def build_agent_item(
         "metadata": metadata or {},
         "created_at": _now_iso(),
     }
+    if type == "tool_call":
+        item["tool_call_id"] = item["item_id"]
+    elif tool_call_id:
+        item["tool_call_id"] = tool_call_id
     if tool:
         item["tool"] = tool
     if skill:
@@ -163,6 +169,7 @@ def tool_result_item(
     skill: str | None = None,
     output: dict[str, Any] | None = None,
     run_id: str | None = None,
+    tool_call_id: str | None = None,
     status: str = "completed",
     duration_ms: int | None = None,
     error: str | None = None,
@@ -177,6 +184,7 @@ def tool_result_item(
         summary=_result_summary(output or {}, error=error),
         payload=output or {},
         run_id=run_id,
+        tool_call_id=tool_call_id,
         tool=tool,
         skill=skill,
         duration_ms=duration_ms,
