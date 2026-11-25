@@ -1,0 +1,1574 @@
+{
+  "objects": [
+    {
+      "code": "demo_relation_batch",
+      "name": "生产批次",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的生产批次。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "生产批次编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "生产批次名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "order_no",
+          "label": "生产工单编号",
+          "type": "string"
+        },
+        {
+          "code": "equipment_no",
+          "label": "加工设备编号",
+          "type": "string"
+        },
+        {
+          "code": "batch_qty",
+          "label": "批次数量",
+          "type": "integer"
+        },
+        {
+          "code": "disposition",
+          "label": "批次处置",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "齿轮座精加工批次",
+          "order_no": "DEMO-WO-01",
+          "batch_qty": 240,
+          "record_no": "DEMO-LOT-01",
+          "disposition": "筛选放行",
+          "equipment_no": "DEMO-EQ-01"
+        },
+        {
+          "name": "输入轴车削批次",
+          "order_no": "DEMO-WO-02",
+          "batch_qty": 180,
+          "record_no": "DEMO-LOT-02",
+          "disposition": "返修复验通过",
+          "equipment_no": "DEMO-EQ-02"
+        },
+        {
+          "name": "传动齿轮渗碳批次",
+          "order_no": "DEMO-WO-03",
+          "batch_qty": 320,
+          "record_no": "DEMO-LOT-03",
+          "disposition": "隔离待复检",
+          "equipment_no": "DEMO-EQ-03"
+        },
+        {
+          "name": "联轴套回火批次",
+          "order_no": "DEMO-WO-04",
+          "batch_qty": 160,
+          "record_no": "DEMO-LOT-04",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-04"
+        },
+        {
+          "name": "设备底座安装面精铣批次",
+          "order_no": "DEMO-WO-05",
+          "batch_qty": 260,
+          "record_no": "DEMO-LOT-05",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-05"
+        },
+        {
+          "name": "设备侧板安装面精铣批次",
+          "order_no": "DEMO-WO-06",
+          "batch_qty": 250,
+          "record_no": "DEMO-LOT-06",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-06"
+        },
+        {
+          "name": "导轨滚轮端面车削批次",
+          "order_no": "DEMO-WO-07",
+          "batch_qty": 420,
+          "record_no": "DEMO-LOT-07",
+          "disposition": "隔离待复检",
+          "equipment_no": "DEMO-EQ-07"
+        },
+        {
+          "name": "导轨隔套端面车削批次",
+          "order_no": "DEMO-WO-08",
+          "batch_qty": 400,
+          "record_no": "DEMO-LOT-08",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-08"
+        },
+        {
+          "name": "电控箱检修门折弯批次",
+          "order_no": "DEMO-WO-09",
+          "batch_qty": 110,
+          "record_no": "DEMO-LOT-09",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-09"
+        },
+        {
+          "name": "过滤器检修门折弯批次",
+          "order_no": "DEMO-WO-10",
+          "batch_qty": 105,
+          "record_no": "DEMO-LOT-10",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-10"
+        },
+        {
+          "name": "耐蚀箱体框盖装配批次",
+          "order_no": "DEMO-WO-11",
+          "batch_qty": 85,
+          "record_no": "DEMO-LOT-11",
+          "disposition": "隔离待复检",
+          "equipment_no": "DEMO-EQ-11"
+        },
+        {
+          "name": "耐蚀箱体侧板装配批次",
+          "order_no": "DEMO-WO-12",
+          "batch_qty": 92,
+          "record_no": "DEMO-LOT-12",
+          "disposition": "复验放行",
+          "equipment_no": "DEMO-EQ-12"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_capa",
+      "name": "纠正措施",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的纠正措施。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "纠正措施编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "纠正措施名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "event_no",
+          "label": "质量事件编号",
+          "type": "string"
+        },
+        {
+          "code": "state",
+          "label": "措施状态",
+          "type": "string"
+        },
+        {
+          "code": "action_detail",
+          "label": "措施说明",
+          "type": "text"
+        }
+      ],
+      "records": [
+        {
+          "name": "更换夹具定位销",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-01",
+          "record_no": "DEMO-CAPA-01",
+          "action_detail": "更换定位销，将位置度纳入每班首件检查。"
+        },
+        {
+          "name": "补充换刀首件检查项",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-02",
+          "record_no": "DEMO-CAPA-02",
+          "action_detail": "更新首件表，增加端面毛刺检查及现场复核。"
+        },
+        {
+          "name": "复核渗碳炉温并复检",
+          "state": "执行中",
+          "event_no": "DEMO-QE-03",
+          "record_no": "DEMO-CAPA-03",
+          "action_detail": "校验炉温探头，复核工艺曲线，对隔离批次分区取样复检。"
+        },
+        {
+          "name": "设置温度采集掉线告警",
+          "state": "待验证",
+          "event_no": "DEMO-QE-04",
+          "record_no": "DEMO-CAPA-04",
+          "action_detail": "增加掉线告警并验证记录补传，班组每班检查一次采集状态。"
+        },
+        {
+          "name": "清洁夹具定位面",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-05",
+          "record_no": "DEMO-CAPA-05",
+          "action_detail": "增加每换批的定位面清洁确认。"
+        },
+        {
+          "name": "复核精铣刀补",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-06",
+          "record_no": "DEMO-CAPA-06",
+          "action_detail": "换刀后锁定刀补复核并留存首件记录。"
+        },
+        {
+          "name": "检查滚轮端面刀具",
+          "state": "执行中",
+          "event_no": "DEMO-QE-07",
+          "record_no": "DEMO-CAPA-07",
+          "action_detail": "复核刀具磨损和夹持，隔离标记后进行逐件复检。"
+        },
+        {
+          "name": "补充隔套去毛刺检查",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-08",
+          "record_no": "DEMO-CAPA-08",
+          "action_detail": "修订检验样板并把边缘检查纳入末件确认。"
+        },
+        {
+          "name": "复核检修门折弯补偿",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-09",
+          "record_no": "DEMO-CAPA-09",
+          "action_detail": "核对回弹试片结果并更新设备配方。"
+        },
+        {
+          "name": "复核过滤器检修门折弯补偿",
+          "state": "已关闭",
+          "event_no": "DEMO-QE-10",
+          "record_no": "DEMO-CAPA-10",
+          "action_detail": "在生产首件记录中增加两侧折角检查。"
+        },
+        {
+          "name": "校核框盖装配定位销",
+          "state": "执行中",
+          "event_no": "DEMO-QE-11",
+          "record_no": "DEMO-CAPA-11",
+          "action_detail": "检查定位销配合及压紧顺序，复验后方可释放批次。"
+        },
+        {
+          "name": "核验侧板紧固留痕",
+          "state": "待验证",
+          "event_no": "DEMO-QE-12",
+          "record_no": "DEMO-CAPA-12",
+          "action_detail": "增加控制站通信告警并抽检一班紧固记录。"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_equipment",
+      "name": "设备",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的设备。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "设备编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "设备名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "line_no",
+          "label": "所属生产线编号",
+          "type": "string"
+        },
+        {
+          "code": "model",
+          "label": "设备型号",
+          "type": "string"
+        },
+        {
+          "code": "state",
+          "label": "设备状态",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "立式加工中心 A01",
+          "model": "VMC-850",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-01",
+          "record_no": "DEMO-EQ-01"
+        },
+        {
+          "name": "数控车床 A02",
+          "model": "CK-6150",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-01",
+          "record_no": "DEMO-EQ-02"
+        },
+        {
+          "name": "渗碳炉 B01",
+          "model": "CBF-600",
+          "state": "维护中",
+          "line_no": "DEMO-LINE-02",
+          "record_no": "DEMO-EQ-03"
+        },
+        {
+          "name": "回火炉 B02",
+          "model": "TF-450",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-02",
+          "record_no": "DEMO-EQ-04"
+        },
+        {
+          "name": "立式加工中心 C01",
+          "model": "VMC-1060",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-03",
+          "record_no": "DEMO-EQ-05"
+        },
+        {
+          "name": "立式加工中心 C02",
+          "model": "VMC-1060",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-04",
+          "record_no": "DEMO-EQ-06"
+        },
+        {
+          "name": "数控车床 C03",
+          "model": "CK-6160",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-05",
+          "record_no": "DEMO-EQ-07"
+        },
+        {
+          "name": "数控车床 C04",
+          "model": "CK-6160",
+          "state": "待机",
+          "line_no": "DEMO-LINE-06",
+          "record_no": "DEMO-EQ-08"
+        },
+        {
+          "name": "数控折弯机 D01",
+          "model": "PB-170",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-07",
+          "record_no": "DEMO-EQ-09"
+        },
+        {
+          "name": "数控折弯机 D02",
+          "model": "PB-170",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-08",
+          "record_no": "DEMO-EQ-10"
+        },
+        {
+          "name": "台式扭矩控制站 D03",
+          "model": "TS-120",
+          "state": "运行中",
+          "line_no": "DEMO-LINE-09",
+          "record_no": "DEMO-EQ-11"
+        },
+        {
+          "name": "台式扭矩控制站 D04",
+          "model": "TS-120",
+          "state": "维护中",
+          "line_no": "DEMO-LINE-10",
+          "record_no": "DEMO-EQ-12"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_item",
+      "name": "物料",
+      "description": "关系探索演示数据：虚构精密制造车间的物料。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "物料编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "物料名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "item_type",
+          "label": "物料类型",
+          "type": "string"
+        },
+        {
+          "code": "unit_mass_kg",
+          "label": "单件重量（千克）",
+          "type": "number"
+        },
+        {
+          "code": "inventory_qty",
+          "label": "库存（件）",
+          "type": "integer"
+        },
+        {
+          "code": "material_no",
+          "label": "材料编号",
+          "type": "string"
+        },
+        {
+          "code": "warehouse_no",
+          "label": "存放库区编号",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "铝合金支架毛坯 A",
+          "item_type": "机加工毛坯",
+          "record_no": "DEMO-ITEM-01",
+          "material_no": "DEMO-MAT-01",
+          "unit_mass_kg": 0.82,
+          "warehouse_no": "DEMO-WH-01",
+          "inventory_qty": 240
+        },
+        {
+          "name": "铝合金支架毛坯 B",
+          "item_type": "机加工毛坯",
+          "record_no": "DEMO-ITEM-02",
+          "material_no": "DEMO-MAT-02",
+          "unit_mass_kg": 0.85,
+          "warehouse_no": "DEMO-WH-02",
+          "inventory_qty": 225
+        },
+        {
+          "name": "不锈钢防护罩板坯",
+          "item_type": "板材",
+          "record_no": "DEMO-ITEM-03",
+          "material_no": "DEMO-MAT-03",
+          "unit_mass_kg": 3.4,
+          "warehouse_no": "DEMO-WH-03",
+          "inventory_qty": 60
+        },
+        {
+          "name": "铝合金导轨支座型材 A",
+          "item_type": "挤压型材",
+          "record_no": "DEMO-ITEM-04",
+          "material_no": "DEMO-MAT-04",
+          "unit_mass_kg": 1.24,
+          "warehouse_no": "DEMO-WH-04",
+          "inventory_qty": 310
+        },
+        {
+          "name": "铝合金导轨支座型材 B",
+          "item_type": "挤压型材",
+          "record_no": "DEMO-ITEM-05",
+          "material_no": "DEMO-MAT-05",
+          "unit_mass_kg": 1.19,
+          "warehouse_no": "DEMO-WH-05",
+          "inventory_qty": 298
+        },
+        {
+          "name": "不锈钢检修门板坯",
+          "item_type": "板材",
+          "record_no": "DEMO-ITEM-06",
+          "material_no": "DEMO-MAT-06",
+          "unit_mass_kg": 2.95,
+          "warehouse_no": "DEMO-WH-06",
+          "inventory_qty": 128
+        },
+        {
+          "name": "不锈钢防护箱侧板坯",
+          "item_type": "板材",
+          "record_no": "DEMO-ITEM-07",
+          "material_no": "DEMO-MAT-07",
+          "unit_mass_kg": 3.12,
+          "warehouse_no": "DEMO-WH-07",
+          "inventory_qty": 116
+        },
+        {
+          "name": "复合防护箱压铸框毛坯",
+          "item_type": "压铸毛坯",
+          "record_no": "DEMO-ITEM-08",
+          "material_no": "DEMO-MAT-08",
+          "unit_mass_kg": 2.16,
+          "warehouse_no": "DEMO-WH-08",
+          "inventory_qty": 84
+        },
+        {
+          "name": "铝合金加强支架毛坯 C",
+          "item_type": "机加工毛坯",
+          "record_no": "DEMO-ITEM-09",
+          "material_no": "DEMO-MAT-01",
+          "unit_mass_kg": 0.88,
+          "warehouse_no": "DEMO-WH-04",
+          "inventory_qty": 218
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_material",
+      "name": "材料",
+      "description": "关系探索演示数据：虚构精密制造车间的材料。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "材料编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "材料名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "material_type",
+          "label": "材料类型",
+          "type": "string"
+        },
+        {
+          "code": "density_g_cm3",
+          "label": "密度（克／立方厘米）",
+          "type": "number"
+        },
+        {
+          "code": "tensile_mpa",
+          "label": "名义抗拉强度（兆帕）",
+          "type": "integer"
+        }
+      ],
+      "records": [
+        {
+          "name": "6061-T6 铝合金",
+          "record_no": "DEMO-MAT-01",
+          "tensile_mpa": 310,
+          "density_g_cm3": 2.7,
+          "material_type": "铝合金"
+        },
+        {
+          "name": "6061-T651 铝合金",
+          "record_no": "DEMO-MAT-02",
+          "tensile_mpa": 305,
+          "density_g_cm3": 2.7,
+          "material_type": "铝合金"
+        },
+        {
+          "name": "304 不锈钢",
+          "record_no": "DEMO-MAT-03",
+          "tensile_mpa": 520,
+          "density_g_cm3": 7.93,
+          "material_type": "不锈钢"
+        },
+        {
+          "name": "6082-T6 铝合金",
+          "record_no": "DEMO-MAT-04",
+          "tensile_mpa": 320,
+          "density_g_cm3": 2.7,
+          "material_type": "铝合金"
+        },
+        {
+          "name": "6063-T6 铝合金",
+          "record_no": "DEMO-MAT-05",
+          "tensile_mpa": 245,
+          "density_g_cm3": 2.69,
+          "material_type": "铝合金"
+        },
+        {
+          "name": "304L 不锈钢",
+          "record_no": "DEMO-MAT-06",
+          "tensile_mpa": 510,
+          "density_g_cm3": 7.9,
+          "material_type": "不锈钢"
+        },
+        {
+          "name": "316L 不锈钢",
+          "record_no": "DEMO-MAT-07",
+          "tensile_mpa": 525,
+          "density_g_cm3": 7.98,
+          "material_type": "不锈钢"
+        },
+        {
+          "name": "A380 压铸铝合金",
+          "record_no": "DEMO-MAT-08",
+          "tensile_mpa": 315,
+          "density_g_cm3": 2.71,
+          "material_type": "压铸铝合金"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_operation",
+      "name": "工序",
+      "description": "关系探索演示数据：虚构精密制造车间的工序。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "工序编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "工序名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "operation_type",
+          "label": "工序类型",
+          "type": "string"
+        },
+        {
+          "code": "duration_min",
+          "label": "单件工时（分钟）",
+          "type": "integer"
+        },
+        {
+          "code": "tolerance_mm",
+          "label": "尺寸公差（毫米）",
+          "type": "number"
+        },
+        {
+          "code": "process_no",
+          "label": "所属工艺编号",
+          "type": "string"
+        },
+        {
+          "code": "item_no",
+          "label": "投料编号",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "支架轮廓精铣 A",
+          "item_no": "DEMO-ITEM-01",
+          "record_no": "DEMO-OP-01",
+          "process_no": "DEMO-PROC-01",
+          "duration_min": 12,
+          "tolerance_mm": 0.08,
+          "operation_type": "精铣"
+        },
+        {
+          "name": "支架轮廓精铣 B",
+          "item_no": "DEMO-ITEM-02",
+          "record_no": "DEMO-OP-02",
+          "process_no": "DEMO-PROC-02",
+          "duration_min": 13,
+          "tolerance_mm": 0.09,
+          "operation_type": "精铣"
+        },
+        {
+          "name": "防护罩数控折弯",
+          "item_no": "DEMO-ITEM-03",
+          "record_no": "DEMO-OP-03",
+          "process_no": "DEMO-PROC-03",
+          "duration_min": 4,
+          "tolerance_mm": 0.5,
+          "operation_type": "折弯"
+        },
+        {
+          "name": "支架边缘去毛刺",
+          "item_no": "DEMO-ITEM-01",
+          "record_no": "DEMO-OP-04",
+          "process_no": "DEMO-PROC-01",
+          "duration_min": 3,
+          "tolerance_mm": 0.2,
+          "operation_type": "去毛刺"
+        },
+        {
+          "name": "导轨支座安装面精铣 A",
+          "item_no": "DEMO-ITEM-04",
+          "record_no": "DEMO-OP-05",
+          "process_no": "DEMO-PROC-04",
+          "duration_min": 15,
+          "tolerance_mm": 0.08,
+          "operation_type": "精铣"
+        },
+        {
+          "name": "导轨支座安装面精铣 B",
+          "item_no": "DEMO-ITEM-05",
+          "record_no": "DEMO-OP-06",
+          "process_no": "DEMO-PROC-05",
+          "duration_min": 16,
+          "tolerance_mm": 0.09,
+          "operation_type": "精铣"
+        },
+        {
+          "name": "检修门翻边折弯",
+          "item_no": "DEMO-ITEM-06",
+          "record_no": "DEMO-OP-07",
+          "process_no": "DEMO-PROC-06",
+          "duration_min": 5,
+          "tolerance_mm": 0.45,
+          "operation_type": "折弯"
+        },
+        {
+          "name": "复合防护箱侧板定位",
+          "item_no": "DEMO-ITEM-07",
+          "record_no": "DEMO-OP-08",
+          "process_no": "DEMO-PROC-08",
+          "duration_min": 8,
+          "tolerance_mm": 0.18,
+          "operation_type": "定位装配"
+        },
+        {
+          "name": "复合防护箱压铸框安装",
+          "item_no": "DEMO-ITEM-08",
+          "record_no": "DEMO-OP-09",
+          "process_no": "DEMO-PROC-08",
+          "duration_min": 9,
+          "tolerance_mm": 0.2,
+          "operation_type": "定位装配"
+        },
+        {
+          "name": "加强支架轮廓精铣",
+          "item_no": "DEMO-ITEM-09",
+          "record_no": "DEMO-OP-10",
+          "process_no": "DEMO-PROC-07",
+          "duration_min": 13,
+          "tolerance_mm": 0.09,
+          "operation_type": "精铣"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_process",
+      "name": "工艺",
+      "description": "关系探索演示数据：虚构精密制造车间的工艺。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "工艺编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "工艺名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "process_type",
+          "label": "工艺类型",
+          "type": "string"
+        },
+        {
+          "code": "cycle_min",
+          "label": "标准加工时长（分钟）",
+          "type": "integer"
+        },
+        {
+          "code": "setup_min",
+          "label": "换型准备时长（分钟）",
+          "type": "integer"
+        }
+      ],
+      "records": [
+        {
+          "name": "铝支架精加工 A",
+          "cycle_min": 28,
+          "record_no": "DEMO-PROC-01",
+          "setup_min": 8,
+          "process_type": "数控铣削"
+        },
+        {
+          "name": "铝支架精加工 B",
+          "cycle_min": 30,
+          "record_no": "DEMO-PROC-02",
+          "setup_min": 9,
+          "process_type": "数控铣削"
+        },
+        {
+          "name": "钢罩钣金成型",
+          "cycle_min": 8,
+          "record_no": "DEMO-PROC-03",
+          "setup_min": 3,
+          "process_type": "板材成型"
+        },
+        {
+          "name": "铝合金导轨支座精加工 A",
+          "cycle_min": 34,
+          "record_no": "DEMO-PROC-04",
+          "setup_min": 10,
+          "process_type": "数控铣削"
+        },
+        {
+          "name": "铝合金导轨支座精加工 B",
+          "cycle_min": 36,
+          "record_no": "DEMO-PROC-05",
+          "setup_min": 11,
+          "process_type": "数控铣削"
+        },
+        {
+          "name": "不锈钢检修门折弯成型",
+          "cycle_min": 11,
+          "record_no": "DEMO-PROC-06",
+          "setup_min": 4,
+          "process_type": "板材成型"
+        },
+        {
+          "name": "铝合金加强支架精加工",
+          "cycle_min": 31,
+          "record_no": "DEMO-PROC-07",
+          "setup_min": 8,
+          "process_type": "数控铣削"
+        },
+        {
+          "name": "金属复合防护箱装配",
+          "cycle_min": 19,
+          "record_no": "DEMO-PROC-08",
+          "setup_min": 6,
+          "process_type": "装配"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_product",
+      "name": "产品",
+      "description": "关系探索演示数据：虚构精密制造车间的产品。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "产品编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "产品名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "product_type",
+          "label": "产品类型",
+          "type": "string"
+        },
+        {
+          "code": "unit_mass_kg",
+          "label": "单件重量（千克）",
+          "type": "number"
+        },
+        {
+          "code": "length_mm",
+          "label": "外形长度（毫米）",
+          "type": "integer"
+        },
+        {
+          "code": "process_no",
+          "label": "采用工艺编号",
+          "type": "string"
+        },
+        {
+          "code": "material_no",
+          "label": "指定材料编号",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "铝合金安装支架左件",
+          "length_mm": 160,
+          "record_no": "DEMO-PROD-01",
+          "process_no": "DEMO-PROC-01",
+          "material_no": "DEMO-MAT-01",
+          "product_type": "支架",
+          "unit_mass_kg": 0.64
+        },
+        {
+          "name": "铝合金安装支架右件",
+          "length_mm": 165,
+          "record_no": "DEMO-PROD-02",
+          "process_no": "DEMO-PROC-02",
+          "material_no": "DEMO-MAT-02",
+          "product_type": "支架",
+          "unit_mass_kg": 0.66
+        },
+        {
+          "name": "不锈钢设备防护罩",
+          "length_mm": 560,
+          "record_no": "DEMO-PROD-03",
+          "process_no": "DEMO-PROC-03",
+          "material_no": "DEMO-MAT-03",
+          "product_type": "防护罩",
+          "unit_mass_kg": 2.8
+        },
+        {
+          "name": "铝合金导轨支座左件",
+          "length_mm": 175,
+          "record_no": "DEMO-PROD-04",
+          "process_no": "DEMO-PROC-04",
+          "material_no": "DEMO-MAT-04",
+          "product_type": "支座",
+          "unit_mass_kg": 0.92
+        },
+        {
+          "name": "铝合金导轨支座右件",
+          "length_mm": 178,
+          "record_no": "DEMO-PROD-05",
+          "process_no": "DEMO-PROC-05",
+          "material_no": "DEMO-MAT-05",
+          "product_type": "支座",
+          "unit_mass_kg": 0.9
+        },
+        {
+          "name": "不锈钢箱体检修门",
+          "length_mm": 480,
+          "record_no": "DEMO-PROD-06",
+          "process_no": "DEMO-PROC-06",
+          "material_no": "DEMO-MAT-06",
+          "product_type": "检修门",
+          "unit_mass_kg": 2.71
+        },
+        {
+          "name": "耐蚀复合防护箱侧板型",
+          "length_mm": 500,
+          "record_no": "DEMO-PROD-07",
+          "process_no": "DEMO-PROC-08",
+          "material_no": "DEMO-MAT-07",
+          "product_type": "防护箱",
+          "unit_mass_kg": 4.35
+        },
+        {
+          "name": "耐蚀复合防护箱铝框型",
+          "length_mm": 495,
+          "record_no": "DEMO-PROD-08",
+          "process_no": "DEMO-PROC-08",
+          "material_no": "DEMO-MAT-08",
+          "product_type": "防护箱",
+          "unit_mass_kg": 4.19
+        },
+        {
+          "name": "铝合金设备加强支架",
+          "length_mm": 171,
+          "record_no": "DEMO-PROD-09",
+          "process_no": "DEMO-PROC-07",
+          "material_no": "DEMO-MAT-01",
+          "product_type": "支架",
+          "unit_mass_kg": 0.68
+        },
+        {
+          "name": "铝合金导轨支座左件加长型",
+          "length_mm": 188,
+          "record_no": "DEMO-PROD-10",
+          "process_no": "DEMO-PROC-04",
+          "material_no": "DEMO-MAT-04",
+          "product_type": "支座",
+          "unit_mass_kg": 0.97
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_extra_warehouse",
+      "name": "仓储区域",
+      "description": "关系探索演示数据：虚构精密制造车间的仓储区域。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "仓储区域编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "仓储区域名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "warehouse_type",
+          "label": "库区类型",
+          "type": "string"
+        },
+        {
+          "code": "capacity_slots",
+          "label": "库位数",
+          "type": "integer"
+        },
+        {
+          "code": "setpoint_c",
+          "label": "设定仓温（℃）",
+          "type": "integer"
+        },
+        {
+          "code": "workshop_no",
+          "label": "服务车间编号",
+          "type": "string"
+        }
+      ],
+      "records": [
+        {
+          "name": "铝材原料 A 区",
+          "record_no": "DEMO-WH-01",
+          "setpoint_c": 20,
+          "workshop_no": "DEMO-SHOP-01",
+          "capacity_slots": 120,
+          "warehouse_type": "普通货架"
+        },
+        {
+          "name": "铝材原料 B 区",
+          "record_no": "DEMO-WH-02",
+          "setpoint_c": 21,
+          "workshop_no": "DEMO-SHOP-01",
+          "capacity_slots": 126,
+          "warehouse_type": "普通货架"
+        },
+        {
+          "name": "不锈钢板重载库",
+          "record_no": "DEMO-WH-03",
+          "setpoint_c": 15,
+          "workshop_no": "DEMO-SHOP-01",
+          "capacity_slots": 500,
+          "warehouse_type": "重载货架"
+        },
+        {
+          "name": "铝材机加工货架 C1 区",
+          "record_no": "DEMO-WH-04",
+          "setpoint_c": 20,
+          "workshop_no": "DEMO-SHOP-02",
+          "capacity_slots": 146,
+          "warehouse_type": "普通货架"
+        },
+        {
+          "name": "铝材机加工货架 C2 区",
+          "record_no": "DEMO-WH-05",
+          "setpoint_c": 21,
+          "workshop_no": "DEMO-SHOP-02",
+          "capacity_slots": 152,
+          "warehouse_type": "普通货架"
+        },
+        {
+          "name": "不锈板原料重载 D1 区",
+          "record_no": "DEMO-WH-06",
+          "setpoint_c": 16,
+          "workshop_no": "DEMO-SHOP-03",
+          "capacity_slots": 430,
+          "warehouse_type": "重载货架"
+        },
+        {
+          "name": "不锈板原料重载 D2 区",
+          "record_no": "DEMO-WH-07",
+          "setpoint_c": 17,
+          "workshop_no": "DEMO-SHOP-03",
+          "capacity_slots": 455,
+          "warehouse_type": "重载货架"
+        },
+        {
+          "name": "压铸件周转货架",
+          "record_no": "DEMO-WH-08",
+          "setpoint_c": 23,
+          "workshop_no": "DEMO-SHOP-01",
+          "capacity_slots": 86,
+          "warehouse_type": "周转库"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_line",
+      "name": "生产线",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的生产线。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "生产线编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "生产线名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "workshop_no",
+          "label": "所属车间编号",
+          "type": "string"
+        },
+        {
+          "code": "process",
+          "label": "主要工序",
+          "type": "string"
+        }
+      ],
+      "similarity_features": [],
+      "records": [
+        {
+          "name": "数控加工 A 线",
+          "process": "车削、精铣",
+          "record_no": "DEMO-LINE-01",
+          "workshop_no": "DEMO-SHOP-01"
+        },
+        {
+          "name": "热处理 B 线",
+          "process": "渗碳淬火、回火",
+          "record_no": "DEMO-LINE-02",
+          "workshop_no": "DEMO-SHOP-01"
+        },
+        {
+          "name": "精密铣削 C1 线",
+          "process": "轮廓精铣、安装面精铣",
+          "record_no": "DEMO-LINE-03",
+          "workshop_no": "DEMO-SHOP-02"
+        },
+        {
+          "name": "精密铣削 C2 线",
+          "process": "轮廓精铣、安装面精铣",
+          "record_no": "DEMO-LINE-04",
+          "workshop_no": "DEMO-SHOP-02"
+        },
+        {
+          "name": "端面车削 C3 线",
+          "process": "端面车削、去毛刺",
+          "record_no": "DEMO-LINE-05",
+          "workshop_no": "DEMO-SHOP-02"
+        },
+        {
+          "name": "端面车削 C4 线",
+          "process": "端面车削、去毛刺",
+          "record_no": "DEMO-LINE-06",
+          "workshop_no": "DEMO-SHOP-02"
+        },
+        {
+          "name": "板材成型 D1 线",
+          "process": "板材折弯、折角复核",
+          "record_no": "DEMO-LINE-07",
+          "workshop_no": "DEMO-SHOP-03"
+        },
+        {
+          "name": "板材成型 D2 线",
+          "process": "板材折弯、折角复核",
+          "record_no": "DEMO-LINE-08",
+          "workshop_no": "DEMO-SHOP-03"
+        },
+        {
+          "name": "防护件装配 D3 线",
+          "process": "框盖装配、扭矩确认",
+          "record_no": "DEMO-LINE-09",
+          "workshop_no": "DEMO-SHOP-03"
+        },
+        {
+          "name": "防护件装配 D4 线",
+          "process": "框盖装配、扭矩确认",
+          "record_no": "DEMO-LINE-10",
+          "workshop_no": "DEMO-SHOP-03"
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_order",
+      "name": "生产工单",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的生产工单。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "生产工单编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "生产工单名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "line_no",
+          "label": "执行生产线编号",
+          "type": "string"
+        },
+        {
+          "code": "planned_qty",
+          "label": "计划数量",
+          "type": "integer"
+        },
+        {
+          "code": "state",
+          "label": "工单状态",
+          "type": "string"
+        }
+      ],
+      "similarity_features": [
+        {
+          "code": "planned_qty",
+          "kind": "number",
+          "tolerance": 100.0
+        }
+      ],
+      "records": [
+        {
+          "name": "齿轮座精加工",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-01",
+          "record_no": "DEMO-WO-01",
+          "planned_qty": 240
+        },
+        {
+          "name": "输入轴车削",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-01",
+          "record_no": "DEMO-WO-02",
+          "planned_qty": 180
+        },
+        {
+          "name": "传动齿轮渗碳",
+          "state": "待复检",
+          "line_no": "DEMO-LINE-02",
+          "record_no": "DEMO-WO-03",
+          "planned_qty": 320
+        },
+        {
+          "name": "联轴套回火",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-02",
+          "record_no": "DEMO-WO-04",
+          "planned_qty": 160
+        },
+        {
+          "name": "设备底座安装面精铣",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-03",
+          "record_no": "DEMO-WO-05",
+          "planned_qty": 260
+        },
+        {
+          "name": "设备侧板安装面精铣",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-04",
+          "record_no": "DEMO-WO-06",
+          "planned_qty": 250
+        },
+        {
+          "name": "导轨滚轮端面车削",
+          "state": "待复检",
+          "line_no": "DEMO-LINE-05",
+          "record_no": "DEMO-WO-07",
+          "planned_qty": 420
+        },
+        {
+          "name": "导轨隔套端面车削",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-06",
+          "record_no": "DEMO-WO-08",
+          "planned_qty": 400
+        },
+        {
+          "name": "电控箱检修门折弯",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-07",
+          "record_no": "DEMO-WO-09",
+          "planned_qty": 110
+        },
+        {
+          "name": "过滤器检修门折弯",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-08",
+          "record_no": "DEMO-WO-10",
+          "planned_qty": 105
+        },
+        {
+          "name": "耐蚀箱体框盖装配",
+          "state": "待复检",
+          "line_no": "DEMO-LINE-09",
+          "record_no": "DEMO-WO-11",
+          "planned_qty": 85
+        },
+        {
+          "name": "耐蚀箱体侧板装配",
+          "state": "已完工",
+          "line_no": "DEMO-LINE-10",
+          "record_no": "DEMO-WO-12",
+          "planned_qty": 92
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_quality",
+      "name": "质量事件",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的质量事件。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "质量事件编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "质量事件名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "batch_no",
+          "label": "受影响批次编号",
+          "type": "string"
+        },
+        {
+          "code": "affected_qty",
+          "label": "涉及件数",
+          "type": "integer"
+        },
+        {
+          "code": "severity",
+          "label": "严重程度",
+          "type": "string"
+        },
+        {
+          "code": "finding",
+          "label": "现场发现",
+          "type": "text"
+        }
+      ],
+      "records": [
+        {
+          "name": "安装孔位置度偏差",
+          "finding": "抽检发现夹具定位销磨损，6 件位置度超限。",
+          "batch_no": "DEMO-LOT-01",
+          "severity": "一般",
+          "record_no": "DEMO-QE-01",
+          "affected_qty": 6
+        },
+        {
+          "name": "输入轴端面毛刺",
+          "finding": "换刀后首件未覆盖端面毛刺检查。",
+          "batch_no": "DEMO-LOT-02",
+          "severity": "一般",
+          "record_no": "DEMO-QE-02",
+          "affected_qty": 12
+        },
+        {
+          "name": "传动齿轮表面硬度偏低",
+          "finding": "抽检 8 件低于图纸要求，整批隔离，等待复检判定。",
+          "batch_no": "DEMO-LOT-03",
+          "severity": "严重",
+          "record_no": "DEMO-QE-03",
+          "affected_qty": 8
+        },
+        {
+          "name": "联轴套回火温度记录缺失",
+          "finding": "温度采集短时断开，已调取设备记录并完成硬度复验。",
+          "batch_no": "DEMO-LOT-04",
+          "severity": "一般",
+          "record_no": "DEMO-QE-04",
+          "affected_qty": 160
+        },
+        {
+          "name": "安装面平面度偏差",
+          "finding": "抽检发现定位面有残屑，5 件进入筛选复检。",
+          "batch_no": "DEMO-LOT-05",
+          "severity": "一般",
+          "record_no": "DEMO-QE-05",
+          "affected_qty": 5
+        },
+        {
+          "name": "安装面平面度波动",
+          "finding": "换刀后抽检发现 6 件安装面超差，重设刀补后复检通过。",
+          "batch_no": "DEMO-LOT-06",
+          "severity": "一般",
+          "record_no": "DEMO-QE-06",
+          "affected_qty": 6
+        },
+        {
+          "name": "滚轮端面刀纹异常",
+          "finding": "首批抽检发现 12 件端面刀纹过深，当前批次等待复检。",
+          "batch_no": "DEMO-LOT-07",
+          "severity": "严重",
+          "record_no": "DEMO-QE-07",
+          "affected_qty": 12
+        },
+        {
+          "name": "隔套端面毛刺",
+          "finding": "去毛刺抽检发现 9 件边缘残留，返修后已完成复验。",
+          "batch_no": "DEMO-LOT-08",
+          "severity": "一般",
+          "record_no": "DEMO-QE-08",
+          "affected_qty": 9
+        },
+        {
+          "name": "检修门折角偏差",
+          "finding": "折弯首批 4 件角度超差，修正后已验证量产条件。",
+          "batch_no": "DEMO-LOT-09",
+          "severity": "一般",
+          "record_no": "DEMO-QE-09",
+          "affected_qty": 4
+        },
+        {
+          "name": "过滤器检修门折角偏差",
+          "finding": "抽检发现 3 件折角不足，返修后通过量具复验。",
+          "batch_no": "DEMO-LOT-10",
+          "severity": "一般",
+          "record_no": "DEMO-QE-10",
+          "affected_qty": 3
+        },
+        {
+          "name": "框盖接合面错位",
+          "finding": "装配巡检发现 8 件接合处错位，受影响零件已隔离。",
+          "batch_no": "DEMO-LOT-11",
+          "severity": "严重",
+          "record_no": "DEMO-QE-11",
+          "affected_qty": 8
+        },
+        {
+          "name": "侧板紧固记录缺失",
+          "finding": "设备通信短时异常，7 件装配记录缺失，现已补检。",
+          "batch_no": "DEMO-LOT-12",
+          "severity": "一般",
+          "record_no": "DEMO-QE-12",
+          "affected_qty": 7
+        }
+      ]
+    },
+    {
+      "code": "demo_relation_workshop",
+      "name": "车间",
+      "description": "关系探索演示数据：虚构的精密制造质量追溯场景中的车间。",
+      "fields": [
+        {
+          "code": "record_no",
+          "label": "车间编号",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "name",
+          "label": "车间名称",
+          "type": "string",
+          "searchable": true
+        },
+        {
+          "code": "area",
+          "label": "区域",
+          "type": "string"
+        },
+        {
+          "code": "shift_count",
+          "label": "班次数",
+          "type": "integer"
+        }
+      ],
+      "records": [
+        {
+          "area": "华东示范工厂 A 区",
+          "name": "精密制造车间",
+          "record_no": "DEMO-SHOP-01",
+          "shift_count": 2
+        },
+        {
+          "area": "华东示范工厂 C 区",
+          "name": "精密加工车间",
+          "record_no": "DEMO-SHOP-02",
+          "shift_count": 2
+        },
+        {
+          "area": "华东示范工厂 D 区",
+          "name": "钣金与装配车间",
+          "record_no": "DEMO-SHOP-03",
+          "shift_count": 3
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "code": "demo_relation_batch_equipment",
+      "name": "批次使用加工设备",
+      "source_object_code": "demo_relation_batch",
+      "target_object_code": "demo_relation_equipment",
+      "source_field": "equipment_no"
+    },
+    {
+      "code": "demo_relation_batch_order",
+      "name": "批次对应生产工单",
+      "source_object_code": "demo_relation_batch",
+      "target_object_code": "demo_relation_order",
+      "source_field": "order_no"
+    },
+    {
+      "code": "demo_relation_capa_quality",
+      "name": "纠正措施处理质量事件",
+      "source_object_code": "demo_relation_capa",
+      "target_object_code": "demo_relation_quality",
+      "source_field": "event_no"
+    },
+    {
+      "code": "demo_relation_equipment_line",
+      "name": "设备部署于产线",
+      "source_object_code": "demo_relation_equipment",
+      "target_object_code": "demo_relation_line",
+      "source_field": "line_no"
+    },
+    {
+      "code": "demo_relation_extra_item_material",
+      "name": "物料采用材料",
+      "source_object_code": "demo_relation_extra_item",
+      "target_object_code": "demo_relation_extra_material",
+      "source_field": "material_no"
+    },
+    {
+      "code": "demo_relation_extra_item_warehouse",
+      "name": "物料存放于库区",
+      "source_object_code": "demo_relation_extra_item",
+      "target_object_code": "demo_relation_extra_warehouse",
+      "source_field": "warehouse_no"
+    },
+    {
+      "code": "demo_relation_extra_operation_item",
+      "name": "工序使用投料",
+      "source_object_code": "demo_relation_extra_operation",
+      "target_object_code": "demo_relation_extra_item",
+      "source_field": "item_no"
+    },
+    {
+      "code": "demo_relation_extra_operation_process",
+      "name": "工序隶属工艺",
+      "source_object_code": "demo_relation_extra_operation",
+      "target_object_code": "demo_relation_extra_process",
+      "source_field": "process_no"
+    },
+    {
+      "code": "demo_relation_extra_product_material",
+      "name": "产品指定基材",
+      "source_object_code": "demo_relation_extra_product",
+      "target_object_code": "demo_relation_extra_material",
+      "source_field": "material_no"
+    },
+    {
+      "code": "demo_relation_extra_product_process",
+      "name": "产品采用工艺",
+      "source_object_code": "demo_relation_extra_product",
+      "target_object_code": "demo_relation_extra_process",
+      "source_field": "process_no"
+    },
+    {
+      "code": "demo_relation_extra_warehouse_workshop",
+      "name": "库区服务车间",
+      "source_object_code": "demo_relation_extra_warehouse",
+      "target_object_code": "demo_relation_workshop",
+      "source_field": "workshop_no"
+    },
+    {
+      "code": "demo_relation_line_workshop",
+      "name": "产线隶属车间",
+      "source_object_code": "demo_relation_line",
+      "target_object_code": "demo_relation_workshop",
+      "source_field": "workshop_no"
+    },
+    {
+      "code": "demo_relation_order_line",
+      "name": "工单由产线执行",
+      "source_object_code": "demo_relation_order",
+      "target_object_code": "demo_relation_line",
+      "source_field": "line_no"
+    },
+    {
+      "code": "demo_relation_quality_batch",
+      "name": "质量事件影响批次",
+      "source_object_code": "demo_relation_quality",
+      "target_object_code": "demo_relation_batch",
+      "source_field": "batch_no"
+    }
+  ]
+}
