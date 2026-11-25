@@ -136,6 +136,8 @@ class OntologyRecordMetadataBody(BaseModel):
     tags: list[OntologyRecordTag] | None = Field(default=None, max_length=30)
     properties: list[OntologyRecordPropertyBody] = Field(default_factory=list, max_length=60)
     property_labels: dict[OntologyRecordPropertyCode, OntologyRecordPropertyLabel] | None = Field(default=None, max_length=500)
+    hidden_property_codes: list[OntologyRecordPropertyCode] | None = Field(default=None, max_length=500)
+    note_markdown: str | None = Field(default=None, max_length=100_000)
 
     @model_validator(mode="after")
     def check_duplicates(self):
@@ -143,6 +145,8 @@ class OntologyRecordMetadataBody(BaseModel):
             raise ValueError("标签不能重复")
         if len(self.properties) != len({item.id for item in self.properties}):
             raise ValueError("自定义属性标识不能重复")
+        if self.hidden_property_codes is not None and len(self.hidden_property_codes) != len(set(self.hidden_property_codes)):
+            raise ValueError("隐藏属性编码不能重复")
         return self
 
 

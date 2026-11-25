@@ -16,6 +16,7 @@ import { useShellPageTitle, useShellPageOwnsHeading } from '@/components/ShellPa
 import { CanonThemeScope } from '@/theme/ThemeCardProvider';
 import { useAuthStore } from '@/stores/authStore';
 import { canConfigureWorkspace, reconcilePublishedViewState } from './workspaceState';
+import {recordCopyValues, type RecordCopySource} from './recordCopyValues';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { businessDataDesignPath, formPermissionsPath } from '@/config/navigation';
 import {
@@ -107,6 +108,7 @@ interface FieldDef {
   relation_config?: string;
   defaultValue?: unknown;
   generated_code?: boolean;
+  skipOnCopy?: boolean;
   controlType?: string;
   typeSettings?: ControlSettings;
   placeholder?: string;
@@ -344,6 +346,7 @@ function mapPlatformField(field: PlatformFormField): FieldDef {
   const encoding = (field as any).encoding_rule || ui.encodingRule || {};
   const codeField = (field as any).business_type === 'code' || (field as any).control_type === 'code'
     || field.field_type === 'code' || ui.businessType === 'code' || ui.controlType === 'code' || ui.encodingRule;
+  const autoNumbered = Boolean(codeField && encoding.enabled !== false && encoding.generationMode !== 'manual');
   return {
     field_name: field.field_name,
     label: field.label,
@@ -357,8 +360,9 @@ function mapPlatformField(field: PlatformFormField): FieldDef {
     enum_values: field.enum_values,
     controlType: ui.controlType==='field'?undefined:ui.controlType, typeSettings: ui.typeSettings, placeholder: ui.placeholder, helpText: ui.helpText,
     relation_config: typeof ui.relation_config === 'object' ? JSON.stringify(ui.relation_config) : ui.relation_config,
-    generated_code: Boolean(codeField && encoding.enabled !== false && encoding.generationMode !== 'manual'
-      && !(encoding.allowManualOverride || encoding.allow_manual_override)),
+    generated_code: autoNumbered && !(encoding.allowManualOverride || encoding.allow_manual_override),
+    skipOnCopy: autoNumbered || Boolean(ui.rules?.unique?.enabled || ui.computed || ui.controlType === 'upload'
+      || field.business_type === 'attachment' || ui.businessType === 'attachment'),
   };
 }
 
@@ -388,7 +392,9 @@ export interface RecordListComponentProps {
   fitTableHeight?: boolean;
   listSettings?: ListSettings;
   tableDensity?: 'compact' | 'standard' | 'comfortable' | null;
-  display?: 'all' | 'filters' | 'list';
+  display?: 'all' | 'filters' | 'list' | 'record';
+  recordLinkId?: number;
+  onCloseRecordLink?: () => void;
   filterFields?: string[] | null;
   externalSearch?: string;
   onFilterChange?: (value: {ready?: boolean; search: string; filters: StructuredFilter[]}) => void;
@@ -398,7 +404,7 @@ export interface RecordListComponentProps {
   readOnly?: boolean;
   disableRowAction?: boolean;
 }
-export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', filterSettings, fieldControls, filterLayout, showRecordMetadata = false, fitTableHeight = false, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
+export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', recordLinkId, onCloseRecordLink, filterSettings, fieldControls, filterLayout, showRecordMetadata = false, fitTableHeight = false, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
   const filterFormId = useId();
   const allowedFilterActions = filterButtonActions(filterSettings);
   const canQuery = allowedFilterActions.includes('query');
@@ -411,7 +417,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const slug=formSlug||params.slug;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const linkedRecordId = searchParams.get('recordId');
+  const recordOnly = display === 'record';
+  const linkedRecordId = recordLinkId ?? (!embedded ? searchParams.get('recordId') : undefined);
+  const [recordLinkError, setRecordLinkError] = useState('');
   const aliasProgramRoute = !embedded && slug ? dynamicProgramRouteAliases[slug] : undefined;
   const user = useAuthStore(state => state.user);
   const [configRevision, setConfigRevision] = useState(0);
@@ -631,7 +639,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   }, [aliasProgramRoute, navigate]);
 
   const loadData = useCallback(async () => {
-    if (display === 'filters' || !slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig || configPending.current || configRefreshing || configError) return;
+    if (display === 'filters' || display === 'record' || !slug || aliasProgramRoute || !pageConfig || !platformForm || !viewConfig || configPending.current || configRefreshing || configError) return;
     const requestId = ++requestIdRef.current;
     setLoading(true);setSelectedRowKeys([]);
     try {
@@ -921,14 +929,23 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     const recordId = Number(linkedRecordId);
     if (!Number.isSafeInteger(recordId) || recordId <= 0) return;
     let cancelled = false;
+    setRecordLinkError('');
     getPlatformDynamicRecord(platformForm.id, recordId).then(response => {
       const item = unwrapApiData<any>(response);
       if (!cancelled && item) setDetailRecord({ ...item.data, id: item.id, _approval: item._approval, _fieldStates: item.field_states });
     }).catch((error: any) => {
-      if (!cancelled) message.error(error?.response?.data?.detail || '详情加载失败');
+      if (cancelled) return;
+      const detail = error?.response?.data?.detail;
+      const text = typeof detail === 'string' ? detail : '详情加载失败';
+      if (recordOnly) setRecordLinkError(text);
+      else message.error(text);
     });
     return () => { cancelled = true; };
-  }, [platformForm?.id, linkedRecordId]);
+  }, [platformForm?.id, linkedRecordId, recordOnly]);
+  const closeDetail = () => {
+    setDetailRecord(null);
+    onCloseRecordLink?.();
+  };
   const submitApproval = () => {
     const approval = detailRecord?._approval as RecordApproval | undefined;
     if (readOnly || !platformForm || !detailRecord || !approval?.can_submit) return;
@@ -995,21 +1012,28 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     });
   }
 
-  const loadMutationSchema = async (scope: 'create' | 'edit') => {
+  const loadMutationSchema = async (scope: 'create' | 'edit', copyRecordId?: number) => {
     if (!slug || !platformForm || schemaSlug.current !== slug) return null;
     const request = ++mutationSchemaRequest.current;
     setSchemaLoading(true);
     try {
       const numericFormId = Number(slug);
-      const detail = !Number.isNaN(numericFormId)
-        ? unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope }))
-        : unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope }));
+      const [schema, source] = await Promise.all([
+        !Number.isNaN(numericFormId)
+          ? getPlatformForm(numericFormId, {schema:'published', scope})
+          : getPlatformFormByCode(slug, {schema:'published', scope}),
+        copyRecordId === undefined ? undefined : getPlatformDynamicRecord(platformForm.id, copyRecordId),
+      ]);
       if (request !== mutationSchemaRequest.current) return null;
+      const detail = unwrapApiData<PlatformForm>(schema);
       const nodes = (detail?.config?.formLayout as { version?: number; nodes?: FormLayoutNode[] } | undefined);
       setMutationGap(Number((detail?.config?.canvasSettings as any)?.gap)||12);
       setMutationLayout(nodes?.version === 2 && Array.isArray(nodes.nodes) ? nodes.nodes : null);
       setMutationAppearance(normalizeFormAppearance(detail?.config?.formAppearance));
-      return (detail?.fields ?? []).filter((field) => !field.archived).map(mapPlatformField);
+      return {
+        fields: (detail?.fields ?? []).filter(field=>!field.archived).map(mapPlatformField),
+        copySource: source ? unwrapApiData<RecordCopySource>(source) : undefined,
+      };
     } catch (error) {
       if (request !== mutationSchemaRequest.current) return null;
       throw error;
@@ -1018,25 +1042,31 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     }
   };
 
-  const openCreateModal = async () => {
+  const openCreateModal = async (copyRecordId?: number) => {
     if (readOnly || !platformForm) return;
+    if (copyRecordId !== undefined && (!canRunAction('view') || !canRunAction('create'))) return;
     if (platformForm.code === 'alert-center') {setAlertCreateOpen(true);return;}
     setEditingRecord(null);
     try {
-      const nextFields = await loadMutationSchema('create');
-      if (!nextFields) return;
+      const schema = await loadMutationSchema('create', copyRecordId);
+      if (!schema) return;
+      const {fields: nextFields, copySource} = schema;
+      if (copyRecordId !== undefined && !copySource?.data) throw new Error('记录数据不可用');
       setMutationFields(nextFields);
       form.resetFields();
+      setRuleStates({});
+      setRuleData({});
+      setRuleError('');
       const defaults:Record<string,unknown>={};
       for(const field of nextFields){const settings=field.typeSettings||{};
         if(field.defaultValue!==undefined&&field.defaultValue!==null&&field.defaultValue!==''){let value=field.defaultValue;if(['int','integer','number','float','decimal','json','boolean'].includes(field.field_type)||settings.selectionMode==='multiple'||settings.displayMode==='tags'){try{value=JSON.parse(String(value));}catch{}}else value=String(value);defaults[field.field_name]=value;}
         else if(field.controlType==='switch')defaults[field.field_name]=Boolean(settings.defaultChecked);
         else if(field.controlType==='datetime'&&settings.defaultDate&&settings.defaultDate!=='none'&&settings.dateMode!=='range')defaults[field.field_name]=dayjs().format(settings.dateMode==='date'?'YYYY-MM-DD':'YYYY-MM-DDTHH:mm:ss');
       }
-      form.setFieldsValue(defaults);
+      form.setFieldsValue(copySource ? {...defaults,...recordCopyValues(copySource,nextFields)} : defaults);
       setModalOpen(true);
     } catch {
-      message.error('新增表单配置加载失败');
+      message.error(copyRecordId === undefined ? '新增表单配置加载失败' : '无法复制记录，请确认该记录仍可查看后重试');
     }
   };
 
@@ -1055,7 +1085,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     try {
       const loadedFields = await loadMutationSchema('edit');
       if (!loadedFields) return;
-      nextFields = loadedFields;
+      nextFields = loadedFields.fields;
       setMutationFields(nextFields);
     } catch {
       message.error('编辑表单配置加载失败');
@@ -1191,6 +1221,11 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     return <Input allowClear prefix={filter.controlType === 'keyword' ? <SearchOutlined /> : undefined} placeholder={placeholder} />;
   };
 
+  if (recordOnly && (!pageConfig || !viewConfig)) return withCanonTheme(
+    <Drawer title="记录详情" open onClose={closeDetail} width={560} className="mf-canon-drawer" rootClassName="mf-canon-form-root">
+      {configError ? <Alert type="error" showIcon message={configError} /> : <Spin tip="正在加载记录"><div /></Spin>}
+    </Drawer>
+  );
   if (aliasProgramRoute || (!pageConfig && !configError)) {
     return renderWorkspace(<div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>);
   }
@@ -1320,7 +1355,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const createLabel = platformForm?.runtime_submission_available ? '填写申请' : '新增';
   const createAction = (toolbarActions.includes('create') && (previewToolbar || canRunAction('create'))) && (
     <Tooltip title={iconOnlyToolbar ? createLabel : undefined}>
-      <Button aria-label={createLabel} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal}>{iconOnlyToolbar ? undefined : createLabel}</Button>
+      <Button aria-label={createLabel} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={()=>void openCreateModal()}>{iconOnlyToolbar ? undefined : createLabel}</Button>
     </Tooltip>
   );
   const hasViewsRow = standalone || Boolean(runtimeViewTabs?.length);
@@ -1390,6 +1425,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   </>;
 
   const selectedRows = data.filter(row => selectedRowKeys.includes(row.id));
+  const canCopy = toolbarActions.includes('copy') && platformForm?.code !== 'alert-center'
+    && (previewToolbar || canRunAction('view') && canRunAction('create'));
+  const copyRow = selectedRows.length === 1 && selectedRowKeys.length === 1 ? selectedRows[0] : undefined;
   const submittableRows = readOnly || !platformForm?.runtime_submission_available ? [] : selectedRows.filter(row => row._approval?.can_submit);
   const showDeleteSelected = stableListSettings?.toolbarGroups == null || toolbarActions.includes('delete');
   const deletableRows = showDeleteSelected && rowActions.includes('delete') && canRunAction('delete')
@@ -1515,6 +1553,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
 
   return renderWorkspace(
     <div id={listRootId} onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`mf-canon mf-list-page ${standalone ? 'mf-list-standalone' : 'mf-list-embedded'}`}>
+      {!recordOnly && <>
       {standalone ? <header className="mf-list-head">
           <div className="mf-list-heading">
             <h1>{pageConfig.title}</h1>
@@ -1538,7 +1577,11 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         {selectionEnabled && selectedRowKeys.length > 0 && <div className="mf-list-bulk" role="region" aria-label="批量操作">
           <strong>已选 {selectedRowKeys.length} 项</strong>
           <button type="button" className="mf-link-btn" onClick={() => setSelectedRowKeys([])}>取消选择</button>
-          {(canExport || submittableRows.length > 0 || bulkDeleteAllowed) && <span className="mf-list-bulk-divider" aria-hidden />}
+          {(canCopy || canExport || submittableRows.length > 0 || bulkDeleteAllowed) && <span className="mf-list-bulk-divider" aria-hidden />}
+          {canCopy && <Tooltip title={readOnly ? '预览中不可复制' : copyRow ? undefined : '请选择一条记录'}>
+            <span><button type="button" className="mf-link-btn" disabled={readOnly || !copyRow || schemaLoading || listBusy || bulkBusy}
+              onClick={()=>{if (copyRow) void openCreateModal(copyRow.id);}}>复制记录</button></span>
+          </Tooltip>}
           {canExport && <button type="button" className="mf-link-btn" disabled={exportDisabled || bulkBusy} onClick={exportSelected}>导出所选</button>}
           {submittableRows.length > 0 && <button type="button" className="mf-link-btn" disabled={bulkBusy} onClick={submitSelected}>批量提交审批 ({submittableRows.length})</button>}
           {bulkDeleteAllowed && <button type="button" className="mf-link-btn mf-link-btn-danger" disabled={bulkBusy} onClick={deleteSelected}>删除</button>}
@@ -1547,12 +1590,14 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       </section>
 
       {platformForm&&<FormImport key={platformForm.id} formId={platformForm.id} open={importOpen} onClose={()=>setImportOpen(false)} onImported={()=>{setPage(1);void loadData();onMutated?.();}}/>}
-      {platformForm?.code==='alert-center'&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);setDetailRecord(null);}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
-      <Drawer title={<div className="mf-canon-drawer-title"><strong title={detailTitle}>{detailTitle}</strong><span>{pageConfig.title}</span></div>}
-        open={Boolean(detailRecord) && platformForm?.code!=='alert-center'} onClose={() => setDetailRecord(null)} width={560}
+      </>}
+      {platformForm?.code==='alert-center'&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);closeDetail();}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
+      <Drawer title={<div className="mf-canon-drawer-title"><strong title={detailTitle}>{detailTitle || '记录详情'}</strong><span>{pageConfig.title}</span></div>}
+        open={(Boolean(detailRecord) && platformForm?.code!=='alert-center') || (recordOnly && !detailRecord)} onClose={closeDetail} width={560}
         className="mf-canon-drawer" rootClassName="mf-canon-form-root"
         extra={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}
         footer={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}>
+        {recordOnly && !detailRecord && (recordLinkError ? <Alert type="error" showIcon message={recordLinkError} /> : <Spin tip="正在加载记录"><div /></Spin>)}
         {detailRecord && <>
           {detailRecord._approval && <p className="mf-canon-drawer-status">{APPROVAL_STATUS_LABEL}{renderApprovalStatus(detailRecord._approval)}</p>}
           <Descriptions bordered column={1} size="small" items={(detailFields.length ? detailFields : fields).filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false && (!detailRecord._fieldStates || f.field_name in detailRecord._fieldStates)).map(f => ({ key: f.field_name, label: f.label, children: renderDetailValue(f) }))} />

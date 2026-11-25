@@ -540,13 +540,8 @@
   border-top: 0;
 }
 
-.professional-flow-props label {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  color: #667085;
-  font-size: 12px;
+.professional-flow-properties.property-inspector {
+  --property-label-width: var(--property-inspector-compact-label-width);
 }
 
 .professional-flow-condition-row {
@@ -2406,11 +2401,11 @@
 
 .form-designer-right .designer-props label {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: var(--property-label-width, 72px) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-bottom: 1px solid #f0f3f6;
 }
 
@@ -2807,7 +2802,6 @@
   justify-content: flex-end;
   width: 100%;
   min-width: 0;
-  padding-right: 2px;
 }
 
 .designer-rule-toggle .designer-rule-config-button.ant-btn {
@@ -5107,12 +5101,6 @@
 .professional-flow-assignee-rule .ant-select { min-width: 0; width: 100%; }
 .professional-flow-props .ant-input[readonly] { background: var(--mf-panel-soft); color: #475467; cursor: default; }
 
-/* Keep every single-value property aligned with the bound-field row. */
-.form-designer-right .designer-props label {
-  grid-template-columns: 72px minmax(0, 1fr);
-  min-height: 34px;
-  padding-block: 4px;
-}
 .form-designer-right .designer-props label > :not(span) { min-width: 0; }
 .form-designer-right .designer-props .ant-input-affix-wrapper {
   height: 26px;
@@ -6037,14 +6025,17 @@ body:has(.tech-white-shell) .default-rule-modal .ant-modal-footer { background: 
   .default-rule-modal .encoding-composition-heading > .ant-space { margin-left: auto; }
 }
 
-/* Boolean options never stretch to fill the property value column. */
-.form-designer-right .designer-props label > button.ant-switch {
+/* Match the value edge for native label rows and field rule rows. */
+.form-designer-right .designer-props :is(.property-inspector-group,.property-inspector-advanced)>label>span:first-child { text-align:start; }
+.form-designer-right .designer-props :is(.property-inspector-group,.property-inspector-advanced)>label>:last-child:not(:first-child) { justify-self:end;max-inline-size:100%; }
+.form-designer-right .designer-props :is(.property-inspector-group,.property-inspector-advanced)>label>:is(.designer-inline-fields,.designer-width-picker) { width:100%; }
+.form-designer-right .designer-props :is(label,.designer-property-rule-row) > button.ant-switch {
   justify-self: end; flex: none; width: 34px; min-width: 34px; max-width: 34px; height: 18px;
-  margin-right: 2px; padding: 0;
+  padding: 0;
 }
 .form-designer-right .designer-props .ant-switch .ant-switch-handle { width: 14px; height: 14px; top: 2px; }
 .form-designer-right .designer-props .ant-switch.ant-switch-checked .ant-switch-handle { inset-inline-start: calc(100% - 16px); }
-.form-designer-right .designer-props .designer-property-rule-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 34px; padding: 4px 10px; border-bottom: 1px solid #f0f3f6; }
+.form-designer-right .designer-props .designer-property-rule-row { display: grid; grid-template-columns: var(--property-label-width, 72px) minmax(0, 1fr); align-items: center; gap: 8px; min-height: 34px; padding: 4px 10px; border-bottom: 1px solid #f0f3f6; }
 .designer-property-rule-row > .designer-rule-label { color: #60727f; font-size: 12px; font-weight: 600; }
 .assignment-dialog-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 48px minmax(0, 1fr) 28px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid #edf0f3; color: #718394; font-size: 12px; }
 .assignment-dialog-row > * { min-width: 0; }
@@ -6053,7 +6044,6 @@ body:has(.tech-white-shell) .assignment-rule-modal .ant-modal-footer { backgroun
 @media (max-width: 600px) { .assignment-dialog-row { grid-template-columns: 16px minmax(0, 1fr) 24px; gap: 8px; } .assignment-dialog-row > :nth-child(3) { grid-column: 2; } .assignment-dialog-row > :nth-child(4) { grid-column: 2; } .assignment-dialog-row > :last-child { grid-column: 3; grid-row: 1; } }
 
 .form-designer-right .designer-props .designer-property-rule-row > .ant-select { width: 100%; min-width: 0; }
-.form-designer-right .designer-props .designer-property-rule-row > button.ant-switch { justify-self: end; flex: none; width: 34px; min-width: 34px; max-width: 34px; height: 18px; margin-right: 2px; padding: 0; }
 
 .search-source-note { color: #718394; font-size: 12px; margin-bottom: 14px; }
 .search-rule-modal .search-range-section, .search-rule-modal .search-test-section { padding-top: 16px !important; border-top: 1px solid #e7ecf0 !important; }

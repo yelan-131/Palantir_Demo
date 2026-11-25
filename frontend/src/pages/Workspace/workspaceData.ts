@@ -58,8 +58,7 @@ export function workspaceOverview(items: WorkspaceItem[], now = Date.now()) {
 
 export function workspaceItemRoute(item: WorkspaceItem, view: 'initiated' | 'pending' = 'initiated') {
   if (view === 'pending' && item.workflow?.id) return `/workflow?tab=pending&instance_id=${item.workflow.id}`;
-  // Open the shared form surface, including when an application has a custom page.
-  if (item.form?.id && item.record?.id) return `/dynamic/${item.form.id}?view=records&recordId=${item.record.id}`;
+  if (item.form?.id && item.record?.id) return `/dynamic/${item.form.id}?recordId=${item.record.id}`;
   // Runtime record pages preserve their existing permission checks and edit flow.
   if (item.route_path?.startsWith('/') && !item.route_path.startsWith('//')) {
     if (/[?&](recordId|record_id)=\d+/.test(item.route_path)) return item.route_path;

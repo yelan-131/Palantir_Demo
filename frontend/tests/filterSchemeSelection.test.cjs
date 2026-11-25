@@ -51,9 +51,10 @@ const dynamicPage = () => null;
 const tabs = () => null;
 const filterWidget = () => null;
 const businessComponents = load('businessComponents.ts');
-const createFilter = () => component('FilterWidget.tsx', {
+const createFilter = (useListConfigurationPreview = () => undefined) => component('FilterWidget.tsx', {
   antd: { Empty: () => null, Tabs: tabs },
   '../DynamicPage': dynamicPage,
+  './ListConfigurationPreview': { useListConfigurationPreview },
   './businessComponents': businessComponents,
 });
 const createList = useListConfigurationPreview => component('RecordListWidget.tsx', {
@@ -144,6 +145,18 @@ test('a standalone filter widget still supports switching schemes without an ins
   assert.deepEqual(plain(form.props.filterFields), ['price', 'weight']);
   form.props.onFilterChange({ search: '', filters: [], ready: true });
   assert.equal(contributions.at(-1).schemeId, 'second');
+});
+
+test('a standalone filter shares the scheme selected in its inspector', () => {
+  let selected = 'second';
+  const contributions = [];
+  const render = createFilter(() => ({filterScheme:{id:selected,onSelect:id=>{selected=id;}}}));
+  const [tabBar, form] = render({widget,sourceId:17,onChange:value=>contributions.push(plain(value))}).props.children;
+  assert.equal(tabBar.props.activeKey, 'second');
+  assert.deepEqual(plain(form.props.filterLayout), {rows:1,columns:2});
+  tabBar.props.onChange('default');
+  assert.equal(selected, 'default');
+  assert.deepEqual(contributions, [{schemeId:'default',search:'',filters:[],ready:true}]);
 });
 
 test('inline filters receive inherited layout defaults and keep explicit automatic rows', () => {

@@ -52,13 +52,13 @@ test('ordinary saved records are not misreported as unfinished approval applicat
 });
 test('a bare form route cannot masquerade as a specific application record', () => {
   assert.equal(workspaceItemRoute({ id: 'missing', status: 'running', route_path: '/program/some-form' }), '/workflow?tab=initiated');
-  assert.equal(workspaceItemRoute({ id: 'record', status: 'draft', form: { id: 4 }, record: { id: 9 }, route_path: '/program/some-form' }), '/dynamic/4?view=records&recordId=9');
+  assert.equal(workspaceItemRoute({ id: 'record', status: 'draft', form: { id: 4 }, record: { id: 9 }, route_path: '/program/some-form' }), '/dynamic/4?recordId=9');
 });
 
 test('source records use standard forms across lifecycle states and preserve pending approval actions', () => {
   for (const status of ['draft', 'returned', 'pending', 'running', 'done', 'rejected']) {
     const item = { id: 'record', status, form: { id: 4 }, record: { id: 9 }, workflow: { id: 8 }, route_path: '/program/custom' };
-    assert.equal(workspaceItemRoute(item), '/dynamic/4?view=records&recordId=9');
+    assert.equal(workspaceItemRoute(item), '/dynamic/4?recordId=9');
     assert.equal(workspaceItemRoute(item, 'pending'), '/workflow?tab=pending&instance_id=8');
   }
 });

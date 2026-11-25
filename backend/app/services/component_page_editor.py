@@ -90,7 +90,7 @@ def resolve_toolbar_groups(widget, roles, user_id=None, org_unit_ids=None):
     if groups is None:
         return widget
     matching = [group for group in groups if audience_matches(group, roles, user_id, org_unit_ids)]
-    actions = list(dict.fromkeys(action for group in matching for action in group.get('actions', []) if action in {'create', 'refresh', 'import', 'export', 'delete'}))
+    actions = list(dict.fromkeys(action for group in matching for action in group.get('actions', []) if action in {'create', 'refresh', 'import', 'export', 'copy', 'delete'}))
     return {**widget, 'listSettings': {**settings, 'toolbarGroups': matching, 'toolbarActions': actions}}
 
 

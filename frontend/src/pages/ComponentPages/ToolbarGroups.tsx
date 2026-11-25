@@ -12,7 +12,9 @@ import './toolbar-groups.css';
 export function PropertySubgroup({title,hint,children}: {
   title:string; hint?:React.ReactNode; children:React.ReactNode;
 }) {
-  return <details className="component-toolbar-group" open>
+  const [open,setOpen] = useState(true);
+  return <details className="component-toolbar-group" open={open}
+    onToggle={event=>setOpen(event.currentTarget.open)}>
     <summary>
       <span className="component-toolbar-group-name">{title}</span>
       {hint&&<PropertyHelp label={title+'帮助'}>{hint}</PropertyHelp>}
@@ -88,11 +90,12 @@ export function PermissionGroupName({name, onChange, onRequestEdit, requestEdit 
 }
 
 const actions = [
-  {value:'create',label:'新增 / 填写申请'},
+  {value:'create',label:'新增',hint:'来源表单支持申请时，列表按钮显示为「填写申请」。'},
   {value:'refresh',label:'刷新'},
-  {value:'import',label:'批量导入'},
+  {value:'import',label:'导入',hint:'从文件批量导入记录，需要来源表单的导入和新增权限。'},
   {value:'export',label:'导出'},
-  {value:'delete',label:'删除所选',hint:'启用记录选择后，选中可删除的记录时显示。删除仍受来源权限和记录状态约束。'},
+  {value:'copy',label:'复制',hint:'启用记录选择后，可将一条记录的可复制字段带入新增表单。需要来源表单的查看和新增权限。'},
+  {value:'delete',label:'删除',hint:'启用记录选择后，选中可删除的记录时显示。删除仍受来源权限和记录状态约束。'},
 ];
 export default function ToolbarGroups({groups,roles,disabled,onChange,renderGroup,initialValues,selectedGroup,onSelectGroup,scope='toolbar',accessTarget='应用',headingHint,renameGroupId,onRenameRequest,onRenameStarted}: {
   scope?:'toolbar'|'access'|'roles'|'display'|'filter-fields'; initialValues?:Partial<ToolbarGroup>; renderGroup?:(group:ToolbarGroup,patch:(value:Partial<ToolbarGroup>)=>void)=>React.ReactNode;

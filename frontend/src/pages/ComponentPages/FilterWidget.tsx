@@ -3,7 +3,7 @@ import {Empty, Tabs} from 'antd';
 import DynamicPage from '../DynamicPage';
 import {DEFAULT_FILTER_LAYOUT} from './businessComponents';
 import type {PageWidget, FilterContribution} from './model';
-import type {PreviewSelection} from './ListConfigurationPreview';
+import {useListConfigurationPreview, type PreviewSelection} from './ListConfigurationPreview';
 
 export default function FilterWidget({widget,sourceId,onChange,inline=false,schemeSelection}: {
   widget:PageWidget;sourceId:number;onChange:(value:FilterContribution)=>void;inline?:boolean;
@@ -11,7 +11,9 @@ export default function FilterWidget({widget,sourceId,onChange,inline=false,sche
 }) {
   const schemes=widget.filterSettings?.schemes;
   const [selected,setSelected]=useState(schemes?.[0]?.id);
-  const selectedId = schemeSelection ? schemeSelection.id : selected;
+  const preview = useListConfigurationPreview(widget.id);
+  const selection = schemeSelection ?? preview?.filterScheme;
+  const selectedId = selection ? selection.id : selected;
   const scheme=schemes?.find(item=>item.id===selectedId)||schemes?.[0];
   const fields=useMemo(()=>scheme?[...new Set(scheme.groups.flatMap(group=>group.columns||[]))]:widget.filterFields,[scheme,widget.filterFields]);
   const settings=useMemo(()=>scheme?{...widget.filterSettings,showKeyword:scheme.showKeyword,requiredFields:[],expandAdvanced:false}:widget.filterSettings,[scheme,widget.filterSettings]);
@@ -21,12 +23,12 @@ export default function FilterWidget({widget,sourceId,onChange,inline=false,sche
       // Discard the previous scheme's conditions before mounting the next form.
       if(schemes){
          onChange({schemeId:id,search:'',filters:[],ready:true});
-         (schemeSelection?.onSelect ?? setSelected)(id);
+         (selection?.onSelect ?? setSelected)(id);
        }
     }}/>
     <DynamicPage key={JSON.stringify([scheme?.id,scheme?.fieldControls??{}])} formSlug={String(sourceId)} embedded toolbarTargetId={inline?undefined:`component-toolbar-${widget.id}`} readOnly display="filters"
       filterSettings={settings} fieldControls={scheme?.fieldControls}
-      filterLayout={inline ? {
+      filterLayout={inline || scheme?.defaultRows != null || scheme?.fieldsPerRow != null ? {
         rows:scheme?.defaultRows??DEFAULT_FILTER_LAYOUT.rows,
         columns:scheme?.fieldsPerRow??DEFAULT_FILTER_LAYOUT.columns,
       } : undefined}

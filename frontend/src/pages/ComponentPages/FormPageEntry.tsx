@@ -47,7 +47,7 @@ function BoundFormPage({kind, slug, businessDataDesign}: {kind: 'business' | 'pr
   if (!binding) return <div style={{padding: 80, textAlign: 'center'}}><Spin /></div>;
   if (businessDataDesign && (!binding.code || !binding.form)) return <Empty description="找不到此业务数据对应的页面" />;
   return <Suspense fallback={<Spin />}>
-    {!openEditor && searchParams.get('view') === 'records' && binding.form?.id ? <DynamicPage formSlug={String(binding.form.id)} /> : binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} openEditor={openEditor} businessDataFormId={businessDataDesign ? binding.form?.id : undefined} designTab={designTab} designNavigationKey={navigationKey} /> : <Empty description="此表单的页面尚未发布" />
+    {binding.enabled ? binding.code ? <ComponentPages pageCode={binding.code} openEditor={openEditor} recordFormId={binding.form?.id} businessDataFormId={businessDataDesign ? binding.form?.id : undefined} designTab={designTab} designNavigationKey={navigationKey} /> : <Empty description="此表单的页面尚未发布" />
       : slug === 'alert-center' ? <AlertCenter /> : kind === 'business' ? <DynamicPage /> : <AppProgramPage />}
   </Suspense>;
 }

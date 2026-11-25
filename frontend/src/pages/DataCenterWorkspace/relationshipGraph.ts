@@ -5,8 +5,11 @@ import {
   type RuntimeObjectType,
 } from '../../services/objectRuntime';
 
-const MAX_NODES = 60;
-const MAX_EDGES = 120;
+const MAX_LOCAL_NODES = 60;
+const MAX_LOCAL_EDGES = 120;
+const MAX_OVERVIEW_NODES = 150;
+const MAX_OVERVIEW_EDGES = 320;
+const OVERVIEW_PAGE_SIZE = 100;
 const MAX_EXPANSIONS = 12;
 const REQUEST_BATCH_SIZE = 4;
 
@@ -134,7 +137,7 @@ export async function loadRelationshipGraph(
         const relatedId = relationshipNodeId(typeId, record.key);
         const edge = makeEdge(node.id, relatedId, relation);
         if (edges.has(edge.id)) continue;
-        if (edges.size >= MAX_EDGES || (!nodes.has(relatedId) && nodes.size >= MAX_NODES)) {
+        if (edges.size >= MAX_LOCAL_EDGES || (!nodes.has(relatedId) && nodes.size >= MAX_LOCAL_NODES)) {
           truncated = true;
           continue;
         }
@@ -193,22 +196,49 @@ export async function loadRelationshipOverview(
   for (let index = 0; index < types.length; index += REQUEST_BATCH_SIZE) {
     const batch = types.slice(index, index + REQUEST_BATCH_SIZE);
     const outcomes = await Promise.allSettled(batch.map(({ typeId }) =>
-      listObjectRecords(typeId, { page: 1, page_size: MAX_NODES }, signal)));
+      listObjectRecords(typeId, { page: 1, page_size: OVERVIEW_PAGE_SIZE }, signal)));
     signal?.throwIfAborted();
     for (const [position, outcome] of outcomes.entries()) {
       if (outcome.status === 'fulfilled') {
-        const page = outcome.value.data.data;
-        pages.push({ ...batch[position], page });
-        if (page.total > page.items.length) truncated = true;
+        pages.push({ ...batch[position], page: outcome.value.data.data });
       } else if (!isForbidden(outcome.reason)) {
         failedExpansions++;
       }
     }
   }
 
+  // Two pages cover the overview limit. Only read the second when the first pages cannot fill it.
+  if (pages.reduce((total, { page }) => total + page.items.length, 0) < MAX_OVERVIEW_NODES) {
+    const remaining = pages.filter(({ page }) => page.total > page.items.length);
+    for (let index = 0; index < remaining.length; index += REQUEST_BATCH_SIZE) {
+      const batch = remaining.slice(index, index + REQUEST_BATCH_SIZE);
+      const outcomes = await Promise.allSettled(batch.map(({ typeId }) =>
+        listObjectRecords(typeId, { page: 2, page_size: OVERVIEW_PAGE_SIZE }, signal)));
+      signal?.throwIfAborted();
+      for (const [position, outcome] of outcomes.entries()) {
+        const entry = batch[position];
+        if (outcome.status === 'fulfilled') {
+          const next = outcome.value.data.data;
+          const items = new Map([...entry.page.items, ...next.items].map(record => [record.key, record]));
+          entry.page = {
+            ...entry.page,
+            total: Math.max(entry.page.total, next.total),
+            items: [...items.values()].slice(0, MAX_OVERVIEW_NODES),
+          };
+        } else if (isForbidden(outcome.reason)) {
+          pages.splice(pages.indexOf(entry), 1);
+        } else {
+          failedExpansions++;
+        }
+      }
+    }
+  }
+  if (pages.some(({ page }) => page.total > page.items.length)
+      || pages.reduce((total, { page }) => total + page.total, 0) > MAX_OVERVIEW_NODES) truncated = true;
+
   const nodes = new Map<string, RelationshipNode>();
   // Take one record per type per pass so a large table cannot consume the graph by itself.
-  for (let index = 0; index < MAX_NODES && nodes.size < MAX_NODES; index++) {
+  for (let index = 0; index < MAX_OVERVIEW_NODES && nodes.size < MAX_OVERVIEW_NODES; index++) {
     for (const { typeId, typeName, page } of pages) {
       const record = page.items[index];
       if (!record) continue;
@@ -217,11 +247,9 @@ export async function loadRelationshipOverview(
       const node = makeNode(typeId, typeName, record, 0);
       node.bindingForm = page.binding_form;
       nodes.set(id, node);
-      if (nodes.size === MAX_NODES) break;
+      if (nodes.size === MAX_OVERVIEW_NODES) break;
     }
   }
-  if (pages.reduce((total, { page }) => total + page.total, 0) > MAX_NODES) truncated = true;
-
   const details = new Map<string, ObjectRecordDetail>();
   const selected = [...nodes.values()];
   for (let index = 0; index < selected.length; index += REQUEST_BATCH_SIZE) {
@@ -256,7 +284,7 @@ export async function loadRelationshipOverview(
         const relatedId = relationshipNodeId(relation.related_object_id, record.key);
         const edge = makeEdge(nodeId, relatedId, relation);
         if (edges.has(edge.id)) continue;
-        if (!nodes.has(relatedId) || edges.size === MAX_EDGES) {
+        if (!nodes.has(relatedId) || edges.size === MAX_OVERVIEW_EDGES) {
           truncated = true;
           continue;
         }

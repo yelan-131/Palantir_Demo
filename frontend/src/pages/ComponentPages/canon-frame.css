@@ -92,6 +92,15 @@
 .mf-canon-frame[data-fit-list-height] .mf-list-card:not(.mf-list-empty) { min-block-size: 150px; }
 .mf-canon-frame[data-fit-list-height] .mf-list-table .ant-table-body { flex: 1 1 0; min-height: 0; }
 .mf-canon-frame[data-fit-list-height] .mf-list-table :is(.ant-table-header, .ant-table-pagination) { flex: none; }
+/* Size the empty state from the table body, below the header and above pagination. */
+.mf-canon-frame[data-fit-list-height] .mf-list-table .ant-table-body:has(> table > tbody > .ant-table-placeholder) {
+  container-type: size;
+}
+.mf-canon-frame[data-fit-list-height] .mf-list-table .ant-table-body .ant-table-placeholder .ui-state {
+  min-block-size: calc(100cqb - 1px); /* The placeholder cell has a bottom border. */
+  padding-block: clamp(12px, 8cqb, 40px);
+  justify-content: center;
+}
 
 @media (max-width: 600px) {
   .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-actions { flex: 1 1 100%; margin-left: 0; }

@@ -119,7 +119,7 @@ export function resolveListView(view: ViewConfig | null, settings?: ListSettings
     pageSize: resolveListPresentation(settings).pageSize ?? view.table.pageSize,
     defaultSort: sort && requestedSort ? {fieldName:sort.fieldName,order:requestedSort.order==='asc'?'ascend':'descend'} : undefined,
     rowClickAction: settings.rowClick == null ? view.table.rowClickAction : settings.rowClick === 'none' || view.table.rowActions.includes(settings.rowClick) || view.table.rowClickAction === settings.rowClick ? settings.rowClick : 'none',
-    toolbarActions: toolbarActions == null ? view.table.toolbarActions : toolbarActions.filter(action=>['create','refresh','import','export','delete'].includes(action)),
+    toolbarActions: toolbarActions == null ? view.table.toolbarActions : toolbarActions.filter(action=>['create','refresh','import','export','copy','delete'].includes(action)),
     rowActions: settings.rowActions == null ? view.table.rowActions : view.table.rowActions.filter(action=>settings.rowActions!.includes(action)),
   }};
 }

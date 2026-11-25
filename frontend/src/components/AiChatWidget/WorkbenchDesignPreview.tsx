@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import FieldControl from '@/components/FormWidgets/FieldControl';
 import WidgetFrame from '@/pages/ComponentPages/WidgetFrame';
+import { widgetFrameHeight } from '@/pages/ComponentPages/model';
 import { resolvePresentation } from '@/pages/ComponentPages/presentation';
 import ProfessionalFlowDesigner, { createDefaultFlowConfig } from '@/pages/FormSettings/ProfessionalFlowDesigner';
 import { normalizeProfessionalFlowConfig } from '@/pages/FormSettings/workflowConfig';
@@ -50,7 +51,7 @@ function PagePreview({ definition }: { definition: Extract<DesignPreview, {kind:
         <WidgetFrame heading={widget.title} description={widget.appearance?.subtitle}
           presentation={resolvePresentation(definition, widget)}
           canon={widget.type === 'record-list' || widget.type === 'record-filter'}
-          style={{ minHeight: widget.customHeight ?? undefined }}>
+          style={{ minHeight: widgetFrameHeight(widget) }}>
           {widget.type === 'record-list' && widget.listSettings?.columns?.length
             ? <Table size="small" pagination={false} dataSource={[]} locale={{ emptyText: '布局预览' }}
                 columns={widget.listSettings.columns.map(field => ({ key: field, title: field }))} />

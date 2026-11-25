@@ -9,7 +9,7 @@ import {
 import { CHART_SERIES_COLORS } from '../../theme/charts';
 import { MANUFACTURING_MATCH_TYPES } from './manufacturingMatch';
 import RelationshipMap from './RelationshipMap';
-import RelationshipNodePreview, { relationshipPropertyLabel, relationshipValue, type RelationshipCardMatch } from './RelationshipNodePreview';
+import RelationshipNodePreview, { relationshipNodeLabel, relationshipPropertyLabel, relationshipValue, type RelationshipCardMatch } from './RelationshipNodePreview';
 import { RELATIONSHIP_OBJECT_EDITOR_FORM_ID } from './RelationshipObjectEditor';
 import RelationshipObjectWiki from './RelationshipObjectWiki';
 import {
@@ -31,7 +31,17 @@ function normalizeRecordMetadata(metadata: RelationshipRecordMetadata): Relation
     tags: metadata.tags && [...new Set(metadata.tags.map(tag => tag.trim()).filter(Boolean))],
     properties: metadata.properties.map(({ id, name, value }) => ({ id, name: name.trim(), value })),
     property_labels: Object.fromEntries(Object.entries(metadata.property_labels ?? {}).sort(([left], [right]) => left.localeCompare(right))),
+    hidden_property_codes: metadata.hidden_property_codes && [...new Set(metadata.hidden_property_codes)].sort(),
+    note_markdown: metadata.note_markdown,
   };
+}
+
+function comparableRecordMetadata(normalized: RelationshipRecordMetadata) {
+  return JSON.stringify({
+    ...normalized,
+    hidden_property_codes: normalized.hidden_property_codes ?? [],
+    note_markdown: normalized.note_markdown ?? '',
+  });
 }
 
 export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) {
@@ -54,8 +64,10 @@ export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) 
     nodeId: string;
     snapshot?: RelationshipObjectEditSnapshot;
     recordMetadataDraft?: RelationshipRecordMetadata;
+    importingMarkdown?: boolean;
   }>();
   const [saving, setSaving] = useState(false);
+  const [markdownImportTarget, setMarkdownImportTarget] = useState<HTMLSpanElement | null>(null);
   const editorRequest = useRef<AbortController>();
   const savePending = useRef(false);
   const [hover, setHover] = useState<NodeHover | null>(null);
@@ -172,12 +184,12 @@ export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) 
     objectTypeId(model), CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length],
   ])), [models]);
   const graphNodes = useMemo(() => graph?.nodes.map(node => ({
-    id: node.id, label: node.key, color: typeColors.get(node.typeId) ?? CHART_SERIES_COLORS[0],
+    id: node.id, label: relationshipNodeLabel(node), color: typeColors.get(node.typeId) ?? CHART_SERIES_COLORS[0],
   })) ?? [], [graph, typeColors]);
   const graphEvidence = matchEvidence?.graph === liveGraph ? matchEvidence?.byNode : undefined;
   const candidateEdges = useMemo(() => graph ? buildRelationshipCandidateEdges(graph, graphEvidence) : [], [graph, graphEvidence]);
   const graphEdges = useMemo(() => [...(graph?.edges ?? []), ...candidateEdges.map(item => item.edge)], [graph, candidateEdges]);
-  const { positions, nearby } = useRelationshipSimilarityScene(graph?.nodes, models);
+  const { positions, nearby } = useRelationshipSimilarityScene(graph?.nodes, models, revision);
   const nodesById = new Map(graph?.nodes.map(node => [node.id, node]));
   const selectedEdge = graphEdges.find(edge => edge.id === selectedEdgeId);
   const selectedNode = nodesById.get(selectedNodeId ?? '') ?? nodesById.get(graph?.rootId ?? '');
@@ -336,15 +348,18 @@ export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) 
   }
 
   async function saveEdit(data: Record<string, unknown>, expectedValues: Record<string, unknown>) {
-    if (!selectedNode || !editor?.snapshot || savePending.current) return;
+    if (!selectedNode || !editor?.snapshot || editor.importingMarkdown || savePending.current) return;
     const original = editor.snapshot.record_metadata;
     const pending = editor.recordMetadataDraft && normalizeRecordMetadata(editor.recordMetadataDraft);
     if (pending?.properties.some(property => !property.name)) {
       message.warning('请填写自定义属性的名称。');
       return;
     }
-    const metadata = original && pending && JSON.stringify(pending) !== JSON.stringify(normalizeRecordMetadata(original))
-      ? { record_metadata: pending, expected_record_metadata: original } : undefined;
+    const metadata = original && pending && comparableRecordMetadata(pending) !== comparableRecordMetadata(normalizeRecordMetadata(original))
+      ? {
+        record_metadata: { ...pending, note_markdown: editor.snapshot.can_edit_note_markdown ? pending.note_markdown : undefined },
+        expected_record_metadata: original,
+      } : undefined;
     if (!Object.keys(data).length && !metadata) {
       cancelEdit();
       return;
@@ -420,36 +435,42 @@ export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) 
     </Card>}
     {graph && <div className="relationship-explorer-board">
         <section className="relationship-explorer-main" aria-label="对象关系图">
-          <div className="relationship-explorer-caption">
-            <Typography.Text strong>对象关系图</Typography.Text>
-            <Typography.Text type="secondary">{graphNodes.length} 个对象 · {graph.edges.length} 条记录关系{candidateEdges.length > 0 ? ` · ${candidateEdges.length} 条候选` : ''}</Typography.Text>
-          </div>
-          <div className="relationship-explorer-map" ref={mapStage}>
-            <RelationshipMap key={graph.rootId} nodes={graphNodes} edges={graphEdges} selectedNodeId={selectedNode?.id}
-              positions={positions} selectedEdgeId={selectedEdge?.id} onSelectNode={selectNode} onSelectEdge={selectEdge}
-              resetSignal={resetSignal} onHoverNode={updatePreview} />
-            {hover && hoveredNode && <RelationshipNodePreview key={hoveredNode.id} node={hoveredNode} anchor={hover} stage={mapStage}
-              model={models.find(item => objectTypeId(item) === hoveredNode.typeId)} matches={nodeMatches(hoveredNode.id)}
-              links={graphEdges.filter(edge => edge.source === hoveredNode.id || edge.target === hoveredNode.id).length}
-              comparison={hoveredNeighbor}
-              onPointerEnter={keepPreviewOpen} onPointerLeave={() => updatePreview(null)} />}
-          </div>
-          <div className="relationship-explorer-legend">
-            {[...relatedTypes].map(([id, name]) => <span key={id}><i style={{ backgroundColor: typeColors.get(id) ?? CHART_SERIES_COLORS[0] }} />{name}</span>)}
-            {graph.edges.length > 0 && <span><i className="relationship-legend-line" />记录关系</span>}
-            {candidateEdges.length > 0 && <span><i className="relationship-legend-line relationship-legend-line--candidate" />候选关系</span>}
-            <span className="relationship-explorer-help">悬停预览 · 点击在侧栏查看 · 左拖旋转 · 右拖平移 · 中键上下拖动或滚轮缩放</span>
+          <header className="relationship-explorer-caption">
+            <h2 className="relationship-explorer-panel-title">对象关系图</h2>
+            <span className="relationship-explorer-caption-detail" aria-live="polite">
+              {graphNodes.length} 个对象 · {graph.edges.length} 条记录关系{candidateEdges.length > 0 ? ` · ${candidateEdges.length} 条候选` : ''}
+            </span>
+            {!overview && key && <span className="relationship-explorer-caption-detail">起点 <code>{key}</code></span>}
+          </header>
+          <div className="relationship-explorer-graph-content">
+            <div className="relationship-explorer-map" ref={mapStage}>
+              <RelationshipMap key={graph.rootId} nodes={graphNodes} edges={graphEdges} selectedNodeId={selectedNode?.id}
+                positions={positions} selectedEdgeId={selectedEdge?.id} onSelectNode={selectNode} onSelectEdge={selectEdge}
+                resetSignal={resetSignal} onHoverNode={updatePreview} />
+              {hover && hoveredNode && <RelationshipNodePreview key={hoveredNode.id} node={hoveredNode} anchor={hover} stage={mapStage}
+                model={models.find(item => objectTypeId(item) === hoveredNode.typeId)} matches={nodeMatches(hoveredNode.id)}
+                links={graphEdges.filter(edge => edge.source === hoveredNode.id || edge.target === hoveredNode.id).length}
+                comparison={hoveredNeighbor}
+                onPointerEnter={keepPreviewOpen} onPointerLeave={() => updatePreview(null)} />}
+            </div>
+            <div className="relationship-explorer-legend">
+              {[...relatedTypes].map(([id, name]) => <span key={id}><i style={{ backgroundColor: typeColors.get(id) ?? CHART_SERIES_COLORS[0] }} />{name}</span>)}
+              {graph.edges.length > 0 && <span><i className="relationship-legend-line" />记录关系</span>}
+              {candidateEdges.length > 0 && <span><i className="relationship-legend-line relationship-legend-line--candidate" />候选关系</span>}
+              <span className="relationship-explorer-help">悬停预览 · 点击在侧栏查看 · 左拖旋转 · 右拖平移 · 中键上下拖动或滚轮缩放</span>
+            </div>
           </div>
         </section>
         <aside className="relationship-explorer-inspector" aria-label="关系图详情">
-          <div className="relationship-explorer-inspector-toolbar">
-            <Typography.Text strong>{selectedEdge ? '连线详情' : '属性'}</Typography.Text>
+          <header className="relationship-explorer-inspector-toolbar">
+            <h2 className="relationship-explorer-panel-title">{selectedEdge ? '连线详情' : '对象详情'}</h2>
             {selectedNode && !selectedEdge && <div className="relationship-explorer-inspector-actions">{editor ? <>
+              <span className="relationship-explorer-markdown-import" ref={setMarkdownImportTarget} />
               <Button disabled={saving} onClick={cancelEdit}>取消</Button>
               <Button type="primary" htmlType="submit" form={RELATIONSHIP_OBJECT_EDITOR_FORM_ID}
-                loading={saving || !editor.snapshot} disabled={!editor.snapshot}>保存</Button>
+                loading={saving || !editor.snapshot} disabled={!editor.snapshot || editor.importingMarkdown}>保存</Button>
             </> : <Button icon={<EditOutlined />} onClick={() => void startEdit(selectedNode)}>编辑</Button>}</div>}
-          </div>
+          </header>
           <div className="relationship-explorer-inspector-body" ref={inspectorBody}>
             {selectedEdge && <section className="relationship-explorer-selected-edge" aria-label="当前连线">
               <header><Typography.Text strong>{selectedEdge.label}</Typography.Text>
@@ -473,10 +494,15 @@ export default function RelationshipExplorer({ isAdmin }: { isAdmin: boolean }) 
               </dl> : <Typography.Text type="secondary">暂无可查看的匹配字段和值</Typography.Text>}
             </section>}
             {selectedNode ? <RelationshipObjectWiki key={selectedNode.id} node={selectedNode} model={selectedModel}
+              referenceRecords={graph.nodes}
               related={wikiNeighbors} onOpenRelated={selectNode} onSelectRelationship={selectEdge}
               comparisons={nearby(selectedNode.id)}
               matches={nodeMatches(selectedNode.id)} trials={wikiTrials} selectedTrialKey={soleEvidence?.result.selectedTrial?.key}
               editSnapshot={editor?.snapshot} onSubmitEdit={editor?.snapshot ? saveEdit : undefined} saving={saving}
+              markdownImportTarget={markdownImportTarget}
+              onMarkdownImportingChange={importingMarkdown => {
+                setEditSession(session => session?.nodeId === selectedNode.id ? { ...session, importingMarkdown } : session);
+              }}
               recordMetadataDraft={editor?.recordMetadataDraft} onRecordMetadataChange={draft => {
                 setEditSession(session => session?.nodeId === selectedNode.id ? { ...session, recordMetadataDraft: draft } : session);
               }} />

@@ -91,8 +91,7 @@
 .analytics-editor-metric-definitions code { display:block;margin:6px 0;color:var(--mf-muted);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere; }
 .analytics-editor-metric-definitions small { color:var(--mf-faint);font-size:12px; }
 .analytics-editor-metric-definitions p { margin:6px 0;color:var(--mf-muted);line-height:1.6; }
-.analytics-editor-two-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.analytics-editor-two-fields .ant-input-number-group-addon { font-size: 12px; padding: 0 6px; }
+.analytics-editor-panel .ant-input-number-group-addon { font-size: 12px; padding: 0 6px; }
 .analytics-editor-section-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 20px 0 10px; font-size: 12px; }
 .analytics-editor-section-title:first-child { margin-top: 0; }
 .analytics-editor-section-title .ant-typography { font-size: 12px; }
@@ -246,17 +245,15 @@
 .analytics-appearance-switches .property-inspector-label { min-width: 0; }
 .analytics-appearance-switches .ant-switch { flex: none; }
 
-/* Match the business form's inspector: 72px labels, 26px inputs and 34px rows. */
-.analytics-editor-form-inspector { --property-label-width: 72px; --property-control-height: 26px; --property-row-height: 34px; --property-group-gap: 10px; }
+.analytics-editor-form-inspector { --property-label-width:var(--property-inspector-compact-label-width); --property-control-height:26px; --property-row-height:34px; --property-group-gap:10px; }
 .analytics-editor-form-inspector .property-inspector-header { min-height: 46px; padding: 10px 12px; }
 .analytics-editor-form-inspector .property-inspector-header strong { font-size: 12px; font-weight: 600; }
 .analytics-editor-form-inspector .property-inspector-header-actions { gap: 2px; }
 .analytics-editor-form-inspector .analytics-widget-properties { display: flex; flex-direction: column; gap: 10px; }
 .analytics-editor-form-inspector .analytics-widget-properties > .property-inspector-group { margin: 0; border-radius: 6px; border-color: #e1e9ee; box-shadow: none; background: #fff; }
 .analytics-editor-form-inspector .property-inspector-group-title { min-height: 32px; padding: 8px 10px; background: var(--mf-panel-soft); font-size: 12px; font-weight: 600; }
-.analytics-editor-form-inspector .property-inspector-row { grid-template-columns: 72px minmax(0,1fr); min-height: 34px; gap: 8px; padding: 4px 10px; border-bottom-color: #f0f3f6; }
+.analytics-editor-form-inspector .property-inspector-row { border-bottom-color:#f0f3f6; }
 .analytics-editor-form-inspector .property-inspector-label > label { font-size: 12px; line-height: 1.5; font-weight: 500; }
-.analytics-editor-form-inspector .property-inspector-row > :is(.ant-select,.ant-input-number,.ant-input-number-affix-wrapper,.ant-input-affix-wrapper) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .analytics-editor-form-inspector .property-inspector-row .ant-select-single { height: 26px; }
 .analytics-editor-form-inspector .property-inspector-row .ant-select-single .ant-select-selector { height: 26px !important; align-items: center; border-radius: 4px; }
 .analytics-editor-form-inspector .property-inspector-row .ant-select-single :is(.ant-select-selection-item,.ant-select-selection-placeholder) { line-height: 24px !important; font-size: 12px; }
@@ -264,9 +261,9 @@
 .analytics-editor-form-inspector .property-inspector-row .ant-input-number-affix-wrapper > .ant-input-number { flex: 1; min-width: 0; width: 0; }
 .analytics-editor-form-inspector .property-inspector-row .ant-input-number-input { height: 24px; font-size: 12px; }
 .analytics-editor-form-inspector .ant-input-number-suffix { color: var(--mf-faint); font-size: 12px; }
-.analytics-editor-form-inspector .property-inspector-row > .ant-switch { justify-self: end; width: 34px; min-width: 34px; max-width: 34px; height: 18px; margin-right: 2px; padding: 0; }
-.analytics-editor-form-inspector .ant-switch .ant-switch-handle { width: 14px; height: 14px; top: 2px; }
-.analytics-editor-form-inspector .ant-switch.ant-switch-checked .ant-switch-handle { inset-inline-start: calc(100% - 16px); }
+.analytics-editor-form-inspector :is(.property-inspector-row,.property-inspector-resettable) > .ant-switch-small { width:34px;min-width:34px;height:18px;padding:0; }
+.analytics-editor-form-inspector .ant-switch-small .ant-switch-handle { width:14px;height:14px;top:2px; }
+.analytics-editor-form-inspector .ant-switch-small.ant-switch-checked .ant-switch-handle { inset-inline-start:calc(100% - 16px); }
 .analytics-editor-form-inspector .property-inspector-advanced > summary { display: flex; align-items: center; justify-content: flex-start; gap: 7px; padding: 8px 10px; color: var(--mf-muted); font-size: 12px; }
 .analytics-editor-form-inspector .property-inspector-advanced > summary::after { display: none; }
 .analytics-editor-form-inspector .analytics-appearance-switches { display: block; padding: 0; }
@@ -277,7 +274,7 @@
 .analytics-inspector-palette { display: inline-flex; gap: 2px; }
 .analytics-inspector-palette i { width: 8px; height: 10px; border-radius: 4px; }
 .analytics-editor-form-inspector .analytics-dependent-options { margin:0;padding:0;border:0;border-radius:0;background:transparent; }
-.analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { grid-template-columns:72px minmax(0,1fr);padding-inline:10px;background:transparent; }
+.analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { background:transparent; }
 @keyframes analytics-option-reveal { from { opacity:0;transform:translateY(-3px); } to { opacity:1;transform:none; } }
 @media(prefers-reduced-motion:reduce) { .analytics-dependent-options { animation:none!important; } }
 
@@ -292,16 +289,14 @@
 .analytics-dependent-options > summary:hover { background:color-mix(in srgb,var(--mf-primary,#47627b) 4%,transparent); }
 .analytics-dependent-options > summary:focus-visible { outline:2px solid var(--mf-primary);outline-offset:-2px; }
 .analytics-dependent-options:not([open]) > :not(summary) { display:none!important; }
-/* Reserve enough room for parameter names and their help affordance. */
-.analytics-editor-form-inspector { --property-label-width:var(--property-inspector-compact-label-width); }
-.analytics-editor-form-inspector .property-inspector-row,
-.analytics-editor-form-inspector .analytics-dependent-options .property-inspector-row { grid-template-columns:var(--property-label-width) minmax(0,1fr); }
 /* One alignment and heading hierarchy for every standard settings panel. */
 .analytics-editor-form-inspector .property-inspector-row,
 .analytics-editor-form-inspector .property-inspector-row:has(.option-picker-inline) { align-items:center; }
-.analytics-editor-form-inspector .option-picker-inline-rail { margin-inline:3px; }
-.analytics-editor-form-inspector .option-picker-inline-rail > input { left:-3px;width:calc(100% + 6px); }
-.analytics-editor-form-inspector .option-picker-inline-stops { margin-inline:-12px; }
+.analytics-editor-form-inspector .option-picker-inline { padding-inline:0; }
+.analytics-editor-form-inspector .option-picker-inline-rail { margin-inline:10px; }
+.analytics-editor-form-inspector .option-picker-inline-rail > input { left:-10px;width:calc(100% + 20px); }
+.analytics-editor-form-inspector .option-picker-inline-stops { margin-inline:-10px; }
+.analytics-editor-form-inspector .option-picker-inline-stops > button { min-inline-size:max-content; }
 .analytics-editor-form-inspector .property-inspector-label,
 .analytics-editor-form-inspector .property-inspector-row:has(textarea) > .property-inspector-label { display:flex;align-items:center;justify-content:flex-start;align-self:stretch;min-height:26px;gap:4px;padding:0;text-align:left; }
 .analytics-editor-form-inspector .property-inspector-label > label { text-align:left; }

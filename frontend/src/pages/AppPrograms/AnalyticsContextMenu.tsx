@@ -4,12 +4,14 @@ import { EditOutlined, FilterOutlined, SettingOutlined, SkinOutlined } from '@/c
 
 interface ContextMenuOptions {
   widgetTitle?: string;
+  widgetStyle?: boolean;
+  widgetInteraction?: boolean;
   pageLabel: '看板' | '页面' | '工作台';
   sections: NonNullable<MenuProps['items']>;
 }
 
 /** Share presentation while keeping each workspace's existing action keys. */
-export function buildAnalyticsContextMenu({ widgetTitle, pageLabel, sections }: ContextMenuOptions): NonNullable<MenuProps['items']> {
+export function buildAnalyticsContextMenu({ widgetTitle, widgetStyle = true, widgetInteraction = true, pageLabel, sections }: ContextMenuOptions): NonNullable<MenuProps['items']> {
   const isWidget = widgetTitle !== undefined;
   return [
     {
@@ -17,10 +19,8 @@ export function buildAnalyticsContextMenu({ widgetTitle, pageLabel, sections }: 
       label: <span className="analytics-context-heading" title={widgetTitle || pageLabel}>{widgetTitle || pageLabel}</span>,
       children: [
         { key: 'edit', icon: <EditOutlined />, label: isWidget ? '编辑此组件' : `编辑${pageLabel}` },
-        ...(isWidget ? [
-          { key: 'widget-style', icon: <SkinOutlined />, label: '调整外观' },
-          { key: 'widget-interaction', icon: <FilterOutlined />, label: '设置交互' },
-        ] : []),
+        ...(isWidget && widgetStyle ? [{ key: 'widget-style', icon: <SkinOutlined />, label: '调整外观' }] : []),
+        ...(isWidget && widgetInteraction ? [{ key: 'widget-interaction', icon: <FilterOutlined />, label: '设置交互' }] : []),
       ],
     },
     { type: 'divider' },

@@ -3,7 +3,8 @@ import { relationshipPositions, type Point3 } from './relationshipLayout';
 export interface SimilarityFeature {
   code: string;
   dimension?: string;
-  kind: 'number' | 'category';
+  kind: 'number' | 'category' | 'text';
+  automatic?: true;
   tolerance?: number;
   weight?: number;
   scale?: number;
@@ -34,13 +35,45 @@ export interface RelationshipSimilarity {
 interface PreparedFeature extends SimilarityFeature {
   value?: ComparableValue;
   metricValue?: number;
+  text?: TextProfile;
   weight: number;
+}
+
+interface TextProfile {
+  normalized: string;
+  pairs: ReadonlyMap<string, number>;
+  size: number;
 }
 
 type Profile = ReadonlyMap<string, PreparedFeature>;
 
 function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function prepareText(value: string): TextProfile | undefined {
+  const normalized = value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (!normalized) return undefined;
+  const pairs = new Map<string, number>();
+  let previous = '';
+  let size = 0;
+  for (const character of normalized) {
+    if (previous) {
+      const pair = previous + character;
+      pairs.set(pair, (pairs.get(pair) ?? 0) + 1);
+      size++;
+    }
+    previous = character;
+  }
+  return { normalized, pairs, size };
+}
+
+function textSimilarity(left: TextProfile, right: TextProfile): number {
+  if (left.normalized === right.normalized) return 1;
+  if (!left.size || !right.size) return 0;
+  let shared = 0;
+  for (const [pair, count] of left.pairs) shared += Math.min(count, right.pairs.get(pair) ?? 0);
+  return 2 * shared / (left.size + right.size);
 }
 
 function prepareProfile({ features, values }: SimilarityNode): Profile {
@@ -52,19 +85,30 @@ function prepareProfile({ features, values }: SimilarityNode): Profile {
     const numeric = typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
     const scale = feature.scale ?? 1;
     const metricValue = numeric !== undefined && scale !== 0 ? numeric * scale + (feature.offset ?? 0) : undefined;
-    const value = feature.kind === 'number' ? Number.isFinite(metricValue) ? numeric : undefined
-      : typeof raw === 'boolean' || (typeof raw === 'string' && raw.trim() !== '') ? raw : numeric;
-    profile.set(dimension, { ...feature, value, metricValue, weight: positiveNumber(feature.weight) ?? 1 });
+    const text = feature.kind === 'text' && typeof raw === 'string' ? prepareText(raw) : undefined;
+    let value: ComparableValue | undefined;
+    if (feature.kind === 'number') {
+      if (Number.isFinite(metricValue)) value = numeric;
+    } else if (feature.kind === 'text') {
+      if (text && typeof raw === 'string') value = raw;
+    } else {
+      value = typeof raw === 'boolean' || (typeof raw === 'string' && raw.trim() !== '') ? raw : numeric;
+    }
+    profile.set(dimension, { ...feature, value, metricValue, text, weight: positiveNumber(feature.weight) ?? 1 });
   }
   return profile;
 }
 
 function featureScore(left: PreparedFeature, right: PreparedFeature, leftValue: ComparableValue, rightValue: ComparableValue): number {
   if (left.kind === 'category') return Number(leftValue === rightValue);
+  if (left.kind === 'text') return left.text && right.text ? textSimilarity(left.text, right.text) : 0;
   if (left.metricValue === undefined || right.metricValue === undefined) return 0;
   if (left.metricValue === right.metricValue) return 1;
   const tolerance = Math.min(positiveNumber(left.tolerance) ?? Infinity, positiveNumber(right.tolerance) ?? Infinity);
-  return Number.isFinite(tolerance) ? Math.max(0, 1 - Math.abs(left.metricValue - right.metricValue) / tolerance) : 0;
+  if (Number.isFinite(tolerance)) return Math.max(0, 1 - Math.abs(left.metricValue - right.metricValue) / tolerance);
+  if (!left.automatic || !right.automatic) return 0;
+  const magnitude = Math.max(Math.abs(left.metricValue), Math.abs(right.metricValue));
+  return Math.max(0, 1 - Math.abs(left.metricValue / magnitude - right.metricValue / magnitude));
 }
 
 function compareProfiles(source: Profile, target: Profile): RelationshipSimilarity | undefined {
@@ -103,6 +147,7 @@ const collisionDistance = 0.24;
 const minTargetDistance = 0.32;
 const maxTargetDistance = 1.64;
 const maxIncrementalMovement = 0.48;
+const closePairAffinity = 0.6;
 const iterations = 60;
 
 function validPoint(point: Point3 | undefined): point is Point3 {
@@ -128,6 +173,7 @@ interface Particle {
   velocity: Point3;
   force: Point3;
   compatibleNeighbors: number;
+  bestAffinity: number;
 }
 
 interface Pair {
@@ -135,6 +181,7 @@ interface Pair {
   b: Particle;
   fallbackAxis: 'x' | 'y' | 'z';
   comparison?: RelationshipSimilarity;
+  affinity: number;
 }
 
 export function layoutRelationshipSimilarity(
@@ -152,27 +199,43 @@ export function layoutRelationshipSimilarity(
     const initial = validPoint(prior) ? prior : validPoint(seed) ? seed : fallback.get(node.id) ?? origin;
     const anchor = boundPoint(initial, origin, volumeRadius);
     return { id: node.id, profile: prepareProfile(node), anchor, anchored: validPoint(prior), position: anchor,
-      velocity: { ...origin }, force: { ...origin }, compatibleNeighbors: 0 };
+      velocity: { ...origin }, force: { ...origin }, compatibleNeighbors: 0, bestAffinity: 0 };
   });
 
   const pairs: Pair[] = [];
+  const flexibleAnchors = new Set<Particle>();
   const nearPrevious = new Map<string, { neighbor: Particle; score: number }>();
   for (const [index, a] of particles.entries()) {
     for (let i = index + 1; i < particles.length; i++) {
       const b = particles[i];
       const fallbackAxis = (['x', 'y', 'z'] as const)[(index + i) % 3];
       const comparison = compareProfiles(a.profile, b.profile);
-      pairs.push({ a, b, fallbackAxis, comparison });
+      const affinity = comparison ? comparison.similarity * comparison.coverage : 0;
+      pairs.push({ a, b, fallbackAxis, comparison, affinity });
       if (!comparison) continue;
       a.compatibleNeighbors++;
       b.compatibleNeighbors++;
-      if (a.anchored === b.anchored) continue;
-      const score = comparison.similarity * comparison.coverage;
-      const newcomer = a.anchored ? b : a;
-      const neighbor = a.anchored ? a : b;
-      if (score >= 0.65 && score > (nearPrevious.get(newcomer.id)?.score ?? 0)) {
-        nearPrevious.set(newcomer.id, { neighbor, score });
-      }
+      a.bestAffinity = Math.max(a.bestAffinity, affinity);
+      b.bestAffinity = Math.max(b.bestAffinity, affinity);
+    }
+  }
+
+  for (const pair of pairs) {
+    const { a, b, comparison, affinity } = pair;
+    // Give reciprocal neighbors more pull while keeping limited coverage a cap on layout affinity.
+    if (comparison && affinity > 0 && affinity === a.bestAffinity && affinity === b.bestAffinity) {
+      pair.affinity = Math.sqrt(comparison.similarity) * comparison.coverage;
+    }
+    if (pair.affinity < closePairAffinity) continue;
+    if (a.anchored && b.anchored) {
+      flexibleAnchors.add(a);
+      flexibleAnchors.add(b);
+    }
+    if (a.anchored === b.anchored) continue;
+    const newcomer = a.anchored ? b : a;
+    const neighbor = a.anchored ? a : b;
+    if (affinity > (nearPrevious.get(newcomer.id)?.score ?? 0)) {
+      nearPrevious.set(newcomer.id, { neighbor, score: affinity });
     }
   }
 
@@ -192,7 +255,7 @@ export function layoutRelationshipSimilarity(
 
   for (let frame = 0; frame < iterations; frame++) {
     for (const point of particles) {
-      const anchorForce = point.anchored ? 0.035 : 0.005;
+      const anchorForce = point.anchored && !flexibleAnchors.has(point) ? 0.035 : 0.005;
       point.force = {
         x: (point.anchor.x - point.position.x) * anchorForce,
         y: (point.anchor.y - point.position.y) * anchorForce,
@@ -200,18 +263,19 @@ export function layoutRelationshipSimilarity(
       };
     }
 
-    for (const { a, b, comparison, fallbackAxis } of pairs) {
+    for (const { a, b, comparison, affinity, fallbackAxis } of pairs) {
       const x = b.position.x - a.position.x;
       const y = b.position.y - a.position.y;
       const z = b.position.z - a.position.z;
       const distance = Math.hypot(x, y, z);
       let pull = -0.42 * Math.max(0, collisionDistance - distance);
       if (comparison) {
-        const target = maxTargetDistance - comparison.similarity * (maxTargetDistance - minTargetDistance);
+        const target = minTargetDistance + (maxTargetDistance - minTargetDistance) * (1 - affinity) ** 2;
         const displacement = distance - target;
         const attraction = displacement > 0 ? comparison.similarity : 1;
         const divisor = Math.sqrt(Math.max(a.compatibleNeighbors, b.compatibleNeighbors));
-        pull += 0.28 * comparison.coverage * attraction * displacement / divisor;
+        const strength = 0.28 * comparison.coverage * (1 + 2 * affinity ** 2);
+        pull += strength * attraction * displacement / divisor;
       }
       if (!pull) continue;
       const direction = distance > 1e-8 ? { x: x / distance, y: y / distance, z: z / distance }
@@ -230,7 +294,7 @@ export function layoutRelationshipSimilarity(
       const step = boundPoint({ x: velocity.x * 0.55 + force.x, y: velocity.y * 0.55 + force.y,
         z: velocity.z * 0.55 + force.z }, origin, 0.11);
       let next = { x: position.x + step.x, y: position.y + step.y, z: position.z + step.z };
-      if (point.anchored) next = boundPoint(next, point.anchor, maxIncrementalMovement);
+      if (point.anchored && !flexibleAnchors.has(point)) next = boundPoint(next, point.anchor, maxIncrementalMovement);
       point.position = boundPoint(next, origin, volumeRadius);
       point.velocity = { x: point.position.x - position.x, y: point.position.y - position.y, z: point.position.z - position.z };
       largestMovement = Math.max(largestMovement, Math.hypot(point.velocity.x, point.velocity.y, point.velocity.z));

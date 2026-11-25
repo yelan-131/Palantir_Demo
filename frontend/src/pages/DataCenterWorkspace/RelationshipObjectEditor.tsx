@@ -1,6 +1,7 @@
-import { DeleteOutlined } from '@/components/Icon/ant';
-import { Button, Form, InputNumber } from 'antd';
-import { useLayoutEffect, type ReactNode } from 'react';
+import { DeleteOutlined, UploadOutlined } from '@/components/Icon/ant';
+import { Button, Form, Input, InputNumber, message } from 'antd';
+import { useLayoutEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import FieldControl from '../../components/FormWidgets/FieldControl';
 import type { RelationshipObjectEditSnapshot } from '../../services/objectRuntime';
 import { normalizeText, type ControlSettings } from '../../utils/formControls';
@@ -22,8 +23,12 @@ type EditField = RelationshipObjectEditSnapshot['fields'][number];
 const integerTypes = new Set(['int', 'integer']);
 const numberTypes = new Set(['int', 'integer', 'float', 'decimal', 'number']);
 
+export function isRelationshipMarkdownField(field: EditField) {
+  return field.code === 'wiki_markdown' || field.control_type === 'markdown';
+}
+
 function controlType(field: EditField) {
-  if (field.code === 'wiki_markdown' || field.control_type === 'markdown') return 'textarea';
+  if (isRelationshipMarkdownField(field)) return 'textarea';
   if (field.field_type === 'enum' || field.control_type === 'select') return 'select';
   if (numberTypes.has(field.field_type)) return 'number';
   if (field.field_type === 'boolean') return 'switch';
@@ -36,10 +41,62 @@ function controlSettings(field: EditField): ControlSettings {
   const settings = field.type_settings ?? {};
   if (field.field_type === 'date' || field.control_type === 'date') return { ...settings, dateMode: 'date' };
   if (integerTypes.has(field.field_type)) return { ...settings, precision: 0 };
-  if (field.code === 'wiki_markdown' || field.control_type === 'markdown') {
+  if (isRelationshipMarkdownField(field)) {
     return { rows: 5, ...settings, trimMode: undefined, caseMode: undefined };
   }
   return settings;
+}
+
+export function RelationshipMarkdownInput({ value, onChange, disabled, maxLength, importTarget, onImportingChange }: {
+  value?: string | null;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
+  maxLength?: number;
+  importTarget?: HTMLElement | null;
+  onImportingChange?: (importing: boolean) => void;
+}) {
+  const picker = useRef<HTMLInputElement>(null);
+  const importRevision = useRef(0);
+  const latestOnChange = useRef(onChange);
+  const [importing, setImporting] = useState(false);
+  useLayoutEffect(() => { latestOnChange.current = onChange; }, [onChange]);
+  useLayoutEffect(() => () => { importRevision.current += 1; }, []);
+
+  async function importMarkdown(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || !onChange || disabled) return;
+    const revision = ++importRevision.current;
+    setImporting(true);
+    onImportingChange?.(true);
+    try {
+      const source = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+      if (revision !== importRevision.current) return;
+      if (maxLength !== undefined && source.length > maxLength) {
+        message.error(`Markdown 最多 ${maxLength} 个字符。`);
+        return;
+      }
+      latestOnChange.current?.(source);
+    } catch {
+      if (revision === importRevision.current) message.error('无法读取文件，请选择 UTF-8 编码的 Markdown。');
+    } finally {
+      if (revision === importRevision.current) {
+        setImporting(false);
+        onImportingChange?.(false);
+      }
+    }
+  }
+
+  return <div className="relationship-object-editor__markdown">
+    {importTarget && createPortal(<>
+      <Button type="text" htmlType="button" icon={<UploadOutlined />} loading={importing}
+        aria-label="导入 Markdown" title="导入 Markdown" disabled={disabled} onClick={() => picker.current?.click()}>导入</Button>
+      <input ref={picker} className="relationship-object-editor__file-picker" type="file"
+        accept=".md,.markdown,text/markdown" hidden onChange={event => void importMarkdown(event)} />
+    </>, importTarget)}
+    <Input.TextArea aria-label="Markdown" value={value ?? ''} onChange={event => onChange?.(event.target.value)}
+      rows={6} maxLength={maxLength} disabled={disabled || importing} />
+  </div>;
 }
 
 function normalizedValue(field: EditField, value: unknown): unknown {
@@ -111,7 +168,12 @@ export function RelationshipObjectEditorForm({ snapshot, onSubmit, disabled = fa
   </Form>;
 }
 
-export function RelationshipObjectEditField({ field, disabled }: { field: EditField; disabled?: boolean }) {
+export function RelationshipObjectEditField({ field, disabled, markdownImportTarget, onMarkdownImportingChange }: {
+  field: EditField;
+  disabled?: boolean;
+  markdownImportTarget?: HTMLElement | null;
+  onMarkdownImportingChange?: (importing: boolean) => void;
+}) {
   const type = controlType(field);
   const settings = controlSettings(field);
   const nullableBoolean = type === 'switch' && !field.required;
@@ -136,7 +198,10 @@ export function RelationshipObjectEditField({ field, disabled }: { field: EditFi
       if (error) throw new Error(error);
     } }]}
   >
-    {type === 'number' ? <InputNumber className="relationship-object-editor__number" aria-label={field.label}
+    {isRelationshipMarkdownField(field)
+      ? <RelationshipMarkdownInput maxLength={settings.maxLength} disabled={disabled}
+        importTarget={markdownImportTarget} onImportingChange={onMarkdownImportingChange} />
+      : type === 'number' ? <InputNumber className="relationship-object-editor__number" aria-label={field.label}
       min={settings.min} max={settings.max} precision={settings.precision} suffix={settings.unit} disabled={disabled}
       formatter={settings.thousandSeparator ? (value, info) => info.userTyping ? info.input
         : String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',') : undefined} />

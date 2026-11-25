@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ from app.services.records import change_audit
 from app.services import component_page_definitions as component_page_definitions_service
 from app.services.component_page_definitions import (  # noqa: F401  (re-exported for tests/callers)
     ComponentPresentation,
+    ComponentPublishValidationError,
     FilterScheme,
     FilterSettings,
     DisplayGroup,
@@ -277,7 +278,14 @@ async def page_data(code: str, query: RuntimeQuery, request: Request,
 async def preview_page(code: str, body: PagePreview, request: Request,
                        db: AsyncSession = Depends(get_db), user=Depends(require_admin)):
     page = await find_page(db, user, code)
-    await validate_publish(db, user, body.definition)
+    try:
+        await validate_publish(db, user, body.definition)
+    except ComponentPublishValidationError as error:
+        raise HTTPException(error.status_code, detail={
+            'errors': [error.detail],
+            'widgetErrors': {widget_id: [error.detail] for widget_id in error.widget_targets},
+            'widgetTargets': error.widget_targets,
+        }, headers=error.headers) from error
     data = await runtime_data(db, user, page, body.definition, body.filters, body.widget_filters, body.filter_queries, body.chart_values)
     diagnose_component_data(request, data)
     return {'analyticsData': data}
@@ -291,20 +299,27 @@ def diagnose_component_data(request: Request, data: dict) -> None:
 
 # A section release stores a complete runtime snapshot but merges only its own fields.
 _SECTION_DATA = {'dataBinding', 'dimension', 'measure', 'aggregate', 'expression', 'sharedMetricId', 'sharedMetricVersion', 'sharedFields', 'filterFields', 'filterSettings', 'showFilters'}
+_SECTION_RECORD_FILTER_DATA = {'standaloneFilter', 'targetWidgetIds'}
 _SECTION_LIST_DATA = {'sortableColumns', 'displayGroups', 'columns', 'pageSize', 'defaultSort', 'emptyText'}
 _SECTION_FILTER_DATA = {'showKeyword', 'expandAdvanced', 'requiredFields', 'schemes'}
 
 
 def widget_section(widget, section):
-    result = {k: v for k, v in widget.items() if k not in {'id', 'type', 'listSettings', 'filterSettings'} and ((k in _SECTION_DATA) == (section == 'data'))}
+    widget_type = widget.get('type')
+    data_keys = _SECTION_DATA | _SECTION_RECORD_FILTER_DATA if widget_type == 'record-filter' else _SECTION_DATA
+    result = {k: v for k, v in widget.items() if k not in {'id', 'type', 'listSettings', 'filterSettings'} and ((k in data_keys) == (section == 'data'))}
+    if section == 'basic':
+        result.setdefault('heightPercent', None)
+    elif widget_type == 'record-filter':
+        result.setdefault('standaloneFilter', False)
     result['listSettings'] = {k: v for k, v in (widget.get('listSettings') or {}).items() if ((k in _SECTION_LIST_DATA) == (section == 'data'))}
-    filter_data_keys = set(FilterSettings.model_fields) if widget.get('type') == 'record-list' else _SECTION_FILTER_DATA
+    filter_data_keys = set(FilterSettings.model_fields) if widget_type in {'record-list', 'record-filter'} else _SECTION_FILTER_DATA
     result['filterSettings'] = {k: v for k, v in (widget.get('filterSettings') or {}).items() if ((k in filter_data_keys) == (section == 'data'))}
     return result
 
 
 def merge_widget_section(widget, snapshot, section):
-    patch = widget_section(snapshot, section)
+    patch = widget_section({**snapshot, 'type': widget.get('type')}, section)
     return {**widget, **patch, 'listSettings': {**(widget.get('listSettings') or {}), **patch['listSettings']}, 'filterSettings': {**(widget.get('filterSettings') or {}), **patch['filterSettings']}}
 
 
@@ -359,17 +374,31 @@ async def publish_section(code: str, widget_id: str, section: Literal['basic', '
     if not definition:
         raise HTTPException(422, '请先发布页面首个版本，再独立发布组件页签')
     source = next((w.model_dump() for w in body.definition.widgets if w.id == widget_id), None)
-    if source is None or not any(w['id'] == widget_id for w in definition['widgets']):
+    live_widget = next((w for w in definition['widgets'] if w['id'] == widget_id), None)
+    if source is None or live_widget is None:
         raise HTTPException(422, '新组件请先通过页面发布')
     if section == 'data' and source['type'] == 'record-list':
         draft_ids = {widget.id for widget in body.definition.widgets}
-        if any(w['type'] == 'record-filter' and w.get('targetWidgetIds') == [widget_id] and w['id'] not in draft_ids
+        if any(w['type'] == 'record-filter' and not w.get('standaloneFilter')
+               and w.get('targetWidgetIds') == [widget_id] and w['id'] not in draft_ids
                for w in definition['widgets']):
             raise HTTPException(422, '请发布整个页面，以同步移除已合并的筛选组件')
     definition = {**definition, 'widgets': [merge_widget_section(w, source, section) if w['id'] == widget_id else w for w in definition['widgets']]}
     validated = PageDefinition.model_validate(definition)
     await validate_publish(db, user, validated)
     await validate_draft_sources(db, user, body.definition)
+    try:
+        previous = PageWidget.model_validate(live_widget).model_dump()
+    except ValidationError:
+        # Allow a section release to repair a value that an old snapshot accepted.
+        previous = None
+    current = next(w for w in validated.widgets if w.id == widget_id).model_dump()
+    if previous is not None and widget_section(previous, section) == widget_section(current, section):
+        revision = await db.scalar(select(ComponentPage.revision).where(
+            ComponentPage.id == page.id, ComponentPage.tenant_id == page.tenant_id))
+        if revision != body.expectedRevision:
+            raise coded_error(409, 'COMPONENT_PAGE_VERSION_CONFLICT', '页面已被其他编辑更新，请重新加载')
+        raise HTTPException(422, '当前组件页签与已发布版本一致，无需重复发布')
     updated = await db.execute(update(ComponentPage).where(ComponentPage.id == page.id,
         ComponentPage.tenant_id == page.tenant_id, ComponentPage.revision == body.expectedRevision).values(
         draft=body.definition.model_dump(), revision=ComponentPage.revision + 1, published_version=ComponentPage.published_version + 1))

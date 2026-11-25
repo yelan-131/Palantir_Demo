@@ -39,9 +39,11 @@ export function relationshipValue(value: unknown): string {
 }
 
 export function relationshipNodeLabel(node: RelationshipNode) {
-  const label = [node.values.product_name, node.values.grade_name, node.values.process_name, node.values.name]
-    .find(value => typeof value === 'string' && value.trim());
-  return typeof label === 'string' ? label : node.key;
+  for (const code of ['name', 'product_name', 'grade_name', 'process_name']) {
+    const value = node.values[code];
+    if (!node.maskedFields?.includes(code) && typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return node.key;
 }
 
 export const relationshipMatchStatus = {
@@ -61,7 +63,9 @@ export default function RelationshipNodePreview({ node, model, anchor, stage, li
 }) {
   const card = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number; maxHeight?: number }>();
-  const available = Object.keys(node.values).filter(code => code !== 'wiki_markdown');
+  const hidden = new Set(node.recordMetadata?.hidden_property_codes);
+  const tags = node.recordMetadata?.tags ?? [];
+  const available = Object.keys(node.values).filter(code => code !== 'wiki_markdown' && !hidden.has(code));
   const compared = comparison?.features.map(feature => feature.sourceCode) ?? [];
   const fields = [...new Set([...compared, ...previewProperties, ...available])].filter(code => available.includes(code)).slice(0, 4);
   const match = matches[0];
@@ -111,12 +115,15 @@ export default function RelationshipNodePreview({ node, model, anchor, stage, li
 
   return <div ref={card} role="tooltip" aria-label={`${node.key} 对象预览`} className="relationship-node-preview"
     onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}
-    style={{ ...position, overflowY: position?.maxHeight === undefined ? undefined : 'auto', visibility: position ? 'visible' : 'hidden' }}>
+    style={{ ...position, visibility: position ? 'visible' : 'hidden' }}>
     <header>
       <Typography.Text strong>{relationshipNodeLabel(node)}</Typography.Text>
-      <Tag>{node.typeName}</Tag>
+      <Typography.Text type="secondary" className="relationship-node-preview__type">{node.typeName}</Typography.Text>
     </header>
     <Typography.Text type="secondary" className="relationship-node-preview__identity">{node.key} · {links} 条可见连线</Typography.Text>
+    {tags.length > 0 && <ul className="relationship-node-preview__tags" aria-label="标签">
+      {tags.map(tag => <li key={tag}><Tag>{tag}</Tag></li>)}
+    </ul>}
     {fields.length > 0 && <dl>
       {fields.map(code => <div key={code}><dt>{relationshipPropertyLabel(code, model)}</dt><dd>{relationshipValue(node.values[code])}</dd></div>)}
     </dl>}

@@ -177,10 +177,11 @@ test('overview includes disconnected and isolated records and deduplicates typed
 
 test('overview shares the node limit, bounds request concurrency, and reports incomplete results', async () => {
   const records = new Map([
-    [1, Array.from({ length: 61 }, (_, index) => record(1, String(index)))],
-    [2, Array.from({ length: 60 }, (_, index) => record(2, String(index)))],
+    [1, Array.from({ length: 151 }, (_, index) => record(1, String(index)))],
+    [2, Array.from({ length: 150 }, (_, index) => record(2, String(index)))],
     [3, [record(3, 'isolated')]],
   ]);
+  const listCalls = [];
   let pending = 0;
   let peak = 0;
   const tracked = (handler) => async (...args) => {
@@ -197,10 +198,11 @@ test('overview shares the node limit, bounds request concurrency, and reports in
     if (type === 2 && key === '0') throw new Error('detail unavailable');
     const item = records.get(type).find(entry => entry.key === key);
     const links = type === 1 && key === '0'
-      ? Array.from({ length: 121 }, (_, index) => relation(index, 'outgoing', 2, '方案', [records.get(2)[1]]))
+      ? Array.from({ length: 321 }, (_, index) => relation(index, 'outgoing', 2, '方案', [records.get(2)[1]]))
       : [];
     return wrap({ ...item, relations: links });
-  }), tracked((type, { page_size: pageSize }) => {
+  }), tracked((type, { page, page_size: pageSize }) => {
+    listCalls.push([type, page, pageSize]);
     if (type === 4) denyAccess();
     if (type === 5) throw new Error('listing unavailable');
     const items = records.get(type);
@@ -209,12 +211,51 @@ test('overview shares the node limit, bounds request concurrency, and reports in
 
   const graph = await loadRelationshipOverview([1, 2, 3, 4, 5].map(model));
   assert.equal(peak, 4);
-  assert.deepEqual([1, 2, 3].map(type => graph.nodes.filter(node => node.typeId === type).length), [30, 29, 1]);
-  assert.equal(graph.nodes.length, 60);
-  assert.equal(graph.edges.length, 120);
+  assert.deepEqual(listCalls, [1, 2, 3, 4, 5].map(type => [type, 1, 100]));
+  assert.deepEqual([1, 2, 3].map(type => graph.nodes.filter(node => node.typeId === type).length), [75, 74, 1]);
+  assert.equal(graph.nodes.length, 150);
+  assert.equal(graph.edges.length, 320);
   assert.deepEqual(graph.nodes.find(node => node.typeId === 2 && node.key === '0').bindingForm, bindingForm);
   assert.equal(graph.truncated, true);
   assert.equal(graph.failedExpansions, 2);
+});
+
+test('overview loads all 126 records and their links across the server page-size limit', async () => {
+  const items = Array.from({ length: 126 }, (_, index) => record(1, String(index)));
+  const listCalls = [];
+  const { loadRelationshipOverview } = runtime(async (type, key) => {
+    const index = Number(key);
+    const follow = items[(index + 1) % items.length];
+    const next = items[(index + 2) % items.length];
+    return wrap({ ...items[index], relations: [
+      relation(1, 'outgoing', type, '方案', [follow]),
+      relation(2, 'outgoing', type, '方案', [next]),
+    ] });
+  }, async (type, { page, page_size: pageSize }) => {
+    listCalls.push([type, page, pageSize]);
+    return wrap({ items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length });
+  });
+
+  const graph = await loadRelationshipOverview([model(1)]);
+  assert.deepEqual(listCalls, [[1, 1, 100], [1, 2, 100]]);
+  assert.deepEqual(graph.nodes.map(node => node.key), items.map(item => item.key));
+  assert.equal(graph.edges.length, 252);
+  assert.equal(graph.truncated, false);
+  assert.equal(graph.failedExpansions, 0);
+});
+
+test('a failed second overview page still shows the permitted records on the first page', async () => {
+  const items = Array.from({ length: 100 }, (_, index) => record(1, String(index)));
+  const { loadRelationshipOverview } = runtime(async (_type, key) => wrap({ ...items[Number(key)], relations: [] }),
+    async (_type, { page }) => {
+      if (page === 2) throw new Error('page unavailable');
+      return wrap({ items, total: 126 });
+    });
+
+  const graph = await loadRelationshipOverview([model(1)]);
+  assert.equal(graph.nodes.length, 100);
+  assert.equal(graph.truncated, true);
+  assert.equal(graph.failedExpansions, 1);
 });
 
 test('aborting an overview stops later requests', async () => {

@@ -1,6 +1,6 @@
-import { PlusOutlined } from '@/components/Icon/ant';
-import { Button, Input, Tag, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { CloseOutlined, PlusOutlined } from '@/components/Icon/ant';
+import { Button, Dropdown, Input, Tag, Tooltip, Typography } from 'antd';
+import { useEffect, useState, type ReactNode } from 'react';
 import KnowledgeReader from '../../components/KnowledgeReader';
 import {
   readObjectRecord, relationshipRecordMetadataLimits,
@@ -13,7 +13,8 @@ import type { RelationshipNode } from './relationshipGraph';
 import type { RelationshipNeighbor } from './relationshipSimilarityScene';
 import { relationshipMatchStatus, relationshipNodeLabel, relationshipPropertyLabel, type RelationshipCardMatch } from './RelationshipNodePreview';
 import {
-  RelationshipObjectClearField, RelationshipObjectEditField, RelationshipObjectEditorForm, type RelationshipObjectEditSnapshot,
+  RelationshipMarkdownInput, RelationshipObjectClearField, RelationshipObjectEditField, RelationshipObjectEditorForm,
+  type RelationshipObjectEditSnapshot,
 } from './RelationshipObjectEditor';
 import { RelationshipCustomPropertyRow, RelationshipRecordTags } from './RelationshipRecordMetadataFields';
 import './relationshipObjectWiki.css';
@@ -30,6 +31,7 @@ export interface RelationshipObjectWikiProps {
   }[];
   onOpenRelated?: (id: string) => void;
   onSelectRelationship?: (id: string) => void;
+  referenceRecords?: readonly RelationshipNode[];
   comparisons?: readonly RelationshipNeighbor[];
   trials?: readonly ManufacturingMatchRecord[];
   selectedTrialKey?: string;
@@ -38,6 +40,8 @@ export interface RelationshipObjectWikiProps {
   onSubmitEdit?: (data: Record<string, unknown>, expectedValues: Record<string, unknown>) => void;
   recordMetadataDraft?: RelationshipRecordMetadata;
   onRecordMetadataChange?: (metadata: RelationshipRecordMetadata) => void;
+  markdownImportTarget?: HTMLElement | null;
+  onMarkdownImportingChange?: (importing: boolean) => void;
   saving?: boolean;
 }
 
@@ -68,28 +72,43 @@ function BoundPropertyNameInput({ initialValue, defaultLabel, onChange, disabled
     }} />;
 }
 
-function wikiSections(markdown: string) {
-  const sections: string[] = [];
+function markdownDocument(source: string) {
+  const header = source.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/m);
+  return header?.index === 0
+    ? { attributes: header[1].trimEnd(), body: source.slice(header[0].length) }
+    : { attributes: '', body: source };
+}
+
+function wikiSections(markdown: string, renderEmbed: (target: string) => ReactNode) {
+  const sections: { source: string; embed?: ReactNode }[] = [];
   let lines: string[] = [];
   let fence = '';
   for (const line of markdown.split(/\r?\n/)) {
     const marker = line.trimStart().match(/^(`{3,}|~{3,})/)?.[1];
     if (marker && !fence) fence = marker;
     else if (marker && marker.startsWith(fence) && line.trim() === marker) fence = '';
-    if (!fence && line.trim() === '![[关联老化试验]]') {
-      sections.push(lines.join('\n'));
+    const target = !fence ? line.trim().match(/^!\[\[([^\]]+)\]\]$/)?.[1] : undefined;
+    const embed = target && renderEmbed(target);
+    if (embed) {
+      sections.push({ source: lines.join('\n'), embed });
       lines = [];
     } else {
       lines.push(line);
     }
   }
-  return [...sections, lines.join('\n')];
+  return [...sections, { source: lines.join('\n') }];
 }
 
 export function RelationshipWikiBody({
-  markdown, trials = [], selectedTrialKey, showTrialSection = false,
-}: { markdown: string; trials?: readonly ManufacturingMatchRecord[]; selectedTrialKey?: string; showTrialSection?: boolean }) {
-  const sections = wikiSections(markdown);
+  markdown, trials = [], selectedTrialKey, showTrialSection = false, renderReference, renderEmbed,
+}: {
+  markdown: string;
+  trials?: readonly ManufacturingMatchRecord[];
+  selectedTrialKey?: string;
+  showTrialSection?: boolean;
+  renderReference?: (target: string) => ReactNode;
+  renderEmbed?: (target: string) => ReactNode;
+}) {
   const trialSection = trials.length ? <div className="relationship-object-wiki__trials">
         <table aria-label="关联老化试验">
           <thead><tr>
@@ -107,10 +126,15 @@ export function RelationshipWikiBody({
           })}</tbody>
         </table>
       </div> : <Typography.Text type="secondary">暂无可查看的关联老化试验</Typography.Text>;
+  const document = markdownDocument(markdown);
+  const sections = wikiSections(document.body, target => target === '关联老化试验' ? trialSection : renderEmbed?.(target));
   return <div className="relationship-object-wiki__markdown">
-    {sections.map((source, index) => <div key={index}>
-      {source.trim() && <KnowledgeReader source={source} />}
-      {index < sections.length - 1 && trialSection}
+    {document.attributes && <details className="relationship-object-wiki__file-properties">
+      <summary>文件属性</summary><pre>{document.attributes}</pre>
+    </details>}
+    {sections.map(({ source, embed }, index) => <div key={index}>
+      {source.trim() && <KnowledgeReader source={source} renderReference={renderReference} />}
+      {embed}
     </div>)}
     {showTrialSection && sections.length === 1 && <section aria-label="老化试验记录">
       <Typography.Text strong>老化试验记录</Typography.Text>
@@ -120,8 +144,9 @@ export function RelationshipWikiBody({
 }
 
 export default function RelationshipObjectWiki({
-  node, model, related = [], onOpenRelated, onSelectRelationship, comparisons = [],
-  trials, selectedTrialKey, matches = [], editSnapshot, onSubmitEdit, recordMetadataDraft, onRecordMetadataChange, saving,
+  node, model, related = [], onOpenRelated, onSelectRelationship, referenceRecords = [], comparisons = [],
+  trials, selectedTrialKey, matches = [], editSnapshot, onSubmitEdit, recordMetadataDraft, onRecordMetadataChange,
+  markdownImportTarget, onMarkdownImportingChange, saving,
 }: RelationshipObjectWikiProps) {
   const [loaded, setLoaded] = useState<{ node: RelationshipNode; record?: ObjectRecordDetail }>();
   const needsDetail = !node.bindingForm || !node.recordMetadata;
@@ -135,12 +160,22 @@ export default function RelationshipObjectWiki({
   const originalCustomProperties = recordMetadata?.properties ?? [];
   const customProperties = recordMetadataDraft?.properties ?? originalCustomProperties;
   const editingMetadata = recordMetadataDraft !== undefined && onRecordMetadataChange !== undefined;
-  const markdown = typeof values.wiki_markdown === 'string' ? values.wiki_markdown.trim() : '';
-  const markdownOrigins = mappedSourceLabels(sources?.wiki_markdown);
-  const properties = Object.entries(values).filter(([code]) => code !== 'wiki_markdown' || !markdown);
   const editFields = new Map(editSnapshot?.fields.map(field => [field.code, field]));
-  const extraFields = editSnapshot?.fields.filter(field => !Object.prototype.hasOwnProperty.call(values, field.code)) ?? [];
-  const markdownField = markdown ? editFields.get('wiki_markdown') : undefined;
+  const hiddenCodes = new Set(recordMetadata?.hidden_property_codes?.filter(code => !editingMetadata || !editFields.has(code)));
+  recordMetadataDraft?.hidden_property_codes?.forEach(code => hiddenCodes.add(code));
+  const properties = new Map(Object.entries(values));
+  editFields.forEach(({ code }) => {
+    if (!properties.has(code)) properties.set(code, editSnapshot?.values[code]);
+  });
+  properties.delete('wiki_markdown');
+  const visibleProperties = [...properties].filter(([code]) => !hiddenCodes.has(code));
+  const restorableProperties = [...properties.keys()].filter(code => hiddenCodes.has(code) && editFields.has(code));
+  const masked = detail?.masked_fields ?? node.maskedFields;
+  const markdown = typeof values.wiki_markdown === 'string' && !masked?.includes('wiki_markdown')
+    ? values.wiki_markdown : recordMetadata?.note_markdown ?? '';
+  const markdownField = editFields.get('wiki_markdown');
+  const editNote = editingMetadata && editSnapshot?.can_edit_note_markdown;
+  const tags = (editingMetadata ? recordMetadataDraft.tags : recordMetadata?.tags) ?? [];
   const label = relationshipNodeLabel(node);
 
   useEffect(() => {
@@ -187,7 +222,12 @@ export default function RelationshipObjectWiki({
           <span className="relationship-object-wiki__value" aria-hidden={field ? true : undefined}>{formattedValue(value)}</span>
           {field && <RelationshipObjectEditField field={field} disabled={saving} />}
         </div>
-        {field && !field.required && <RelationshipObjectClearField field={field} disabled={saving} />}
+        {field && <div className="relationship-object-wiki__property-controls">
+          {!field.required && <RelationshipObjectClearField field={field} disabled={saving} />}
+          {editingMetadata && <Button type="text" size="small" htmlType="button" icon={<CloseOutlined />}
+            aria-label={`从此笔记移除${defaultLabel}`} title={`从此笔记移除${defaultLabel}`}
+            disabled={saving} onClick={() => setPropertyHidden(code, true)} />}
+        </div>}
         {origins.length > 0 && <div className="relationship-object-wiki__origin">来源映射　{origins.join('、')}</div>}
       </dd>
     </div>;
@@ -197,34 +237,96 @@ export default function RelationshipObjectWiki({
     if (recordMetadataDraft) onRecordMetadataChange?.({ ...recordMetadataDraft, properties });
   }
 
+  function setPropertyHidden(code: string, hidden: boolean) {
+    if (!editingMetadata) return;
+    const current = recordMetadataDraft.hidden_property_codes ?? [];
+    onRecordMetadataChange({
+      ...recordMetadataDraft,
+      hidden_property_codes: hidden ? [...new Set([...current, code])] : current.filter(item => item !== code),
+    });
+  }
+
+  function addCustomProperty() {
+    updateCustomProperties([...customProperties, { id: createUuid(), name: '', value: '' }]);
+  }
+
+  function findReference(target: string) {
+    const matches = referenceRecords.filter(record => record.key === target || relationshipNodeLabel(record) === target);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  function noteLink(target: RelationshipNode, text: string) {
+    return <Tooltip title={`${target.typeName} · ${target.key}`}>
+      <Button type="link" size="small" htmlType="button" className="relationship-object-wiki__inline-link"
+        disabled={Boolean(editSnapshot)} onClick={() => onOpenRelated?.(target.id)}>{text}</Button>
+    </Tooltip>;
+  }
+
+  function renderReference(source: string) {
+    const [target, alias] = source.split('|', 2);
+    const match = findReference(target.trim());
+    return match ? noteLink(match, alias?.trim() || relationshipNodeLabel(match)) : undefined;
+  }
+
+  function renderEmbed(source: string) {
+    const [target, property] = source.split('#', 2);
+    const match = property && findReference(target.trim());
+    if (!match) return undefined;
+    const code = property === '结论' && !Object.prototype.hasOwnProperty.call(match.values, property) ? 'finding' : property;
+    if (match.maskedFields?.includes(code) || !Object.prototype.hasOwnProperty.call(match.values, code)) return undefined;
+    return <blockquote className="relationship-object-wiki__embed">
+      {noteLink(match, relationshipNodeLabel(match))}
+      <p>{formattedValue(match.values[code])}</p>
+    </blockquote>;
+  }
+
   return <article className="relationship-object-wiki" aria-label="对象卡片">
     <RelationshipObjectEditorForm snapshot={editSnapshot} onSubmit={onSubmitEdit} disabled={saving}>
       <header className="relationship-object-wiki__header">
         <h2 className="relationship-object-wiki__title" title={label}>{label}</h2>
-        <RelationshipRecordTags defaultTag={node.typeName} tags={recordMetadata?.tags} draft={recordMetadataDraft?.tags} disabled={saving}
-          onChange={editingMetadata ? tags => onRecordMetadataChange({ ...recordMetadataDraft, tags }) : undefined} />
         <div className="relationship-object-wiki__metadata">
           {label !== node.key && <Typography.Text code>{node.key}</Typography.Text>}
+          <span className="relationship-object-wiki__type">{node.typeName}</span>
           {bindingForm && <Typography.Text type="secondary">记录来源　{bindingForm.name}</Typography.Text>}
           {updatedAt && <Typography.Text type="secondary">记录更新　{formatServerDateTime(updatedAt, '—')}</Typography.Text>}
           {!bindingForm && needsDetail && loaded?.node !== node && <Typography.Text type="secondary">正在读取记录来源</Typography.Text>}
         </div>
+        <RelationshipRecordTags key={editingMetadata ? 'edit' : 'read'} tags={tags} disabled={saving}
+          onChange={editingMetadata ? tags => onRecordMetadataChange({ ...recordMetadataDraft, tags }) : undefined} />
       </header>
 
       <section className="relationship-object-wiki__section relationship-object-wiki__section--properties" aria-label="对象属性">
-        {properties.length || customProperties.length ? <dl className="relationship-object-wiki__properties">
-          {properties.map(([code, value]) => propertyRow(code, value))}
+        {(visibleProperties.length > 0 || customProperties.length > 0) && <dl className="relationship-object-wiki__properties">
+          {visibleProperties.map(([code, value]) => propertyRow(code, value))}
           {customProperties.map(property => <RelationshipCustomPropertyRow key={`custom:${property.id}`} property={property} disabled={saving}
             original={originalCustomProperties.find(item => item.id === property.id)}
             onChange={editingMetadata ? next => updateCustomProperties(customProperties.map(item => item.id === next.id ? next : item)) : undefined}
             onRemove={editingMetadata ? () => updateCustomProperties(customProperties.filter(item => item.id !== property.id)) : undefined} />)}
-        </dl> : <Typography.Text type="secondary">暂无可查看的属性</Typography.Text>}
-        {(recordMetadata || editingMetadata) && <div className="relationship-object-wiki__property-actions">
-          {editingMetadata && <Button type="link" htmlType="button" size="small" icon={<PlusOutlined />}
-            disabled={saving || customProperties.length >= relationshipRecordMetadataLimits.properties}
-            onClick={() => updateCustomProperties([...customProperties, { id: createUuid(), name: '', value: '' }])}>添加属性</Button>}
+        </dl>}
+        {editingMetadata && <div className="relationship-object-wiki__property-actions">
+          {restorableProperties.length ? <Dropdown trigger={['click']} disabled={saving} menu={{
+            items: [
+              ...restorableProperties.map(code => ({ key: `property:${code}`, label: displayedPropertyName(code) })),
+              { key: 'custom', label: '自定义属性', disabled: customProperties.length >= relationshipRecordMetadataLimits.properties },
+            ],
+            onClick: ({ key }) => key === 'custom' ? addCustomProperty() : setPropertyHidden(key.slice('property:'.length), false),
+          }}>
+            <Button type="link" htmlType="button" size="small" icon={<PlusOutlined />}>添加属性</Button>
+          </Dropdown> : <Button type="link" htmlType="button" size="small" icon={<PlusOutlined />}
+            disabled={saving || customProperties.length >= relationshipRecordMetadataLimits.properties} onClick={addCustomProperty}>添加属性</Button>}
         </div>}
       </section>
+
+      {markdownField || editNote || markdown.trim() ? <div className="relationship-object-wiki__document">
+        {markdownField ? <RelationshipObjectEditField field={markdownField} disabled={saving}
+          markdownImportTarget={markdownImportTarget} onMarkdownImportingChange={onMarkdownImportingChange} />
+          : editNote ? <RelationshipMarkdownInput value={recordMetadataDraft.note_markdown} disabled={saving}
+            importTarget={markdownImportTarget} onImportingChange={onMarkdownImportingChange}
+            maxLength={relationshipRecordMetadataLimits.markdownLength}
+            onChange={note_markdown => onRecordMetadataChange({ ...recordMetadataDraft, note_markdown })} />
+          : <RelationshipWikiBody markdown={markdown} trials={trials} selectedTrialKey={selectedTrialKey}
+            renderReference={renderReference} renderEmbed={renderEmbed} />}
+      </div> : null}
 
       {comparisons.length > 0 && <section className="relationship-object-wiki__section" aria-label="属性对比">
         <h3>属性对比</h3>
@@ -242,21 +344,6 @@ export default function RelationshipObjectWiki({
           </dl>
         </div>)}
       </section>}
-      {markdown && <section className="relationship-object-wiki__section relationship-object-wiki__section--markdown" aria-label="Markdown 正文">
-        <h3>{propertyName('wiki_markdown', 'Markdown 正文', Boolean(markdownField))}</h3>
-        {markdownField && !markdownField.required && <div className="relationship-object-wiki__markdown-clear">
-          <RelationshipObjectClearField field={markdownField} disabled={saving} />
-        </div>}
-        {markdownOrigins.length > 0 && <div className="relationship-object-wiki__origin">来源映射　{markdownOrigins.join('、')}</div>}
-        <div className="relationship-object-wiki__markdown-slot">
-          <div aria-hidden={markdownField ? true : undefined}>
-            <RelationshipWikiBody markdown={markdown} trials={trials} selectedTrialKey={selectedTrialKey} />
-          </div>
-          {markdownField && <div className="relationship-object-wiki__markdown-editor">
-            <RelationshipObjectEditField field={markdownField} disabled={saving} />
-          </div>}
-        </div>
-      </section>}
       {matches.length > 0 && <section className="relationship-object-wiki__section" aria-label="匹配依据">
         <h3>匹配依据</h3>
         {matches.map(match => {
@@ -270,27 +357,26 @@ export default function RelationshipObjectWiki({
           </div>;
         })}
       </section>}
-      {model?.description && <section className="relationship-object-wiki__section" aria-label="对象类型说明">
-        <h3>对象类型说明</h3>
-        <p>{model.description}</p>
-      </section>}
       <section className="relationship-object-wiki__section" aria-label="当前图中的关联对象">
         <h3>关联对象</h3>
         {related.length > 0 ? <ul className="relationship-object-wiki__relations">
           {related.map(({ node: neighbor, label, edgeId, direction, kind }) => <li key={edgeId}>
-            {onOpenRelated ? <Button type="link" size="small" onClick={() => onOpenRelated(neighbor.id)}>{neighbor.key}</Button> : <strong>{neighbor.key}</strong>}
-            <span>{direction === 'outgoing' ? '→' : '←'} {label} · {neighbor.typeName}</span>
+            <div className="relationship-object-wiki__relation-heading">
+              {onOpenRelated ? noteLink(neighbor, relationshipNodeLabel(neighbor)) : <strong>{relationshipNodeLabel(neighbor)}</strong>}
+              {relationshipNodeLabel(neighbor) !== neighbor.key && <Typography.Text code>{neighbor.key}</Typography.Text>}
+            </div>
+            <span>{direction === 'outgoing' ? '出向' : '入向'} · {label} · {neighbor.typeName}</span>
             {onSelectRelationship && <Button type="link" size="small" onClick={() => onSelectRelationship(edgeId)}
-              aria-label={`查看${label}依据 · ${neighbor.key}`}>{kind === 'candidate' ? '查看候选依据' : '查看匹配依据'}</Button>}
+              disabled={Boolean(editSnapshot)} aria-label={`查看${label}依据 · ${neighbor.key}`}>
+              {kind === 'candidate' ? '查看候选依据' : '查看匹配依据'}
+            </Button>}
           </li>)}
         </ul> : <Typography.Text type="secondary">图中暂无连线</Typography.Text>}
       </section>
-      {extraFields.length > 0 && <section className="relationship-object-wiki__section relationship-object-wiki__section--properties" aria-label="其他可编辑属性">
-        <h3>其他可编辑属性</h3>
-        <dl className="relationship-object-wiki__properties">
-          {extraFields.map(field => propertyRow(field.code, editSnapshot?.values[field.code]))}
-        </dl>
-      </section>}
+      {model?.description && <details className="relationship-object-wiki__type-description">
+        <summary>对象类型说明</summary>
+        <p>{model.description}</p>
+      </details>}
     </RelationshipObjectEditorForm>
   </article>;
 }

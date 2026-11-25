@@ -1,17 +1,19 @@
 import { widgetSourceId, type PageDefinition, type PageWidget, type WidgetType } from './model';
 
-export type AddableWidgetType = Exclude<WidgetType, 'record-filter'>;
+export type AddableWidgetType = WidgetType;
+const operationWidgetTypes = ['record-list', 'metric', 'chart', 'workspace'] as const;
 
 export const componentNames: Record<AddableWidgetType, string> = {
-  'record-list': '业务列表', metric: '指标卡', chart: '分组图表', workspace: '工作台模块',
+  'record-list': '业务列表', 'record-filter': '联动筛选', metric: '指标卡', chart: '分组图表', workspace: '工作台模块',
 };
 
 type ComponentProperties = Partial<Pick<PageWidget, 'title' | 'width' | 'dataBinding' | 'dimension' |
   'measure' | 'aggregate' | 'expression' | 'customWidth' | 'customHeight' | 'height' |
   'showFilters' | 'filterFields' | 'chartType' | 'format' | 'unit' | 'threshold'>>;
+const standaloneFilterProperties = new Set(['title', 'width', 'dataBinding', 'customWidth', 'customHeight', 'filterFields']);
 
 export type ComponentOperation =
-  | { action: 'add'; widget_id: string; widget_type: AddableWidgetType }
+  | { action: 'add'; widget_id: string; widget_type: typeof operationWidgetTypes[number] }
   | { action: 'edit'; widget_id: string; properties?: ComponentProperties;
       appearance?: PageWidget['appearance']; interaction?: Pick<Partial<PageWidget>, 'interaction' | 'targetWidgetIds'>;
       list_settings?: PageWidget['listSettings']; filter_settings?: PageWidget['filterSettings'] };
@@ -19,7 +21,9 @@ export type ComponentOperation =
 export function newComponent(definition: PageDefinition, id: string, type: AddableWidgetType, firstField?: string): PageWidget {
   return {
     id, type, title: componentNames[type], width: type === 'metric' ? 6 : 24, aggregate: 'count',
-    showFilters: false,
+    ...(type === 'record-filter' ? {
+      standaloneFilter: true, filterFields: [], targetWidgetIds: [], filterSettings: { showKeyword: false },
+    } : { showFilters: false }),
     dimension: type === 'chart' ? definition.filterFields[0] || firstField : undefined,
   };
 }
@@ -32,7 +36,7 @@ export function applyComponentOperations(definition: PageDefinition, operations:
   for (const operation of operations) {
     const index = widgets.findIndex(widget => widget.id === operation.widget_id);
     if (operation.action === 'add') {
-      if (!Object.prototype.hasOwnProperty.call(componentNames, operation.widget_type)) throw new Error('不支持此组件类型');
+      if (!operationWidgetTypes.includes(operation.widget_type)) throw new Error('不支持此组件类型');
       if (index !== -1) throw new Error(`组件标识已存在：${operation.widget_id}`);
       if (widgets.length >= 30) throw new Error('页面最多支持 30 个组件');
       const firstField = definition.sourceFormId ? formFields(definition.sourceFormId)?.[0] : undefined;
@@ -40,17 +44,21 @@ export function applyComponentOperations(definition: PageDefinition, operations:
     } else if (operation.action === 'edit') {
       if (index === -1) throw new Error(`找不到组件：${operation.widget_id}`);
       const current = widgets[index];
-      if (current.type === 'record-filter') throw new Error('旧版独立筛选已停用编辑，请使用列表筛选');
+      const isStandaloneFilter = current.type === 'record-filter';
+      if (isStandaloneFilter && Object.keys(operation.properties ?? {}).some(key => !standaloneFilterProperties.has(key))) {
+        throw new Error('联动筛选只支持修改名称、布局、业务来源和筛选字段');
+      }
       if (operation.list_settings && current.type !== 'record-list') throw new Error('列表设置仅适用于业务列表');
-      if (operation.filter_settings && current.type !== 'record-list') throw new Error('筛选设置仅适用于业务列表');
+      if (operation.filter_settings && current.type !== 'record-list' && !isStandaloneFilter) throw new Error('筛选设置仅适用于业务列表和联动筛选');
       if (operation.interaction?.interaction !== undefined && current.type !== 'chart') {
         throw new Error('点击行为仅适用于分组图表');
       }
-      if (operation.interaction?.targetWidgetIds !== undefined && current.type !== 'chart') {
-        throw new Error('联动目标仅适用于分组图表');
+      if (operation.interaction?.targetWidgetIds !== undefined && current.type !== 'chart' && !isStandaloneFilter) {
+        throw new Error('联动目标仅适用于分组图表和联动筛选');
       }
       widgets[index] = {
         ...current, ...operation.properties, ...operation.interaction,
+        ...(isStandaloneFilter ? { standaloneFilter: true } : {}),
         ...(operation.appearance ? { appearance: { ...current.appearance, ...operation.appearance } } : {}),
         ...(operation.list_settings ? { listSettings: { ...current.listSettings, ...operation.list_settings } } : {}),
         ...(operation.filter_settings ? { filterSettings: { ...current.filterSettings, ...operation.filter_settings } } : {}),
@@ -79,7 +87,8 @@ export function applyComponentOperations(definition: PageDefinition, operations:
     for (const id of widget.targetWidgetIds ?? []) {
       if (!changed.has(widget.id) && !changed.has(id)) continue;
       const target = widgets.find(item => item.id === id);
-      if (!target || target.id === widget.id || target.type === 'record-filter' || !source || widgetSourceId(next, target) !== source) {
+      if (!target || target.id === widget.id || target.type === 'record-filter' || target.type === 'workspace'
+        || !source || widgetSourceId(next, target) !== source) {
         throw new Error(`「${widget.title}」的联动目标必须是同一业务来源的其他列表、指标或图表`);
       }
     }

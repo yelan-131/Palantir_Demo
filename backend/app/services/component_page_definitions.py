@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import ast
 import re
+from contextlib import contextmanager
 from typing import Annotated, Literal
 from fastapi import HTTPException
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id
+from app.core.production_errors import coded_error
 from app.core.permissions import get_user_role_ids, has_form_permission
 from app.models.relational import ComponentPage, ComponentPageVersion, Form, Role, User, OrgUnit
 from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD
@@ -94,7 +96,7 @@ class ToolbarGroup(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=50)
     roleIds: list[int] = Field(default_factory=list, max_length=100)
-    actions: list[Literal['create', 'refresh', 'import', 'export', 'disable', 'delete']] = Field(default_factory=list, max_length=6)
+    actions: list[Literal['create', 'refresh', 'import', 'export', 'copy', 'disable', 'delete']] = Field(default_factory=list, max_length=7)
 
 
 SYSTEM_DISPLAY_COLUMNS = RECORD_LIST_METADATA_FIELDS | {APPROVAL_STATUS_FIELD}
@@ -154,7 +156,7 @@ class ListSettings(BaseModel):
     pageSize: int | None = Field(default=None, ge=1, le=200)
     defaultSort: ListSort | None = None
     rowClick: Literal['none', 'detail', 'edit'] | None = None
-    toolbarActions: list[Literal['create', 'refresh', 'import', 'export', 'delete']] | None = None
+    toolbarActions: list[Literal['create', 'refresh', 'import', 'export', 'copy', 'delete']] | None = None
     rowActions: list[Literal['detail', 'edit', 'delete']] | None = None
     selection: Literal['none', 'single', 'multiple'] = 'none'
     emptyText: str = Field(default='暂无符合条件的数据', min_length=1, max_length=100)
@@ -197,6 +199,20 @@ class ComponentPresentation(BaseModel):
     header: HeaderPresentation | None = None
     content: ContentPresentation | None = None
 
+    @model_serializer(mode='wrap')
+    def serialize_overrides(self, serialize: SerializerFunctionWrapHandler):
+        # Missing values inherit. In particular, an explicit null background
+        # overrides a page color with the automatic surface color.
+        result = {}
+        for name, values in serialize(self).items():
+            if name not in self.model_fields_set:
+                continue
+            section = getattr(self, name)
+            result[name] = None if section is None else {
+                key: value for key, value in values.items() if key in section.model_fields_set
+            }
+        return result
+
 
 class PageWidget(BaseModel):
     accessGroups: list[ToolbarGroup] | None = Field(default=None, max_length=20)
@@ -216,8 +232,10 @@ class PageWidget(BaseModel):
     sharedFields: list[str] = Field(default_factory=list, max_length=200)
     customWidth: int | None = Field(default=None, ge=160, le=3840)
     customHeight: int | None = Field(default=None, ge=120, le=3000)
+    heightPercent: Literal[25, 33, 50, 75, 100] | None = None
     height: int = Field(default=280, ge=160, le=600)
     showFilters: bool = True
+    standaloneFilter: bool | None = Field(default=None, exclude_if=lambda enabled: not enabled)
     filterSettings: FilterSettings = Field(default_factory=FilterSettings)
     listSettings: ListSettings = Field(default_factory=ListSettings)
     filterFields: list[str] | None = Field(default=None, max_length=30)
@@ -309,6 +327,24 @@ def widget_source_id(definition, widget):
     return widget.dataBinding.formId if widget.dataBinding else definition.sourceFormId
 
 
+class ComponentPublishValidationError(HTTPException):
+    def __init__(self, error: HTTPException, widget_ids: list[str], target: Literal['data', 'interaction']):
+        super().__init__(error.status_code, detail=error.detail, headers=error.headers)
+        self.widget_targets = dict.fromkeys(widget_ids, target)
+
+
+@contextmanager
+def _publish_target(widget_ids: list[str], target: Literal['data', 'interaction'] = 'data'):
+    try:
+        yield
+    except ComponentPublishValidationError:
+        raise
+    except HTTPException as error:
+        if widget_ids and error.status_code == 422 and isinstance(error.detail, str):
+            raise ComponentPublishValidationError(error, widget_ids, target) from error
+        raise
+
+
 def source_definitions(definition):
     groups = {}
     for widget in definition.widgets:
@@ -316,7 +352,8 @@ def source_definitions(definition):
             continue
         source_id = widget_source_id(definition, widget)
         if source_id is None:
-            raise HTTPException(422, f'请为组件「{widget.title}」选择业务数据来源')
+            with _publish_target([widget.id]):
+                raise HTTPException(422, f'请为组件「{widget.title}」选择业务数据来源')
         groups.setdefault(source_id, []).append(widget)
     if definition.filterFields:
         if definition.sourceFormId is None:
@@ -399,24 +436,24 @@ async def validate_publish(db, user, definition):
     # Current interactions require the same source; cross-source mapping is a later feature.
     by_id = {w.id: w for w in definition.widgets}
     for widget in definition.widgets:
-        for target_id in widget.targetWidgetIds:
-            target = by_id.get(target_id)
-            if target is None or target.id == widget.id:
-                raise HTTPException(422, '组件联动目标不存在或指向自身')
-            if widget_source_id(definition, target) != widget_source_id(definition, widget):
-                raise HTTPException(422, '当前联动仅支持相同业务数据来源的组件')
+        with _publish_target([widget.id], 'interaction' if widget.type == 'chart' else 'data'):
+            for target_id in widget.targetWidgetIds:
+                target = by_id.get(target_id)
+                if target is None or target.id == widget.id:
+                    raise HTTPException(422, '组件联动目标不存在或指向自身')
+                if widget_source_id(definition, target) != widget_source_id(definition, widget):
+                    raise HTTPException(422, '当前联动仅支持相同业务数据来源的组件')
     for group in source_definitions(definition):
         await validate_source_publish(db, user, group)
 
 
 async def validate_source_publish(db, user, definition):
-    from app.core.production_errors import coded_error
-
-    form = await source_form(db, user, definition)
-    if (form.config or {}).get('assemblyKind') in {'analysis', 'analytics', 'dashboard', 'report'} and not (form.config or {}).get('analyticsDesign'):
-        raise HTTPException(422, '请在页面设置中选择业务表单作为数据来源')
-    if form.status != 'published':
-        raise HTTPException(422, '请先发布业务数据来源')
+    with _publish_target([widget.id for widget in definition.widgets]):
+        form = await source_form(db, user, definition)
+        if (form.config or {}).get('assemblyKind') in {'analysis', 'analytics', 'dashboard', 'report'} and not (form.config or {}).get('analyticsDesign'):
+            raise HTTPException(422, '请在页面设置中选择业务表单作为数据来源')
+        if form.status != 'published':
+            raise HTTPException(422, '请先发布业务数据来源')
     fields = await runtime_fields(db, form)
     available = {f.field_name: f for f in fields if not f.archived}
     from app.services.form_runtime import _latest_form_version
@@ -430,91 +467,26 @@ async def validate_source_publish(db, user, definition):
     references = set(definition.filterFields)
     target_ids = {widget.id for widget in definition.widgets if widget.type != 'record-filter'}
     list_ids = {widget.id for widget in definition.widgets if widget.type == 'record-list'}
+    published_columns = configured_columns | SYSTEM_DISPLAY_COLUMNS if view else None
+    references_by_widget = {}
     for widget in definition.widgets:
-        if widget.type in {'record-filter', 'record-list'}:
-            filter_system_fields = {APPROVAL_STATUS_FIELD} if (
-                widget.type == 'record-list' or set(widget.targetWidgetIds) <= list_ids
-            ) else set()
-            schemes = widget.filterSettings.schemes
-            if schemes is not None:
-                if filter_system_fields:
-                    filter_system_fields = filter_system_fields | RECORD_LIST_METADATA_FIELDS
-                if len({scheme.id for scheme in schemes}) != len(schemes):
-                    raise HTTPException(422, '筛选方案 ID 不能重复')
-                for scheme in schemes:
-                    scheme_fields = {field for group in scheme.groups for field in (group.columns or [])}
-                    if set(scheme.fieldControls) - scheme_fields:
-                        raise HTTPException(422, '筛选控件必须对应方案已启用的字段')
-                    if set(scheme.fieldControls) & RECORD_LIST_METADATA_FIELDS:
-                        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录系统字段使用固定的筛选控件')
-                    if len(scheme_fields) > 30:
-                        raise HTTPException(422, '每个筛选方案最多配置 30 个字段')
-                    if len({group.id for group in scheme.groups}) != len(scheme.groups):
-                        raise HTTPException(422, '筛选字段权限组 ID 不能重复')
-                    for group in scheme.groups:
-                        if group.columns is None or len(set(group.columns)) != len(group.columns):
-                            raise HTTPException(422, '筛选权限组需要配置不重复的字段')
-                        references.update(set(group.columns) - filter_system_fields)
+        with _publish_target([widget.id]):
+            widget_references = _widget_publish_references(widget, target_ids, list_ids, published_columns, available)
+        references.update(widget_references)
+        references_by_widget[widget.id] = widget_references
 
-            if widget.type == 'record-filter' and (not widget.targetWidgetIds or set(widget.targetWidgetIds) - target_ids):
-                raise HTTPException(422, '筛选组件需要关联有效的列表、指标或图表')
-            if schemes is None:
-                references.update((set(widget.filterFields or []) | set(widget.filterSettings.requiredFields)) - filter_system_fields)
-            if schemes is None and widget.filterFields is not None and set(widget.filterSettings.requiredFields) - set(widget.filterFields):
-                raise HTTPException(422, '必填筛选条件必须包含在组件筛选字段中')
-            if schemes is None and not widget.filterSettings.showKeyword and widget.filterFields == []:
-                raise HTTPException(422, '筛选组件至少需要一个筛选条件')
-        if widget.type == 'record-list':
-            columns = widget.listSettings.columns
-            if columns is not None and len(set(columns)) != len(columns):
-                raise HTTPException(422, '列表显示列不能重复')
-            list_fields = configured_columns | SYSTEM_DISPLAY_COLUMNS
-            references.update(set(columns or []) - SYSTEM_DISPLAY_COLUMNS)
-            if SYSTEM_DISPLAY_COLUMNS.intersection(widget.listSettings.sortableColumns or []):
-                raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
-            for group in widget.listSettings.displayGroups or []:
-                if group.columns is None:
-                    raise HTTPException(422, '显示权限组需要配置显示列')
-                if SYSTEM_DISPLAY_COLUMNS.intersection(group.sortableColumns or []):
-                    raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
-                if group.sortableColumns is not None and set(group.sortableColumns) - set(group.columns):
-                    raise HTTPException(422, '允许排序字段必须为可见列')
-                if group.defaultSort:
-                    references.add(group.defaultSort.field)
-                    if group.defaultSort.field not in group.columns or (group.sortableColumns is not None and group.defaultSort.field not in group.sortableColumns):
-                        raise HTTPException(422, '权限组默认排序必须为本组可见且允许排序的字段')
-                references.update(set(group.columns) - SYSTEM_DISPLAY_COLUMNS)
-                if len(set(group.columns)) != len(group.columns) or (view and set(group.columns) - list_fields):
-                    raise HTTPException(422, '显示权限组包含重复或来源视图未开放的列')
-            if view and columns is not None and set(columns) - list_fields:
-                raise HTTPException(422, '列表显示列不属于来源发布视图')
-            if widget.listSettings.defaultSort:
-                references.add(widget.listSettings.defaultSort.field)
-                if columns is not None and widget.listSettings.defaultSort.field not in columns:
-                    raise HTTPException(422, '默认排序字段必须在列表显示列中')
-        if widget.type == 'chart' and not widget.dimension:
-            raise HTTPException(422, '图表需要选择分组字段')
-        if widget.dimension:
-            references.add(widget.dimension)
-        if widget.type == 'chart' and (set(widget.targetWidgetIds) - {w.id for w in definition.widgets if w.id != widget.id and w.type != 'record-filter'}):
-            raise HTTPException(422, '图表联动目标不存在或指向自身')
-        if widget.expression and widget.type in {'metric', 'chart'}:
-            from app.services.analytics_runtime import AnalyticsError, parse_expression
-            try:
-                parse_expression(widget.expression, set(available))
-                references.update(expression_fields(widget.expression))
-            except AnalyticsError as exc:
-                raise HTTPException(422, str(exc)) from exc
-        elif widget.aggregate != 'count':
-            if widget.measure not in available or available[widget.measure].field_type not in {'int', 'integer', 'float', 'decimal', 'number'}:
-                raise HTTPException(422, '求和需要有效的数值字段')
-            references.add(widget.measure)
-    if references & RECORD_LIST_METADATA_FIELDS:
-        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录元数据仅用于列表显示或记录列表的筛选方案')
+    def widgets_referencing(fields):
+        return [widget_id for widget_id, field_names in references_by_widget.items() if field_names & fields]
+
+    if invalid_fields := references & RECORD_LIST_METADATA_FIELDS:
+        with _publish_target(widgets_referencing(invalid_fields)):
+            raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录元数据仅用于列表显示或记录列表的筛选方案')
     if APPROVAL_STATUS_FIELD in references:
-        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '审批状态仅用于记录列表的筛选和显示')
-    if references - available.keys():
-        raise HTTPException(422, '页面引用了不存在或已归档的字段')
+        with _publish_target(widgets_referencing({APPROVAL_STATUS_FIELD})):
+            raise coded_error(422, 'COMPONENT_QUERY_INVALID', '审批状态仅用于记录列表的筛选和显示')
+    if invalid_fields := references - available.keys():
+        with _publish_target(widgets_referencing(invalid_fields)):
+            raise HTTPException(422, '页面引用了不存在或已归档的字段')
     roles = set((await db.scalars(select(Role.id).where(Role.tenant_id == form.tenant_id, Role.id.in_(definition.roleIds)))).all())
     if roles != set(definition.roleIds):
         raise HTTPException(422, '页面角色不属于当前租户')
@@ -526,6 +498,89 @@ async def validate_source_publish(db, user, definition):
                                      [{'field_name': f.field_name, 'archived': f.archived} for f in fields])
         if errors:
             raise HTTPException(422, {'message': '页面数据配置无效', 'errors': errors})
+
+
+def _widget_publish_references(widget, target_ids, list_ids, published_columns, available):
+    references = set()
+    if widget.type in {'record-filter', 'record-list'}:
+        filter_system_fields = {APPROVAL_STATUS_FIELD} if (
+            widget.type == 'record-list' or set(widget.targetWidgetIds) <= list_ids
+        ) else set()
+        schemes = widget.filterSettings.schemes
+        if schemes is not None:
+            if filter_system_fields:
+                filter_system_fields = filter_system_fields | RECORD_LIST_METADATA_FIELDS
+            if len({scheme.id for scheme in schemes}) != len(schemes):
+                raise HTTPException(422, '筛选方案 ID 不能重复')
+            for scheme in schemes:
+                scheme_fields = {field for group in scheme.groups for field in (group.columns or [])}
+                if set(scheme.fieldControls) - scheme_fields:
+                    raise HTTPException(422, '筛选控件必须对应方案已启用的字段')
+                if set(scheme.fieldControls) & RECORD_LIST_METADATA_FIELDS:
+                    raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录系统字段使用固定的筛选控件')
+                if len(scheme_fields) > 30:
+                    raise HTTPException(422, '每个筛选方案最多配置 30 个字段')
+                if len({group.id for group in scheme.groups}) != len(scheme.groups):
+                    raise HTTPException(422, '筛选字段权限组 ID 不能重复')
+                for group in scheme.groups:
+                    if group.columns is None or len(set(group.columns)) != len(group.columns):
+                        raise HTTPException(422, '筛选权限组需要配置不重复的字段')
+                    references.update(set(group.columns) - filter_system_fields)
+
+        if widget.type == 'record-filter' and (not widget.targetWidgetIds or set(widget.targetWidgetIds) - target_ids):
+            raise HTTPException(422, '筛选组件需要关联有效的列表、指标或图表')
+        if schemes is None:
+            references.update((set(widget.filterFields or []) | set(widget.filterSettings.requiredFields)) - filter_system_fields)
+        if schemes is None and widget.filterFields is not None and set(widget.filterSettings.requiredFields) - set(widget.filterFields):
+            raise HTTPException(422, '必填筛选条件必须包含在组件筛选字段中')
+        if schemes is None and not widget.filterSettings.showKeyword and widget.filterFields == []:
+            raise HTTPException(422, '筛选组件至少需要一个筛选条件')
+    if widget.type == 'record-list':
+        columns = widget.listSettings.columns
+        if columns is not None and len(set(columns)) != len(columns):
+            raise HTTPException(422, '列表显示列不能重复')
+        references.update(set(columns or []) - SYSTEM_DISPLAY_COLUMNS)
+        if SYSTEM_DISPLAY_COLUMNS.intersection(widget.listSettings.sortableColumns or []):
+            raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
+        for group in widget.listSettings.displayGroups or []:
+            if group.columns is None:
+                raise HTTPException(422, '显示权限组需要配置显示列')
+            if SYSTEM_DISPLAY_COLUMNS.intersection(group.sortableColumns or []):
+                raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
+            if group.sortableColumns is not None and set(group.sortableColumns) - set(group.columns):
+                raise HTTPException(422, '允许排序字段必须为可见列')
+            if group.defaultSort:
+                references.add(group.defaultSort.field)
+                if group.defaultSort.field not in group.columns or (group.sortableColumns is not None and group.defaultSort.field not in group.sortableColumns):
+                    raise HTTPException(422, '权限组默认排序必须为本组可见且允许排序的字段')
+            references.update(set(group.columns) - SYSTEM_DISPLAY_COLUMNS)
+            if len(set(group.columns)) != len(group.columns) or (published_columns is not None and set(group.columns) - published_columns):
+                raise HTTPException(422, '显示权限组包含重复或来源视图未开放的列')
+        if published_columns is not None and columns is not None and set(columns) - published_columns:
+            raise HTTPException(422, '列表显示列不属于来源发布视图')
+        if widget.listSettings.defaultSort:
+            references.add(widget.listSettings.defaultSort.field)
+            if columns is not None and widget.listSettings.defaultSort.field not in columns:
+                raise HTTPException(422, '默认排序字段必须在列表显示列中')
+    if widget.type == 'chart' and not widget.dimension:
+        raise HTTPException(422, '图表需要选择分组字段')
+    if widget.dimension:
+        references.add(widget.dimension)
+    if widget.type == 'chart' and set(widget.targetWidgetIds) - (target_ids - {widget.id}):
+        with _publish_target([widget.id], 'interaction'):
+            raise HTTPException(422, '图表联动目标不存在或指向自身')
+    if widget.expression and widget.type in {'metric', 'chart'}:
+        from app.services.analytics_runtime import AnalyticsError, parse_expression
+        try:
+            parse_expression(widget.expression, set(available))
+            references.update(expression_fields(widget.expression))
+        except AnalyticsError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    elif widget.aggregate != 'count':
+        if widget.measure not in available or available[widget.measure].field_type not in {'int', 'integer', 'float', 'decimal', 'number'}:
+            raise HTTPException(422, '求和需要有效的数值字段')
+        references.add(widget.measure)
+    return references
 
 
 async def list_pages(*, db: AsyncSession, user):

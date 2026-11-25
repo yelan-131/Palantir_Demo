@@ -439,6 +439,99 @@ async def test_record_property_labels_are_filtered_and_preserved_for_legacy_edit
 
 
 @pytest.mark.asyncio
+async def test_hidden_record_properties_preserve_values_relations_and_restricted_codes(object_client):
+    client, sessions, user = object_client
+    await configure(client)
+    url = f"{ROOT}/ontology-objects/1/record-edit"
+    params = {"key": ORDER}
+    before = await instance(client, 1, ORDER)
+    snapshot = (await client.get(url, params=params)).json()["data"]
+    body = {"token": snapshot["token"], "expected_record_metadata": snapshot["record_metadata"]}
+    response = await client.put(url, params=params, json={
+        **body,
+        "record_metadata": {**EMPTY_RECORD_METADATA, "hidden_property_codes": ["planned", "completed", "work_order_id"]},
+    })
+    assert response.status_code == 200, response.text
+    hidden = ["completed", "planned", "work_order_id"]
+    after = await instance(client, 1, ORDER)
+    assert after["record_metadata"] == {**EMPTY_RECORD_METADATA, "hidden_property_codes": hidden}
+    assert {**after, "record_metadata": EMPTY_RECORD_METADATA} == before
+
+    stale = await client.put(url, params=params, json={
+        **body, "record_metadata": {**EMPTY_RECORD_METADATA, "hidden_property_codes": []},
+    })
+    assert stale.status_code == 409, stale.text
+    legacy = {**EMPTY_RECORD_METADATA, "tags": ["已复核"]}
+    response = await client.put(url, params=params, json={**body, "record_metadata": legacy})
+    assert response.status_code == 200, response.text
+    assert (await instance(client, 1, ORDER))["record_metadata"] == {**legacy, "hidden_property_codes": hidden}
+
+    async with sessions.begin() as db:
+        db.add(FormPermission(tenant_id=1, form_id=1, role_id=1, action="edit", effect="allow"))
+    user["is_admin"] = False
+    visible = {**legacy, "hidden_property_codes": ["completed", "work_order_id"]}
+    assert (await instance(client, 1, ORDER))["record_metadata"] == visible
+    snapshot = (await client.get(url, params=params)).json()["data"]
+    assert snapshot["record_metadata"] == visible
+    body = {"token": snapshot["token"], "expected_record_metadata": visible}
+    forbidden = await client.put(url, params=params, json={
+        **body, "record_metadata": {**legacy, "hidden_property_codes": ["planned"]},
+    })
+    assert forbidden.status_code == 403, forbidden.text
+    response = await client.put(url, params=params, json={
+        **body, "record_metadata": {**legacy, "hidden_property_codes": []},
+    })
+    assert response.status_code == 200, response.text
+    assert (await instance(client, 1, ORDER))["record_metadata"] == legacy
+    user["is_admin"] = True
+    assert (await instance(client, 1, ORDER))["record_metadata"] == {**legacy, "hidden_property_codes": ["planned"]}
+
+
+@pytest.mark.asyncio
+async def test_standalone_record_note_round_trips_markdown_and_respects_mapped_note_source(object_client):
+    client, _, _ = object_client
+    await configure(client)
+    url = f"{ROOT}/ontology-objects/2/record-edit"
+    params = {"key": DEFECTS[0]}
+    before = await instance(client, 2, DEFECTS[0])
+    snapshot = (await client.get(url, params=params)).json()["data"]
+    assert snapshot["can_edit_note_markdown"] is True
+    body = {"token": snapshot["token"], "expected_record_metadata": EMPTY_RECORD_METADATA}
+    note = "  # 复核笔记\r\n\r\n- 已确认\r\n"
+    response = await client.put(url, params=params, json={
+        **body, "record_metadata": {**EMPTY_RECORD_METADATA, "note_markdown": note},
+    })
+    assert response.status_code == 200, response.text
+    after = await instance(client, 2, DEFECTS[0])
+    assert after["record_metadata"] == {**EMPTY_RECORD_METADATA, "note_markdown": note}
+    assert {**after, "record_metadata": EMPTY_RECORD_METADATA} == before
+
+    stale = await client.put(url, params=params, json={
+        **body, "record_metadata": {**EMPTY_RECORD_METADATA, "note_markdown": ""},
+    })
+    assert stale.status_code == 409, stale.text
+    legacy = {**EMPTY_RECORD_METADATA, "tags": ["待处置"]}
+    response = await client.put(url, params=params, json={**body, "record_metadata": legacy})
+    assert response.status_code == 200, response.text
+    current = {**legacy, "note_markdown": note}
+    assert (await client.get(url, params=params)).json()["data"]["record_metadata"] == current
+    response = await client.put(url, params=params, json={
+        **body, "expected_record_metadata": current, "record_metadata": {**legacy, "note_markdown": ""},
+    })
+    assert response.status_code == 200, response.text
+    assert (await instance(client, 2, DEFECTS[0]))["record_metadata"] == legacy
+
+    mapped_url = f"{ROOT}/ontology-objects/1/record-edit"
+    mapped = (await client.get(mapped_url, params={"key": ORDER})).json()["data"]
+    assert "can_edit_note_markdown" not in mapped
+    forbidden = await client.put(mapped_url, params={"key": ORDER}, json={
+        "token": mapped["token"], "expected_record_metadata": mapped["record_metadata"],
+        "record_metadata": {**mapped["record_metadata"], "note_markdown": note},
+    })
+    assert forbidden.status_code == 403, forbidden.text
+
+
+@pytest.mark.asyncio
 async def test_object_annotation_and_form_edit_are_atomic_with_independent_conflict_checks(object_client):
     client, _, _ = object_client
     await configure(client)

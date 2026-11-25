@@ -12,7 +12,7 @@ from app.api import applications, forms, admin
 from app.services import applications as applications_service
 from app.services import form_admin
 from app.api.deps import get_db, get_current_user
-from app.models.relational import Application, ApplicationForm, Base, Form, Role, RolePermission, Tenant, User
+from app.models.relational import Application, ApplicationForm, ApplicationRole, Base, Form, Role, RolePermission, Tenant, User, UserRole
 
 
 @pytest.mark.asyncio
@@ -240,5 +240,15 @@ async def test_menu_integrity_defaults_and_atomic_reorder(tmp_path, monkeypatch)
                 db.add(ApplicationForm(tenant_id=1, application_id=legacy['id'], form_id=form_id))
                 await db.commit()
             assert [node['title'] for node in await request(client, 'GET', f'/applications/{legacy["id"]}/menus')] == ['Shared inspection']
+            async with sessions() as db:
+                roles = [Role(tenant_id=1, name=name, label=name) for name in ('assembly-reader', 'assembly-reviewer')]
+                db.add_all(roles)
+                await db.flush()
+                for role in roles:
+                    db.add(UserRole(tenant_id=1, user_id=1, role_id=role.id))
+                    db.add(ApplicationRole(tenant_id=1, application_id=a['id'], role_id=role.id))
+                await db.commit()
+            actor['is_admin'] = False
+            assert [item['id'] for item in await request(client, 'GET', '/applications')] == [a['id']]
     finally:
         await engine.dispose()

@@ -10,3 +10,17 @@
 .relationship-object-editor__number {
   width: 100%;
 }
+
+.relationship-object-editor__markdown {
+  min-width: 0;
+}
+
+.relationship-object-editor__file-picker[hidden] {
+  display: none;
+}
+
+.relationship-object-editor__markdown textarea {
+  font-family: var(--ui-font-mono);
+  line-height: 1.6;
+  resize: vertical;
+}

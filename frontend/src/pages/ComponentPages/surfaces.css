@@ -28,6 +28,9 @@
   background:var(--widget-background)!important;border:1px solid var(--widget-border)!important;
   border-radius:var(--widget-radius)!important;box-shadow:var(--widget-shadow)!important;backdrop-filter:none;
 }
+.tech-white-shell .app-content .component-page .component-page-widget[data-presentation="configured"].analytics-selected-widget {
+  outline:2px solid var(--ui-focus,var(--mf-focus));outline-offset:-2px;
+}
 .component-frame-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:var(--widget-header-padding);flex:none;}
 .component-frame-header[data-divider="true"]{border-bottom:1px solid var(--mf-border,#e2e7ec);}
 .component-frame-heading{min-width:0;flex:1;}.component-frame-title{font-size:14px;font-weight:600;line-height:1.5;overflow-wrap:anywhere;}

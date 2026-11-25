@@ -4,12 +4,24 @@
 .component-toolbar-group {margin:0 8px 8px;border:1px solid var(--property-border);border-radius:4px;overflow:hidden;}
 .component-toolbar-group>summary {cursor:pointer;background:var(--property-soft);list-style:none;}
 .component-toolbar-group>summary::-webkit-details-marker {display:none;}
+.component-toolbar-group>summary:focus-visible {outline:2px solid var(--mf-primary);outline-offset:-2px;}
 .component-toolbar-group>summary::before {content:'›';color:var(--mf-muted);}
 .component-toolbar-group[open]>summary::before {transform:rotate(90deg);}
 .component-toolbar-group-name {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .component-toolbar-group .ant-btn {color:var(--mf-muted);}
 .component-toolbar-group .property-inspector-row {grid-template-columns:minmax(0,1fr) auto;}
 .component-toolbar-group .property-inspector-row>.ant-space {justify-self:end;font-size:12px;}
+.component-text-settings {margin-block-start:4px;}
+.component-text-settings-heading {display:flex;align-items:center;gap:6px;padding-inline-end:10px;background:var(--property-soft);}
+.component-text-settings-toggle {display:flex;align-items:center;gap:6px;align-self:stretch;flex:1;min-width:0;min-height:var(--property-row-height);padding:5px 10px;border:0;background:transparent;color:var(--mf-text);font:inherit;text-align:start;cursor:pointer;}
+.component-text-settings-toggle:focus-visible {outline:2px solid var(--mf-primary);outline-offset:-2px;}
+.component-text-settings-toggle .anticon {color:var(--mf-muted);font-size:12px;}
+.component-text-settings-toggle[aria-expanded="true"] .anticon {transform:rotate(90deg);}
+.component-text-settings-toggle:disabled {cursor:default;}
+.component-text-settings-toggle:disabled .anticon {visibility:hidden;}
+.component-text-settings-heading .ant-btn-link {color:var(--mf-primary);}
+.component-text-settings-fields:not([hidden]) {border-block-start:1px solid var(--property-border);}
+.component-text-settings-fields>.property-inspector-row {grid-template-columns:var(--property-label-width) minmax(0,1fr);}
 .component-toolbar-audience {display:flex;flex-direction:column;gap:7px;padding:10px;border-bottom:1px solid var(--property-border);}
 .component-toolbar-audience-heading {font-size:12px;color:var(--mf-muted);}
 .component-toolbar-audience .ant-radio-group {display:flex;}

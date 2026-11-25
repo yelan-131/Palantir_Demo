@@ -39,6 +39,8 @@
 
 .relationship-explorer-main,
 .relationship-explorer-inspector {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -47,23 +49,38 @@
   background: var(--mf-surface);
 }
 
-.relationship-explorer-main {
+.relationship-explorer-graph-content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
 }
 
 .relationship-explorer-caption,
 .relationship-explorer-inspector-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-content: center;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 10px;
   min-height: 48px;
   padding: 7px 12px;
   border-bottom: 1px solid var(--mf-border);
 }
 
-.relationship-explorer-caption > .ant-typography-secondary { font-size: 12px; }
+.relationship-explorer-caption { justify-content: flex-start; }
+.relationship-explorer-panel-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+.relationship-explorer-caption-detail {
+  min-width: 0;
+  color: var(--mf-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .relationship-explorer-legend { padding: 10px 12px; }
 .relationship-explorer-map { min-height: 0; min-width: 0; position: relative; }
 .relationship-node-preview {
@@ -71,7 +88,7 @@
   z-index: 2;
   width: min(292px, calc(100% - 16px));
   max-height: calc(100% - 16px);
-  overflow: hidden;
+  overflow: hidden auto;
   padding: 10px 12px;
   border: 1px solid var(--mf-border);
   border-radius: 10px;
@@ -81,7 +98,11 @@
 .relationship-node-preview header { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
 .relationship-node-preview header > .ant-typography { min-width: 0; overflow-wrap: anywhere; }
 .relationship-node-preview .ant-tag { margin-inline-end: 0; }
-.relationship-node-preview__identity, .relationship-node-preview__source, .relationship-node-preview footer { color: var(--mf-muted); font-size: 12px; }
+.relationship-node-preview__type, .relationship-node-preview__identity,
+.relationship-node-preview__source, .relationship-node-preview footer { color: var(--mf-muted); font-size: 12px; }
+.relationship-node-preview__tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; padding: 0; list-style: none; }
+.relationship-node-preview__tags li { min-width: 0; max-width: 100%; }
+.relationship-node-preview__tags .ant-tag { white-space: normal; overflow-wrap: anywhere; }
 .relationship-node-preview dl { margin: 7px 0; }
 .relationship-node-preview dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 2px 0; }
 .relationship-node-preview dt, .relationship-node-preview dd { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -98,20 +119,16 @@
 .relationship-explorer-legend .relationship-legend-line--candidate { border-top-style: dashed; }
 .relationship-explorer-help { margin-inline-start: auto; }
 
-.relationship-explorer-inspector {
-  display: flex;
-  flex-direction: column;
-}
-
-.relationship-explorer-inspector-toolbar { flex: none; }
-
 .relationship-explorer-inspector-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-inline-start: auto;
   gap: 8px;
 }
+.relationship-explorer-markdown-import:empty { display: none; }
 
 .relationship-explorer-inspector-body {
-  flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -145,6 +162,22 @@
   .data-center-workspace > .ant-tabs > .ant-tabs-content-holder:has(.relationship-explorer-board) {
     flex: 1 1 0;
     min-height: 0;
+  }
+
+  @supports (grid-template-rows: subgrid) {
+    .relationship-explorer-board {
+      grid-template-rows: auto minmax(0, 1fr);
+      row-gap: 0;
+    }
+
+    .relationship-explorer-main,
+    .relationship-explorer-inspector {
+      grid-row: 1 / span 2;
+      grid-template-rows: subgrid;
+    }
+
+    .relationship-explorer-main { grid-column: 1; }
+    .relationship-explorer-inspector { grid-column: 2; }
   }
 }
 

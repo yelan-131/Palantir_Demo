@@ -9,6 +9,7 @@ from tests.test_record_service import environment, seed
 from app.api import component_pages
 from app.core.request_diagnostics import install_request_diagnostics
 from app.models.relational import ComponentPageVersion, FormPermission, RolePermission
+from app.services.component_page_definitions import ListSettings
 
 
 @pytest_asyncio.fixture
@@ -395,6 +396,51 @@ async def test_draft_live_preview_never_saves_or_publishes(pages_environment):
 
 
 @pytest.mark.asyncio
+async def test_preview_locates_structural_widget_errors_without_changing_publish(pages_environment):
+    _, _, user, client = pages_environment
+    page = await create_publish(client, user)
+    code = page['code']
+    cases = [
+        (2, {'dimension': None}, 'data', '图表需要选择分组字段'),
+        (1, {'measure': None}, 'data', '求和需要有效的数值字段'),
+        (2, {'dataBinding': {'formId': 99999}}, 'data', '业务数据来源不存在'),
+        (2, {'targetWidgetIds': ['missing']}, 'interaction', '组件联动目标不存在或指向自身'),
+        (2, {'targetWidgetIds': ['list'], 'dataBinding': {'formId': 99999}}, 'interaction', '当前联动仅支持相同业务数据来源的组件'),
+        (3, {'listSettings': {'columns': ['title', 'title']}}, 'data', '列表显示列不能重复'),
+        (2, {'dimension': 'archived_column'}, 'data', '页面引用了不存在或已归档的字段'),
+    ]
+    for index, patch, target, message in cases:
+        broken = copy.deepcopy(page['definition'])
+        widget = broken['widgets'][index]
+        widget.update(patch)
+        response = await client.post(f'/pages/{code}/preview', json={'definition': broken})
+        assert response.status_code == 422, response.text
+        assert response.json()['detail'] == {
+            'errors': [message], 'widgetErrors': {widget['id']: [message]}, 'widgetTargets': {widget['id']: target},
+        }
+        response = await client.post(f'/pages/{code}/publish', json={
+            'definition': broken, 'expectedRevision': page['revision'],
+        })
+        assert response.status_code == 422 and response.json()['detail'] == message
+
+    broken = copy.deepcopy(page['definition'])
+    broken['sourceFormId'] = None
+    response = await client.post(f'/pages/{code}/preview', json={'definition': broken})
+    assert response.status_code == 422
+    assert response.json()['detail']['widgetTargets'] == {'total': 'data'}
+
+    broken = copy.deepcopy(page['definition'])
+    broken['filterFields'] = ['archived_column']
+    response = await client.post(f'/pages/{code}/preview', json={'definition': broken})
+    assert response.status_code == 422 and response.json()['detail'] == '页面引用了不存在或已归档的字段'
+
+    current = (await client.get(f'/pages/{code}/editor')).json()
+    assert current['revision'] == page['revision']
+    assert current['definition'] == page['definition']
+    assert current['publishedDefinition'] == page['publishedDefinition']
+
+
+@pytest.mark.asyncio
 async def test_presentation_and_interaction_settings_survive_publication(pages_environment):
     _, _, user, client=pages_environment
     value=definition()
@@ -429,6 +475,21 @@ async def test_detached_filters_publish_without_analytics_and_require_valid_targ
     value['widgets'][0]['filterFields'] = ['missing']
     response = await client.post(f'/pages/{page["code"]}/publish', json={'definition': value, 'expectedRevision': page['revision']})
     assert response.status_code == 422, response.text
+    assert 'standaloneFilter' not in page['publishedDefinition']['widgets'][0]
+    for fields, targets, message in [
+        ([], ['list'], '筛选组件至少需要一个筛选条件'),
+        (['title'], [], '筛选组件需要关联有效的列表、指标或图表'),
+        (['title'], ['missing'], '组件联动目标不存在或指向自身'),
+    ]:
+        value['widgets'][0].update(
+            standaloneFilter=True, filterFields=fields, targetWidgetIds=targets,
+            filterSettings={'showKeyword': False},
+        )
+        response = await client.post(f'/pages/{page["code"]}/preview', json={'definition': value})
+        assert response.status_code == 422, response.text
+        assert response.json()['detail'] == {
+            'errors': [message], 'widgetErrors': {'filters': [message]}, 'widgetTargets': {'filters': 'data'},
+        }
 
 @pytest.mark.asyncio
 async def test_dashboard_options_round_trip_and_targeted_statistics(pages_environment):
@@ -609,6 +670,42 @@ async def test_component_sources_query_and_write_independently(pages_environment
 
 
 @pytest.mark.asyncio
+async def test_standalone_filters_on_different_sources_apply_and_reset_independently(pages_environment):
+    db, _, user, client = pages_environment
+    await seed(db, 'First')
+    await seed(db, 'Second')
+    await second_source(db, user, client)
+    response = await client.post('/forms/20/records', json={'data': {'amount': 8}})
+    assert response.status_code == 200, response.text
+    value = {'title': '跨来源筛选隔离', 'widgets': [
+        {'id': 'count', 'type': 'metric', 'title': '记录数', 'dataBinding': {'formId': 1}},
+        {'id': 'sum', 'type': 'metric', 'title': '金额', 'dataBinding': {'formId': 20}, 'aggregate': 'sum', 'measure': 'amount'},
+        {'id': 'title-filter', 'type': 'record-filter', 'title': '名称筛选', 'standaloneFilter': True,
+         'dataBinding': {'formId': 1}, 'filterFields': ['title'], 'targetWidgetIds': ['count']},
+        {'id': 'amount-filter', 'type': 'record-filter', 'title': '金额筛选', 'standaloneFilter': True,
+         'dataBinding': {'formId': 20}, 'filterFields': ['amount'], 'targetWidgetIds': ['sum']},
+    ]}
+    page = await create_publish(client, user, value)
+    user['is_admin'] = False
+    path = f'/pages/{page["code"]}/data'
+    title_query = {'filters': [{'field': 'title', 'op': 'equals', 'value': 'First'}]}
+    amount_query = {'filters': [{'field': 'amount', 'op': 'equals', 'value': 8}]}
+    cases = [
+        ({}, {'count': 2, 'sum': 25}),
+        ({'title-filter': title_query}, {'count': 1, 'sum': 25}),
+        ({'title-filter': title_query, 'amount-filter': amount_query}, {'count': 1, 'sum': 8}),
+        ({'title-filter': {'filters': []}, 'amount-filter': amount_query}, {'count': 2, 'sum': 8}),
+        ({'title-filter': {'filters': []}, 'amount-filter': {'filters': []}}, {'count': 2, 'sum': 25}),
+    ]
+    for queries, expected in cases:
+        response = await client.post(path, json={'filter_queries': queries})
+        assert response.status_code == 200, response.text
+        analytics = response.json()['analyticsData']
+        assert analytics['errors'] == []
+        assert analytics['metricValues'] == expected
+
+
+@pytest.mark.asyncio
 async def test_shared_list_removal_and_empty_publication_preserve_records(pages_environment):
     db, _, user, client = pages_environment
     record = await seed(db, 'Keep')
@@ -658,8 +755,8 @@ async def test_binding_validation_checks_each_source_and_rejects_cross_source_li
     assert (await client.post(f'/pages/{page["code"]}/publish', json={
         'definition': page['definition'], 'expectedRevision': page['revision']})).status_code == 422
     value['widgets'][0].pop('listSettings')
-    value['widgets'].append({'id': 'filter', 'type': 'record-filter', 'title': '错误关联',
-        'dataBinding': {'formId': 1}, 'targetWidgetIds': ['one']})
+    value['widgets'].append({'id': 'filter', 'type': 'record-filter', 'title': '错误关联', 'standaloneFilter': True,
+        'dataBinding': {'formId': 1}, 'filterFields': ['title'], 'targetWidgetIds': ['one']})
     assert (await client.post(f'/pages/{page["code"]}/publish', json={
         'definition': value, 'expectedRevision': page['revision']})).status_code == 422
 
@@ -777,9 +874,17 @@ async def test_component_filters_drive_only_linked_statistics_and_use_record_pre
     db, _, user, client = pages_environment
     await seed(db, 'Alpha'); await seed(db, 'Beta')
     value = definition()
+    value.update(sourceFormId=None, filterFields=[])
+    binding = {'formId': 1}
+    for widget in value['widgets']:
+        widget['dataBinding'] = binding
     value['widgets'].append({'id': 'filter', 'type': 'record-filter', 'title': '筛选',
-                             'targetWidgetIds': ['total', 'chart'], 'filterFields': ['title']})
+                             'standaloneFilter': True, 'dataBinding': binding,
+                             'targetWidgetIds': ['total', 'chart', 'list'], 'filterFields': ['title']})
     page = await create_publish(client, user, value)
+    assert page['publishedDefinition']['sourceFormId'] is None
+    assert page['publishedDefinition']['widgets'][-1]['standaloneFilter'] is True
+    assert 'standaloneFilter' not in page['publishedDefinition']['widgets'][0]
     user['is_admin'] = False
     path = f'/pages/{page["code"]}/data'
     response = await client.post(path, json={'filter_queries': {'filter': {
@@ -862,11 +967,12 @@ def test_toolbar_group_audiences_merge_without_mutating_saved_definition():
     widget = {'id': 'list', 'listSettings': {'toolbarGroups': [
         {'id': 'all', 'name': '通用', 'roleIds': [], 'actions': ['refresh']},
         {'id': 'a', 'name': '录入', 'roleIds': [1], 'actions': ['create', 'refresh']},
-        {'id': 'b', 'name': '导出与删除', 'roleIds': [2], 'actions': ['export', 'delete', 'disable']}]}}
+        {'id': 'b', 'name': '导出、复制与删除', 'roleIds': [2], 'actions': ['export', 'copy', 'delete', 'disable']}]}}
+    ListSettings.model_validate(widget['listSettings'])
     original = copy.deepcopy(widget)
     assert component_pages.resolve_toolbar_groups(widget, {1})['listSettings']['toolbarActions'] == ['refresh', 'create']
     assert component_pages.resolve_toolbar_groups(widget, {3})['listSettings']['toolbarActions'] == ['refresh']
-    assert component_pages.resolve_toolbar_groups(widget, {1, 2})['listSettings']['toolbarActions'] == ['refresh', 'create', 'export', 'delete']
+    assert component_pages.resolve_toolbar_groups(widget, {1, 2})['listSettings']['toolbarActions'] == ['refresh', 'create', 'export', 'copy', 'delete']
     assert widget == original
     assert component_pages.resolve_toolbar_groups({'listSettings': {'toolbarGroups': []}}, set())['listSettings']['toolbarActions'] == []
     assert component_pages.resolve_toolbar_groups({'listSettings': {'toolbarActions': ['refresh']}}, set()) == {'listSettings': {'toolbarActions': ['refresh']}}
@@ -896,6 +1002,7 @@ async def test_component_section_publish_isolated_and_revision_checked(pages_env
     code = page['code']
     edited = copy.deepcopy(page['definition'])
     edited['widgets'][0]['title'] = '独立基本版本'
+    edited['widgets'][0]['heightPercent'] = 50
     edited['widgets'][1]['title'] = '未发布其他组件'
     edited['widgets'][0]['aggregate'] = 'sum'
     edited['widgets'][0]['measure'] = 'qty'
@@ -905,14 +1012,46 @@ async def test_component_section_publish_isolated_and_revision_checked(pages_env
     published_page = response.json()
     widgets = published_page['publishedDefinition']['widgets']
     assert widgets[0]['title'] == '独立基本版本'
+    assert widgets[0]['heightPercent'] == 50
     assert widgets[0]['aggregate'] == 'count'
     assert widgets[1]['title'] == page['definition']['widgets'][1]['title']
     history = (await client.get(url + '/versions')).json()['items']
     assert len(history) == 2
+    assert history[0]['snapshot']['heightPercent'] == 50
+    assert history[1]['snapshot']['heightPercent'] is None
     data_history = (await client.get(f'/pages/{code}/widgets/total/data/versions')).json()['items']
     assert len(data_history) == 1
     stale = await client.post(url + '/publish', json={'definition': edited, 'expectedRevision': page['revision']})
     assert stale.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_unchanged_section_does_not_publish_or_save_other_changes(pages_environment):
+    db, _, user, client = pages_environment
+    page = await create_publish(client, user)
+    code = page['code']
+    snapshot = await db.scalar(select(ComponentPageVersion).where(ComponentPageVersion.version == page['publishedVersion']))
+    older = copy.deepcopy(snapshot.definition)
+    # Older snapshots may predate schema defaults now present in editor payloads.
+    older['widgets'][0] = definition()['widgets'][0]
+    snapshot.definition = older
+    await db.commit()
+
+    edited = copy.deepcopy(page['definition'])
+    edited['widgets'][1]['title'] = '其他组件的未保存修改'
+    for section in ('basic', 'data'):
+        response = await client.post(f'/pages/{code}/widgets/total/{section}/publish', json={
+            'definition': edited, 'expectedRevision': page['revision'],
+        })
+        assert response.status_code == 422, response.text
+        assert response.json()['detail'] == '当前组件页签与已发布版本一致，无需重复发布'
+
+    editor = (await client.get(f'/pages/{code}/editor')).json()
+    assert editor['revision'] == page['revision']
+    assert editor['publishedVersion'] == page['publishedVersion']
+    assert editor['definition'] == page['definition']
+    assert editor['publishedDefinition'] == older
+    assert len((await client.get(f'/pages/{code}/versions')).json()['items']) == 1
 
 
 @pytest.mark.asyncio
@@ -1169,16 +1308,20 @@ async def test_filter_button_groups_are_projected_and_template_scope_isolated(pa
         assert response.status_code == 422, response.text
 
 
-def test_filter_button_permissions_publish_with_basic_section_without_changing_fields():
-    live = {'id': 'f', 'type': 'record-filter', 'filterFields': ['title'], 'filterSettings': {
+def test_filter_data_section_is_atomic_and_can_restore_a_legacy_snapshot():
+    live = {'id': 'f', 'type': 'record-filter', 'title': '旧筛选', 'filterFields': ['title'],
+            'dataBinding': {'formId': 1}, 'targetWidgetIds': ['metric', 'list'], 'filterSettings': {
         'queryMode': 'submit', 'showKeyword': True, 'requiredFields': ['title'], 'toolbarGroups': None}}
-    draft = {**live, 'filterFields': ['qty'], 'filterSettings': {
+    draft = {**live, 'title': '新筛选', 'standaloneFilter': True, 'filterFields': ['qty'],
+             'dataBinding': {'formId': 2}, 'targetWidgetIds': ['new-list'], 'filterSettings': {
         'queryMode': 'change', 'showKeyword': False, 'requiredFields': ['qty'], 'toolbarGroups': []}}
     basic = component_pages.merge_widget_section(live, draft, 'basic')
-    assert basic['filterFields'] == ['title']
-    assert basic['filterSettings'] == {'queryMode': 'change', 'showKeyword': True, 'requiredFields': ['title'], 'toolbarGroups': []}
+    assert basic == {**live, 'title': '新筛选', 'heightPercent': None, 'listSettings': {}}
     data = component_pages.merge_widget_section(live, draft, 'data')
-    assert data['filterSettings'] == {'queryMode': 'submit', 'showKeyword': False, 'requiredFields': ['qty'], 'toolbarGroups': None}
+    assert data == {**draft, 'title': '旧筛选', 'listSettings': {}}
+    snapshot = component_pages.widget_section(live, 'data')
+    restored = component_pages.merge_widget_section(data, snapshot, 'data')
+    assert restored == {**live, 'standaloneFilter': False, 'listSettings': {}}
 
 
 @pytest.mark.asyncio
@@ -1541,6 +1684,54 @@ def test_basic_section_versions_include_presentation_without_touching_data():
     merged = component_pages.merge_widget_section({'id': 'one', 'type': 'workspace', 'dataBinding': {'formId': 2}}, snapshot, 'basic')
     assert merged['presentation'] == widget['presentation']
     assert merged['dataBinding'] == {'formId': 2}
+
+
+@pytest.mark.asyncio
+async def test_presentation_overrides_preserve_inheritance_across_versions(pages_environment):
+    _, _, user, client = pages_environment
+    original = definition()
+    page_defaults = {'container': {'background': '#123456', 'padding': 0}}
+    inherited = {'container': {'radius': 0}, 'header': {'visible': False}}
+    automatic = {'container': {'radius': 0, 'background': None}, 'header': {'visible': False}}
+    original['style'] = {'componentDefaults': page_defaults}
+    original['widgets'][0]['presentation'] = inherited
+    page = await create_publish(client, user, original)
+    code = page['code']
+    assert page['publishedDefinition']['widgets'][0]['presentation'] == inherited
+
+    draft = copy.deepcopy(page['definition'])
+    draft['style']['componentDefaults'] = {'container': {'padding': 0}}
+    draft['widgets'][0]['presentation'] = automatic
+    draft['widgets'][0].update(aggregate='sum', measure='qty')
+    response = await client.put(f'/pages/{code}/draft', json={
+        'definition': draft, 'expectedRevision': page['revision'],
+    })
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert page['definition']['style']['componentDefaults'] == draft['style']['componentDefaults']
+    assert page['definition']['widgets'][0]['presentation'] == automatic
+    assert page['publishedDefinition']['widgets'][0]['presentation'] == inherited
+
+    for section, published_presentation in [('data', inherited), ('basic', automatic)]:
+        response = await client.post(f'/pages/{code}/widgets/total/{section}/publish', json={
+            'definition': page['definition'], 'expectedRevision': page['revision'],
+        })
+        assert response.status_code == 200, response.text
+        page = response.json()
+        assert page['publishedDefinition']['style']['componentDefaults'] == page_defaults
+        assert page['publishedDefinition']['widgets'][0]['presentation'] == published_presentation
+
+    history = await client.get(f'/pages/{code}/widgets/total/basic/versions')
+    assert history.status_code == 200, history.text
+    assert [item['snapshot']['presentation'] for item in history.json()['items']] == [automatic, inherited]
+    snapshot = await client.get(f'/pages/{code}/versions/1')
+    assert snapshot.status_code == 200, snapshot.text
+    restored = await client.put(f'/pages/{code}/draft', json={
+        'definition': snapshot.json()['definition'], 'expectedRevision': page['revision'],
+    })
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['definition']['widgets'][0]['presentation'] == inherited
+    assert restored.json()['publishedDefinition']['widgets'][0]['presentation'] == automatic
 
 
 @pytest.mark.asyncio

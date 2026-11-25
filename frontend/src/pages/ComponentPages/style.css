@@ -1,4 +1,8 @@
 .component-page {padding:16px;min-width:0;}
+.component-page-editor-toolbar {
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:8px 16px;margin-bottom:12px;min-height:32px;flex:none;
+}
 .component-page-loading {padding:100px;text-align:center;}
 .component-page-preview {flex:1;min-width:0;container-type:inline-size;container-name:analytics-canvas;}
 .component-page-canvas {min-width:0;min-height:280px;}
@@ -7,28 +11,7 @@
 .component-page-filters {padding:10px 12px;margin-bottom:12px;background:var(--mf-surface,#fff);border:1px solid var(--mf-border);border-radius:10px;}
 .component-page-filters .ant-select {min-width:150px;}
 .component-page-grid {min-height:200px;}
-/* A single business list with no custom height uses the available canvas height. */
-.component-page-fill-list {height:100%;min-height:0;box-sizing:border-box;}
-.component-page-fill-list>.analytics-workspace-body {height:100%;align-items:stretch;}
-.component-page-fill-list .component-page-preview {height:100%;overflow:hidden auto;}
-.component-page-fill-list :is(.component-page-canvas-host,.component-page-canvas,.component-page-grid,.component-page-grid>.ant-row>.ant-col,
- .component-page-widget-record-list) {
- display:flex;flex-direction:column;min-width:0;min-height:0;
-}
-.component-page-fill-list .component-page-canvas-host {height:100%;}
-.component-page-fill-list :is(.component-page-canvas,.component-page-grid,.component-page-grid>.ant-row,
- .component-page-widget-record-list) {flex:1 1 0;min-height:0;}
-
-@media(min-width:1101px) {
- .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:has(>.component-page-filters) {align-items:stretch;grid-template-rows:minmax(min-content,1fr);}
- .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:has(>.component-page-filters):has(>.ant-alert) {grid-template-rows:auto minmax(min-content,1fr);}
- .component-page-fill-list .component-filter-layout-panel>.component-page-filters {align-self:start;}
- .tech-white-shell .app-content .component-page-fill-list .component-filter-layout-panel:not(:has(>.component-page-filters)) {display:flex;gap:0;}
-}
-@media(max-width:800px) {
- .component-page-fill-list.analytics-workspace-configuring>.analytics-workspace-body {height:auto;}
- .component-page-fill-list.analytics-workspace-configuring .component-page-preview {flex:none;height:var(--component-editor-height,70dvh);}
-}
+.component-page-grid>.ant-row>.ant-col {min-width:0;}
 .component-page-widget {overflow:hidden;min-width:0;}
 .component-page-widget>.ant-card-head {min-height:46px;padding-inline:16px;}
 .component-page-widget>.ant-card-head .ant-card-head-title {font-size:13px;font-weight:600;}
@@ -47,6 +30,7 @@
 .component-page .component-business-links {display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
 .component-page-source-editor {min-width:0;min-height:500px;}
 .component-page .analytics-editor-panel .ant-select,.component-page .analytics-editor-panel .ant-input-number {width:100%;}
+.component-height-mode .ant-segmented-item-label {padding-inline:3px;font-size:12px;}
 .component-widget-preview {min-height:100px;display:flex;align-items:center;justify-content:center;}
 @media (min-width:601px) {
   @container analytics-canvas (min-width:480px) {
@@ -87,9 +71,6 @@
 .tech-white-shell .app-content .component-page .component-page-filters .ant-select {min-width:130px;}
 .tech-white-shell .app-content .component-page .component-page-filters>.ant-space {margin:0;gap:8px!important;}
 .tech-white-shell .app-content .component-page .component-page-filters .ant-select-selector {background:var(--mf-surface,#fff);}
-@container analytics-canvas (max-width:850px) {
-  .tech-white-shell .app-content .component-page-fill-list :is(.component-filter-layout-toolbar,.component-filter-layout-inline)>.component-page-filters {column-gap:8px;}
-}
 .tech-white-shell .app-content .component-page .component-record-filter .dynamic-business-filter {
   padding:0;margin:0;border:0;border-radius:0;background:transparent;box-shadow:none;
   grid-template-columns:repeat(4,minmax(0,1fr)) auto;align-items:end;gap:12px 16px;
@@ -131,7 +112,7 @@
 .tech-white-shell .app-content .component-page .component-filter-layout-panel .component-page-filters>.ant-space {display:flex;flex-direction:column;align-items:stretch;width:100%;}
 .tech-white-shell .app-content .component-page .component-filter-layout-panel .component-page-filters .ant-select {min-width:0;width:100%;}
 .tech-white-shell .app-content .component-page .component-filter-layout-panel .component-page-filters .analytics-filter-heading>.ant-btn {margin:0;}
-.tech-white-shell .app-content .component-page .analytics-editor-presets {grid-template-columns:repeat(3,minmax(0,1fr));}
+.component-page .analytics-editor-presets {grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:0;}
 @media(max-width:1100px) {
   .tech-white-shell .app-content .component-page .component-filter-layout-panel {display:block;}
   .tech-white-shell .app-content .component-page .component-filter-layout-panel>.component-page-filters {position:static;margin-bottom:12px;}
@@ -241,18 +222,20 @@
 @media(min-width:801px) {
  .component-page.analytics-workspace-configuring .analytics-workspace-body {height:var(--component-editor-height,calc(100dvh - 112px));min-height:0;align-items:stretch;overflow:hidden;}
  .component-page.analytics-workspace-configuring .component-page-preview {height:100%;min-height:0;overflow:hidden auto;overscroll-behavior:contain;}
- .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-canvas-host:not([hidden]) {display:grid;min-height:100%;min-width:0;}
- .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-canvas {display:flex;flex-direction:column;}
- .component-page.analytics-workspace-configuring:not(.component-page-fill-list) .component-page-grid {flex:1;min-width:0;}
+ .component-page.analytics-workspace-configuring .component-page-canvas-host:not([hidden]) {display:grid;min-height:100%;min-width:0;}
+ .component-page.analytics-workspace-configuring .component-page-canvas {display:flex;flex-direction:column;}
+ .component-page.analytics-workspace-configuring .component-page-grid {flex:1;min-width:0;}
  .component-page.analytics-workspace-configuring .analytics-settings-page {position:relative;top:auto;height:100%;min-height:0;align-self:stretch;}
 }
 
 @media(min-width:801px) {
  .tech-white-shell .app-content>.content-surface>.component-page>.analytics-workspace-body {flex:1 0 auto;align-items:stretch;}
- .tech-white-shell .app-content>.content-surface>.component-page:not(.component-page-fill-list,.analytics-workspace-configuring) .component-page-canvas-host:not([hidden]) {display:grid;min-height:100%;min-width:0;}
- .tech-white-shell .app-content>.content-surface:has(.component-page:is(.analytics-workspace-configuring,.component-page-fill-list)) {overflow:hidden;scrollbar-gutter:auto;min-height:0;}
+ .tech-white-shell .app-content>.content-surface>.component-page:not(.analytics-workspace-configuring) .component-page-canvas-host:not([hidden]) {display:grid;min-height:100%;min-width:0;}
+ .tech-white-shell .app-content>.content-surface:has(.component-page.analytics-workspace-configuring) {overflow:hidden;scrollbar-gutter:auto;min-height:0;}
  .tech-white-shell .app-content .component-page.analytics-workspace-configuring {height:100%;min-height:0;box-sizing:border-box;overflow:hidden;}
  .component-page.analytics-workspace-configuring .analytics-workspace-body {height:100%;}
+ .component-page.analytics-workspace-configuring:has(>.component-page-editor-toolbar) {display:flex;flex-direction:column;}
+ .component-page.analytics-workspace-configuring:has(>.component-page-editor-toolbar)>.analytics-workspace-body {height:0;min-height:0;flex:1 1 auto;}
 }
 
 .component-page-widget {position:relative;}
@@ -270,7 +253,6 @@
 .component-source-properties .form-designer-right .designer-props .property-inspector-group-title::after {display:none;}
 .component-source-properties .form-designer-right .designer-props .property-inspector-group-actions {margin-left:auto;}
 .component-source-properties .form-designer-right .designer-props .property-inspector-group-actions .ant-btn {height:22px;padding:0 4px;font-size:12px;color:var(--mf-muted);}
-.component-source-properties .form-designer-right .designer-props .property-inspector-row {grid-template-columns:72px minmax(0,1fr);gap:8px;min-height:34px;padding:4px 10px;margin:0;}
 .component-source-properties .form-designer-right .designer-props .property-inspector-label>label {display:block;min-height:0;padding:0;margin:0;border:0;background:transparent;font-size:12px;color:var(--mf-muted);}
 .component-source-properties .form-designer-right .designer-props .designer-description-row {align-items:start;}
 
@@ -287,8 +269,7 @@
 }
 .component-source-properties .form-designer-right .designer-props :is(.property-inspector-row,.designer-property-rule-row),
 .component-source-properties .form-designer-right .designer-props .property-inspector-group>label {
- display:grid;grid-template-columns:var(--property-label-width) minmax(0,1fr);align-items:center;
- gap:8px;min-height:34px;margin:0;padding:4px 10px;border-bottom:1px solid #f0f3f6;
+ border-bottom-color:#f0f3f6;
 }
 .component-source-properties .form-designer-right .designer-props :is(label>span,.designer-rule-label,.designer-property-rule-row>.designer-rule-label) {
  color:var(--mf-muted);font-size:12px;font-weight:500;line-height:1.5;
@@ -312,21 +293,11 @@
  min-height:34px;padding:8px 10px;font-size:12px;font-weight:600;line-height:1.4;letter-spacing:.01em;
  color:var(--mf-text);background:color-mix(in srgb,var(--mf-primary,#47627b) 7%,white);
 }
-.component-source-properties .professional-flow-properties .professional-flow-props>.property-inspector-group>label {
- display:grid;grid-template-columns:var(--property-label-width) minmax(0,1fr);gap:8px;align-items:center;
- min-height:34px;padding:4px 10px;margin:0;border-bottom:1px solid #f0f3f6;
-}
-.component-source-properties .professional-flow-properties .professional-flow-props label>span {
- color:var(--mf-muted);font-size:12px;font-weight:500;line-height:1.5;
-}
 .component-source-properties .professional-flow-properties .professional-flow-props :is(.ant-input:not(textarea),.ant-input-affix-wrapper,.ant-input-number,.ant-input-number-affix-wrapper,.ant-select-single) {height:26px;font-size:12px;border-radius:4px;}
 .component-source-properties .professional-flow-properties .professional-flow-props .ant-input-number {width:100%;min-width:0;}
 .component-source-properties .professional-flow-properties .professional-flow-props .ant-input-number-input {height:24px;font-size:12px;}
 .component-source-properties .professional-flow-properties .professional-flow-props .ant-select-single .ant-select-selector {height:26px!important;border-radius:4px;align-items:center;}
 .component-source-properties .professional-flow-properties .professional-flow-props .ant-select-single :is(.ant-select-selection-item,.ant-select-selection-placeholder) {line-height:24px!important;font-size:12px;}
-.component-source-properties .professional-flow-properties .professional-flow-props label>.ant-switch {justify-self:end;width:34px;min-width:34px;max-width:34px;height:18px;margin-right:2px;padding:0;}
-.component-source-properties .professional-flow-properties .professional-flow-props .ant-switch .ant-switch-handle {width:14px;height:14px;top:2px;}
-.component-source-properties .professional-flow-properties .professional-flow-props .ant-switch.ant-switch-checked .ant-switch-handle {inset-inline-start:calc(100% - 16px);}
 .component-source-properties .professional-flow-properties .professional-flow-panel-head {padding:10px;border:1px solid var(--property-border);border-radius:6px;background:var(--mf-surface,#fff);}
 .component-source-properties .professional-flow-properties .professional-flow-panel-head strong {color:var(--mf-text);font-size:12px;font-weight:600;}
 .component-source-properties .professional-flow-properties .professional-flow-panel-head span {color:var(--mf-muted);font-size:12px;font-weight:400;}
@@ -335,7 +306,7 @@
 .component-source-properties .professional-flow-properties .professional-flow-node-kind strong {font-size:12px;font-weight:500;color:var(--mf-text);}
 .component-source-properties .professional-flow-properties .property-inspector-group-actions .ant-btn {height:22px;padding:0 4px;color:var(--mf-muted);}
 
-.component-source-properties .professional-flow-properties .professional-flow-props .property-inspector-row {grid-template-columns:var(--property-label-width) minmax(0,1fr);min-height:34px;gap:8px;padding:4px 10px;border-bottom-color:#f0f3f6;}
+.component-source-properties .professional-flow-properties .professional-flow-props .property-inspector-row {border-bottom-color:#f0f3f6;}
 .component-source-properties .professional-flow-properties .property-inspector-label>label {display:block;min-height:0;margin:0;padding:0;border:0;background:transparent;font-size:12px;font-weight:500;color:var(--mf-muted);}
 .component-source-properties .professional-flow-properties .property-inspector-row:has(textarea) {align-items:start;padding-top:7px;padding-bottom:7px;}
 .component-source-properties .professional-flow-properties textarea.ant-input {height:auto;min-height:48px;font-size:12px;line-height:1.6;border-radius:4px;}

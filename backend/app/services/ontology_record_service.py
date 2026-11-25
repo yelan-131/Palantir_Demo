@@ -313,35 +313,64 @@ async def _load_record_metadata(db, view, raw):
     return row, {"tags": None, "properties": []}
 
 
-def _metadata_with_labels(metadata, labels):
+def _visible_record_metadata(metadata, fields, *, standalone_note):
     result = {"tags": metadata["tags"], "properties": metadata["properties"]}
+    labels = {code: label for code, label in (metadata.get("property_labels") or {}).items() if code in fields}
+    hidden = sorted(code for code in (metadata.get("hidden_property_codes") or []) if code in fields)
     if labels:
         result["property_labels"] = labels
+    if hidden:
+        result["hidden_property_codes"] = hidden
+    if standalone_note and (note := metadata.get("note_markdown")):
+        result["note_markdown"] = note
     return result
 
 
-def _visible_record_metadata(metadata, fields):
-    labels = {code: label for code, label in (metadata.get("property_labels") or {}).items() if code in fields}
-    return _metadata_with_labels(metadata, labels)
-
-
-def _merge_record_metadata(current, proposed, expected, fields):
+def _merge_record_metadata(current, proposed, expected, fields, *, standalone_note):
     if any(current[key] != expected[key] for key in ("tags", "properties")):
         raise HTTPException(409, "对象标签或自定义属性已变化，请重新打开后再保存")
 
-    current_labels = current.get("property_labels") or {}
+    result = {**current, "tags": proposed["tags"], "properties": proposed["properties"]}
     proposed_labels = proposed.get("property_labels")
-    if proposed_labels is None:
-        return _metadata_with_labels(proposed, current_labels)
+    if proposed_labels is not None:
+        if proposed_labels.keys() - fields:
+            raise HTTPException(403, "包含不可编辑的对象属性名称")
+        current_labels = current.get("property_labels") or {}
+        editable_labels = {code: label for code, label in current_labels.items() if code in fields}
+        if editable_labels != (expected.get("property_labels") or {}):
+            raise HTTPException(409, "对象属性名称已变化，请重新打开后再保存")
+        protected = {code: label for code, label in current_labels.items() if code not in fields}
+        labels = {**protected, **proposed_labels}
+        if labels:
+            result["property_labels"] = labels
+        else:
+            result.pop("property_labels", None)
 
-    if proposed_labels.keys() - fields:
-        raise HTTPException(403, "包含不可编辑的对象属性名称")
-    editable_labels = {code: label for code, label in current_labels.items() if code in fields}
-    if editable_labels != (expected.get("property_labels") or {}):
-        raise HTTPException(409, "对象属性名称已变化，请重新打开后再保存")
+    proposed_hidden = proposed.get("hidden_property_codes")
+    if proposed_hidden is not None:
+        hidden = set(proposed_hidden)
+        if hidden - fields:
+            raise HTTPException(403, "包含不可编辑的对象属性")
+        current_hidden = set(current.get("hidden_property_codes") or [])
+        if current_hidden & fields != set(expected.get("hidden_property_codes") or []):
+            raise HTTPException(409, "隐藏属性已变化，请重新打开后再保存")
+        hidden.update(current_hidden - fields)
+        if hidden:
+            result["hidden_property_codes"] = sorted(hidden)
+        else:
+            result.pop("hidden_property_codes", None)
 
-    protected = {code: label for code, label in current_labels.items() if code not in fields}
-    return _metadata_with_labels(proposed, {**protected, **proposed_labels})
+    note = proposed.get("note_markdown")
+    if note is not None:
+        if not standalone_note:
+            raise HTTPException(403, "请通过映射字段编辑对象正文")
+        if (current.get("note_markdown") or "") != (expected.get("note_markdown") or ""):
+            raise HTTPException(409, "对象正文已变化，请重新打开后再保存")
+        if note:
+            result["note_markdown"] = note
+        else:
+            result.pop("note_markdown", None)
+    return result
 
 
 async def _write_record_metadata(db, user, view, raw, row, current, next_metadata):
@@ -390,7 +419,9 @@ async def get_instance(db, user, object_id, key) -> dict:
     visible_fields = set(item["values"]) - masked
     return {
         **item, "binding_form": view.form_info, "relations": sections,
-        "record_metadata": _visible_record_metadata(record_metadata, visible_fields),
+        "record_metadata": _visible_record_metadata(
+            record_metadata, visible_fields, standalone_note="wiki_markdown" not in view.properties,
+        ),
         "sources": await _mapped_sources(db, view, visible_fields),
     }
 
@@ -513,8 +544,12 @@ async def _record_editor(db, user, object_id, key, *, lock_record=False):
 async def get_instance_editor(db, user, object_id, key) -> dict:
     view, raw, fields, values = await _record_editor(db, user, object_id, key)
     _, record_metadata = await _load_record_metadata(db, view, raw)
-    return {"fields": list(fields.values()), "values": values, "token": _edit_token(user, view, key, raw),
-            "record_metadata": _visible_record_metadata(record_metadata, fields)}
+    standalone_note = "wiki_markdown" not in view.properties
+    result = {"fields": list(fields.values()), "values": values, "token": _edit_token(user, view, key, raw),
+              "record_metadata": _visible_record_metadata(record_metadata, fields, standalone_note=standalone_note)}
+    if standalone_note:
+        result["can_edit_note_markdown"] = True
+    return result
 
 
 def _validate_edit_value(field, value):
@@ -676,7 +711,10 @@ async def update_instance(db, user, object_id, key, data, expected_values, token
     metadata_row = current_metadata = None
     if record_metadata is not None:
         metadata_row, current_metadata = await _load_record_metadata(db, view, raw)
-        record_metadata = _merge_record_metadata(current_metadata, record_metadata, expected_record_metadata, fields.keys())
+        record_metadata = _merge_record_metadata(
+            current_metadata, record_metadata, expected_record_metadata, fields.keys(),
+            standalone_note="wiki_markdown" not in view.properties,
+        )
 
     changes, expected = {}, {}
     for code, value in data.items():

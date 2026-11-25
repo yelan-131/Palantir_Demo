@@ -1789,9 +1789,9 @@ export default function ProfessionalFlowDesigner({
         {selectedNode.type === 'serviceTask' && (
           <PropertyGroup title="数据下发" hint="流程经过此自动任务后异步执行。站内表单创建草稿；API/Webhook 使用 POST 并携带幂等键，失败可在实例下发记录中重试。">
 
-            <label><span>启用下发</span><Switch checked={externalAction.enabled} onChange={(enabled) => patchExternalAction({ enabled })} /></label>
+            <PropertyRow label="启用下发"><Switch size="small" checked={externalAction.enabled} onChange={(enabled) => patchExternalAction({ enabled })} /></PropertyRow>
 
-            <label><span>推送方式</span><Select value={externalAction.action || 'api'} options={externalActionTypeOptions} onChange={(action) => patchExternalAction({ action })} /></label>
+            <PropertyRow label="推送方式"><Select value={externalAction.action || 'api'} options={externalActionTypeOptions} onChange={(action) => patchExternalAction({ action })} /></PropertyRow>
             {externalAction.action==='form'?<PropertyRow label="目标表单"><Select aria-label="下发目标表单" showSearch optionFilterProp="label" placeholder="选择已发布表单" value={externalAction.targetFormId} options={dispatchForms.map(form=>({value:form.id,label:form.name}))} onChange={targetFormId=>patchExternalAction({targetFormId,fieldMappings:(externalAction.fieldMappings||[]).map(item=>({...item,targetField:undefined}))})}/></PropertyRow>:<><PropertyRow label="目标系统"><Input placeholder="例如 ERP / MES / WMS" value={externalAction.system} onChange={event=>patchExternalAction({system:event.target.value})}/></PropertyRow><PropertyRow label="接口地址"><Input placeholder="https://example.com/api/receive" value={externalAction.endpoint} onChange={event=>patchExternalAction({endpoint:event.target.value})}/></PropertyRow></>}
             {dispatchLoadError&&<Typography.Text type="danger">{dispatchLoadError}</Typography.Text>}
             <div className="professional-flow-mapping-list">
@@ -1899,8 +1899,7 @@ export default function ProfessionalFlowDesigner({
           <PropertyRow label="连线名称">
             <Input aria-label="连线名称" value={selectedEdge.label} onChange={(event) => patchEdge(selectedEdge.id, { label: event.target.value })} />
           </PropertyRow>
-          <label>
-            <span>条件规则</span>
+          <PropertyRow label="条件规则">
             <div className="designer-rule-toggle professional-flow-edge-rule-toggle" data-rule-title="条件规则" title={conditionSummary} onClick={(event) => event.stopPropagation()}>
               <small>{conditionSummary}</small>
               <Button
@@ -1923,15 +1922,15 @@ export default function ProfessionalFlowDesigner({
                 title="设置条件规则"
               />
             </div>
-          </label>
-          <label><span>优先级</span><InputNumber min={1} value={selectedEdge.priority} onChange={(value) => patchEdge(selectedEdge.id, { priority: Number(value || 1) })} /></label>
-          {isSelectedEdgeFromBranch && <label>
-            <span>默认路径</span>
+          </PropertyRow>
+          <PropertyRow label="优先级"><InputNumber min={1} value={selectedEdge.priority} onChange={(value) => patchEdge(selectedEdge.id, { priority: Number(value || 1) })} /></PropertyRow>
+          {isSelectedEdgeFromBranch && <PropertyRow label="默认路径">
             <Switch
+              size="small"
               checked={Boolean(selectedEdge.isDefault)}
               onChange={(checked) => patchEdge(selectedEdge.id, { isDefault: checked })}
             />
-          </label>}
+          </PropertyRow>}
         </PropertyGroup>
         <PropertyGroup title="连线路径">
           <div className="professional-flow-property-actions">
@@ -2456,9 +2455,9 @@ export default function ProfessionalFlowDesigner({
         </div>
       </main>
 
-      {externalInspector?(propertiesTarget?createPortal(<aside className="professional-flow-properties">
+      {externalInspector?(propertiesTarget?createPortal(<aside className="professional-flow-properties property-inspector">
         {renderProperties()}
-      </aside>,propertiesTarget):null):<aside className="professional-flow-properties">
+      </aside>,propertiesTarget):null):<aside className="professional-flow-properties property-inspector">
         <div className="professional-flow-panel-head">
           <div>
             <strong>{selectedType}</strong>

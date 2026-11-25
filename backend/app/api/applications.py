@@ -407,14 +407,14 @@ async def list_applications(
         if not user.get("is_admin"):
             if not role_names:
                 return {"data": []}
-            query = (
-                query.join(ApplicationRole, ApplicationRole.application_id == Application.id)
-                .where(ApplicationRole.role_id.in_(
+            # Role membership yields one row per application without comparing its JSON fields.
+            permitted_ids = select(ApplicationRole.application_id).where(
+                ApplicationRole.tenant_id == tenant_id,
+                ApplicationRole.role_id.in_(
                     select(Role.id).where(Role.name.in_(role_names), Role.tenant_id == tenant_id)
-                ))
-                .where(ApplicationRole.tenant_id == tenant_id)
-                .distinct()
+                ),
             )
+            query = query.where(Application.id.in_(permitted_ids))
         apps = (await session.execute(query)).scalars().all()
         return {"data": [await _application_to_dict(session, app) for app in apps]}
 

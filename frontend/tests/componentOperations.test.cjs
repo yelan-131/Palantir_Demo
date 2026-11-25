@@ -13,7 +13,7 @@ function load(name, dependencies = {}) {
   return exports;
 }
 
-const { applyComponentOperations } = load('componentOperations', { './model': load('model') });
+const { applyComponentOperations, newComponent } = load('componentOperations', { './model': load('model') });
 const fields = id => id === 7 || id === 8 ? ['status'] : undefined;
 const initial = () => ({
   title: '巡检', sourceFormId: 7, filterFields: ['status'], roleIds: [],
@@ -51,8 +51,40 @@ test('an invalid link rejects the entire batch without partially changing the pa
   assert.equal(page.widgets.length, 1);
 });
 
-test('retired standalone filters cannot be added through canvas operations', () => {
+test('the page editor creates an unconfigured standalone filter without broadening automation add types', () => {
+  const created = newComponent(initial(), 'conditions', 'record-filter');
+  assert.equal(created.title, '联动筛选');
+  assert.equal(created.standaloneFilter, true);
+  assert.equal(created.filterFields.length, 0);
+  assert.equal(created.targetWidgetIds.length, 0);
+  assert.equal(created.filterSettings.showKeyword, false);
+  assert.equal(created.showFilters, undefined);
   assert.throws(() => applyComponentOperations(initial(), [
     { action: 'add', widget_id: 'conditions', widget_type: 'record-filter' },
   ], fields), /不支持此组件类型/);
+});
+
+test('editing a standalone filter accepts valid same-source links and rejects unrelated properties', () => {
+  const page = initial();
+  page.widgets.push(
+    { id: 'conditions', type: 'record-filter', targetWidgetIds: [] },
+    { id: 'foreign', type: 'metric', dataBinding: { formId: 8 } },
+  );
+  const draft = applyComponentOperations(page, [{
+    action: 'edit', widget_id: 'conditions', properties: { filterFields: ['status'] },
+    interaction: { targetWidgetIds: ['records'] }, filter_settings: { queryMode: 'change' },
+  }], fields);
+  const filter = draft.widgets[1];
+  assert.equal(filter.standaloneFilter, true);
+  assert.deepEqual(filter.filterFields, ['status']);
+  assert.deepEqual(filter.targetWidgetIds, ['records']);
+  assert.equal(filter.filterSettings.queryMode, 'change');
+  assert.deepEqual(page.widgets[1].targetWidgetIds, []);
+
+  assert.throws(() => applyComponentOperations(page, [{
+    action: 'edit', widget_id: 'conditions', interaction: { targetWidgetIds: ['foreign'] },
+  }], fields), /同一业务来源/);
+  assert.throws(() => applyComponentOperations(page, [{
+    action: 'edit', widget_id: 'conditions', properties: { chartType: 'line' },
+  }], fields), /联动筛选只支持修改/);
 });

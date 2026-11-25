@@ -1,48 +1,54 @@
-import { DeleteOutlined } from '@/components/Icon/ant';
-import { Button, Input, Select, Tag, message } from 'antd';
+import { CloseOutlined, DeleteOutlined, PlusOutlined } from '@/components/Icon/ant';
+import { Button, Input, Tag, message } from 'antd';
+import { useRef, useState } from 'react';
 import { relationshipRecordMetadataLimits, type RelationshipRecordMetadata } from '../../services/objectRuntime';
 
 type CustomProperty = RelationshipRecordMetadata['properties'][number];
 
-export function RelationshipRecordTags({ defaultTag, tags, draft, onChange, disabled }: {
-  defaultTag: string;
-  tags?: string[] | null;
-  draft?: string[] | null;
+export function RelationshipRecordTags({ tags, onChange, disabled }: {
+  tags: readonly string[];
   onChange?: (tags: string[]) => void;
   disabled?: boolean;
 }) {
-  const defaults = defaultTag ? [defaultTag] : [];
-  const displayed = tags ?? defaults;
-  const selected = draft ?? defaults;
-  const editing = draft !== undefined && onChange !== undefined;
-  return <div className="relationship-object-wiki__tags">
-    <span>标签</span>
-    <div className="relationship-object-wiki__tag-slot">
-      <div className="relationship-object-wiki__tag-list" aria-hidden={editing ? true : undefined}>
-        {displayed.length ? displayed.map(tag => <Tag key={tag} title={tag}>{tag}</Tag>) : <span>—</span>}
-      </div>
-      {editing && <Select<string[]>
-        aria-label="记录标签"
-        mode="tags"
-        size="small"
-        allowClear
-        value={selected}
-        disabled={disabled}
-        placeholder="添加标签"
-        tokenSeparators={[',', '，']}
-        maxTagCount="responsive"
-        maxCount={relationshipRecordMetadataLimits.tags}
-        options={[...new Set([...defaults, ...displayed, ...selected])].map(tag => ({ value: tag, label: tag }))}
-        onChange={value => {
-          const next = [...new Set(value.map(tag => tag.trim()).filter(Boolean))];
-          if (next.some(tag => [...tag].length > relationshipRecordMetadataLimits.tagLength)) {
-            message.warning(`标签最多 ${relationshipRecordMetadataLimits.tagLength} 个字符。`);
-            return;
-          }
-          onChange(next);
-        }}
-      />}
-    </div>
+  const [adding, setAdding] = useState(false);
+  const [pending, setPending] = useState('');
+  const addButton = useRef<HTMLButtonElement | HTMLAnchorElement>(null);
+  if (!onChange && !tags.length) return null;
+
+  function finish(accept: boolean, restoreFocus = false) {
+    const names = accept ? pending.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) : [];
+    const next = [...new Set([...tags, ...names])];
+    if (names.some(tag => [...tag].length > relationshipRecordMetadataLimits.tagLength)) {
+      message.warning(`标签最多 ${relationshipRecordMetadataLimits.tagLength} 个字符。`);
+      if (restoreFocus) return;
+    } else if (next.length > relationshipRecordMetadataLimits.tags) {
+      message.warning(`最多添加 ${relationshipRecordMetadataLimits.tags} 个标签。`);
+      if (restoreFocus) return;
+    } else if (next.length !== tags.length) {
+      onChange?.(next);
+    }
+    setPending('');
+    setAdding(false);
+    if (restoreFocus) requestAnimationFrame(() => addButton.current?.focus());
+  }
+
+  return <div className="relationship-object-wiki__tags" role="group" aria-label="记录标签">
+    {tags.map(tag => <Tag key={tag} title={tag}>
+      <span>{tag}</span>
+      {onChange && <Button type="text" size="small" htmlType="button" icon={<CloseOutlined />}
+        aria-label={`移除标签 ${tag}`} disabled={disabled} onClick={() => onChange(tags.filter(item => item !== tag))} />}
+    </Tag>)}
+    {onChange && (adding
+      ? <Input className="relationship-object-wiki__tag-input" aria-label="新标签" size="small" autoFocus
+        value={pending} disabled={disabled} onChange={event => setPending(event.target.value)}
+        onBlur={() => finish(!disabled)} onKeyDown={event => {
+          if (event.nativeEvent.isComposing || !['Enter', 'Escape', ',', '，'].includes(event.key)) return;
+          event.preventDefault();
+          finish(event.key !== 'Escape', true);
+        }} />
+      : <Button ref={addButton} className="relationship-object-wiki__tag-add" type="dashed" size="small"
+        htmlType="button" icon={<PlusOutlined />} aria-label="添加标签"
+        disabled={disabled || tags.length >= relationshipRecordMetadataLimits.tags} onClick={() => setAdding(true)}>标签</Button>)}
   </div>;
 }
 

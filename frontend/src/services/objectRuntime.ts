@@ -32,9 +32,13 @@ export interface RelationshipRecordMetadata {
   tags: string[] | null;
   properties: { id: string; name: string; value: string }[];
   property_labels?: Record<string, string>;
+  hidden_property_codes?: string[];
+  note_markdown?: string;
 }
 
-export const relationshipRecordMetadataLimits = { tags: 30, tagLength: 60, properties: 60, nameLength: 120, valueLength: 4096 } as const;
+export const relationshipRecordMetadataLimits = {
+  tags: 30, tagLength: 60, properties: 60, nameLength: 120, valueLength: 4096, markdownLength: 100_000,
+} as const;
 
 export interface ObjectRecord {
   instance_id: string;
@@ -92,6 +96,7 @@ export interface RelationshipObjectEditSnapshot {
   values: Record<string, unknown>;
   token: string;
   record_metadata?: RelationshipRecordMetadata;
+  can_edit_note_markdown?: boolean;
 }
 
 export const objectTypeId = (entry: { id: string; db_id?: number }) => entry.db_id ?? Number(entry.id);

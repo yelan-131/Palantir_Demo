@@ -36,8 +36,8 @@ test('clearing filters produces explicit empty control values so defaults cannot
 });
 
 test('toolbar groups merge matching server groups independently of source toolbar presentation',()=>{
- const groups=[{id:'a',name:'A',roleIds:[],actions:['create','refresh']},{id:'b',name:'B',roleIds:[],actions:['refresh','export','delete','disable']}];
- assert.deepEqual(plain(resolveListView(view,{toolbarGroups:groups}).table.toolbarActions),['create','refresh','export','delete']);
+ const groups=[{id:'a',name:'A',roleIds:[],actions:['create','refresh']},{id:'b',name:'B',roleIds:[],actions:['refresh','export','copy','delete','disable']}];
+ assert.deepEqual(plain(resolveListView(view,{toolbarGroups:groups}).table.toolbarActions),['create','refresh','export','copy','delete']);
  assert.deepEqual(plain(resolveListView(view,{toolbarGroups:[],toolbarActions:['refresh']}).table.toolbarActions),[]);
 });
 

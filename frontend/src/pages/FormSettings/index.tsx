@@ -14,7 +14,7 @@ import { adminListOrgUnits, adminListRoles, adminListUsers, createPlatformForm, 
 import type { PlatformForm, PlatformFormField, PlatformFormPublishReport } from '@/services/api';
 import { FormAppearanceHeader, normalizeFormAppearance, type FormAppearance } from '@/components/FormLayout/formAppearance';
 import { PropertyGroup, PropertyInspectorHeader, PropertyRow } from '@/components/PropertyInspector';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { normalizeViewConfig } from '@/utils/viewConfig';
 import type { ViewConfig } from '@/utils/viewConfig';
 import { applyAiLayoutOperations, describeAiLayout } from '@/utils/aiFormLayout';
@@ -49,12 +49,53 @@ import type { PropertyPanelActions, PropertyPanelScope } from './PropertyPanels'
 
 export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;status:HTMLElement|null}
 
+export interface EmbeddedDraftStatus {
+  dirty: boolean;
+  saving: boolean;
+}
+
+export interface EmbeddedDraftGuard {
+  onStatusChange: (status: EmbeddedDraftStatus) => void;
+  saveRef: React.MutableRefObject<(() => Promise<boolean>) | null>;
+}
+
 type SourceDesignerTab = 'form' | 'flow';
 type DesignerTab = SourceDesignerTab | 'permission';
+
+function StandaloneDraftGuard({ dirty }: { dirty: boolean }) {
+  const location = useLocation();
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty
+    // A pending designer can mount before React Router commits navigation.
+    && currentLocation.pathname === location.pathname
+    && currentLocation.search === location.search
+    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search
+      || currentLocation.state?.aiDesignPreviewId !== nextLocation.state?.aiDesignPreviewId));
+  useEffect(() => {
+    if (!dirty) return;
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [dirty]);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    const modal = Modal.confirm({
+      className: 'form-designer-dialog',
+      title: '当前有未保存修改',
+      content: '离开后本次修改不会保留。请先保存草稿，或确认放弃修改。',
+      okText: '放弃并离开',
+      cancelText: '继续编辑',
+      onOk: () => blocker.proceed(),
+      onCancel: () => blocker.reset(),
+    });
+    return () => modal.destroy();
+  }, [blocker]);
+  return null;
+}
 
 export interface FormSettingsPageProps {
   workspaceTargets?: SourceEditorTargets;
   requestExitRef?:React.MutableRefObject<(()=>void)|null>;
+  embeddedDraftGuard?: EmbeddedDraftGuard;
   formId: string;
   initialTab?: DesignerTab;
   requestedTab?: SourceDesignerTab;
@@ -63,7 +104,7 @@ export interface FormSettingsPageProps {
   onPublished?: () => void;
 }
 
-export default function FormSettingsPage({ formId, initialTab = 'form', requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef }: FormSettingsPageProps) {
+export default function FormSettingsPage({ formId, initialTab = 'form', requestedTab, onTabChange, onExit, onPublished, workspaceTargets, requestExitRef, embeddedDraftGuard }: FormSettingsPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const permissionOnly = initialTab === 'permission';
@@ -149,15 +190,6 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   const [previewStates,setPreviewStates]=useState<Record<string,{visible:boolean;required:boolean;readonly:boolean;masked?:boolean;copyMode?:'normal'|'maskedCopy'|'disabled';copyText?:string}>>({});
   const [previewRuleError,setPreviewRuleError]=useState('');
   const previewEpoch=useRef(0);
-  const blocker=useBlocker(({currentLocation,nextLocation}) => hasUnsavedChanges
-    // A pending designer can mount before React Router commits navigation.
-    // Its new draft must not block the navigation that is opening it.
-    && currentLocation.pathname === location.pathname
-    && currentLocation.search === location.search
-    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search
-      || currentLocation.state?.aiDesignPreviewId !== nextLocation.state?.aiDesignPreviewId));
-  useEffect(()=>{if(!hasUnsavedChanges)return;const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',guard);return()=>window.removeEventListener('beforeunload',guard);},[hasUnsavedChanges]);
-  useEffect(()=>{if(blocker.state!=='blocked')return;const modal=Modal.confirm({className:'form-designer-dialog',title:'当前有未保存修改',content:'离开后本次修改不会保留。请先保存草稿，或确认放弃修改。',okText:'放弃并离开',cancelText:'继续编辑',onOk:()=>blocker.proceed(),onCancel:()=>blocker.reset()});return()=>modal.destroy();},[blocker]);
   const [flowLoadError, setFlowLoadError] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewRole, setPreviewRole] = useState('');
@@ -1183,6 +1215,19 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
     }
   };
 
+  const { onStatusChange: reportDraftStatus, saveRef: embeddedSaveRef } = embeddedDraftGuard ?? {};
+  useLayoutEffect(() => {
+    if (!embeddedSaveRef) return;
+    embeddedSaveRef.current = saveDraft;
+    return () => {
+      if (embeddedSaveRef.current === saveDraft) embeddedSaveRef.current = null;
+    };
+  }, [embeddedSaveRef, saveDraft]);
+  useLayoutEffect(() => {
+    reportDraftStatus?.({ dirty: hasUnsavedChanges, saving: isPersistingFlow || isPersistingPermissions });
+  }, [reportDraftStatus, hasUnsavedChanges, isPersistingFlow, isPersistingPermissions]);
+  useLayoutEffect(() => () => reportDraftStatus?.({ dirty: false, saving: false }), [reportDraftStatus]);
+
   const publishConfig = async () => {
     if (isPersistingFlow || savingDraft.current || !checkSelectionConfiguration()) return false;
     if (flowLoadError) { message.error(flowLoadError); return false; }
@@ -2052,10 +2097,12 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
     isResolvingPlatformConfig
     && !hasResolvedRemoteDesignerConfig
   );
+  const standaloneDraftGuard = !embeddedDraftGuard && <StandaloneDraftGuard dirty={hasUnsavedChanges} />;
 
   if (shouldWaitForDatabaseConfig) {
     return (
       <div className="form-designer-page form-designer-embedded">
+        {standaloneDraftGuard}
         <div className="form-designer-loading-state">
           <Spin />
           <Typography.Text type="secondary">正在加载数据库表单配置...</Typography.Text>
@@ -2160,6 +2207,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   };
   return (
     <div className={`form-designer-page form-designer-embedded${workspaceTargets?' form-designer-unified':''}`}>
+      {standaloneDraftGuard}
       {workspaceTargets&&<>
         {sourcePortal(<Tooltip title={sourceStatus}><span className={'analytics-save-indicator'+(hasUnsavedChanges?' is-dirty':viewConfigMeta.status!=='published'?' is-pending':'')} role="status" aria-label={sourceStatus} tabIndex={0}/></Tooltip>,workspaceTargets.status)}
         {sourcePortal(<Space size={0}>
