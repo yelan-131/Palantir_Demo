@@ -10,7 +10,7 @@ import {
   MessageOutlined,
   PlusOutlined,
   SearchOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   acknowledgePageAction,

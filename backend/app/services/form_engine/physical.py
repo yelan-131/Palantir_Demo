@@ -11,12 +11,12 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identifiers import assert_safe_identifier
+from app.core.production_errors import coded_error
 from app.services.form_engine.encoding import _encoding_rule_for_field, _is_encoding_field
 from app.services.form_engine.naming import _physical_column_name, _uses_physical_form_table
 from app.services.form_engine.query import (
     _ensure_filter_fields_visible,
     _ensure_sort_field_allowed,
-    _parse_record_filters,
     _range_bounds,
     _queryable_field_names,
     _visible_field_subset,
@@ -24,6 +24,7 @@ from app.services.form_engine.query import (
 from app.services.form_engine.validation import _field_allowed_values, _field_value_is_compatible, _field_max_bytes
 from app.config import settings
 from app.database import DB_TYPE
+from app.services.record_metadata_filters import MetadataConditions, record_metadata_sql
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,7 @@ def _physical_filter_clause(fields: list, visible_fields: set[str], filters: lis
         if expected in (None, ""):
             continue
         if field not in allowed:
-            raise HTTPException(400, f"Field is not indexed for filtering: {field}")
+            raise coded_error(400, "RECORD_FILTER_INVALID", f"Field is not indexed for filtering: {field}")
         column_name = _physical_column_name(field)
         key = f"filter_{index}"
         if op == "contains":
@@ -277,6 +278,21 @@ def _physical_filter_clause(fields: list, visible_fields: set[str], filters: lis
     return clauses, params
 
 
+def _physical_approval_filter(form, statuses):
+    if statuses is None:
+        return [], {}
+    if not statuses:
+        return ["1 = 0"], {}
+    params = {f"approval_status_{index}": status for index, status in enumerate(sorted(statuses))}
+    placeholders = ", ".join(f":{key}" for key in params)
+    params.update(approval_resource=f"form_application:{form.id}", approval_tenant=form.tenant_id)
+    return [
+        f"record_status IN ({placeholders})",
+        "id IN (SELECT resource_id FROM audit_logs WHERE tenant_id = :approval_tenant "
+        "AND resource_type = :approval_resource)",
+    ], params
+
+
 async def _list_physical_records(
     db: AsyncSession,
     form,
@@ -285,7 +301,9 @@ async def _list_physical_records(
     *,
     include_deleted: bool,
     search: Optional[str],
-    filters_json: Optional[str],
+    filters: list[dict],
+    approval_statuses: set[str] | None,
+    metadata: MetadataConditions,
     sort_field: Optional[str],
     sort_order: str,
     include_total: bool,
@@ -296,8 +314,7 @@ async def _list_physical_records(
     assert_safe_identifier(table_name)
     query_fields = _visible_field_subset(fields, visible_fields)
     await _ensure_physical_form_table(db, form, fields)
-    parsed_filters = _parse_record_filters(filters_json)
-    _ensure_filter_fields_visible(parsed_filters, visible_fields)
+    _ensure_filter_fields_visible(filters, visible_fields)
     _ensure_sort_field_allowed(sort_field, fields, visible_fields)
 
     columns = ["id", "tenant_id", "record_status", "created_by", "updated_by", "deleted_at", "created_at", "updated_at"]
@@ -322,9 +339,13 @@ async def _list_physical_records(
                 search_clauses.append(f"LOWER(CAST({column_name} AS TEXT)) LIKE :{key}")
                 params[key] = f"%{search.lower()}%"
             clauses.append(f"({' OR '.join(search_clauses)})")
-    filter_clauses, filter_params = _physical_filter_clause(fields, visible_fields, parsed_filters, db.bind.dialect.name)
-    clauses.extend(filter_clauses)
+    filter_clauses, filter_params = _physical_filter_clause(fields, visible_fields, filters, db.bind.dialect.name)
+    approval_clauses, approval_params = _physical_approval_filter(form, approval_statuses)
+    metadata_clauses, metadata_params = record_metadata_sql(metadata, db.bind.dialect.name)
+    clauses.extend(filter_clauses + approval_clauses + metadata_clauses)
     params.update(filter_params)
+    params.update(approval_params)
+    params.update(metadata_params)
 
     where_sql = " AND ".join(clauses)
     if sort_field:

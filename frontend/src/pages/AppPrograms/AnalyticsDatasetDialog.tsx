@@ -1,7 +1,7 @@
 import { createUuid } from '@/utils/uuid';
 import React, {useEffect, useRef, useState} from 'react';
 import {Alert, Button, Checkbox, Collapse, ConfigProvider, Empty, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tabs, Tag} from 'antd';
-import {DatabaseOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
+import {DatabaseOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined} from '@/components/Icon/ant';
 import {Link} from 'react-router-dom';
 import {PropertyAdvanced, PropertyGroup, PropertyRow} from '@/components/PropertyInspector';
 import type {PlatformForm, PlatformFormField} from '@/services/api';
@@ -126,7 +126,7 @@ export default function AnalyticsDatasetDialog({programId, dataset: original, de
         <PropertyRow label="刷新方式"><Select value={dataset.refreshMode} options={[{value:'manual',label:'手动刷新'},{value:'realtime',label:'自动刷新 · 每 30 秒'},{value:'scheduled',label:'定时刷新'}]} onChange={refreshMode => patch({refreshMode})} /></PropertyRow>
         {dataset.refreshMode === 'scheduled' && <PropertyRow label="刷新间隔" hint="10–86400 秒。"><InputNumber min={10} max={86400} precision={0} addonAfter="秒" value={dataset.refreshInterval ?? 60} onChange={value => patch({refreshInterval:value ?? 60})} /></PropertyRow>}
         <p className="dataset-note">外部 SQL / API 直接绑定尚未接入。当前可选择已导入业务表单的数据。</p>
-        <Space><Link target="_blank" rel="noopener noreferrer" to="/data-center/sources">管理数据连接</Link><Link target="_blank" rel="noopener noreferrer" to="/data-center/pipelines">查看同步管道</Link></Space>
+        <Space><Link target="_blank" rel="noopener noreferrer" to="/data-center/assets?view=connections">管理数据连接</Link><Link target="_blank" rel="noopener noreferrer" to="/data-center/assets?view=pipelines">查看同步管道</Link></Space>
       </PropertyAdvanced>
     </PropertyGroup>
     <div className="dataset-next"><Button onClick={() => setTab('fields')}>下一步：选择字段</Button></div>

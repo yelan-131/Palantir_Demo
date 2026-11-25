@@ -7,14 +7,14 @@
   padding-inline: 16px 8px;
 }
 .tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-item-selected {
-  box-shadow: none;
-  color: var(--canon-primary) !important;
+  box-shadow: inset 3px 0 0 var(--ui-indicator);
+  color: var(--ui-side-active-text) !important;
 }
 .tech-white-shell .shell-hierarchy-menu .app-menu .ant-menu-submenu-title {
   font-weight: 400;
 }
 .tech-white-shell .shell-hierarchy-menu .ant-menu-sub.ant-menu-inline::before {
-  background: var(--canon-border-soft);
+  background: var(--ui-side-border);
 }
 .tech-white-shell .shell-search-input {
   background: var(--mf-sidebar);
@@ -83,21 +83,13 @@ body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer) :is(button, a, input, t
 }
 
 /* Page headings follow the shared scale, separate from compact editor labels. */
-.tech-white-shell .app-content :is(.workspace-page-header, .data-center-workspace-heading) h4.ant-typography,
+.tech-white-shell .app-content .workspace-page-header h4.ant-typography,
 .tech-white-shell .app-content :is(.shell-page-heading, .runtime-page-bar) h3.ant-typography,
 .tech-white-shell .app-content :is(.preferences-page-heading, .account-security-page-heading) h2.ant-typography {
-  font-size: var(--mf-font-title) !important;
+  font-size: var(--ui-text-title-size) !important;
   font-weight: 600;
-  line-height: 1.4;
-  letter-spacing: -0.02em;
-}
-.tech-white-shell .data-center-workspace-heading {
-  margin-bottom: var(--mf-space-section);
-}
-.tech-white-shell .data-center-workspace-heading .ant-typography-secondary {
-  max-width: 72ch;
-  margin-bottom: 0;
-  font-size: var(--mf-font-compact);
+  line-height: var(--ui-text-title-line);
+  letter-spacing: var(--ui-text-title-tracking);
 }
 .tech-white-shell .settings-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab {
   padding-block: 12px;
@@ -135,14 +127,19 @@ body:has(.tech-white-shell) .ant-drawer-title {
 
 /* Home modules retain saved surfaces, while their text uses semantic colors. */
 .tech-white-shell .wh-canvas-intro {
-  padding: 16px 24px 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px 12px;
 }
 .tech-white-shell .wh-canvas-intro h1 {
-  margin: 0 0 8px;
-  font-size: 24px;
-  line-height: 1.4;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: var(--ui-text-title-size);
+  font-weight: 600;
+  line-height: var(--ui-text-title-line);
+  letter-spacing: var(--ui-text-title-tracking);
 }
+.tech-white-shell .wh-canvas-intro .ant-btn { color: var(--mf-muted); }
 .tech-white-shell .workspace-home :is(.wh-entry-metric-top, .wh-entry-metric-footer, .wh-recent-info small, .wh-recent-end time, .wh-form-entry small, .wh-feature-context, .wh-feature-footer > span, .wh-quiet, .wh-quiet small, .wh-recent-empty small, .wh-panel-footer > small) {
   color: var(--mf-muted);
   font-size: var(--mf-font-auxiliary);
@@ -203,54 +200,13 @@ body:has(.tech-white-shell) .ant-drawer-title {
   margin-bottom: var(--mf-space-section);
 }
 
-/* Sign-in uses the same type and focus vocabulary. On a phone the access
-   task gets the viewport; desktop keeps the existing product introduction. */
-body .technology-login {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-.technology-login .technology-login-form {
-  border-radius: 12px;
-  box-shadow: none;
-}
-.technology-login .technology-login-form-head h2.ant-typography {
-  font-size: 26px;
-  letter-spacing: -0.02em;
-}
-.technology-login .technology-login-auth-note {
-  font-size: var(--mf-font-auxiliary);
-}
-.technology-login .technology-login-form .ant-input::placeholder {
-  color: var(--mf-muted);
-}
-.technology-login .technology-login-form:focus-within {
-  box-shadow: none;
-  border-color: var(--mf-border-strong);
-}
-
-@media (max-width: 600px) {
-  .technology-login .technology-login-intro {
-    display: none;
-  }
-  .technology-login .technology-login-access {
-    padding: 24px 16px;
-    align-items: center;
-  }
-  .technology-login .technology-login-form {
-    padding: 24px;
-  }
-  .technology-login .technology-login-form-head h2.ant-typography {
-    font-size: var(--mf-font-title);
-  }
-}
-
 @media (max-width: 760px) {
   .tech-white-shell .wh-canvas-intro {
-    padding: 16px 16px 4px;
+    padding: 16px 16px 8px;
   }
   .tech-white-shell .wh-canvas-intro h1 {
-    font-size: var(--mf-font-title);
+    font-size: var(--ui-text-heading-size);
+    line-height: var(--ui-text-heading-line);
   }
   .tech-white-shell .settings-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab {
     min-height: 44px;

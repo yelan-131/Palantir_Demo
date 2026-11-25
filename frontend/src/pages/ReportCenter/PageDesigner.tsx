@@ -4,7 +4,7 @@ import { Button, Space, Typography, message, Tooltip } from 'antd';
 import {
   ArrowLeftOutlined, SaveOutlined, ExpandOutlined,
   CompressOutlined, UndoOutlined, RedoOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import ComponentPanel from '@/components/ComponentPanel';
 import ConfigPanel from '@/components/ConfigPanel';
 import DragCanvas from '@/components/DragCanvas';

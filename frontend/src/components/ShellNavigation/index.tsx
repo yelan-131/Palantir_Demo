@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ApartmentOutlined, AppstoreOutlined, BarChartOutlined, ClockCircleOutlined, DatabaseOutlined, EllipsisOutlined, FolderOutlined, FormOutlined, HistoryOutlined, HomeOutlined, PlusOutlined, SafetyCertificateOutlined, ShopOutlined, ToolOutlined, CheckOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
+import { BookOpen, Ellipsis, History, House, Network, Workflow, Wrench } from 'lucide-react';
 import { Button, Card, ConfigProvider, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import AccountMenu, { type AccountMenuUser } from '../AccountMenu';
+import { AppIcon, Icon, type IconSize } from '../Icon';
 import { useShellPreferences } from '../../hooks/useShellPreferences';
-import { canonTheme } from '../../theme/canon';
+import { useThemeCard } from '../../theme/ThemeCardProvider';
 
 export interface ShellApplication {
   id: number;
@@ -17,14 +18,13 @@ export interface ShellApplication {
   is_pinned?: boolean;
 }
 
-export const shellIcons: Record<string, React.ReactNode> = {
-  HomeOutlined: <HomeOutlined />, FolderOutlined: <FolderOutlined />, FormOutlined: <FormOutlined />,
-  ClockCircleOutlined: <ClockCircleOutlined />, AppstoreOutlined: <AppstoreOutlined />,
-  DashboardOutlined: <BarChartOutlined />, DatabaseOutlined: <DatabaseOutlined />,
-  ToolOutlined: <ToolOutlined />, SafetyCertificateOutlined: <SafetyCertificateOutlined />,
-  ShopOutlined: <ShopOutlined />, CheckOutlined: <CheckOutlined />, BookOutlined: <BookOutlined />,
+/** Choices offered for personal app entries; values stay in the stored Ant Design naming. */
+export const shellIcons: Record<string, string> = {
+  HomeOutlined: '首页', FolderOutlined: '空间', FormOutlined: '表单', ClockCircleOutlined: '任务', AppstoreOutlined: '应用',
+  DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量',
+  ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识',
 };
-export function shellIcon(name?: string) { return shellIcons[name || ''] || <AppstoreOutlined />; }
+export function shellIcon(name?: string, size: IconSize = 16) { return <AppIcon name={name} size={size} />; }
 
 export const fixedShellApps = [
   { id: 'home', name: '工作台', icon: 'HomeOutlined', path: '/' },
@@ -61,7 +61,8 @@ interface ApplicationRailProps {
 
 export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, onHome }: ApplicationRailProps) {
   const navigate = useNavigate();
-  const fixedIcons: Record<string, React.ReactNode> = { home: <HomeOutlined />, workflow: <ApartmentOutlined />, scheduler: <HistoryOutlined />, more: <EllipsisOutlined /> };
+  const { canonTheme } = useThemeCard();
+  const fixedIcons: Record<string, React.ReactNode> = { home: <Icon icon={House} size={20} />, workflow: <Icon icon={Workflow} size={20} />, scheduler: <Icon icon={History} size={20} />, more: <Icon icon={Ellipsis} size={20} /> };
   const railButton = (id: string, name: string, icon: React.ReactNode, onClick: () => void) => (
     <Tooltip
       key={id}
@@ -80,10 +81,11 @@ export function ApplicationRail({ library, onOpen, activeKey, user, onLogout, on
     </Tooltip>
   );
   return <ConfigProvider theme={canonTheme}><nav className="shell-app-rail" aria-label="应用栏">
+    <span className="shell-rail-brand" title="ManuFoundry" aria-hidden="true">MF</span>
     <div className="shell-rail-scroll">
       {fixedShellApps.filter(app => app.id !== 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => app.id === 'home' ? onHome() : navigate(app.path)))}
-      {library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned)).map(app => railButton(app.id, app.name, shellIcon(app.icon), () => onOpen(app)))}
-      {user?.is_admin && railButton('knowledge', '知识库', <BookOutlined />, () => navigate('/data-center/knowledge'))}
+      {library.slice().sort((a, b) => Number(b.pinned) - Number(a.pinned)).map(app => railButton(app.id, app.name, shellIcon(app.icon, 20), () => onOpen(app)))}
+      {user?.is_admin && railButton('knowledge', '知识库', <Icon icon={BookOpen} size={20} />, () => navigate('/data-center/knowledge'))}
       {fixedShellApps.filter(app => app.id === 'more').map(app => railButton(app.id, app.name, fixedIcons[app.id], () => navigate(app.path)))}
     </div>
     <div className="shell-rail-user"><AccountMenu compact active={activeKey === 'account'} user={user} onNavigate={navigate} onLogout={onLogout} /></div>
@@ -108,9 +110,9 @@ export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[];
   return <section className="shell-library-page">
     <p className="page-intro">从左侧主菜单切换业务应用，常用应用优先显示。</p>
     <Input.Search aria-label="搜索应用" placeholder="搜索应用名称或用途" value={query} onChange={event => setQuery(event.target.value)} allowClear className="shell-library-search" />
-    {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon)}</span><Tag>{app.pinned ? '常用应用' : '业务应用'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '设为常用'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
+    {filtered.length ? <div className="shell-library-grid">{filtered.map(app => <Card key={app.id} className="shell-library-card"><div className="shell-library-card-top"><span className="shell-library-icon">{shellIcon(app.icon, 20)}</span><Tag>{app.pinned ? '常用应用' : '业务应用'}</Tag></div><Typography.Title level={4}>{app.name}</Typography.Title><Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph><div className="shell-library-actions"><Button onClick={() => setEditing({ ...app, pinned: true })}>{app.pinned ? '自定义' : '设为常用'}</Button><Button type="text" onClick={() => onOpen(app)}>打开 →</Button></div></Card>)}</div> : <Empty description="没有匹配的应用" />}
     <Modal title="自定义应用入口" open={Boolean(editing)} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" destroyOnClose>
-      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.keys(shellIcons).map(value => ({ value, label: <Space>{shellIcon(value)}{({ HomeOutlined: '首页', FolderOutlined: '空间', FormOutlined: '表单', ClockCircleOutlined: '任务', AppstoreOutlined: '应用', DashboardOutlined: '看板', DatabaseOutlined: '数据', ToolOutlined: '工具', SafetyCertificateOutlined: '质量', ShopOutlined: '供应链', CheckOutlined: '流程', BookOutlined: '知识' } as Record<string, string>)[value]}</Space> }))} /></Form.Item><Form.Item name="pinned" label="在主菜单优先显示" valuePropName="checked"><Switch /></Form.Item></Form>
+      <Form form={form} layout="vertical"><Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true, message: '请输入应用名称' }, { max: 32 }]}><Input maxLength={32} /></Form.Item><Form.Item name="icon" label="应用图标"><Select options={Object.entries(shellIcons).map(([value, label]) => ({ value, label: <Space>{shellIcon(value)}{label}</Space> }))} /></Form.Item><Form.Item name="pinned" label="在主菜单优先显示" valuePropName="checked"><Switch /></Form.Item></Form>
       <Typography.Text type="secondary">仅调整你的应用入口显示，业务应用配置与权限仍沿用现有设置。</Typography.Text>
     </Modal>
   </section>;
@@ -119,8 +121,8 @@ export function ApplicationLibrary({ library, onOpen }: { library: LibraryApp[];
 export function ExtensionLibrary({ isAdmin }: { isAdmin: boolean }) {
   const navigate = useNavigate();
   const entries = [
-    { name: '数据接入', description: '管理数据连接、同步任务与运行记录。', path: '/data-center/sources', icon: <ApiOutlined /> },
-    ...(isAdmin ? [{ name: 'AI 技能与工具', description: '管理已注册的 Agent 技能、工具和平台模型设置。', path: '/admin/ai?tab=agent-registry', icon: <ToolOutlined /> }] : []),
+    { name: '数据资产', description: '管理数据源、资产目录和同步任务。', path: '/data-center/assets', icon: <Icon icon={Network} size={20} /> },
+    ...(isAdmin ? [{ name: 'AI 技能与工具', description: '管理已注册的 Agent 技能、工具和平台模型设置。', path: '/admin/ai?tab=agent-registry', icon: <Icon icon={Wrench} size={20} /> }] : []),
   ];
   return <section><div className="shell-library-grid">{entries.map(entry => <Card key={entry.path}><span className="shell-library-icon">{entry.icon}</span><Typography.Title level={4}>{entry.name}</Typography.Title><Typography.Paragraph type="secondary">{entry.description}</Typography.Paragraph><Button onClick={() => navigate(entry.path)}>进入 →</Button></Card>)}</div></section>;
 }

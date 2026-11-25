@@ -32,7 +32,7 @@ import {
   UserOutlined,
   UserSwitchOutlined,
   SearchOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Button, Dropdown, Input, InputNumber, Modal, Select, Switch, Tag, Typography, message } from 'antd';
 import { FlowAnnotationProperties } from './FlowAnnotationProperties';
 import {

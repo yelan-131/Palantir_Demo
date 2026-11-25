@@ -132,7 +132,7 @@ release.json        发布清单，后端 /api/v1/release/current 读取此文�
 | `AppPrograms` | 未启用组件页面时的 `/program/*` 程序页；内部复用 `Dashboard` |
 | `AlertCenter`、`MaterialApplications` | 告警中心、料号申请 |
 | `SystemAdmin` | 应用与菜单、业务数据、基础数据、身份与权限、语义资产与知识中心 |
-| `DataCenterWorkspace` | 数据接入、数据资产、对象与关系三个工作区，内部复用 `DataSource`、`Pipeline`、`Ontology`、`GraphExplorer` |
+| `DataCenterWorkspace` | 「数据资产」和「对象与关系」两个工作区，内部使用 `DataSource`、`Pipeline`、`SemanticAssetCenter`、`ObjectBrowser` 和 `RelationshipExplorer` |
 | `AccountCenter` | 账号与安全、工作偏好，以及后台的 AI 设置和审计面板 |
 | `BackendSettings` | 后台高级工具：实体时间旅行、图谱分析、模型与页面工具（复用 `ModelDriven`）、AI 建议、配置导入导出、模块成熟度 |
 | `QualityImpact` | `/admin/quality-impact` 质量影响与时间线 |

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, EditOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@/components/Icon/ant';
 import type { ColumnsType } from 'antd/es/table';
 import { createScheduledJob, deleteScheduledJob, listScheduledJobs, triggerJob, updateScheduledJob } from '@/services/api';
 
@@ -158,7 +158,7 @@ export default function Scheduler() {
       </div>
       {fallback && <Alert type="warning" showIcon message="后端数据库不可用，正在使用临时回退数据；修改可能在服务重启后丢失。" style={{ marginBottom: 16 }} />}
       {loadError && <Alert type="error" showIcon message={loadError} action={<Button size="small" onClick={() => void reload()}>重试</Button>} style={{ marginBottom: 16 }} />}
-      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 12 }}>
+      <Card styles={{ body: { padding: 20 } }} style={{ borderRadius: 10 }}>
         <Space wrap style={{ marginBottom: 20 }}>
           <Input prefix={<SearchOutlined />} placeholder="搜索任务、类型或 Cron" aria-label="搜索日常任务" allowClear value={query} onChange={(event) => setQuery(event.target.value)} style={{ width: 280 }} />
           <Select aria-label="任务状态筛选" value={status} onChange={setStatus} style={{ width: 130 }} options={[{ value: 'all', label: '全部状态' }, { value: 'active', label: '启用' }, { value: 'paused', label: '暂停' }]} />

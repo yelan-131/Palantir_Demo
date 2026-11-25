@@ -212,7 +212,7 @@ AI 分析
 | --- | --- | --- | --- |
 | 顶部全局搜索与通知 | 已实现 | 应用壳层 `frontend/src/App.tsx` 中的 `components/GlobalSearch`、`components/NotificationCenter`；后端 `api/search.py`、`api/notifications.py` | 搜索结果直达对象图谱 |
 | 左侧风险事件队列 | 部分实现 | `QualityImpact` 顶部用下拉框切换质量事件，左栏为料号快捷入口；事件来自 `GET /quality/events`（`api/quality.py`）。没有跨质量、供应链、设备的统一风险事件视图 | 新增统一风险事件模型与队列 |
-| 中央影响图谱 | 部分实现 | `QualityImpact` 的关系网络画布，数据来自 `GET /quality/events/{event_id}/impact` 与 `services/graph_service.py`；通用图谱探索在 `/data-center/objects?view=graph`（`pages/GraphExplorer`，基于 Cytoscape） | 嵌入业务详情页，不只做独立工具 |
+| 中央影响图谱 | 部分实现 | `QualityImpact` 的关系网络画布使用 `GET /quality/events/{event_id}/impact` 与 `services/graph_service.py`。业务对象记录关系可在 `/data-center/objects?view=graph` 查看（`pages/DataCenterWorkspace/RelationshipExplorer`） | 嵌入业务详情页，不只做独立工具 |
 | 右侧对象详情与动作 | 部分实现 | `QualityImpact` 右侧详情面板按节点类型显示动作按钮；“生成 CAPA”写入 `CAPA` 表，其余动作调用 `POST /quality/events/{event_id}/actions`，只返回演示结果 | 封装成真实业务动作并接入审批 |
 | AI 行动栏 | 部分实现 | `QualityImpact` 的“AI 影响分析草稿”抽屉，调用 `POST /quality/events/{event_id}/ai-suggestion`，不调用大模型；全局 AI 面板 `components/AiChatWidget` 不读取当前事件上下文 | 改成上下文感知的 AI 面板 |
 | 底部时间轴 | 部分实现 | `QualityImpact` 底部时间轴按节点和关系的时间戳展示追溯过程（`frontend/src/utils/qualityTimeline.ts`）；没有合并流程记录和操作日志 | 合并流程记录（`api/workflow.py`）与审计日志（`core/audit.py`） |

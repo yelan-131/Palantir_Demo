@@ -31,7 +31,7 @@ import {
   SearchOutlined,
   SendOutlined,
   StopOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   Alert,
   Button,

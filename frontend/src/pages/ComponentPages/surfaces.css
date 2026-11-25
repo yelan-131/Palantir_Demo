@@ -13,7 +13,7 @@
 .tech-white-shell .app-content .component-page:not(.analytics-workspace-configuring) {background-image:none;}
 .tech-white-shell .app-content:has(.component-page:not(.analytics-workspace-configuring)):not(:has(.analytics-workspace-configuring)) {background-image:none;}
 .component-floating-handle {position:absolute;top:0;left:12px;z-index:5;opacity:0;transform:translateY(-3px);transition:opacity .15s,transform .15s;}
-.component-floating-handle .analytics-widget-select {font-size:11px!important;line-height:24px;padding:0 8px!important;border-radius:0 0 6px 6px;background:#eaf0f6;color:#425f7b;}
+.component-floating-handle .analytics-widget-select {font-size:12px!important;line-height:24px;padding:0 8px!important;border-radius:0 0 6px 6px;background:#eaf0f6;color:#425f7b;}
 .component-page-widget:hover>.ant-card-body>.component-floating-handle,
 .component-page-widget:focus-within>.ant-card-body>.component-floating-handle,
 .analytics-selected-widget>.ant-card-body>.component-floating-handle {opacity:1;transform:none;}

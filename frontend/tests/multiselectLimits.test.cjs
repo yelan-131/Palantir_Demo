@@ -18,7 +18,7 @@ test('configuration rejects impossible counts and validates tag settings',()=>{
 function render(settings,value=['a','b']){
  let select,checkbox,next;const warnings=[],stub=()=>null;
  const Widget=load('../src/components/FormWidgets/FieldControl.tsx',{
- '@/utils/uuid':{createUuid:()=> 'test'},'@/components/FieldProtection':{default:({children})=>children,__esModule:true},'@/services/api':{},'@ant-design/icons':{},
+ '@/utils/uuid':{createUuid:()=> 'test'},'@/components/FieldProtection':{default:({children})=>children,__esModule:true},'@/services/api':{},'@/components/Icon/ant':{},
  antd:{Button:stub,Checkbox:{Group:props=>{checkbox=props;return null;}},DatePicker:stub,Input:stub,InputNumber:stub,Radio:{Group:stub},Select:props=>{select=props;return null;},Space:stub,Switch:stub,Table:stub,Tooltip:({children})=>children,Upload:stub,message:{warning:text=>warnings.push(text)}}
  }).default;
  renderToStaticMarkup(React.createElement(Widget,{type:'select',settings:{selectionMode:'multiple',...settings},value,options:['a','b','c'],onChange:value=>{next=value;}}));return {select,checkbox,warnings,get next(){return next;}};

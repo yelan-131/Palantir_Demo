@@ -1,0 +1,166 @@
+.relationship-explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.relationship-explorer > :not(.relationship-explorer-board) { flex: none; }
+
+.relationship-explorer-toolbar,
+.relationship-explorer-controls,
+.relationship-explorer-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.relationship-explorer-toolbar { justify-content: space-between; }
+
+.relationship-explorer-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mf-muted);
+}
+
+.relationship-explorer-controls .ant-select { width: 176px; }
+.relationship-explorer-loading { display: grid; min-height: 250px; place-items: center; }
+
+.relationship-explorer-board {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: minmax(0, 1fr) clamp(288px, 30%, var(--property-inspector-panel-width, 320px));
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  min-height: 360px;
+}
+
+.relationship-explorer-main,
+.relationship-explorer-inspector {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--property-inspector-panel-radius, 10px);
+  background: var(--mf-surface);
+}
+
+.relationship-explorer-main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.relationship-explorer-caption,
+.relationship-explorer-inspector-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--mf-border);
+}
+
+.relationship-explorer-caption > .ant-typography-secondary { font-size: 12px; }
+.relationship-explorer-legend { padding: 10px 12px; }
+.relationship-explorer-map { min-height: 0; min-width: 0; position: relative; }
+.relationship-node-preview {
+  position: absolute;
+  z-index: 2;
+  width: min(292px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid var(--mf-border);
+  border-radius: 10px;
+  background: var(--mf-panel);
+  box-shadow: 0 5px 18px rgb(43 67 103 / 14%);
+}
+.relationship-node-preview header { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.relationship-node-preview header > .ant-typography { min-width: 0; overflow-wrap: anywhere; }
+.relationship-node-preview .ant-tag { margin-inline-end: 0; }
+.relationship-node-preview__identity, .relationship-node-preview__source, .relationship-node-preview footer { color: var(--mf-muted); font-size: 12px; }
+.relationship-node-preview dl { margin: 7px 0; }
+.relationship-node-preview dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 2px 0; }
+.relationship-node-preview dt, .relationship-node-preview dd { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.relationship-node-preview dt { color: var(--mf-muted); }
+.relationship-node-preview dd { margin: 0; }
+.relationship-node-preview__evidence { margin: 6px 0; padding-top: 6px; border-top: 1px solid var(--mf-border); }
+.relationship-node-preview__evidence > .ant-typography { margin-inline-start: 5px; }
+.relationship-node-preview__evidence p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.relationship-node-preview footer { margin-top: 5px; }
+.relationship-explorer-legend { border-top: 1px solid var(--mf-border); gap: 8px 16px; }
+.relationship-explorer-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--mf-muted); font-size: 12px; }
+.relationship-explorer-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.relationship-explorer-legend .relationship-legend-line { width: 16px; height: 0; border-top: 1px solid currentColor; border-radius: 0; }
+.relationship-explorer-legend .relationship-legend-line--candidate { border-top-style: dashed; }
+.relationship-explorer-help { margin-inline-start: auto; }
+
+.relationship-explorer-inspector {
+  display: flex;
+  flex-direction: column;
+}
+
+.relationship-explorer-inspector-toolbar { flex: none; }
+
+.relationship-explorer-inspector-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.relationship-explorer-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+
+.relationship-explorer-selected-edge { margin-bottom: 14px; padding: 10px; border: 1px solid var(--mf-border); border-radius: 6px; background: var(--mf-panel-soft); overflow-wrap: anywhere; }
+.relationship-explorer-selected-edge header,
+.relationship-similarity-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.relationship-explorer-endpoints { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; }
+.relationship-explorer-endpoints .ant-btn,
+.relationship-similarity-heading .ant-btn { padding-inline: 0; height: auto; white-space: normal; }
+.relationship-explorer-selected-edge dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; margin: 6px 0 0; }
+.relationship-explorer-selected-edge dt,
+.relationship-similarity-values dt { color: var(--mf-muted); }
+.relationship-explorer-selected-edge dd,
+.relationship-similarity-values dd { margin: 0; }
+.relationship-explorer-selected-edge ul { margin: 8px 0 0; padding-inline-start: 18px; }
+.relationship-explorer-selected-edge li + li { margin-top: 5px; }
+.relationship-similarity-values { margin: 6px 0 0; }
+.relationship-similarity-values > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px; padding-block: 2px; }
+
+@media (width > 850px) {
+  .navigation-area-page:has(> .data-center-workspace .relationship-explorer-board),
+  .data-center-workspace:has(.relationship-explorer-board),
+  .data-center-workspace :is(.ant-tabs, .ant-tabs-content, .ant-tabs-tabpane-active):has(.relationship-explorer-board),
+  .relationship-explorer:has(> .relationship-explorer-board) {
+    height: 100%;
+  }
+
+  .data-center-workspace > .ant-tabs > .ant-tabs-content-holder:has(.relationship-explorer-board) {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 850px) {
+  .relationship-explorer-board {
+    flex: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    min-height: 0;
+  }
+  .relationship-explorer-map { height: max(290px, 56dvh); }
+  .relationship-explorer-inspector-body { overflow: visible; }
+}
+
+@media (max-width: 540px) {
+  .relationship-explorer-controls label { max-width: 100%; }
+  .relationship-explorer-controls .ant-select { width: min(168px, 50vw); }
+  .relationship-explorer-help { margin-inline-start: 0; }
+}

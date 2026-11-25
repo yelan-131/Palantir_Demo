@@ -21,7 +21,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, RobotOutlined } from '@/components/Icon/ant';
 import {
   adminCreateRole,
   adminDeleteRole,
@@ -591,7 +591,7 @@ export default function RoleManagement() {
                     <Button onClick={runSimulation}>模拟</Button>
                   </Form>
                   {simulation && (
-                    <pre style={{ marginTop: 12, background: 'var(--mf-panel-soft)', padding: 12, borderRadius: 8 }}>
+                    <pre style={{ marginTop: 12, background: 'var(--mf-panel-soft)', padding: 12, borderRadius: 10 }}>
                       {JSON.stringify(simulation, null, 2)}
                     </pre>
                   )}

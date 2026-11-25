@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import { Alert, Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Spin, Statistic, Table, Tag, Timeline, Typography, message } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined } from '@/components/Icon/ant';
 import { adminListUsers } from '../../services/api';
 import { actOnAlert, alertError, createAlert, getAlert, listAlerts, type AlertAction, type AlertList, type AlertRecord, type AlertStatus } from '../../services/alerts';
 import { useAuthStore } from '../../stores/authStore';

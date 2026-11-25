@@ -3,7 +3,7 @@ import {
   Table, Button, Space, Modal, Form, Input, InputNumber, Switch, Tag, Popconfirm,
   Typography, message,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined } from '@/components/Icon/ant';
 import { listMenus, createMenu, updateMenu, deleteMenu } from '@/services/api';
 
 interface MenuItem {

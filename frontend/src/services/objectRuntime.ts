@@ -1,4 +1,5 @@
 import { isAxiosError } from 'axios';
+import type { ControlSettings } from '../utils/formControls';
 import api, { type OntologyObjectInfo, type OntologyRelationInfo } from './api';
 
 export interface ObjectRecordBinding {
@@ -27,11 +28,21 @@ export interface ObjectBindingForm {
   code: string;
 }
 
+export interface RelationshipRecordMetadata {
+  tags: string[] | null;
+  properties: { id: string; name: string; value: string }[];
+  property_labels?: Record<string, string>;
+}
+
+export const relationshipRecordMetadataLimits = { tags: 30, tagLength: 60, properties: 60, nameLength: 120, valueLength: 4096 } as const;
+
 export interface ObjectRecord {
   instance_id: string;
   key: string;
   values: Record<string, unknown>;
+  masked_fields?: string[];
   updated_at?: string | null;
+  record_metadata?: RelationshipRecordMetadata;
 }
 
 export interface ObjectRecordPage {
@@ -59,6 +70,7 @@ export interface ObjectRelationRecords {
   state: 'matched' | 'missing' | 'ambiguous' | 'unbound' | 'restricted';
   total: number;
   records: ObjectRecord[];
+  evidence?: ObjectRecordLink & { source_value: string; target_value: string };
 }
 
 export interface ObjectRecordDetail extends ObjectRecord {
@@ -67,9 +79,25 @@ export interface ObjectRecordDetail extends ObjectRecord {
   relations: ObjectRelationRecords[];
 }
 
+export interface RelationshipObjectEditSnapshot {
+  fields: {
+    code: string;
+    label: string;
+    field_type: string;
+    required: boolean;
+    control_type?: string;
+    type_settings?: ControlSettings;
+    options?: unknown;
+  }[];
+  values: Record<string, unknown>;
+  token: string;
+  record_metadata?: RelationshipRecordMetadata;
+}
+
 export const objectTypeId = (entry: { id: string; db_id?: number }) => entry.db_id ?? Number(entry.id);
 
-export const loadObjectTypes = () => api.get<{ data: RuntimeObjectType[] }>('/semantic-assets/ontology-objects');
+export const loadObjectTypes = (signal?: AbortSignal) =>
+  api.get<{ data: RuntimeObjectType[] }>('/semantic-assets/ontology-objects', { signal });
 
 export const loadRelationTypes = () => api.get<{ data: RuntimeRelationType[] }>('/semantic-assets/ontology-relations');
 
@@ -79,11 +107,19 @@ export const bindObjectRecords = (id: number, binding: ObjectRecordBinding) =>
 export const bindRelationRecords = (id: number, link: ObjectRecordLink) =>
   api.put<{ data: RuntimeRelationType }>(`/semantic-assets/ontology-relations/${id}/record-link`, link);
 
-export const listObjectRecords = (id: number, params: { q?: string; page: number; page_size: number }) =>
-  api.get<{ data: ObjectRecordPage }>(`/semantic-assets/ontology-objects/${id}/records`, { params });
+export const listObjectRecords = (id: number, params: { q?: string; page: number; page_size: number }, signal?: AbortSignal) =>
+  api.get<{ data: ObjectRecordPage }>(`/semantic-assets/ontology-objects/${id}/records`, { params, signal });
 
-export const readObjectRecord = (id: number, key: string) =>
-  api.get<{ data: ObjectRecordDetail }>(`/semantic-assets/ontology-objects/${id}/record`, { params: { key } });
+export const readObjectRecord = (id: number, key: string, signal?: AbortSignal) =>
+  api.get<{ data: ObjectRecordDetail }>(`/semantic-assets/ontology-objects/${id}/record`, { params: { key }, signal });
+
+export const readObjectRecordForEdit = (id: number, key: string, signal?: AbortSignal) =>
+  api.get<{ data: RelationshipObjectEditSnapshot }>(`/semantic-assets/ontology-objects/${id}/record-edit`, { params: { key }, signal });
+
+export const updateObjectRecord = (id: number, key: string, token: string, data: Record<string, unknown>, expectedValues: Record<string, unknown>,
+  metadata?: { record_metadata: RelationshipRecordMetadata; expected_record_metadata: RelationshipRecordMetadata }) =>
+  api.put<{ data: { key: string } }>(`/semantic-assets/ontology-objects/${id}/record-edit`,
+    { token, data, expected_values: expectedValues, ...metadata }, { params: { key } });
 
 export function objectRuntimeError(error: unknown, fallback: string) {
   if (!isAxiosError(error)) return fallback;

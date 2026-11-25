@@ -1,5 +1,5 @@
-import { Alert, Button, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Tooltip, message } from 'antd';
-import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { Alert, Button, ColorPicker, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Tooltip, message } from 'antd';
+import { DeleteOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, SettingOutlined } from '@/components/Icon/ant';
 import { calculationSources } from '@/utils/formCalculations';
 import type { CalculationRule } from '@/utils/formCalculations';
 import type { OptionSearchSettings } from '@/utils/formControls';
@@ -9,6 +9,7 @@ import { isLayoutContainer, isLayoutControl, getControlPresentation } from '@/ut
 import type { ControlPresentation } from '@/utils/formLayout';
 import { DEFAULT_FIELD_BYTES, fieldStorageSize } from '../SystemAdmin/assemblyPersistence';
 import { PropertyAdvanced, PropertyGroup, PropertyHelp, PropertyRow } from '@/components/PropertyInspector';
+import type { FormAppearance } from '@/components/FormLayout/formAppearance';
 import React from 'react';
 import { parseStaticOptions } from '@/utils/selectOptions';
 import { previewFormReferenceOptions } from '@/services/api';
@@ -690,6 +691,45 @@ export function LayoutWidthProperties({ scope, actions }: PropertyPanelProps) {
 
 export function LayoutAppearanceProperties({ scope, actions }: PropertyPanelProps) {
   return propertyNode(scope, actions, (panels) => panels.renderLayoutAppearance());
+}
+
+export function FormAppearanceProperties({ value, formName, disabled, onChange }: {
+  value: FormAppearance;
+  formName: string;
+  disabled: boolean;
+  onChange: (patch: Partial<FormAppearance>) => void;
+}) {
+  return <>
+    <PropertyGroup title="标题与说明" className="designer-canvas-property-group">
+      <PropertyRow label="表单标题">
+        <Input value={value.title ?? ''} placeholder={formName} maxLength={120} disabled={disabled}
+          onChange={event => onChange({ title: event.target.value })} />
+      </PropertyRow>
+      <PropertyRow label="填写说明">
+        <Input.TextArea value={value.description ?? ''} maxLength={600} autoSize={{ minRows: 2, maxRows: 5 }} disabled={disabled}
+          onChange={event => onChange({ description: event.target.value })} />
+      </PropertyRow>
+      <PropertyRow label="标题对齐">
+        <Select value={value.titleAlign} placeholder="默认" allowClear disabled={disabled}
+          options={[{ value: 'left', label: '左对齐' }, { value: 'center', label: '居中' }]}
+          onChange={titleAlign => onChange({ titleAlign })} />
+      </PropertyRow>
+    </PropertyGroup>
+    <PropertyGroup title="表单卡片" className="designer-canvas-property-group">
+      <PropertyRow label="标题颜色">
+        <ColorPicker value={value.titleColor ?? ''} allowClear={Boolean(value.titleColor)} disabledAlpha size="small" disabled={disabled}
+          showText={color => value.titleColor ? color.toHexString() : '默认'}
+          onClear={() => onChange({ titleColor: undefined })}
+          onChange={color => onChange({ titleColor: color.toHexString() })} />
+      </PropertyRow>
+      <PropertyRow label="表单底色">
+        <ColorPicker value={value.backgroundColor ?? ''} allowClear={Boolean(value.backgroundColor)} disabledAlpha size="small" disabled={disabled}
+          showText={color => value.backgroundColor ? color.toHexString() : '默认'}
+          onClear={() => onChange({ backgroundColor: undefined })}
+          onChange={color => onChange({ backgroundColor: color.toHexString() })} />
+      </PropertyRow>
+    </PropertyGroup>
+  </>;
 }
 
 export function DataSourceProperties({ scope, actions }: PropertyPanelProps) {

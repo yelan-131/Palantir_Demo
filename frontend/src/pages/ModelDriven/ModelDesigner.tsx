@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, DeleteOutlined, EditOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   listModels, createModel, deleteModel, addField,
   importFromOntology, updateModel,

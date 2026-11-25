@@ -1,6 +1,6 @@
 import { createUuid } from '@/utils/uuid';
 import { useState } from 'react';
-import { PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ApiOutlined } from '@/components/Icon/ant';
 import { Alert, Button, Card, Collapse, Form, Input, InputNumber, Select, Space, Statistic, Switch, Tag } from 'antd';
 import type { FormInstance } from 'antd';
 

@@ -1,5 +1,25 @@
 import type {ViewConfig} from '@/utils/viewConfig';
 
+export const APPROVAL_STATUS_FIELD = '_approval_status';
+export const APPROVAL_STATUS_LABEL = '审批状态';
+
+export const RECORD_METADATA_FIELDS = [
+  {fieldName: '_record_id', label: '记录编号', width: 96, controlType: 'number', operator: 'equals', controlLabel: '数字输入'},
+  {fieldName: '_created_at', label: '创建时间', width: 160, controlType: 'dateRange', operator: 'between', controlLabel: '日期范围'},
+  {fieldName: '_updated_at', label: '更新时间', width: 160, controlType: 'dateRange', operator: 'between', controlLabel: '日期范围'},
+  {fieldName: '_created_by', label: '创建人', width: 116, controlType: 'select', operator: 'equals', controlLabel: '人员选择'},
+  {fieldName: '_updated_by', label: '最后修改人', width: 116, controlType: 'select', operator: 'equals', controlLabel: '人员选择'},
+] as const;
+type RecordMetadataField = typeof RECORD_METADATA_FIELDS[number]['fieldName'];
+
+export function isRecordMetadataField(name: string): name is RecordMetadataField {
+  return RECORD_METADATA_FIELDS.some(field=>field.fieldName===name);
+}
+
+export function withDefaultRecordMetadata(columns: string[], configured?: boolean | null): string[] {
+  return configured ? columns : [...new Set([...columns, ...RECORD_METADATA_FIELDS.map(field=>field.fieldName)])];
+}
+
 export type FilterControlMode = "dropdown" | "radio" | "multi-dropdown" | "checkbox";
 export interface FilterScheme {
   id: string;
@@ -25,6 +45,8 @@ export interface FilterSettings {
 export interface ToolbarGroup {
   pageSize?:number|null; emptyText?:string|null;
   defaultSort?: {field:string;order:'asc'|'desc'} | null; inheritDefaultSort?: boolean;
+  approvalStatusConfigured?: boolean;
+  recordMetadataConfigured?: boolean;
   sortableColumns?:string[]|null; columns?:string[]|null; id:string; name:string; userIds?:number[]; orgUnitIds?:number[]; roleIds:number[]; actions:string[];
 }
 export interface ListSettings {
@@ -47,18 +69,47 @@ export function resolveListPresentation(settings?: ListSettings | null) {
     emptyText: settings?.displayGroups?.find(group=>!!group.emptyText?.trim())?.emptyText ?? settings?.emptyText,
   };
 }
+export function hasImplicitApprovalStatus(settings?: ListSettings | null): boolean {
+  return settings?.displayGroups?.some(group => !group.approvalStatusConfigured) ?? true;
+}
+
+const approvalStatusColumn: ViewConfig['table']['columns'][number] = {
+  id: APPROVAL_STATUS_FIELD,
+  fieldName: APPROVAL_STATUS_FIELD,
+  label: APPROVAL_STATUS_LABEL,
+  enabled: true,
+  sortable: false,
+  width: 88,
+  renderType: 'tag',
+  emptyText: '—',
+  sortOrder: 0,
+};
+
 /** Component toolbar configuration is independent; runtime authorization still applies. */
-export function resolveListView(view: ViewConfig | null, settings?: ListSettings): ViewConfig | null {
-  if (!view || !settings) return view;
+export function resolveListView(view: ViewConfig | null, settings?: ListSettings, approvalStatusAvailable = false, showRecordMetadata = false, indexedSortFields?: ReadonlySet<string>): ViewConfig | null {
+  if (!view || (!settings && !showRecordMetadata)) return view;
+  settings ??= {};
   const allowed = view.table.columns.filter(column=>column.enabled);
-  const selectedColumns = settings.displayGroups == null ? settings.columns : [...new Set(settings.displayGroups.flatMap(group=>group.columns||[]))];
-  const sortableColumns = settings.displayGroups == null ? settings.sortableColumns : [...new Set(settings.displayGroups.flatMap(group=>(group.sortableColumns??view.table.columns.filter(column=>column.sortable).map(column=>column.fieldName)).filter(name=>group.columns?.includes(name))))];
+  const sourceColumnNames = allowed.map(column=>column.fieldName);
+  if (approvalStatusAvailable) allowed.push(approvalStatusColumn);
+  if (showRecordMetadata) {
+    allowed.push(...RECORD_METADATA_FIELDS.map(({fieldName,label,width})=>({
+      ...approvalStatusColumn, fieldName, label, width, id:fieldName, renderType:'text' as const,
+    })));
+  }
+  const selectedColumns = settings.displayGroups == null
+    ? showRecordMetadata ? withDefaultRecordMetadata(settings.columns ?? sourceColumnNames) : settings.columns
+    : [...new Set(settings.displayGroups.flatMap(group=>showRecordMetadata
+        ? withDefaultRecordMetadata(group.columns ?? [], group.recordMetadataConfigured) : group.columns ?? []))];
+  const sourceSortable = view.table.columns.filter(column=>column.sortable).map(column=>column.fieldName);
+  const groupSortable = (group: ToolbarGroup) => group.sortableColumns??settings.sortableColumns??sourceSortable;
+  const sortableColumns = settings.displayGroups == null ? settings.sortableColumns : [...new Set(settings.displayGroups.flatMap(group=>groupSortable(group).filter(name=>group.columns?.includes(name))))];
   const columns = selectedColumns == null ? view.table.columns : selectedColumns.flatMap(name=>allowed.filter(column=>column.fieldName===name)).map((column,index)=>({...column,sortOrder:index}));
-  const resolvedColumns = columns.map(column=>({...column,sortable:sortableColumns==null?column.sortable:sortableColumns.includes(column.fieldName)}));
+  const resolvedColumns = columns.map(column=>({...column,sortable:column.fieldName!==APPROVAL_STATUS_FIELD&&!isRecordMetadataField(column.fieldName)&&(indexedSortFields?.has(column.fieldName)??true)&&(sortableColumns==null?column.sortable:sortableColumns.includes(column.fieldName))}));
   const sourceDefault = view.table.defaultSort ? {field:view.table.defaultSort.fieldName,order:view.table.defaultSort.order==='ascend'?'asc' as const:'desc' as const} : null;
   const groupDefault = settings.displayGroups?.map(group=>{
     const candidate=group.defaultSort??(group.inheritDefaultSort!==false?(settings.defaultSort??sourceDefault):null);
-    const sortable=group.sortableColumns??view.table.columns.filter(column=>column.sortable).map(column=>column.fieldName);
+    const sortable=groupSortable(group);
     return candidate&&group.columns?.includes(candidate.field)&&sortable.includes(candidate.field)&&resolvedColumns.some(column=>column.fieldName===candidate.field&&column.sortable)?candidate:null;
   }).find(Boolean);
   const requestedSort = settings.displayGroups == null ? settings.defaultSort??sourceDefault : groupDefault;
@@ -68,7 +119,7 @@ export function resolveListView(view: ViewConfig | null, settings?: ListSettings
     pageSize: resolveListPresentation(settings).pageSize ?? view.table.pageSize,
     defaultSort: sort && requestedSort ? {fieldName:sort.fieldName,order:requestedSort.order==='asc'?'ascend':'descend'} : undefined,
     rowClickAction: settings.rowClick == null ? view.table.rowClickAction : settings.rowClick === 'none' || view.table.rowActions.includes(settings.rowClick) || view.table.rowClickAction === settings.rowClick ? settings.rowClick : 'none',
-    toolbarActions: toolbarActions == null ? view.table.toolbarActions : toolbarActions.filter(action=>['create','refresh','import','export'].includes(action)),
+    toolbarActions: toolbarActions == null ? view.table.toolbarActions : toolbarActions.filter(action=>['create','refresh','import','export','delete'].includes(action)),
     rowActions: settings.rowActions == null ? view.table.rowActions : view.table.rowActions.filter(action=>settings.rowActions!.includes(action)),
   }};
 }

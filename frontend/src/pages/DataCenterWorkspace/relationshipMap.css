@@ -1,0 +1,22 @@
+.relationship-map {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--mf-panel, #fff);
+}
+
+.relationship-map canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.relationship-map canvas:focus-visible {
+  outline: 2px solid var(--mf-primary, #476791);
+  outline-offset: -3px;
+}

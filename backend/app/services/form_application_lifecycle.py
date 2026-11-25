@@ -4,7 +4,41 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select, text
 from app.core.principal import current_user_id
+from app.core.production_errors import coded_error
 from app.models.relational import AuditLog, DynamicRecord, Form, WorkflowBinding, WorkflowInstance, User
+
+
+APPROVAL_STATUS_FIELD = '_approval_status'
+APPROVAL_FILTER_STATUSES = frozenset({'draft', 'pending', 'approved', 'rejected'})
+
+
+def approval_record_ids(form):
+    return select(AuditLog.resource_id).where(
+        AuditLog.tenant_id == form.tenant_id,
+        AuditLog.resource_type == f'form_application:{form.id}',
+    )
+
+
+async def has_approval_history(db, form):
+    return bool(await db.scalar(select(approval_record_ids(form).exists())))
+
+
+def split_approval_filters(filters, *, error_code='RECORD_FILTER_INVALID'):
+    business = []
+    statuses = None
+    for item in filters:
+        if item.get('field') != APPROVAL_STATUS_FIELD:
+            business.append(item)
+            continue
+        value, operator = item.get('value'), item.get('op') or 'equals'
+        values = [value] if operator == 'equals' else value if operator == 'in' else None
+        if not isinstance(values, list) or not values or len(values) > 100 or any(
+            not isinstance(status, str) or status not in APPROVAL_FILTER_STATUSES for status in values
+        ):
+            raise coded_error(422, error_code, '审批状态筛选需要有效的审批状态和等于或任一匹配运算符')
+        selected = set(values)
+        statuses = selected if statuses is None else statuses & selected
+    return business, statuses
 
 
 def parsed(raw):

@@ -3,7 +3,7 @@ import './designer-dialog.css';
 import SettingsTabs from '@/components/SettingsTabs';
 import { useState } from 'react';
 import { Button, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
-import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { PlusOutlined, SettingOutlined } from '@/components/Icon/ant';
 import { getViewTabs, type ViewConfig, type ViewTabConfig } from '@/utils/viewConfig';
 
 type Option = { value: number; label: string };

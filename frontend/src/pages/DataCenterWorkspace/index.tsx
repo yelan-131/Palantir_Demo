@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Button, Result, Spin, Tabs, Typography } from 'antd';
+import { Button, Result, Spin, Tabs } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import { DATA_WORKSPACES, dataWorkspaceSelection, type DataWorkspace } from '../../config/dataCenter';
 import { useAuthStore } from '../../stores/authStore';
@@ -8,15 +8,16 @@ import './workspace.css';
 const Sources = lazy(() => import('../DataSource'));
 const Pipelines = lazy(() => import('../Pipeline'));
 const Assets = lazy(() => import('../SystemAdmin/SemanticAssetCenter'));
-const Entities = lazy(() => import('../Ontology'));
-const Graph = lazy(() => import('../GraphExplorer'));
 const ObjectBrowser = lazy(() => import('./ObjectBrowser'));
+const RelationshipExplorer = lazy(() => import('./RelationshipExplorer'));
 
 export default function DataCenterWorkspace({ workspace }: { workspace: DataWorkspace }) {
   const [params, setParams] = useSearchParams();
-  const isAdmin = Boolean(useAuthStore(state => state.user?.is_admin));
+  const user = useAuthStore(state => state.user);
+  const isAdmin = Boolean(user?.is_admin);
+  const accountKey = user ? `${user.tenant_id ?? 'default'}:${user.id}` : 'anonymous';
   const parameter = DATA_WORKSPACES[workspace].parameter;
-  const { title, description, tabs, activeKey, forbidden } = dataWorkspaceSelection(workspace, params.get(parameter), isAdmin);
+  const { tabs, activeKey, forbidden } = dataWorkspaceSelection(workspace, params.get(parameter), isAdmin);
   const selectTab = (key: string) => {
     setParams(previous => {
       const next = new URLSearchParams(previous);
@@ -27,22 +28,16 @@ export default function DataCenterWorkspace({ workspace }: { workspace: DataWork
 
   let content;
   if (forbidden) {
-    content = <Result status="403" title="需要管理员权限" subTitle="资产配置、语义映射与模型设计需要管理员权限。" extra={<Button onClick={() => selectTab(tabs[0].key)}>返回可访问的页面</Button>} />;
-  } else if (workspace === 'sources') {
-    content = activeKey === 'pipelines' ? <Pipelines /> : <Sources />;
+    content = <Result status="403" title="需要管理员权限" extra={<Button onClick={() => selectTab(tabs[0].key)}>返回{tabs[0].label}</Button>} />;
   } else if (workspace === 'assets') {
-    content = activeKey === 'entities' ? <Entities /> : <Assets key={activeKey} embedded view={activeKey === 'mapping' ? 'mapping' : 'data'} onViewChange={selectTab} />;
+    content = activeKey === 'data' ? <Assets embedded view="data" /> : activeKey === 'pipelines' ? <Pipelines /> : <Sources />;
   } else {
     content = activeKey === 'browse'
       ? <ObjectBrowser isAdmin={isAdmin} openModelDesign={() => selectTab('ontology')} />
-      : activeKey === 'graph' ? <Graph /> : <Assets embedded view="ontology" />;
+      : activeKey === 'graph' ? <RelationshipExplorer key={accountKey} isAdmin={isAdmin} /> : <Assets embedded view="ontology" />;
   }
 
   return <div className="data-center-workspace">
-    <header className="data-center-workspace-heading">
-      <Typography.Title level={4}>{title}</Typography.Title>
-      <Typography.Paragraph type="secondary">{description}</Typography.Paragraph>
-    </header>
     <Tabs activeKey={forbidden ? undefined : activeKey} onChange={selectTab} destroyInactiveTabPane items={tabs.map(tab => ({
       key: tab.key,
       label: tab.label,

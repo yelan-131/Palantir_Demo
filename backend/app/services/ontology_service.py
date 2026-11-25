@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
+from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,10 +27,108 @@ from app.models.relational import (
     OntologyRelation,
     OntologyVersion,
 )
+from app.services import field_uniqueness
+
+
+class OntologySimilarityFeature(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    code: str = Field(min_length=1, max_length=120)
+    dimension: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: Literal["number", "category"]
+    tolerance: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
+    weight: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
+    scale: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
+    offset: float | None = Field(default=None, allow_inf_nan=False, strict=True)
+
+    @model_validator(mode="after")
+    def validate_comparison(self):
+        if self.kind == "number" and self.tolerance is None:
+            raise ValueError("数值特征需要填写大于 0 的容差")
+        if self.kind == "category" and any(value is not None for value in (self.tolerance, self.scale, self.offset)):
+            raise ValueError("分类特征使用值相等比较")
+        return self
+
+
+_SIMILARITY_NUMBER_TYPES = frozenset((
+    "number", "int", "integer", "smallint", "bigint", "float", "float32", "float64",
+    "decimal", "numeric", "double", "double_precision", "real",
+))
+_SIMILARITY_CATEGORY_TYPES = frozenset((
+    "string", "text", "short_text", "long_text", "varchar", "char", "enum",
+    "select", "single_select", "boolean", "bool", "radio",
+))
+
+
+def _similarity_field_kinds(obj: OntologyObject) -> dict[str, str]:
+    supported = {**dict.fromkeys(_SIMILARITY_NUMBER_TYPES, "number"), **dict.fromkeys(_SIMILARITY_CATEGORY_TYPES, "category")}
+    kinds = {}
+    for field in obj.fields:
+        field_type = field.field_type.strip().lower().replace("-", "_").replace(" ", "_")
+        if field.status == "published" and field_type in supported:
+            kinds[field.code] = supported[field_type]
+    return kinds
+
+
+def _similarity_features_payload(obj: OntologyObject, configured: list) -> list[dict[str, Any]]:
+    fields = _similarity_field_kinds(obj)
+    payload = []
+    for entry in configured:
+        try:
+            feature = OntologySimilarityFeature.model_validate(entry)
+        except ValidationError:
+            continue
+        if fields.get(feature.code) == feature.kind:
+            payload.append(feature.model_dump(exclude_none=True))
+    return payload
+
+
+async def set_similarity_features(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    object_id: int,
+    actor_id: int | None,
+    features: list[OntologySimilarityFeature],
+) -> OntologyObject:
+    await field_uniqueness.lock(db, tenant_id)
+    obj = await db.scalar(select(OntologyObject).options(selectinload(OntologyObject.fields)).where(
+        OntologyObject.id == object_id,
+        OntologyObject.tenant_id == tenant_id,
+        OntologyObject.status != "deprecated",
+    ))
+    if obj is None:
+        raise HTTPException(404, "未找到可配置的对象类型")
+
+    fields = _similarity_field_kinds(obj)
+    codes = set()
+    dimensions = set()
+    for feature in features:
+        if fields.get(feature.code) != feature.kind:
+            raise HTTPException(422, f"属性「{feature.code}」不存在、未发布或类型与比较方式不符")
+        if feature.code in codes:
+            raise HTTPException(422, f"属性「{feature.code}」重复配置")
+        codes.add(feature.code)
+        if feature.dimension:
+            if feature.dimension in dimensions:
+                raise HTTPException(422, f"共享维度「{feature.dimension}」重复配置")
+            dimensions.add(feature.dimension)
+
+    configuration = [feature.model_dump(exclude_none=True) for feature in features]
+    metadata = obj.metadata_json or {}
+    if metadata.get("similarity_features") != configuration:
+        obj.metadata_json = {**metadata, "similarity_features": configuration}
+        obj.updated_by = actor_id
+        await log_ontology_action(
+            db, tenant_id=tenant_id, action="set_similarity_features", resource_type="ontology_object",
+            resource_id=obj.id, actor_id=actor_id, detail={"similarity_features": configuration},
+        )
+    return obj
 
 
 def object_payload(obj: OntologyObject, *, include_runtime_config: bool = False) -> dict[str, Any]:
     binding = (obj.metadata_json or {}).get("record_binding")
+    similarity_features = (obj.metadata_json or {}).get("similarity_features")
     payload = {
         "id": str(obj.id),
         "db_id": obj.id,
@@ -61,6 +161,8 @@ def object_payload(obj: OntologyObject, *, include_runtime_config: bool = False)
     }
     if include_runtime_config:
         payload["record_binding"] = binding
+    if isinstance(similarity_features, list):
+        payload["similarity_features"] = _similarity_features_payload(obj, similarity_features)
     return payload
 
 

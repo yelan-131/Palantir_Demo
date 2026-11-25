@@ -2,6 +2,8 @@
 
 当前 GitHub 版本为 [0.3.26](docs/releases/release-0.3.26.md)，发布于 2026-11-20。
 
+当前开发草稿为 [0.3.27](docs/releases/release-0.3.27.md)。
+
 本版完善 AI 助手的执行轨迹、查询审计与记录确认，补齐全局 AI 设置权限分工，并新增 PostgreSQL 映射入表与对象实例浏览。
 版本编号与发布流程见[版本策略](docs/operations/version-policy.md)，历次版本见[文档索引](docs/README.md#6-发布说明历史)。
 

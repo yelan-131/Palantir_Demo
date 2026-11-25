@@ -4,7 +4,7 @@ import OptionPicker from '@/components/OptionPicker';
 import {PropertyInspectorHeader, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Collapse, ConfigProvider, Empty, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tabs, Tag, Typography } from 'antd';
-import { SettingOutlined, BarChartOutlined, CloseOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, LineChartOutlined, NumberOutlined, PieChartOutlined, PlusOutlined, SafetyCertificateOutlined, TableOutlined, TrophyOutlined } from '@ant-design/icons';
+import { SettingOutlined, BarChartOutlined, CloseOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, LineChartOutlined, NumberOutlined, PieChartOutlined, PlusOutlined, SafetyCertificateOutlined, TableOutlined, TrophyOutlined } from '@/components/Icon/ant';
 import { Link } from 'react-router-dom';
 import { getPlatformFormByCode, listPlatformForms, type PlatformForm, type PlatformFormField } from '@/services/api';
 import { formPermissionsPath } from '@/config/navigation';

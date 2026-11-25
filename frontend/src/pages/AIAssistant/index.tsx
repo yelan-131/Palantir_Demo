@@ -21,7 +21,7 @@ import {
   BarChartOutlined,
   DatabaseOutlined,
   ThunderboltOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   DEFAULT_PUBLIC_TENANT_PROFILE,
   getPublicTenantProfile,
@@ -293,12 +293,12 @@ export default function AIAssistantPage() {
                           <Tag
                             color={INTENT_CONFIG[msg.intent]?.color ?? 'default'}
                             icon={INTENT_CONFIG[msg.intent]?.icon}
-                            style={{ fontSize: 11 }}
+                            style={{ fontSize: 12 }}
                           >
                             {INTENT_CONFIG[msg.intent]?.label ?? msg.intent}
                           </Tag>
                           {msg.analysisType && (
-                            <Tag color="purple" style={{ fontSize: 11 }}>
+                            <Tag color="purple" style={{ fontSize: 12 }}>
                               {msg.analysisType}
                             </Tag>
                           )}
@@ -323,19 +323,19 @@ export default function AIAssistantPage() {
                           style={{
                             background: '#fff',
                             border: '1px solid #f0f0f0',
-                            borderRadius: 8,
+                            borderRadius: 10,
                             padding: 8,
                             marginTop: 6,
                             maxWidth: 500,
                           }}
                         >
-                          <Text type="secondary" style={{ fontSize: 11, marginBottom: 4, display: 'block' }}>
+                          <Text type="secondary" style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>
                             结构化数据:
                           </Text>
                           {renderStructuredData(msg.structuredData)}
                         </div>
                       )}
-                      <Text type="secondary" style={{ fontSize: 10, marginTop: 2, display: 'block' }}>
+                      <Text type="secondary" style={{ fontSize: 12, marginTop: 2, display: 'block' }}>
                         {msg.timestamp}
                       </Text>
                     </div>
@@ -361,7 +361,7 @@ export default function AIAssistantPage() {
                     style={{
                       background: '#f5f5f5',
                       padding: '10px 14px',
-                      borderRadius: '12px 12px 12px 2px',
+                      borderRadius: '10px 10px 10px 4px',
                     }}
                   >
                     <Spin size="small" />

@@ -1,6 +1,6 @@
 import type { AiLayoutControlType } from '@/utils/aiFormLayout';
 import FieldControl from '@/components/FormWidgets/FieldControl';
-import { FormOutlined } from '@ant-design/icons';
+import { FormOutlined } from '@/components/Icon/ant';
 import type { PlatformForm } from '@/services/api';
 import { isLayoutControl } from '@/utils/formLayout';
 import { parseStaticOptions } from '@/utils/selectOptions';
@@ -170,17 +170,6 @@ export const fieldTemplates: DesignerField[] = [
   { key: 'templateAttachment', name: '附件', type: '附件控件', placeholder: '上传附件', listVisible: false },
   { key: 'templateRemark', name: '备注', type: '多行文本', placeholder: '填写备注说明', listVisible: false },
 ];
-
-export function getRecommendedRules(fields: DesignerField[]) {
-  const suggestions: string[] = [];
-  const has = (name: string) => fields.some(field => field.name.includes(name));
-  if (has('物料编码')) suggestions.push('建议为物料编码配置自动编号与唯一性校验');
-  if (has('安全库存')) suggestions.push('建议将安全库存设置为非负数，防止录入负库存阈值');
-  if (has('计量单位')) suggestions.push('建议将计量单位绑定字典，统一物料的计量口径');
-  if (has('告警等级') && has('附件') && has('处理时限')) suggestions.push('建议在告警等级为严重时，将附件证据和处理时限设为必填');
-  if (has('告警状态') && has('处理结论')) suggestions.push('建议在告警状态为已关闭时，将处理结论设为必填');
-  return suggestions;
-}
 
 export function getFlowNodeAssigneeLabel(node?: FlowDesignerNode) {
   if (!node) return '未选择流程节点';

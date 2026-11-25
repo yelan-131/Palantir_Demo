@@ -45,7 +45,6 @@
 | F10 | 模板中心提示“已成功应用”，但 `templates/{id}/instantiate` 只返回 `packaged` 状态，没有导入任何内容 | `backend/app/api/templates.py`、模板中心页面 | 待验证 |
 | F11 | 导出只导出当前一页 | `frontend/src/pages/DynamicPage/index.tsx` 的 `exportPage` | 待验证 |
 | F12 | 角色权限界面的动作下拉中没有“导入”，无法单独授予批量导入所需的权限 | `frontend/src/pages/SystemAdmin/RoleManagement.tsx` | 待验证 |
-| F13 | 图谱浏览器读取 `node_count` 等字段，后端返回 `total_nodes` 等字段，统计卡片始终显示 0 | `frontend/src/pages/GraphExplorer/index.tsx` | 待验证 |
 | F14 | 图谱种子用 `CREATE` 写关系，重复运行会产生重复的边 | `backend/app/services/graph_service.py` | 待验证 |
 | F15 | 前端“其他数据源”列出 MongoDB、Kafka、OPC UA 等后端不支持的类型，保存后变成 `postgresql` | 数据中心数据源页面、`backend/app/api/data_sources.py` 的 `_normalize_data_source_type` | 待验证 |
 | F16 | 前端会显示“已退回”状态，但后端 `/act` 只接受通过和驳回，没有“退回修改” | `backend/app/api/workflow.py` | 待验证 |
@@ -62,4 +61,4 @@
 - 没有挂路由的旧页面：`pages/Quality`、`AIAssistant`、`RuleEngine`、`ReportCenter`、`Maintenance`、`SupplyChain`。
 - `backend/app/api/applications.py` 中的 `DEFAULT_*`、`_mock_*`、`_ensure_default_seed`、`_rule_actions_match`、`_menu_rule_subject_matches`。
 - `backend/app/api/deps.py` 中的 `require_permission`、`require_form_permission`（没有路由使用）。
-- `backend/app/api/graph.py` 中不可达的模拟数据分支；`send_notification` 没有调用方。
+- `send_notification` 没有调用方。

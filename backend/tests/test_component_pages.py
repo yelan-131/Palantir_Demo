@@ -862,11 +862,11 @@ def test_toolbar_group_audiences_merge_without_mutating_saved_definition():
     widget = {'id': 'list', 'listSettings': {'toolbarGroups': [
         {'id': 'all', 'name': '通用', 'roleIds': [], 'actions': ['refresh']},
         {'id': 'a', 'name': '录入', 'roleIds': [1], 'actions': ['create', 'refresh']},
-        {'id': 'b', 'name': '导出', 'roleIds': [2], 'actions': ['export']}]}}
+        {'id': 'b', 'name': '导出与删除', 'roleIds': [2], 'actions': ['export', 'delete', 'disable']}]}}
     original = copy.deepcopy(widget)
     assert component_pages.resolve_toolbar_groups(widget, {1})['listSettings']['toolbarActions'] == ['refresh', 'create']
     assert component_pages.resolve_toolbar_groups(widget, {3})['listSettings']['toolbarActions'] == ['refresh']
-    assert component_pages.resolve_toolbar_groups(widget, {1, 2})['listSettings']['toolbarActions'] == ['refresh', 'create', 'export']
+    assert component_pages.resolve_toolbar_groups(widget, {1, 2})['listSettings']['toolbarActions'] == ['refresh', 'create', 'export', 'delete']
     assert widget == original
     assert component_pages.resolve_toolbar_groups({'listSettings': {'toolbarGroups': []}}, set())['listSettings']['toolbarActions'] == []
     assert component_pages.resolve_toolbar_groups({'listSettings': {'toolbarActions': ['refresh']}}, set()) == {'listSettings': {'toolbarActions': ['refresh']}}
@@ -1541,3 +1541,123 @@ def test_basic_section_versions_include_presentation_without_touching_data():
     merged = component_pages.merge_widget_section({'id': 'one', 'type': 'workspace', 'dataBinding': {'formId': 2}}, snapshot, 'basic')
     assert merged['presentation'] == widget['presentation']
     assert merged['dataBinding'] == {'formId': 2}
+
+
+@pytest.mark.asyncio
+async def test_approval_status_list_fields_and_group_intent_survive_publication(pages_environment):
+    from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD
+
+    _, _, user, client = pages_environment
+    value = definition()
+    record_list = value['widgets'][-1]
+    record_list.update(
+        listSettings={'displayGroups': [
+            {'id': 'show', 'name': 'Show', 'userIds': [1], 'columns': [APPROVAL_STATUS_FIELD, 'title'], 'approvalStatusConfigured': True},
+            {'id': 'hide', 'name': 'Hide', 'userIds': [2], 'columns': ['title'], 'approvalStatusConfigured': True},
+        ]},
+        filterSettings={'schemes': [{'id': 'approvals', 'name': 'Approvals', 'groups': [
+            {'id': 'with-status', 'name': 'With status', 'userIds': [1], 'columns': [APPROVAL_STATUS_FIELD]},
+            {'id': 'without-status', 'name': 'Without status', 'userIds': [2], 'columns': ['title']},
+        ]}]},
+    )
+    value['widgets'].append({'id': 'approval-filter', 'type': 'record-filter', 'title': 'Approval filter',
+        'targetWidgetIds': ['list'], 'filterFields': [APPROVAL_STATUS_FIELD]})
+    page = await create_publish(client, user, value)
+
+    user['is_admin'] = False
+    for uid, columns, field in [(1, [APPROVAL_STATUS_FIELD, 'title'], APPROVAL_STATUS_FIELD), (2, ['title'], 'title')]:
+        user['uid'] = uid
+        response = await client.get(f'/pages/{page["code"]}')
+        assert response.status_code == 200, response.text
+        visible = next(item for item in response.json()['definition']['widgets'] if item['id'] == 'list')
+        assert visible['listSettings']['columns'] == columns
+        assert visible['listSettings']['displayGroups'][0]['approvalStatusConfigured'] is True
+        assert visible['filterSettings']['schemes'][0]['groups'][0]['columns'] == [field]
+
+    path = f'/pages/{page["code"]}/data'
+    condition = {'field': APPROVAL_STATUS_FIELD, 'op': 'equals', 'value': 'pending'}
+    valid = await client.post(path, json={'filter_queries': {'approval-filter': {'filters': [condition]}}})
+    assert valid.status_code == 200, valid.text
+    invalid = await client.post(path, json={'filter_queries': {'approval-filter': {'filters': [{**condition, 'value': 'active'}]}}})
+    assert invalid.status_code == 422
+    assert invalid.headers['X-Error-Code'] == 'COMPONENT_QUERY_INVALID'
+
+    user['is_admin'] = True
+    value['widgets'][-1]['targetWidgetIds'] = ['total']
+    unsupported = await client.post(f'/pages/{page["code"]}/publish',
+        json={'definition': value, 'expectedRevision': page['revision']})
+    assert unsupported.status_code == 422
+    assert unsupported.headers['X-Error-Code'] == 'COMPONENT_QUERY_INVALID'
+
+
+@pytest.mark.asyncio
+async def test_record_list_metadata_uses_separate_display_and_filter_configuration(pages_environment):
+    _, _, user, client = pages_environment
+    value = definition()
+    columns = ['_record_id', 'title', '_created_by', '_created_at', '_updated_by', '_updated_at']
+    group = {'id': 'system', 'name': 'System columns', 'userIds': [1], 'columns': columns,
+             'recordMetadataConfigured': True, 'approvalStatusConfigured': True}
+    value['widgets'][-1]['listSettings'] = {'displayGroups': [group]}
+    page = await create_publish(client, user, value)
+    user['is_admin'] = False
+    response = await client.get(f'/pages/{page["code"]}')
+    assert response.status_code == 200, response.text
+    visible = next(item for item in response.json()['definition']['widgets'] if item['id'] == 'list')
+    assert visible['listSettings']['columns'] == columns
+    projected = visible['listSettings']['displayGroups'][0]
+    assert projected['recordMetadataConfigured'] is True and projected['approvalStatusConfigured'] is True
+
+    user['is_admin'] = True
+    group['sortableColumns'] = ['_record_id']
+    before = await client.post(f'/pages/{page["code"]}/publish',
+        json={'definition': value, 'expectedRevision': page['revision']})
+    assert before.status_code == 422 and before.headers['X-Error-Code'] == 'COMPONENT_QUERY_INVALID'
+    group.pop('sortableColumns')
+    value['widgets'][-1]['listSettings']['displayGroups'].append({
+        'id': 'business', 'name': 'Business columns', 'userIds': [2], 'columns': ['title']})
+    value['widgets'][-1]['filterSettings'] = {'schemes': [{'id': 'metadata-filters', 'name': 'Metadata filters',
+        'groups': [{'id': 'metadata', 'name': 'Metadata', 'columns': ['_updated_at'], 'userIds': [1]},
+                   {'id': 'title', 'name': 'Title', 'columns': ['title'], 'userIds': [2]}]}]}
+    page = await create_publish(client, user, value)
+    user['is_admin'] = False
+    for uid, expected in [(1, ['_updated_at']), (2, ['title'])]:
+        user['uid'] = uid
+        result = (await client.get(f'/pages/{page["code"]}')).json()
+        widget = next(item for item in result['definition']['widgets'] if item['id'] == 'list')
+        assert widget['filterSettings']['schemes'][0]['groups'][0]['columns'] == expected
+        assert widget['filterSettings']['schemes'][0]['groups'][0]['columns'] != columns
+
+    user['uid'] = 1
+    user['is_admin'] = True
+    value['widgets'].append({'id': 'metadata-filter', 'type': 'record-filter', 'title': 'Metadata filter',
+        'targetWidgetIds': ['list'], 'filterSettings': value['widgets'][-1]['filterSettings']})
+    linked = await create_publish(client, user, value)
+    path = f'/pages/{linked["code"]}/data'
+    filter_request = {'schemeId': 'metadata-filters', 'filters': [
+        {'field': '_updated_at', 'op': 'between', 'value': ['2026-11-17', '2026-11-18']}]}
+    assert (await client.post(path, json={'filter_queries': {'metadata-filter': filter_request}})).status_code == 200
+    filter_request['filters'][0]['op'] = 'contains'
+    invalid = await client.post(path, json={'filter_queries': {'metadata-filter': filter_request}})
+    assert invalid.status_code == 422 and invalid.headers['X-Error-Code'] == 'COMPONENT_QUERY_INVALID'
+    value['widgets'][-1]['targetWidgetIds'] = ['total']
+    unsupported = await client.post(f'/pages/{linked["code"]}/publish',
+        json={'definition': value, 'expectedRevision': linked['revision']})
+    assert unsupported.status_code == 422 and unsupported.headers['X-Error-Code'] == 'COMPONENT_QUERY_INVALID'
+
+
+def test_system_display_columns_preserve_the_business_column_limit():
+    from pydantic import ValidationError
+    from app.services.component_page_definitions import DisplayGroup, ListSettings, SYSTEM_DISPLAY_COLUMNS
+
+    regular = [f'field_{index}' for index in range(100)]
+    all_columns = sorted(SYSTEM_DISPLAY_COLUMNS) + regular
+    assert len(all_columns) == 106
+    assert DisplayGroup(id='system', name='System columns', columns=all_columns).columns == all_columns
+    assert ListSettings(columns=all_columns).columns == all_columns
+
+    with pytest.raises(ValidationError):
+        DisplayGroup(id='over-limit', name='Over limit', columns=regular + ['extra_field'])
+    with pytest.raises(ValidationError):
+        ListSettings(columns=regular + ['extra_field'])
+    with pytest.raises(ValidationError):
+        ListSettings(columns=[])

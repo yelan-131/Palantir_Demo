@@ -8,7 +8,7 @@ import {
   RightOutlined,
   InboxOutlined,
   RollbackOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Alert, Button, Drawer, Input, Modal, Select, Space, Tabs, Tag, Timeline, Tooltip, Typography, message } from 'antd';
 import { useAuthStore } from '../../stores/authStore';
 import { createRef, useEffect, useMemo, useRef, useState } from 'react';

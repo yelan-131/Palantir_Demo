@@ -124,6 +124,16 @@ export interface OntologyFieldInfo {
   confidence?: number;
 }
 
+export interface OntologySimilarityFeature {
+  code: string;
+  dimension?: string;
+  kind: 'number' | 'category';
+  tolerance?: number;
+  weight?: number;
+  scale?: number;
+  offset?: number;
+}
+
 export interface OntologyObjectInfo {
   id: string;
   db_id?: number;
@@ -139,6 +149,7 @@ export interface OntologyObjectInfo {
   confidence?: number;
   review_status?: string;
   fields: OntologyFieldInfo[];
+  similarity_features?: OntologySimilarityFeature[];
 }
 
 export interface OntologyRelationInfo {
@@ -329,14 +340,6 @@ export const listEntityInstances = (type: string, params?: Record<string, number
 export const listRelationTypes = () => api.get('/ontology/relations');
 
 // Graph
-export const executeCypher = (query: string, params?: Record<string, unknown>) =>
-  api.post('/graph/query', { query, params });
-export const getNeighbors = (entityId: number, limit?: number) =>
-  api.get(`/graph/neighbors/${entityId}`, { params: { limit } });
-export const getShortestPath = (srcId: number, tgtId: number) =>
-  api.get('/graph/path', { params: { src_id: srcId, tgt_id: tgtId } });
-export const getSubgraph = (entityId: number, depth?: number) =>
-  api.get(`/graph/subgraph/${entityId}`, { params: { depth } });
 export const getGraphStats = () => api.get('/graph/stats');
 export const listGraphAssetNodes = (params?: { search?: string; entity_type?: string }) =>
   api.get('/graph/assets/nodes', { params });
@@ -380,6 +383,8 @@ export const listSemanticOntologyObjects = () => api.get<{ data: OntologyObjectI
 export const listSemanticOntologyRelations = () => api.get<{ data: OntologyRelationInfo[]; source?: string }>('/semantic-assets/ontology-relations');
 export const createSemanticOntologyObject = (data: Partial<OntologyObjectInfo> & { fields?: OntologyFieldInfo[] }) =>
   api.post('/semantic-assets/ontology-objects', data);
+export const updateOntologySimilarityFeatures = (objectId: number, features: OntologySimilarityFeature[]) =>
+  api.put<{ data: OntologyObjectInfo }>(`/semantic-assets/ontology-objects/${objectId}/similarity-features`, { features });
 export const createSemanticOntologyRelation = (data: Partial<OntologyRelationInfo> & { source_object_code: string; target_object_code: string }) =>
   api.post('/semantic-assets/ontology-relations', data);
 export const listSemanticOntologyMappings = (params?: { source_type?: string; object_code?: string }) =>
@@ -1159,6 +1164,7 @@ export interface PlatformForm {
   applications?: Array<Record<string, unknown>>;
   permission_design?: Record<string, unknown>;
   runtime_submission_available?: boolean;
+  runtime_approval_available?: boolean;
   runtime_permissions?: Record<string, boolean>;
   runtime_field_permissions?: Record<string, { visible: boolean; editable: boolean; exportable: boolean; required?: boolean }>;
 }
@@ -1314,6 +1320,10 @@ export const deletePlatformFormPermission = (formId: number | string, permission
 
 export const listPlatformDynamicRecords = (formId: number | string, params?: Record<string, unknown>) =>
   api.get(`/forms/${formId}/records`, { params });
+export const getFormRecordActorOptions = (formId: number, field: '_created_by' | '_updated_by', search: OptionSearchRequest) =>
+  api.get<{data: Array<{id: number; label: string}>; has_more: boolean}>(`/forms/${formId}/records/actor-options`, {
+    params: {field, ...search},
+  });
 export const createPlatformDynamicRecord = (formId: number | string, data: Record<string, unknown>) =>
   api.post(`/forms/${formId}/records`, { data });
 export const getPlatformDynamicRecord = (formId: number | string, recordId: number | string) =>

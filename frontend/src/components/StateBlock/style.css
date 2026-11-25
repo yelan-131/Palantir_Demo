@@ -1,0 +1,8 @@
+.ui-state { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 40px 16px; color: var(--mf-muted); text-align: center; }
+.ui-state.is-compact { padding: 24px 12px; }
+.ui-state-icon { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 8px; border-radius: var(--canon-radius-panel); background: var(--ui-sunken); color: var(--mf-muted); }
+.ui-state-error .ui-state-icon { background: var(--mf-danger-bg); color: var(--mf-danger); }
+.ui-state-denied .ui-state-icon { background: var(--mf-warning-bg); color: var(--mf-warning); }
+.ui-state > strong { color: var(--mf-text); font-size: var(--ui-text-section-size); line-height: var(--ui-text-section-line); font-weight: 600; }
+.ui-state > p { max-width: 44ch; margin: 0; font-size: var(--ui-text-control-size); line-height: var(--ui-text-control-line); }
+.ui-state-action { margin-top: 12px; }

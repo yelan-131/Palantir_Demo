@@ -53,7 +53,7 @@ export default function GaugeWidget({ widget, isEditing }: Props) {
       axisLine: { lineStyle: { width: 14 } },
       axisTick: { show: false },
       splitLine: { length: 8, lineStyle: { width: 2, color: colors.borderStrong } },
-      axisLabel: { distance: 20, fontSize: 11 },
+      axisLabel: { distance: 20, fontSize: 12 },
       pointer: { itemStyle: { color: 'auto' } },
       detail: { valueAnimation: true, formatter: '{value}%', fontSize: 20, offsetCenter: [0, '70%'] },
       data: [{ value: displayValue }],

@@ -28,6 +28,7 @@ from app.services.component_page_definitions import (  # noqa: F401  (re-exporte
     ComponentPresentation,
     FilterScheme,
     FilterSettings,
+    DisplayGroup,
     FilterToolbarGroup,
     PageDefinition,
     PageWidget,
@@ -75,7 +76,7 @@ class PageBinding(BaseModel):
 class PermissionTemplate(BaseModel):
     scope: Literal['toolbar', 'access', 'display', 'filter', 'filter-fields', 'audience'] = 'toolbar'
     name: str = Field(min_length=1, max_length=50)
-    groups: list[ToolbarGroup | FilterToolbarGroup] = Field(min_length=1, max_length=20)
+    groups: list[ToolbarGroup | FilterToolbarGroup | DisplayGroup] = Field(min_length=1, max_length=20)
 
     @model_validator(mode='after')
     def scope_actions(self):

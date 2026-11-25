@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {Button, Checkbox, Empty, Modal, Space} from 'antd';
-import {SettingOutlined} from '@ant-design/icons';
+import {SettingOutlined} from '@/components/Icon/ant';
 
 export default function RoleSettings({value, options, onChange}: {
   value: number[]; options: Array<{value:number;label:string}>; onChange:(value:number[])=>void;

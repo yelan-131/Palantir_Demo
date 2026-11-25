@@ -11,9 +11,10 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import BigInteger, bindparam, func, select, text
 
 from app.core.principal import current_tenant_id, current_user_id
+from app.core.production_errors import coded_error
 from app.services.form_engine import (
     _apply_record_encoding_rules,
     _apply_record_filters_query,
@@ -42,10 +43,30 @@ from app.services.form_engine import (
 )
 from app.core.identifiers import assert_safe_identifier
 from app.core.permissions import evaluate_form_permission, allowed_form_fields
-from app.models.relational import Form, DynamicRecord, AuditLog
+from app.models.relational import Form, DynamicRecord, AuditLog, User
 from app.services.form_runtime import _latest_form_version, _runtime_form_fields, _record_payload
+from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD, approval_record_ids, split_approval_filters
+from app.services.form_engine.physical import _physical_approval_filter
 from app.services.record_domains import prepare_domain_create, validate_domain_update, protect_migrated_request
+from app.services.record_metadata_filters import (
+    ACTOR_COLUMNS, RECORD_LIST_METADATA_FIELDS, record_metadata_sql, split_record_metadata_filters,
+)
 from app.services.tenant_onboarding import assert_tenant_quota
+
+
+async def add_record_actor_names(db, tenant_id, rows):
+    """Resolve names for the actors of an already-authorized record page."""
+    actors = ('created_by', 'updated_by')
+    actor_ids = {record[key] for record in rows for key in actors if record.get(key) is not None}
+    names = {}
+    if actor_ids:
+        users = await db.execute(select(User.id, User.display_name, User.username).where(
+            User.tenant_id == tenant_id, User.id.in_(actor_ids),
+        ))
+        names = {uid: display_name or username for uid, display_name, username in users}
+    for record in rows:
+        for key in actors:
+            record[f'{key}_name'] = names.get(record.get(key))
 
 
 async def create_record(form_id, body, db, user, *, defer_commit=False, draft=False, source="business"):
@@ -479,25 +500,33 @@ async def get_record(form_id, record_id, db, user, *, include_deleted=False):
     return {"data": await decorate(db, form, await project_record(db, user, form, record, cache=cache), user, cache=cache)}
 
 
-async def iter_raw(db, form, *, include_deleted=False, fields=None):
+async def iter_raw(db, form, *, include_deleted=False, fields=None, approval_statuses=None, metadata=()):
     """Scan in bounded batches so permission filtering happens before pagination/counts."""
     fields = fields if fields is not None else await runtime_fields(db, form)
+    metadata_clauses, metadata_params = record_metadata_sql(metadata, db.bind.dialect.name)
     if _uses_physical_form_table(form):
         table = str(form.table_name)
         assert_safe_identifier(table)
         await _ensure_physical_form_table(db, form, fields)
+        approval_clauses, approval_params = _physical_approval_filter(form, approval_statuses)
+        filter_sql = "".join(f" AND {clause}" for clause in approval_clauses + metadata_clauses)
     cursor = 0
     while True:
         if _uses_physical_form_table(form):
             deleted = "" if include_deleted else " AND deleted_at IS NULL"
-            rows = (await db.execute(text(f"SELECT * FROM {table} WHERE tenant_id=:tenant AND id>:cursor{deleted} ORDER BY id LIMIT 200"),
-                {"tenant": form.tenant_id, "cursor": cursor})).all()
+            rows = (await db.execute(text(
+                f"SELECT * FROM {table} WHERE tenant_id=:tenant AND id>:cursor{deleted}{filter_sql} ORDER BY id LIMIT 200"
+            ), {"tenant": form.tenant_id, "cursor": cursor, **approval_params, **metadata_params})).all()
             batch = [_physical_record_payload(row, form, fields) for row in rows]
         else:
             query = select(DynamicRecord).where(DynamicRecord.tenant_id == form.tenant_id,
                 DynamicRecord.form_id == form.id, DynamicRecord.id > cursor).order_by(DynamicRecord.id).limit(200)
             if not include_deleted:
                 query = query.where(DynamicRecord.deleted_at.is_(None))
+            if approval_statuses is not None:
+                query = query.where(DynamicRecord.status.in_(approval_statuses), DynamicRecord.id.in_(approval_record_ids(form)))
+            if metadata_clauses:
+                query = query.where(text(' AND '.join(metadata_clauses)).bindparams(**metadata_params))
             batch = [_record_payload(row) for row in (await db.scalars(query)).all()]
         if not batch:
             break
@@ -509,7 +538,7 @@ async def iter_raw(db, form, *, include_deleted=False, fields=None):
 
 
 async def authorized_records(db, user, form, *, include_deleted=False, decorate=True, statistics=False,
-                             cache=None, raw_records=None):
+                             cache=None, raw_records=None, approval_statuses=None, metadata=()):
     if form.tenant_id != current_tenant_id(user):
         raise HTTPException(404, "Form not found")
     cache = cache if cache is not None else {}
@@ -521,11 +550,10 @@ async def authorized_records(db, user, form, *, include_deleted=False, decorate=
         await allow_statistics(db,user,form)
     fields = await runtime_fields(db, form, cache=cache)
     result = []
-    async for record in iter_raw(db, form, include_deleted=include_deleted, fields=fields):
-        if form.code == 'alert-center':
-            from app.services.alert_service import is_material_request
-            if is_material_request(record['data']):
-                continue
+    async for record in iter_raw(db, form, include_deleted=include_deleted, fields=fields,
+                                 approval_statuses=approval_statuses, metadata=metadata):
+        if _excluded_from_record_list(form, record):
+            continue
         if raw_records is not None:
             raw_records[(form.id, record['id'])] = record
         if not await record_allowed(db, user, form, "view", record, cache=cache):
@@ -538,6 +566,64 @@ async def authorized_records(db, user, form, *, include_deleted=False, decorate=
     return result
 
 
+def _excluded_from_record_list(form, record):
+    if form.code != 'alert-center':
+        return False
+    from app.services.alert_service import is_material_request
+    return is_material_request(record['data'])
+
+
+async def record_actor_options(form_id, db, user, *, field, query, page, page_size, selected=None):
+    """Return named actors present in live records visible to the current user."""
+    form = await resolve_form(db, user, form_id=form_id)
+    cache = {}
+    await require_form_permission(db, user, form_id, 'view', cache=cache)
+    fields = await runtime_fields(db, form, cache=cache)
+    actor = ACTOR_COLUMNS[field]
+    if _uses_physical_form_table(form):
+        table = str(form.table_name)
+        assert_safe_identifier(table)
+        await _ensure_physical_form_table(db, form, fields)
+        recorded_actors = text(f'SELECT {actor} FROM {table} WHERE tenant_id=:actor_tenant AND deleted_at IS NULL')
+        recorded_actors = recorded_actors.bindparams(actor_tenant=form.tenant_id)
+    else:
+        recorded_actors = select(getattr(DynamicRecord, actor)).where(
+            DynamicRecord.tenant_id == form.tenant_id, DynamicRecord.form_id == form.id,
+            DynamicRecord.deleted_at.is_(None),
+        )
+    label = func.coalesce(func.nullif(User.display_name, ''), User.username)
+    candidates = select(User.id, label).where(User.tenant_id == form.tenant_id, User.id.in_(recorded_actors))
+    if selected is not None:
+        candidates = candidates.where(User.id == bindparam('selected_actor', selected, type_=BigInteger))
+    elif query.strip():
+        candidates = candidates.where(func.lower(label).contains(query.strip().lower(), autoescape=True))
+    candidates = candidates.order_by(User.id)
+    offset = (page - 1) * page_size if selected is None else 0
+    if user.get('is_admin') and form.code != 'alert-center':
+        rows = (await db.execute(candidates.offset(offset).limit(page_size + 1))).all()
+    else:
+        rows = []
+        cursor = skipped = 0
+        while len(rows) <= page_size:
+            batch = (await db.execute(candidates.where(User.id > cursor).limit(page_size + 1))).all()
+            if not batch:
+                break
+            for uid, name in batch:
+                async for record in iter_raw(db, form, fields=fields, metadata=[(actor, '=', uid)]):
+                    if not _excluded_from_record_list(form, record) and await record_allowed(db, user, form, 'view', record, cache=cache):
+                        if skipped < offset:
+                            skipped += 1
+                        else:
+                            rows.append((uid, name))
+                        break
+                if len(rows) > page_size:
+                    break
+            if len(batch) < page_size + 1:
+                break
+            cursor = batch[-1][0]
+    return {'data': [{'id': uid, 'label': name} for uid, name in rows[:page_size]], 'has_more': len(rows) > page_size}
+
+
 async def list_records(form_id, db, user, *, include_deleted=False, search=None, filters_json=None,
     sort_field=None, sort_order="desc", cursor_after_id=None, cursor_before_id=None,
     include_total=True, page=1, page_size=20):
@@ -547,16 +633,18 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
         raise HTTPException(400, "Use only one cursor direction")
     form = await resolve_form(db, user, form_id=form_id)
     from app.services.field_policies import has_presentation_rules
-    has_policies=has_presentation_rules(await runtime_fields(db,form))
+    cache = {}
+    await require_form_permission(db, user, form_id, 'view', cache=cache)
+    filters, approval_statuses = split_approval_filters(_parse_record_filters(filters_json))
+    filters, metadata = split_record_metadata_filters(filters)
+    fields = await runtime_fields(db, form, cache=cache)
+    has_policies=has_presentation_rules(fields)
     if user.get("is_admin") and form.code != 'alert-center' and not has_policies and not (_uses_physical_form_table(form) and (cursor_after_id is not None or cursor_before_id is not None)):
         return await _list_admin_records(form_id, db, user, include_deleted=include_deleted, search=search,
-            filters_json=filters_json, sort_field=sort_field, sort_order=sort_order,
+            filters=filters, approval_statuses=approval_statuses, metadata=metadata, sort_field=sort_field, sort_order=sort_order,
             cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id,
             include_total=include_total, page=page, page_size=page_size)
-    cache = {}
-    fields = await runtime_fields(db, form, cache=cache)
     visible = await allowed_form_fields(user, form.id, "view", fields, db, cache=cache)
-    filters = _parse_record_filters(filters_json)
     _ensure_filter_fields_visible(filters, visible)
     _ensure_sort_field_allowed(sort_field, fields, visible)
     query_fields = _visible_field_subset(fields, visible)
@@ -565,9 +653,13 @@ async def list_records(form_id, db, user, *, include_deleted=False, search=None,
         raise HTTPException(400, "Query is not indexed for production dynamic records")
     if settings.IS_PRODUCTION:
         from app.services.form_engine import _queryable_field_names
-        if any(str(item.get("field") or "") not in _queryable_field_names(query_fields) for item in filters):
-            raise HTTPException(400, "Field is not indexed for filtering")
-    records = await authorized_records(db, user, form, include_deleted=include_deleted, decorate=False, cache=cache)
+        filter_fields = {str(item.get("field") or "") for item in filters}
+        unindexed = filter_fields - _queryable_field_names(query_fields)
+        if unindexed:
+            field = min(unindexed)
+            raise coded_error(400, "RECORD_FILTER_INVALID", f"Field is not indexed for filtering: {field}")
+    records = await authorized_records(db, user, form, include_deleted=include_deleted, decorate=False, cache=cache,
+                                       approval_statuses=approval_statuses, metadata=metadata)
     matches = []
     for record in records:
         # Filter only the projected row: hidden values cannot affect search/counts.
@@ -682,10 +774,9 @@ async def write_fields(db, form, record, changes, *, user, system=False):
         old_values={"form_id": form.id, "data": before}, new_values={"form_id": form.id, "data": changes, "source": "workflow" if system else "domain_action"})
 
 
-async def _list_admin_records(form_id, db, user, *, include_deleted=False, search=None, filters_json=None,
+async def _list_admin_records(form_id, db, user, *, include_deleted=False, search=None, filters, approval_statuses, metadata,
     sort_field=None, sort_order="desc", cursor_after_id=None, cursor_before_id=None,
     include_total=True, page=1, page_size=20):
-    from sqlalchemy import func
     from app.models.relational import DynamicRecord, Form
 
     from app.services.form_application_lifecycle import decorate
@@ -706,7 +797,9 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
             visible_fields,
             include_deleted=include_deleted,
             search=search,
-            filters_json=filters_json,
+            filters=filters,
+            approval_statuses=approval_statuses,
+            metadata=metadata,
             sort_field=sort_field,
             sort_order=sort_order,
             include_total=include_total,
@@ -721,7 +814,12 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
     if not include_deleted:
         db_filters.append(DynamicRecord.deleted_at.is_(None))
 
-    parsed_filters = _parse_record_filters(filters_json)
+    if approval_statuses is not None:
+        db_filters.extend((DynamicRecord.status.in_(approval_statuses), DynamicRecord.id.in_(approval_record_ids(form))))
+    metadata_clauses, metadata_params = record_metadata_sql(metadata, db.bind.dialect.name)
+    if metadata_clauses:
+        db_filters.append(text(' AND '.join(metadata_clauses)).bindparams(**metadata_params))
+    parsed_filters = filters
     _ensure_filter_fields_visible(parsed_filters, visible_fields)
     _ensure_sort_field_allowed(sort_field, fields, visible_fields)
     query = select(DynamicRecord).where(*db_filters)
@@ -743,7 +841,11 @@ async def _list_admin_records(form_id, db, user, *, include_deleted=False, searc
     if cursor_before_id is not None:
         query = query.where(DynamicRecord.id > cursor_before_id)
 
-    query = _apply_record_sort_query(query, DynamicRecord, sort_field, sort_order)
+    numeric_sort = any(field.field_name == sort_field and str(field.field_type).lower() in {
+        "number", "integer", "int", "decimal", "float",
+    } for field in query_fields)
+    query = _apply_record_sort_query(query, DynamicRecord, sort_field, sort_order,
+                                    numeric=numeric_sort, dialect=db.bind.dialect.name)
     if not search and not parsed_filters and not cursor_mode:
         total = None
         if include_total:
@@ -804,6 +906,7 @@ async def require_form_permission(db, user, form_id, action, *, cache=None):
 def validate_business_keys(data):
     reserved = {"id", "tenant_id", "record_status", "created_by", "updated_by",
         "source_dynamic_record_id", "deleted_at", "created_at", "updated_at"}
-    denied = [key for key in data if _physical_column_name(key) in reserved]
+    denied = [key for key in data if key == APPROVAL_STATUS_FIELD or key in RECORD_LIST_METADATA_FIELDS
+        or _physical_column_name(key) in reserved]
     if denied:
         raise HTTPException(403, f"Record metadata cannot be written as business fields: {', '.join(sorted(denied))}")

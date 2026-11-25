@@ -1,5 +1,5 @@
 /* Canon record modal and detail drawer, in every business-list mode.
-   `--canon-*` values arrive on the modal/drawer wrapper from CANON_CSS_VARIABLES; this file never declares colors.
+   `--canon-*` values are inherited from the active color card on the document root; this file never declares colors.
    Selectors start with `body .mf-canon-form-root` to outrank the shell's portal overrides. */
 
 body .mf-canon-form-root .mf-canon-form {
@@ -49,6 +49,20 @@ body .mf-canon-form-root .mf-canon-form .ant-modal-header .ant-modal-title {
   letter-spacing: 0;
   overflow-wrap: anywhere;
   text-wrap: balance;
+}
+
+body .mf-canon-form-root .mf-canon-form .record-form-heading > strong {
+  font-weight: inherit;
+}
+
+body .mf-canon-form-root .mf-canon-form .record-form-heading > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--canon-muted);
+  font-size: var(--canon-font-caption);
+  font-weight: 400;
+  line-height: 20px;
+  text-wrap: wrap;
 }
 
 body .mf-canon-form-root .mf-canon-form .ant-modal-close {
@@ -224,6 +238,8 @@ body .mf-canon-form-root .mf-canon-drawer .mf-canon-drawer-title {
 }
 body .mf-canon-form-root .mf-canon-drawer .mf-canon-drawer-title > strong {
   overflow: hidden;
+  font-size: var(--ui-text-heading-size);
+  line-height: var(--ui-text-heading-line);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -314,6 +330,8 @@ body .mf-canon-form-root .mf-canon-drawer .mf-pill {
 }
 body .mf-canon-form-root .mf-canon-drawer .mf-pill-success { background: var(--canon-success-bg); color: var(--canon-success); }
 body .mf-canon-form-root .mf-canon-drawer .mf-pill-primary { background: var(--canon-selected); color: var(--canon-primary); }
+body .mf-canon-form-root .mf-canon-drawer .mf-pill-info { background: var(--canon-info-bg); color: var(--canon-info); }
+body .mf-canon-form-root .mf-canon-drawer .mf-pill-warning { background: var(--canon-warning-bg); color: var(--canon-warning); }
 body .mf-canon-form-root .mf-canon-drawer .mf-pill-neutral { background: var(--canon-fill); color: var(--canon-muted); }
 body .mf-canon-form-root .mf-canon-drawer .mf-pill-danger { background: var(--canon-danger-bg); color: var(--canon-danger); }
 body .mf-canon-form-root .mf-canon-drawer .ant-descriptions-bordered .ant-descriptions-view {

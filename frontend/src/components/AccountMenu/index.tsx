@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { UserOutlined } from '@ant-design/icons';
+import { UserOutlined } from '@/components/Icon/ant';
 import { Avatar, Dropdown, Space } from 'antd';
 import type { MenuProps } from 'antd';
 import { settingsNavigationGroups } from '../../config/navigation';

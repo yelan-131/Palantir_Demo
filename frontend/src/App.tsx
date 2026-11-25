@@ -32,7 +32,7 @@ import {
   SafetyCertificateOutlined,
   ToolOutlined,
   UserOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { ApplicationRail, ApplicationLibrary, ExtensionLibrary, shellIcon, useApplicationLibrary, type LibraryApp } from './components/ShellNavigation';
 import { normalizeShellMenu, shellMenuAncestors, applicationNavigation, hasApplicationPage, resolveApplicationEntry } from './utils/shellMenu';
 import { useShellPreferences } from './hooks/useShellPreferences';
@@ -44,7 +44,7 @@ import { AiWorkbenchProvider } from './components/AiChatWidget/context';
 import GlobalSearch from './components/GlobalSearch';
 import ShellPageTitle, { ShellPageTitleProvider } from './components/ShellPageTitle';
 import NotificationCenter from './components/NotificationCenter';
-import { CANON_CSS_VARIABLES, canonTheme } from './theme/canon';
+import { useThemeCard } from './theme/ThemeCardProvider';
 import { formSettingsRedirect, newBusinessFormDesignPath, settingsNavigationGroups, settingsDestinationKey, LEGACY_ROUTES, NAVIGATION_AREAS, NAVIGATION_ENTRIES, navigationAreaForPath } from './config/navigation';
 import { useAuthStore } from './stores/authStore';
 import {
@@ -369,6 +369,7 @@ function AppContent() {
   const areaEntry = NAVIGATION_ENTRIES.find(entry => entry.path === location.pathname);
 
   const { preferences, updatePreferences } = useShellPreferences();
+  const { canonTheme } = useThemeCard();
   const [compactViewport, setCompactViewport] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [smallViewport, setSmallViewport] = useState(() => window.matchMedia('(max-width: 760px)').matches);
   const [temporaryMenuExpanded, setTemporaryMenuExpanded] = useState(false);
@@ -673,7 +674,7 @@ function AppContent() {
     <AiWorkbenchProvider>
     <AiPageActionRouter onOpenWorkspaceTarget={openAiWorkspaceTarget}
       applicationReady={location.pathname !== '/' || Boolean(isApplicationEntry && currentMenus && !currentMenus.failed && !applicationEntryRoute)} />
-    <Layout style={CANON_CSS_VARIABLES} className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
+    <Layout className={`app-shell tech-white-shell density-${preferences.density}${isKnowledgeWorkspace ? ' shell-knowledge-workspace' : preferences.layout === 'float' ? ' shell-layout-float' : ''}${showContextMenu && smallViewport && !collapsed ? ' shell-menu-overlay-open' : ''}${loginArrival ? ' login-arrival' : ''}`}>
       <a className="shell-skip-link" href="#workspace-main">跳转到页面内容</a>
       <ApplicationRail library={library} onOpen={openLibraryApp} onHome={openWorkspace} activeKey={railKey} user={user} onLogout={() => { logout(); navigate('/login'); }} />
       {showContextMenu && smallViewport && !collapsed && <button className="shell-menu-backdrop" aria-label="收起菜单栏" onClick={() => setCollapsed(true)} />}

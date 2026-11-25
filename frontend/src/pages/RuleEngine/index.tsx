@@ -4,7 +4,7 @@ import {
   Card, Table, Button, Modal, Form, Input, Select, InputNumber,
   Switch, Tag, Space, Empty, Spin, message, Popconfirm,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined } from '@/components/Icon/ant';
 import { listRules, createRule, updateRule, deleteRule, validateRule } from '@/services/api';
 import { listModels } from '@/services/api';
 

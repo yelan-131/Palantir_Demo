@@ -1,6 +1,6 @@
 # API 参考
 
-更新日期 2026-11-20，对应代码版本 0.3.26。
+更新日期 2026-11-25，对应代码版本 0.3.27 草稿。
 
 接口以代码为准：路由挂载见 `backend/app/main.py`，各模块实现见 `backend/app/api/*.py`。
 第 6 节的接口清单由 `scripts/docs/generate_api_reference.py` 静态解析路由装饰器生成，不需要安装后端依赖。
@@ -108,7 +108,7 @@ Authorization: Bearer <token>
 | `/pipelines` | `pipeline.py` | 数据管道与运行记录 |
 | `/semantic-assets` | `semantic_assets.py` | 数据资产、本体对象与关系、本体候选与发布、语义映射工作台、页面契约 |
 | `/ontology` | `ontology.py` | 实体类型、实例、关系与时间线 |
-| `/graph` | `graph.py` | Neo4j 只读查询、邻居、路径、子图、影响分析、追溯 |
+| `/graph` | `graph.py` | 知识图谱资产、Neo4j 统计、实体关系、影响分析、追溯、中心度、质量演示同步 |
 | `/knowledge` | `knowledge.py` | 知识空间与目录、文档上传与解析、OCR、分块、抽取任务、检索、知识卡片、知识问答会话 |
 | `/ai` | `ai_assistant.py`、`ai_harness.py` | AI 对话与 Agent 运行、确认与取消、会话、记忆、草稿、模型设置、技能和工具注册表、Harness MCP 桥 |
 | `/ai-builder` | `ai_builder.py` | 根据描述建议数据模型或页面 |
@@ -126,7 +126,7 @@ Authorization: Bearer <token>
 路径省略 `/api/v1` 前缀（`/` 与 `/health` 除外）。处理函数格式为 `模块.函数名`，可直接在 `backend/app/api/` 中搜索。
 
 <!-- api-routes:start -->
-共 427 个接口。
+共 425 个接口。
 
 ### 根路径（2）
 
@@ -383,7 +383,7 @@ Authorization: Bearer <token>
 | `PUT` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.update_workflow_binding` |
 | `DELETE` | `/forms/{form_id}/workflow-bindings/{binding_id}` | 管理员 | `forms.delete_workflow_binding` |
 
-### `graph`（18）
+### `graph`（14）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -398,11 +398,7 @@ Authorization: Bearer <token>
 | `GET` | `/graph/entity/{label}/{entity_id}/relationships` | 登录 | `graph.get_graph_relationships` |
 | `GET` | `/graph/impact-analysis-by-object` | 登录 | `graph.impact_analysis_by_object` |
 | `GET` | `/graph/impact-analysis/{entity_id}` | 登录 | `graph.impact_analysis` |
-| `GET` | `/graph/neighbors/{entity_id}` | 登录 | `graph.get_neighbors` |
-| `GET` | `/graph/path` | 登录 | `graph.shortest_path` |
-| `POST` | `/graph/query` | 登录 | `graph.execute_cypher` |
 | `GET` | `/graph/stats` | 登录 | `graph.graph_stats` |
-| `GET` | `/graph/subgraph/{entity_id}` | 登录 | `graph.get_subgraph` |
 | `POST` | `/graph/sync/quality-demo` | 登录 | `graph.sync_quality_demo_graph` |
 | `GET` | `/graph/trace/{entity_id}` | 登录 | `graph.trace_chain` |
 
@@ -638,7 +634,7 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `GET` | `/search` | 登录 | `search.cross_entity_search` |
 
-### `semantic-assets`（28）
+### `semantic-assets`（30）
 
 | 方法 | 路径 | 访问要求 | 处理函数 |
 | --- | --- | --- | --- |
@@ -655,6 +651,8 @@ Authorization: Bearer <token>
 | `PUT` | `/semantic-assets/ontology-objects/{object_id}` | 登录 | `semantic_assets.update_ontology_object` |
 | `GET` | `/semantic-assets/ontology-objects/{object_id}/record` | 登录 | `semantic_assets.get_ontology_instance` |
 | `PUT` | `/semantic-assets/ontology-objects/{object_id}/record-binding` | 管理员 | `semantic_assets.bind_ontology_records` |
+| `GET` | `/semantic-assets/ontology-objects/{object_id}/record-edit` | 登录 | `semantic_assets.get_ontology_instance_editor` |
+| `PUT` | `/semantic-assets/ontology-objects/{object_id}/record-edit` | 登录 | `semantic_assets.update_ontology_instance` |
 | `GET` | `/semantic-assets/ontology-objects/{object_id}/records` | 登录 | `semantic_assets.list_ontology_instances` |
 | `GET` | `/semantic-assets/ontology-relations` | 登录 | `semantic_assets.list_ontology_relations` |
 | `POST` | `/semantic-assets/ontology-relations` | 登录 | `semantic_assets.create_ontology_relation` |

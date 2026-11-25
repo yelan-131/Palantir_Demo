@@ -9,12 +9,11 @@ import {
   ReloadOutlined,
   SaveOutlined,
   UploadOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   Avatar,
   Button,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -40,7 +39,6 @@ import {
   adminListUsers,
   adminRevokeSession,
   adminUpdateUser,
-  adminUpdateUserSecurity,
 } from '@/services/api';
 import { formatServerDateTime } from '@/utils/dateTime';
 
@@ -67,6 +65,7 @@ interface UserItem {
 }
 
 type ImportRow = Record<string, string>;
+type UserDetailMode = 'view' | 'edit' | 'saving';
 
 const csvHeaders = 'username,display_name,email,avatar_url,password,role_names,org_names,is_active';
 const visibleTagCount = 2;
@@ -129,15 +128,12 @@ export default function UserManagement() {
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
-  const [editingUser, setEditingUser] = useState<UserItem | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailEditing, setDetailEditing] = useState(false);
+  const [detailMode, setDetailMode] = useState<UserDetailMode>('view');
   const [query, setQuery] = useState('');
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(100);
   const [form] = Form.useForm();
-  const [securityForm] = Form.useForm();
 
   const orgOptions = useMemo(
     () => orgUnits.map((org) => ({ label: `${org.name} / ${org.org_type}`, value: org.id })),
@@ -159,16 +155,6 @@ export default function UserManagement() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    if (!users.length) {
-      setSelectedUserId(null);
-      return;
-    }
-    if (!selectedUserId || !users.some((user) => user.id === selectedUserId)) {
-      setSelectedUserId(users[0].id);
-    }
-  }, [users, selectedUserId]);
 
   const openCreate = () => {
     form.resetFields();
@@ -197,14 +183,12 @@ export default function UserManagement() {
       await adminUpdateUser(record.id, updates);
       message.success('用户已更新');
       await fetchData();
+      return true;
     } catch {
       message.error('更新用户失败');
-      throw new Error('update-user-failed');
+      return false;
     }
   };
-
-
-
 
   const deleteUser = async (record: UserItem) => {
     await adminDeleteUser(record.id);
@@ -258,23 +242,41 @@ export default function UserManagement() {
     }
   };
 
-  const selectedUser = useMemo(
-    () => users.find((user) => user.id === selectedUserId) || null,
-    [users, selectedUserId],
-  );
-
   const filteredUsers = useMemo(() => {
     const term = query.trim().toLowerCase();
     return users.filter(user => [user.username, user.display_name, user.email, ...(user.roles || []).map(role => role.label), ...(user.org_units || []).map(org => org.name)].some(value => value?.toLowerCase().includes(term)));
   }, [users, query]);
-  const closeDetail = () => {
-    if (detailEditing) Modal.confirm({ title: '放弃未保存的修改？', content: '关闭后，本次编辑的内容将不会保存。', okText: '放弃修改', cancelText: '继续编辑', onOk: () => { setDetailOpen(false); setDetailEditing(false); } });
-    else setDetailOpen(false);
-  };
+  const currentPage = Math.min(userPage, Math.max(1, Math.ceil(filteredUsers.length / userPageSize)));
   const pagedUsers = useMemo(() => {
-    const start = (userPage - 1) * userPageSize;
+    const start = (currentPage - 1) * userPageSize;
     return filteredUsers.slice(start, start + userPageSize);
-  }, [filteredUsers, userPage, userPageSize]);
+  }, [currentPage, filteredUsers, userPageSize]);
+  const selectableUsers = detailMode === 'view' ? pagedUsers : users;
+  const selectedUser = selectableUsers.find((user) => user.id === selectedUserId) ?? pagedUsers[0] ?? null;
+  const previewMode = selectedUser?.id === selectedUserId ? detailMode : 'view';
+
+  const selectUser = (userId: number) => {
+    if (detailMode === 'saving') return;
+    if (userId === selectedUser?.id) {
+      setSelectedUserId(userId);
+      return;
+    }
+    if (previewMode === 'edit') {
+      Modal.confirm({
+        title: '放弃未保存的修改？',
+        content: '切换用户后，本次编辑的内容将不会保存。',
+        okText: '放弃修改',
+        cancelText: '继续编辑',
+        onOk: () => {
+          setDetailMode('view');
+          setSelectedUserId(userId);
+        },
+      });
+      return;
+    }
+    setDetailMode('view');
+    setSelectedUserId(userId);
+  };
 
   return (
     <div className="user-management-console">
@@ -297,13 +299,13 @@ export default function UserManagement() {
             className="user-management-table"
             scroll={{ x: 760, y: '100%' }}
             pagination={false}
-            rowClassName={(record) => (detailOpen && record.id === selectedUserId ? 'user-row-selected' : '')}
-            onRow={(record) => ({ onClick: () => { setSelectedUserId(record.id); setDetailOpen(true); } })}
+            rowClassName={(record) => (record.id === selectedUser?.id ? 'user-row-selected' : '')}
+            onRow={(record) => ({ onClick: () => selectUser(record.id) })}
             columns={[
               {
                 title: '用户',
                 width: 240,
-                render: (_value, record) => <button className="user-directory-person" onClick={() => { setSelectedUserId(record.id); setDetailOpen(true); }}>
+                render: (_value, record) => <button type="button" className="user-directory-person" aria-current={record.id === selectedUser?.id || undefined}>
                   <Avatar className="user-table-avatar" size={32} src={record.avatar_url || undefined}>{getUserAvatarText(record)}</Avatar>
                   <span><strong>{record.display_name || record.username}</strong><small>{record.username}</small></span>
                 </button>,
@@ -350,7 +352,7 @@ export default function UserManagement() {
           />
           <div className="user-management-pagination">
             <Pagination
-              current={userPage}
+              current={currentPage}
               pageSize={userPageSize}
               total={filteredUsers.length}
               showSizeChanger
@@ -364,17 +366,20 @@ export default function UserManagement() {
           </div>
         </div>
 
-      </div>
-      <Drawer title="用户详情" open={detailOpen} onClose={closeDetail} width={600} rootClassName="user-detail-drawer" destroyOnClose>
         <UserPreviewPanel
-          onEditingChange={setDetailEditing}
+          key={selectedUser?.id}
           user={selectedUser}
+          mode={previewMode}
+          onModeChange={(mode) => {
+            if (mode === 'edit' && selectedUser) setSelectedUserId(selectedUser.id);
+            setDetailMode(mode);
+          }}
           roles={roles}
           orgOptions={orgOptions}
           onSave={saveUserInline}
           onDelete={deleteUser}
         />
-      </Drawer>
+      </div>
 
       <Modal title="新建用户" open={createOpen} onOk={submitCreateUser} onCancel={() => setCreateOpen(false)} destroyOnClose>
         <Form form={form} layout="vertical">
@@ -417,31 +422,34 @@ export default function UserManagement() {
 
 function UserPreviewPanel({
   user,
+  mode,
+  onModeChange,
   roles,
   orgOptions,
   onSave,
   onDelete,
-  onEditingChange,
 }: {
-  onEditingChange: (editing: boolean) => void;
   user: UserItem | null;
+  mode: UserDetailMode;
+  onModeChange: (mode: UserDetailMode) => void;
   roles: RoleItem[];
   orgOptions: Array<{ label: string; value: number }>;
-  onSave: (record: UserItem, values: any) => Promise<void>;
+  onSave: (record: UserItem, values: any) => Promise<boolean>;
   onDelete: (record: UserItem) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState('overview');
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { onEditingChange(editing || saving); }, [editing, saving, onEditingChange]);
+  const editing = mode !== 'view';
+  const saving = mode === 'saving';
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [inlineForm] = Form.useForm();
 
-  const loadSessions = useCallback(async (record: UserItem) => {
+  const userId = user?.id;
+  const loadSessions = useCallback(async () => {
+    if (userId === undefined) return;
     setSessionsLoading(true);
     try {
-      const res = await adminListUserSessions(record.id);
+      const res = await adminListUserSessions(userId);
       setSessions(res.data?.data || []);
     } catch {
       setSessions([]);
@@ -449,48 +457,33 @@ function UserPreviewPanel({
     } finally {
       setSessionsLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user) return;
-    setEditing(false);
-    inlineForm.setFieldsValue(getUserFormValues(user));
-    setSessions([]);
-  }, [inlineForm, user?.id]);
+    if (user && !editing) inlineForm.setFieldsValue(getUserFormValues(user));
+  }, [editing, inlineForm, user]);
 
   useEffect(() => {
-    if (!user) return;
-    inlineForm.setFieldsValue(getUserFormValues(user));
-  }, [inlineForm, user]);
-
-  useEffect(() => {
-    if (user && activeTab === 'sessions') {
-      loadSessions(user);
-    }
-  }, [activeTab, loadSessions, user]);
+    if (activeTab === 'sessions') loadSessions();
+  }, [activeTab, loadSessions]);
 
   if (!user) {
     return (
-      <aside className="user-preview-panel">
-        <Empty description="选择一个用户查看账号治理信息" />
+      <aside className="user-preview-panel" aria-label="用户详情">
+        <Empty description="暂无用户可显示" />
       </aside>
     );
   }
 
   const saveEdit = async () => {
-    const values = await inlineForm.validateFields();
-    setSaving(true);
+    onModeChange('saving');
     try {
-      await onSave(user, values);
-      setEditing(false);
-    } finally {
-      setSaving(false);
+      const values = await inlineForm.validateFields();
+      const saved = await onSave(user, values);
+      onModeChange(saved ? 'view' : 'edit');
+    } catch {
+      onModeChange('edit');
     }
-  };
-
-  const cancelEdit = () => {
-    inlineForm.setFieldsValue(getUserFormValues(user));
-    setEditing(false);
   };
 
   const securityRisks = [
@@ -615,7 +608,7 @@ function UserPreviewPanel({
                   disabled={Boolean(record.revoked_at)}
                   onClick={async () => {
                     await adminRevokeSession(record.session_id);
-                    await loadSessions(user);
+                    await loadSessions();
                   }}
                 >
                   撤销
@@ -630,7 +623,7 @@ function UserPreviewPanel({
   ];
 
   return (
-    <aside className="user-preview-panel">
+    <aside className="user-preview-panel" aria-label="用户详情">
       <div className="user-preview-head">
         <div>
           <Space size={6} wrap>
@@ -643,11 +636,11 @@ function UserPreviewPanel({
           {editing ? (
             <>
               <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={saveEdit}>保存</Button>
-              <Button size="small" icon={<CloseOutlined />} onClick={cancelEdit}>取消</Button>
+              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={() => onModeChange('view')}>取消</Button>
             </>
           ) : (
             <>
-              <Button size="small" icon={<EditOutlined />} onClick={() => setEditing(true)}>编辑</Button>
+              <Button size="small" icon={<EditOutlined />} onClick={() => onModeChange('edit')}>编辑</Button>
               {user.username !== 'admin' && (
                 <Popconfirm title="确定删除该用户？" onConfirm={() => onDelete(user)}>
                   <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
@@ -657,7 +650,7 @@ function UserPreviewPanel({
           )}
         </Space>
       </div>
-      <Form form={inlineForm} layout="vertical" component={false}>
+      <Form form={inlineForm} layout="vertical" component={false} disabled={saving}>
         <SettingsTabs className="user-preview-tabs" activeKey={activeTab} onChange={setActiveTab} items={tabs} />
       </Form>
     </aside>

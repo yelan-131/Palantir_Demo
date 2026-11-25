@@ -84,10 +84,9 @@ node --test tests/*.test.cjs    # 单元测试（需先安装依赖）
 | `/studio/business-data` | 业务数据 | `SystemAdmin/AppMenuManagement`（业务数据模式，`?form=` 定位表单） |
 | `/studio/page-design` | 页面设计 | `ComponentPages/PageDesignWorkspace` |
 | `/studio/templates` | 模板中心 | `TemplateMarket` |
-| `/data-center/sources` | 数据接入（含同步与管道页签） | `DataCenterWorkspace workspace="sources"` |
-| `/data-center/assets` | 数据资产（含实体浏览视图） | `DataCenterWorkspace workspace="assets"` |
+| `/data-center/assets` | 数据资产（资产目录、连接管理、同步任务） | `DataCenterWorkspace workspace="assets"` |
 | `/data-center/reference` | 基础数据 | `SystemAdmin/ReferenceDataManagement` |
-| `/data-center/objects` | 对象与关系（含图谱视图） | `DataCenterWorkspace workspace="objects"` |
+| `/data-center/objects` | 对象与关系（对象浏览、模型设计、关系探索） | `DataCenterWorkspace workspace="objects"` |
 | `/data-center/knowledge` | 知识库 | `SystemAdmin/SemanticAssetCenter` 的 `KnowledgeCenter` |
 | `/admin/identity` | 组织、身份与权限 | `SystemAdmin/IdentityAccessManagement` |
 | `/admin/ai` | AI 与平台设置 | `AccountCenter` 的 `AIPlatformPanelV2` |
@@ -95,7 +94,7 @@ node --test tests/*.test.cjs    # 单元测试（需先安装依赖）
 | `/admin/quality-impact` | 质量影响与时间线（实验） | `QualityImpact` |
 | `/admin/entity-timeline`、`/admin/graph-tools`、`/admin/model-tools`、`/admin/ai-builder`、`/admin/config-transfer`、`/admin/readiness` | 高级工具 | `BackendSettings` 的对应分区 |
 
-`/admin/sources`、`/admin/assets` 等后台旧入口与对应的 `/data-center/*` 渲染相同内容。
+旧的 `/data-center/sources` 和 `/data-center/pipelines` 链接转到「数据资产」中的对应页签。原字段映射链接转到 `/data-center/objects?view=ontology&section=mapping`，并保留来源等筛选参数。旧的后台数据入口也会转到对应页面。
 
 ### 4.3 业务页面的解析
 

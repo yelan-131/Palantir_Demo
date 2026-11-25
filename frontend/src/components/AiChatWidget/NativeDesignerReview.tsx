@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Alert, Button } from 'antd';
-import { CheckCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined } from '@/components/Icon/ant';
 import { useAiWorkbench } from './context';
 import { createUuid } from '@/utils/uuid';
 import type { NewFormDraft } from './pageControls';

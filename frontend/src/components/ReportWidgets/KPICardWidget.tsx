@@ -11,7 +11,7 @@ import {
   TeamOutlined,
   ShopOutlined,
   DatabaseOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import type { WidgetInstance } from './types';
 import { fetchDataFromApi } from './WidgetRegistry';
 

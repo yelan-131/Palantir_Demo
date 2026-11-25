@@ -1,6 +1,6 @@
 import { Button } from 'antd';
 import React from 'react';
-import { SettingOutlined } from '@ant-design/icons';
+import { SettingOutlined } from '@/components/Icon/ant';
 
 export function RuleToggleControl({
   enabled,

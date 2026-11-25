@@ -18,7 +18,7 @@ import {
   RobotOutlined,
   SafetyCertificateOutlined,
   UserOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   Alert,
   AutoComplete,

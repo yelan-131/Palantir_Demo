@@ -4,7 +4,7 @@ import {
   Table, Button, Space, Modal, Form, Input, Select, Tag, Popconfirm,
   Typography, message, Card, Descriptions,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, EyeOutlined } from '@/components/Icon/ant';
 import { wfListDefinitions, wfCreateDefinition, wfUpdateDefinition, wfDeleteDefinition, wfStartInstance } from '@/services/api';
 
 interface WfDef {
@@ -43,7 +43,7 @@ export default function WorkflowList() {
         <div style={{ marginTop: 16 }}>
           <div style={{
             position: 'relative', minHeight: 200,
-            background: 'var(--mf-panel-soft)', borderRadius: 8, padding: 20, border: '1px solid #e8e8e8',
+            background: 'var(--mf-panel-soft)', borderRadius: 10, padding: 20, border: '1px solid #e8e8e8',
           }}>
             {nodes.map((node: any) => {
               const colors: Record<string, string> = {
@@ -61,7 +61,7 @@ export default function WorkflowList() {
               );
             })}
             {edges.map((edge: any) => (
-              <div key={edge.id} style={{ position: 'absolute', left: 0, top: 0, fontSize: 10, color: '#999' }}>
+              <div key={edge.id} style={{ position: 'absolute', left: 0, top: 0, fontSize: 12, color: '#999' }}>
                 {edge.label ? `${edge.source} → ${edge.target} (${edge.label})` : ''}
               </div>
             ))}

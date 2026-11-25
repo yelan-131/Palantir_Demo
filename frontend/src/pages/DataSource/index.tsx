@@ -33,7 +33,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   listDataSources,
   createDataSource,
@@ -281,7 +281,7 @@ export default function DataSourcePage() {
             icon={<SyncOutlined />}
             disabled={record.type==='api'}
             title={record.type==='api'?'只读 API 按需读取，无需同步':undefined}
-            onClick={() => navigate('/data-center/sources?tab=pipelines')}
+            onClick={() => navigate('/data-center/assets?view=pipelines')}
           >
             同步任务
           </Button>

@@ -24,7 +24,7 @@ import {
   CloseCircleOutlined,
   PlusOutlined,
   DownloadOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import ReactECharts from 'echarts-for-react';
 import { TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import { TECH_WHITE_PALETTE } from '../../theme/techWhite';

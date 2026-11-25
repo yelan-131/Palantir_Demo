@@ -1,7 +1,8 @@
 import { Alert, Button, Divider, Form, Input, Modal, Typography, message } from 'antd';
 import { isAxiosError } from 'axios';
 import { flushSync } from 'react-dom';
-import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons';
+import { LockKeyhole, ShieldCheck, UserRound } from 'lucide-react';
+import { Icon } from '@/components/Icon';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { authLoginWithMfa, getOidcLoginUrl } from '@/services/api';
@@ -182,8 +183,7 @@ export default function LoginPage() {
   return (
     <main className={`technology-login${entering ? ' is-entering-workspace' : ''}`} aria-busy={entering} data-transition-mode={nativeTransition ? 'snapshot' : 'fade'}>
       <section className="technology-login-intro" aria-label="平台介绍">
-        <div className="technology-login-atmosphere" aria-hidden="true"><span /><span /><span /></div>
-        <div className="technology-login-transition" aria-hidden="true" />
+        <div className="technology-login-brand"><span className="technology-login-brand-mark" aria-hidden="true">MF</span><strong>ManuFoundry</strong><span>制造数智平台</span></div>
         <div className="technology-login-description">
           <span className="technology-login-kicker"><i /> 制造业数据工作空间</span>
           <Typography.Title level={1}>连接制造现场<br /><em>让数据驱动协作</em></Typography.Title>
@@ -250,10 +250,10 @@ export default function LoginPage() {
           onFinish={handleLogin}
         >
           <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
-            <Input prefix={<UserOutlined />} placeholder="请输入组织账号" autoComplete="username" autoCapitalize="none" spellCheck={false} />
+            <Input prefix={<Icon icon={UserRound} />} placeholder="请输入组织账号" autoComplete="username" autoCapitalize="none" spellCheck={false} />
           </Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" autoComplete="current-password" />
+            <Input.Password prefix={<Icon icon={LockKeyhole} />} placeholder="请输入密码" autoComplete="current-password" />
           </Form.Item>
           <div className="technology-login-help"><Button type="link" onClick={() => setHelpOpen(true)}>无法登录？联系管理员</Button></div>
           {loginError && <Alert className="technology-login-error" type="error" showIcon message={loginError} role="alert" />}
@@ -263,7 +263,7 @@ export default function LoginPage() {
         </Form>
 
         <Divider plain className="technology-login-divider">或</Divider>
-        <Button block icon={<SafetyCertificateOutlined />} loading={ssoLoading} disabled={loading || entering} onClick={handleSsoLogin}>
+        <Button block icon={<Icon icon={ShieldCheck} />} loading={ssoLoading} disabled={loading || entering} onClick={handleSsoLogin}>
           企业 SSO 登录
         </Button>
         <div className="technology-login-auth-note">账号由组织统一分配，企业 SSO 需组织开通。</div>

@@ -8,8 +8,9 @@ from app.services.form_definition import _form_payload, _permission_design_from_
 def _published_form_payload(form, version, *, applications: Optional[list] = None) -> dict:
     snapshot = version.snapshot or {}
     form_snapshot = snapshot.get("form") or {}
-    config = form_snapshot.get("config") or form.config or {}
     live_config = form.config or {}
+    snapshot_config = form_snapshot.get("config")
+    config = snapshot_config or {key: value for key, value in live_config.items() if key != "formAppearance"}
     snapshot_view = config.get("viewConfig") if isinstance(config, dict) else None
     live_view = live_config.get("viewConfig") if isinstance(live_config, dict) else None
     if (

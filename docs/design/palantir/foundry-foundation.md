@@ -151,7 +151,7 @@ RiskEvent -> Equipment -> WorkOrder -> SalesOrder
 3. 固化动作：生成整改任务、冻结物料批次、创建设备点检、通知负责人。
    部分实现。生成 CAPA 会写入 `CAPA` 表（`api/quality.py` 的 `POST /quality/capa`）；冻结批次、复检、维修工单、通知采购通过 `POST /quality/events/{event_id}/actions` 只返回演示结果，不修改业务数据。
 4. 在图谱探索或新建指挥台中展示影响图谱。
-   部分实现。质量影响工作台 `/admin/quality-impact`（`pages/QualityImpact`）展示以事件为中心的影响图谱；通用图谱探索在 `/data-center/objects?view=graph`（`pages/GraphExplorer`）。
+   部分实现。质量影响工作台 `/admin/quality-impact`（`pages/QualityImpact`）展示以事件为中心的影响图谱。关系探索 `/data-center/objects?view=graph`（`pages/DataCenterWorkspace/RelationshipExplorer`）展示业务对象记录之间的关系。
 5. 将动作接入流程和通知。
    未实现。质量事件动作没有发起审批流程或发送通知。
 

@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { DatabaseOutlined, DeleteOutlined, EditOutlined, NodeIndexOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, DeleteOutlined, EditOutlined, NodeIndexOutlined, PlusOutlined, ReloadOutlined } from '@/components/Icon/ant';
 import { Button, Card, Checkbox, Col, Empty, Form, Input, InputNumber, List, Modal, Row, Select, Slider, Space, Spin, Switch, Table, Tabs, Tag, Typography, type FormInstance } from 'antd';
 import type { NavigateFunction } from 'react-router-dom';
 import type { OntologyCandidateInfo } from '../../services/api';
@@ -130,7 +130,7 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
       <h3>{assetLoadFailed ? '暂时无法读取资产目录' : '还没有数据源'}</h3>
       <p>{assetLoadFailed ? '可以重试读取，或接入新的数据源。' : '接入数据源后，即可扫描表和字段，建立资产目录。'}</p>
       <Space>
-        <Button type="primary" icon={<DatabaseOutlined />} onClick={() => navigate('/data-center/sources')}>前往连接管理</Button>
+        <Button type="primary" icon={<DatabaseOutlined />} onClick={() => navigate('/data-center/assets?view=connections')}>前往连接管理</Button>
         {assetLoadFailed && <Button onClick={load}>重试</Button>}
       </Space>
     </section> : <div className="data-asset-workbench">
@@ -140,7 +140,7 @@ export function DataAssetView({ catalog, quality, candidates, actions }: { catal
           title="数据源"
           extra={(
             <Space size={4}>
-              <Button size="small" onClick={() => navigate('/data-center/sources')}>连接管理</Button>
+              <Button size="small" onClick={() => navigate('/data-center/assets?view=connections')}>连接管理</Button>
               <Button size="small" icon={<ReloadOutlined />} onClick={load}>刷新</Button>
             </Space>
           )}

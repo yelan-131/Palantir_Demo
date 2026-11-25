@@ -8,7 +8,7 @@ import {
   AppstoreOutlined, CheckCircleOutlined,
   ShopOutlined, ThunderboltOutlined, SafetyCertificateOutlined,
   ToolOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { listTemplates, instantiateTemplate, getTemplate, listApplicationTemplates, instantiateApplicationTemplate } from '@/services/api';
 import { shellIcon } from '@/components/ShellNavigation';
 import { useAuthStore } from '@/stores/authStore';

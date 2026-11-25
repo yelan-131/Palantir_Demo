@@ -1,7 +1,7 @@
 import './style.css';
 import './designer-dialog.css';
 import { Button, Checkbox, Dropdown, Form, Input, InputNumber, Modal, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
-import { ApartmentOutlined, ArrowLeftOutlined, CalendarOutlined, CheckCircleOutlined, CheckSquareOutlined, DatabaseOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined, HolderOutlined, LayoutOutlined, LockOutlined, NumberOutlined, PlusOutlined, QuestionCircleOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SettingOutlined, TableOutlined, UndoOutlined, UserSwitchOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, ArrowLeftOutlined, CalendarOutlined, CheckCircleOutlined, CheckSquareOutlined, DatabaseOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined, HolderOutlined, LayoutOutlined, LockOutlined, NumberOutlined, PlusOutlined, QuestionCircleOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SettingOutlined, TableOutlined, UndoOutlined, UserSwitchOutlined } from '@/components/Icon/ant';
 import type { CalculationRule } from '@/utils/formCalculations';
 import { cloneLayoutSubtree, isLayoutContainer, isLayoutControl, layoutDescendants, layoutSlots, normalizeLayout, placeLayoutControl, unwrapLayoutControl } from '@/utils/formLayout';
 import { defaultRuleErrors } from '@/utils/formDefaults';
@@ -12,6 +12,7 @@ import { enumOptions, matchesOptionSearch } from '@/utils/formControls';
 import type { OptionSearchSettings } from '@/utils/formControls';
 import { adminListOrgUnits, adminListRoles, adminListUsers, createPlatformForm, createPlatformFormField, getFormOptionSources, getPlatformForm, getPlatformFormByCode, listPlatformFormLayouts, listPlatformFormPermissions, listPlatformForms, listWorkflowBindings, previewDesignerRules, previewFormReferenceOptions, previewOptionSearchSchema, publishPlatformForm, restorePlatformFormDraft, updatePlatformForm, updatePlatformFormField, upsertPlatformFormLayout, wfCreateDefinition, wfGetDefinition, wfUpdateDefinition } from '@/services/api';
 import type { PlatformForm, PlatformFormField, PlatformFormPublishReport } from '@/services/api';
+import { FormAppearanceHeader, normalizeFormAppearance, type FormAppearance } from '@/components/FormLayout/formAppearance';
 import { PropertyGroup, PropertyInspectorHeader, PropertyRow } from '@/components/PropertyInspector';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeViewConfig } from '@/utils/viewConfig';
@@ -33,7 +34,7 @@ import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, encodingDatePatternOptions, encoding
 import type { AnalyticsDesign, AssignmentRule, ComponentDefinition, ComponentPanel, ControlRule, ControlRuleCondition, ControlRuleKey, ControlTypeSettings, ControlWidth, DesignerConfig, DesignerField, DropPosition, EncodingRule, EncodingSegment, FlowConnection, FlowNode, FlowNodeDefinition, FlowPortSide, FormPermissionRow, LayoutControl, OptionSearchSchema, PermissionDesignDraft, PermissionDraftMap, SearchSettingsDraft, ViewConfigMeta, WorkflowBindingPayload, WorkflowDefinitionPayload, WorkflowDesignerMeta } from './designerTypes';
 import { encodingSegmentLengthError, getDateSegmentLength, getEncodingRules, getEncodingSegmentTypeLabel, getEncodingSegments, makeEncodingRule, makeEncodingSegment, renderEncodingSample } from './encodingRules';
 import { getFieldBusinessType, isEncodingField, mapDesignerFieldType } from './fieldBusinessType';
-import { alertBusinessSections, designerFieldsToViewFields, getDefaultTypeSettings, getDesignerMeta, getEffectiveControlTypeForControl, getFlowNodeAssigneeLabel, getPreviewNodeNote, getRecommendedRules, getReferenceConfig, inferFieldControlType, inferReferenceSourceKind, isDataSourceControlType, isEditableTarget, makeAiLayoutControl, makeComponentControl, makeControlRules, makeFieldControl, normalizeBusinessSections, normalizeControlRules, optionSourceToOptions } from './fieldModel';
+import { alertBusinessSections, designerFieldsToViewFields, getDefaultTypeSettings, getDesignerMeta, getEffectiveControlTypeForControl, getFlowNodeAssigneeLabel, getPreviewNodeNote, getReferenceConfig, inferFieldControlType, inferReferenceSourceKind, isDataSourceControlType, isEditableTarget, makeAiLayoutControl, makeComponentControl, makeControlRules, makeFieldControl, normalizeBusinessSections, normalizeControlRules, optionSourceToOptions } from './fieldModel';
 import { makeFlowConnections, makeFlowNodes } from './flowGeometry';
 import { applyNativeFieldProperties, draftFieldToDesignerField } from './nativeDraft';
 import { defaultRoleFieldPermission, getDefaultPermissionActionEnabled, makePermissionDesignDraft, permissionActionDefinitions, permissionActionGroups, permissionDraftsFromConfig, permissionDraftsFromRows, sanitizePermissionDesignDraft } from './permissionDrafts';
@@ -43,7 +44,7 @@ import { getStoredViewConfig, getViewConfigMeta, getWorkflowDesignerMeta, makeDe
 
 import { CanvasControl, ContainerProperties, PreviewContent, TableProperties } from './CanvasStage';
 import type { CanvasActions, CanvasScope } from './CanvasStage';
-import { AssignmentEditor, CalculationEditor, ControlIdentityProperties, DataAttributeProperties, DefaultValueEditor, InteractionProperties, LayoutAppearanceProperties, LayoutWidthProperties, SearchSettingsEditor, TypeSpecificProperties } from './PropertyPanels';
+import { AssignmentEditor, CalculationEditor, ControlIdentityProperties, DataAttributeProperties, DefaultValueEditor, FormAppearanceProperties, InteractionProperties, LayoutAppearanceProperties, LayoutWidthProperties, SearchSettingsEditor, TypeSpecificProperties } from './PropertyPanels';
 import type { PropertyPanelActions, PropertyPanelScope } from './PropertyPanels';
 
 export interface SourceEditorTargets {properties:HTMLElement|null;actions:HTMLElement|null;status:HTMLElement|null}
@@ -139,6 +140,10 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   const [librarySearch, setLibrarySearch] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [canvasSettings,setCanvasSettings]=useState({columns:2,gap:12});
+  const [showCanvasGrid, setShowCanvasGrid] = useState(false);
+  const [formAppearance, setFormAppearance] = useState<FormAppearance>({});
+  const renderedAppearance = normalizeFormAppearance(formAppearance);
+  const savedAppearance = Object.keys(renderedAppearance).length ? renderedAppearance : undefined;
   const [previewForm]=Form.useForm();
   const [previewValues,setPreviewValues]=useState<Record<string,unknown>>({});
   const [previewStates,setPreviewStates]=useState<Record<string,{visible:boolean;required:boolean;readonly:boolean;masked?:boolean;copyMode?:'normal'|'maskedCopy'|'disabled';copyText?:string}>>({});
@@ -429,6 +434,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
           },
         }));
         setPlatformForm(formDetail);
+        setFormAppearance(normalizeFormAppearance(formDetail.config?.formAppearance));
         const savedCanvas=formDetail.config?.canvasSettings as {columns?:number;gap?:number}|undefined;
         setCanvasSettings({columns:[1,2,3].includes(Number(savedCanvas?.columns))?Number(savedCanvas?.columns):2,gap:[8,12,16].includes(Number(savedCanvas?.gap))?Number(savedCanvas?.gap):12});
         let layouts: Array<{ layout_type?: string; config?: Record<string, unknown>; updated_at?: string }> = [];
@@ -611,8 +617,6 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   ];
   const alertSections = normalizeBusinessSections(designerMeta.businessSections, fallbackBusinessSections);
   const hiddenRequiredControls = layoutControls.filter((control) => !control.rules.visible.enabled && control.rules.required.enabled);
-  const recommendedRules = getRecommendedRules(baseConfig.fields);
-
   const updateSelectedControlRule = (ruleKey: ControlRuleKey, patch: Partial<ControlRule>) => {
     if (!selectedControl) return;
     const normalizedRules = normalizeControlRules(selectedControl.rules, selectedField);
@@ -851,6 +855,11 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
 
   const markUnsaved = () => setHasUnsavedChanges(true);
 
+  const updateFormAppearance = (patch: Partial<FormAppearance>) => {
+    setFormAppearance(current => ({ ...current, ...patch }));
+    markUnsaved();
+  };
+
   const ensurePlatformForm = async () => {
     if (platformForm) return platformForm;
     if (aiFormDraft) throw new Error('请先确认创建草稿');
@@ -961,6 +970,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
           canvasSettings,
+          formAppearance: savedAppearance,
           viewConfigMeta: nextMeta,
         }
       : {
@@ -971,6 +981,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
           permissionDesignDraft:{version:1,roles:Object.fromEntries(Object.entries(permissionDrafts).map(([key,value])=>[key,sanitizePermissionDesignDraft(value)]))},
           formDesignerControls: layoutControls,
           canvasSettings,
+          formAppearance: savedAppearance,
           viewConfigMeta: nextMeta,
         };
     const response = await updatePlatformForm(form.id, { config: nextConfig });
@@ -1085,6 +1096,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
           ) },
           formDesignerControls: layoutControls,
           canvasSettings,
+          formAppearance: savedAppearance,
         },
         designer_draft: {
           draft_id: aiFormDraft.id,
@@ -1413,8 +1425,8 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
 
   const { registerPageController, setDesignerContext } = useAiWorkbench();
   const draftSaveSnapshot = useMemo(() => ({
-    baseConfig, canvasSettings, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig,
-  }), [baseConfig, canvasSettings, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig]);
+    baseConfig, canvasSettings, formAppearance, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig,
+  }), [baseConfig, canvasSettings, formAppearance, fieldDefaultValueDrafts, layoutControls, permissionDrafts, professionalFlowConfig, storedViewConfig]);
   const [layoutReview, setLayoutReview] = useState<{ id: string; snapshot: typeof draftSaveSnapshot }>();
   const layoutReviewId = hasUnsavedChanges && layoutReview?.snapshot === draftSaveSnapshot ? layoutReview.id : undefined;
   const aiNativeState = useRef({ layoutControls, selectedControlId, platformForm, layoutReviewId, commitLayoutChange, saveDraft, onTabChange, fields: baseConfig.fields });
@@ -2368,9 +2380,9 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
                 <button type="button" onClick={() => { setSelectedControlId(''); setSelectedAssetKey(''); }}><LayoutOutlined /> 表单画布</button>
                 <span>{layoutControls.filter(control => !isLayoutContainer(control)).length} 个控件 · 点击选择，拖动排序</span>
               </div>
-              <div className="create-form-modal" onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
-                <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>
-                <div style={{gap:canvasSettings.gap}} className={`create-form-grid ${isCanvasDragActive ? 'canvas-drag-active' : ''}`} onClick={event => { if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
+              <div className="create-form-modal" style={{ backgroundColor: renderedAppearance.backgroundColor }} onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
+                <FormAppearanceHeader appearance={renderedAppearance} fallbackTitle={baseConfig.name} className="form-editor-canvas-heading" />
+                <div style={{gap:canvasSettings.gap}} className={`create-form-grid${showCanvasGrid ? ' show-canvas-grid' : ''}${isCanvasDragActive ? ' canvas-drag-active' : ''}`} onClick={event => { if (event.target === event.currentTarget) { setSelectedControlId(''); setSelectedAssetKey(''); } }}>
                   {layoutControls.filter(control => !control.parentId).map(control => <CanvasControl key={control.id} control={control} scope={canvasScope} actions={canvasActions} />)}
                   {isCanvasDragActive && !dropHint && <div className="canvas-drop-end-indicator">拖到这里放在末尾</div>}
                 </div>
@@ -2691,7 +2703,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
 
         {!isAnalysisDesigner && activeTab === 'form' && (
         sourcePortal(<aside className="form-designer-right property-inspector">
-          <PropertyInspectorHeader title={selectedControl ? '控件属性' : '表单属性'} context={selectedControl?.name || baseConfig.name} />
+          <PropertyInspectorHeader title={selectedControl ? '控件属性' : '表单外观'} context={selectedControl?.name || baseConfig.name} />
           {selectedControl ? (
             <div className="designer-props">
               <ControlIdentityProperties scope={propertyScope} actions={propertyActions} />
@@ -2709,14 +2721,17 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
             </div>
           ) : (
             <div className="designer-props">
-              <PropertyGroup title="画布规格" className="designer-canvas-property-group">
-                <PropertyRow label="默认列数"><Select value={String(canvasSettings.columns)} onChange={value=>{const columns=Number(value);setCanvasSettings(current=>({...current,columns}));commitLayoutChange(current=>current.map(c=>!c.parentId&&!isLayoutContainer(c)&&c.controlType!=='divider'?{...c,width:columns===1?'full':columns===3?'third':'half'}:c));}} options={[{ value: '1', label: '单列' }, { value: '2', label: '两列' }, { value: '3', label: '三列' }]} /></PropertyRow>
-                <PropertyRow label="字段间距"><Select value={String(canvasSettings.gap)} onChange={value=>{setCanvasSettings(current=>({...current,gap:Number(value)}));setHasUnsavedChanges(true);}} options={[{ value: '8', label: '紧凑' }, { value: '12', label: '标准' }, { value: '16', label: '宽松' }]} /></PropertyRow>
+              <FormAppearanceProperties
+                value={formAppearance}
+                formName={baseConfig.name}
+                disabled={isResolvingPlatformConfig || isPersistingFlow}
+                onChange={updateFormAppearance}
+              />
+              <PropertyGroup title="编辑辅助" className="designer-canvas-property-group">
+                <PropertyRow label="显示背景网格">
+                  <Switch size="small" checked={showCanvasGrid} onChange={setShowCanvasGrid} />
+                </PropertyRow>
               </PropertyGroup>
-              {recommendedRules.length > 0 && <PropertyGroup title="内置配置参考" defaultOpen={true} className="designer-canvas-property-group">
-                <small className="designer-recommendation-note"><strong>来源：平台预置规则</strong><span>按字段名称匹配，仅供参考；需手动配置后生效。</span></small>
-                {recommendedRules.map((rule) => <div className="designer-rule-pill" key={rule}>{rule}</div>)}
-              </PropertyGroup>}
             </div>
           )}
         </aside>,workspaceTargets?.properties)
@@ -2891,8 +2906,8 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         <div className="trial-stage">
         <div className="trial-stage-label"><span className="trial-live-dot" />表单预览<span>·</span><span>{isAnalysisDesigner ? '示意布局' : '与当前草稿同步'}</span></div>
         <div className="designer-preview-shell designer-preview-desktop">
-          <div className="designer-preview-surface trial-canvas form-designer-embedded">
-            <div className="form-editor-canvas-heading"><strong>{baseConfig.name}</strong></div>
+          <div className="designer-preview-surface trial-canvas form-designer-embedded" style={{ backgroundColor: renderedAppearance.backgroundColor }}>
+            <FormAppearanceHeader appearance={renderedAppearance} fallbackTitle={baseConfig.name} className="form-editor-canvas-heading" />
             <div className="trial-form-body"><PreviewContent scope={canvasScope} actions={canvasActions} /></div>
           </div>
         </div>

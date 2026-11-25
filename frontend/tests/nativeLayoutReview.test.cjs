@@ -27,7 +27,7 @@ function harness() {
     },
     'react/jsx-runtime': require('react/jsx-runtime'),
     antd: { Alert: 'alert', Button: 'button', Space: 'div', Tag: 'span' },
-    '@ant-design/icons': { CheckCircleOutlined: 'i' },
+    '@/components/Icon/ant': { CheckCircleOutlined: 'i' },
     '@/utils/uuid': {},
     './context': { useAiWorkbench: () => ({
       designerContext,

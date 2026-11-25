@@ -1420,6 +1420,17 @@ class OntologyObject(TimestampMixin, Base):
     fields: Mapped[list["OntologyField"]] = relationship(back_populates="object", cascade="all, delete-orphan")
 
 
+class OntologyRecordMetadata(TimestampMixin, Base):
+    __tablename__ = "ontology_record_metadata"
+
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True)
+    object_id: Mapped[int] = mapped_column(ForeignKey("ontology_objects.id", ondelete="CASCADE"), primary_key=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("forms.id", ondelete="CASCADE"), primary_key=True)
+    record_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    record_created_at: Mapped[str] = mapped_column(String(64))
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class OntologyField(TimestampMixin, Base):
     __tablename__ = "ontology_fields"
     __table_args__ = (

@@ -14,7 +14,7 @@ import {
   SettingOutlined,
   TableOutlined,
   ThunderboltOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
 import { getSemanticPageContract } from '@/services/api';
 import '../SystemAdmin/semanticCenter.css';

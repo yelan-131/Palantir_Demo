@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { App, Avatar, Dropdown, Tooltip } from 'antd';
-import { ApartmentOutlined, AppstoreOutlined, CheckOutlined, DatabaseOutlined, EllipsisOutlined, FormOutlined, HomeOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TableOutlined, ToolOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, AppstoreOutlined, CheckOutlined, DatabaseOutlined, EllipsisOutlined, FormOutlined, HomeOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TableOutlined, ToolOutlined, UnorderedListOutlined } from '@/components/Icon/ant';
 import { applications, type Dataset } from './data';
 
 const icons: Record<number, React.ReactNode> = {

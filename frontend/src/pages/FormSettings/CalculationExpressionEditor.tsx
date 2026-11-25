@@ -1,6 +1,6 @@
 import { useRef, useState, type ComponentRef } from 'react';
 import { Button, Input, Select, Tooltip } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined } from '@/components/Icon/ant';
 import { buildFormula, readFormulaBuilder, type FormulaBuilder, type FormulaOperand } from '@/utils/formCalculations';
 
 import { RuleInlineSelect, RuleInlineInput, RuleInlineNumber } from './RuleInlineCell';

@@ -15,7 +15,7 @@ import {
   SwapOutlined,
   AlignLeftOutlined,
   LinkOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import type { WidgetType } from '../ReportWidgets/types';
 import { WIDGET_REGISTRY, WIDGET_CATEGORIES } from '../ReportWidgets/types';
 
@@ -47,7 +47,7 @@ export default function ComponentPanel({ onAddWidget }: Props) {
         const widgets = WIDGET_REGISTRY.filter((w) => w.category === cat.key);
         return (
           <React.Fragment key={cat.key}>
-            {idx > 0 && <Divider style={{ margin: '8px 0', fontSize: 11 }} plain>{cat.label}</Divider>}
+            {idx > 0 && <Divider style={{ margin: '8px 0', fontSize: 12 }} plain>{cat.label}</Divider>}
             {idx === 0 && (
               <div style={{ fontSize: 12, color: TECH_WHITE_PALETTE.faint, marginBottom: 6 }}>{cat.label}</div>
             )}

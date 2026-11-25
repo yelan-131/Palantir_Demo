@@ -1,16 +1,19 @@
-import {sourceFilterConfig} from '../ComponentPages/filterControls';
-import {filterButtonActions, resolveListView, resolveListPresentation, emptyFilterValue, clearedFilterValues, DEFAULT_FILTER_LAYOUT, type FilterControlMode, type FilterSettings, type ListSettings} from '../ComponentPages/businessComponents';
+import {filterValueToPayload, recordMetadataFilterConfig, sourceFilterConfig, type StructuredFilter} from '../ComponentPages/filterControls';
+import FilterFieldsViewport from './FilterFieldsViewport';
+import {APPROVAL_STATUS_FIELD, APPROVAL_STATUS_LABEL, filterButtonActions, hasImplicitApprovalStatus, isRecordMetadataField, resolveListView, resolveListPresentation, emptyFilterValue, clearedFilterValues, type FilterControlMode, type FilterSettings, type ListSettings} from '../ComponentPages/businessComponents';
 import { selectionCountError } from '@/utils/selectOptions';
 import FormImport from '@/components/FormImport';
 import FieldProtection, {protectCopy, type FieldPolicy} from '@/components/FieldProtection';
 import FieldControl from '@/components/FormWidgets/FieldControl';
 import { enumOptions, choiceLabel, type ControlSettings } from '@/utils/formControls';
 import FormLayout from '@/components/FormLayout';
+import { StateBlock } from '@/components/StateBlock';
+import { FormAppearanceHeader, normalizeFormAppearance, type FormAppearance } from '@/components/FormLayout/formAppearance';
 import type { FormLayoutNode } from '@/utils/formLayout';
 import {createPortal} from 'react-dom';
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { useShellPageTitle, useShellPageOwnsHeading } from '@/components/ShellPageTitle';
-import { canonTheme, CANON_CSS_VARIABLES } from '@/theme/canon';
+import { CanonThemeScope } from '@/theme/ThemeCardProvider';
 import { useAuthStore } from '@/stores/authStore';
 import { canConfigureWorkspace, reconcilePublishedViewState } from './workspaceState';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -18,16 +21,17 @@ import { businessDataDesignPath, formPermissionsPath } from '@/config/navigation
 import {
   Table, Button, Space, Input, Modal, Form, Tag, Spin, message,
   Popconfirm, Typography, Select, InputNumber, DatePicker, Switch,
-  Empty, Drawer, Descriptions, Timeline, Tabs, Alert, Progress, Dropdown,
-  ConfigProvider, Tooltip,
+  Drawer, Descriptions, Timeline, Tabs, Alert, Progress, Dropdown,
+  Tooltip,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, SearchOutlined,
   ReloadOutlined, DownloadOutlined, UploadOutlined, DownOutlined, InfoCircleOutlined, EllipsisOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import dayjs from 'dayjs';
 import {
   getPlatformForm,
+  getFormRecordActorOptions,
   getFormReferenceOptions,
   getPlatformFormByCode,
   listPlatformForms,
@@ -36,6 +40,7 @@ import {
   getPlatformDynamicRecord,
   submitPlatformDynamicRecord,
   approvalStatusLabels,
+  type OptionSearchRequest,
   type RecordApproval,
   updatePlatformDynamicRecord,
   deletePlatformDynamicRecord,
@@ -45,7 +50,7 @@ import {
   exportPlatformDynamicRecords,
   downloadFormFile,
 } from '@/services/api';
-import { parseServerDate } from '@/utils/dateTime';
+import { formatServerDateTime, parseServerDate } from '@/utils/dateTime';
 import RelationPicker from '@/components/FormWidgets/RelationPicker';
 import {
   makeDefaultViewConfig,
@@ -61,6 +66,33 @@ import './canon-form.css';
 
 const AlertRecordPanel = lazy(() => import('../AlertCenter'));
 type WorkspaceEditorTab = 'form' | 'data' | 'flow' | 'permission';
+
+const approvalStatusOptions = Object.entries(approvalStatusLabels).map(([value, label]) => ({ value, label }));
+const approvalTones: Record<string, string> = { approved: 'success', pending: 'info', draft: 'neutral', rejected: 'danger' };
+
+function renderApprovalStatus(approval?: RecordApproval) {
+  return approval
+    ? <span className={`mf-pill mf-pill-${approvalTones[approval.status] || 'neutral'}`}>{approvalStatusLabels[approval.status] || approval.status}</span>
+    : <span className="mf-empty-mark" title="无审批记录">—</span>;
+}
+
+function formatRecordActor(id?: number | string | null, name?: string | null): string {
+  return name?.trim() || (id == null || id === '' ? '—' : '未知用户');
+}
+
+function formatRecordTimestamp(value?: string | number | Date | null): string {
+  // SQLite's CURRENT_TIMESTAMP has no timezone marker and uses a space in place of T.
+  const normalized = typeof value === 'string' ? value.replace(/^(\d{4}-\d{2}-\d{2}) /, '$1T') : value;
+  return formatServerDateTime(normalized, '—');
+}
+
+const approvalTableColumn = {
+  title: APPROVAL_STATUS_LABEL,
+  key: APPROVAL_STATUS_FIELD,
+  width: 88,
+  className: 'mf-cell-approval',
+  render: (_: unknown, record: Record<string, any>) => renderApprovalStatus(record._approval),
+};
 
 interface FieldDef {
   field_name: string;
@@ -299,14 +331,12 @@ function isWideFormField(field: FieldDef) {
     || field.field_name.toLowerCase().includes('remark');
 }
 
-// The shell's root theme sets component-level tokens that a nested global token cannot override.
-const canonScopeTheme = { ...canonTheme, inherit: false };
 function withCanonTheme(children: React.ReactNode) {
-  return <ConfigProvider theme={canonScopeTheme} button={{ autoInsertSpace: false }}>{children}</ConfigProvider>;
+  return <CanonThemeScope>{children}</CanonThemeScope>;
 }
 /** Content portaled into a component-page header lives outside the list root and needs its own scope. */
 function canonPortal(children: React.ReactNode) {
-  return withCanonTheme(<span className="mf-canon mf-canon-portal" style={CANON_CSS_VARIABLES}>{children}</span>);
+  return withCanonTheme(<span className="mf-canon mf-canon-portal">{children}</span>);
 }
 
 function mapPlatformField(field: PlatformFormField): FieldDef {
@@ -332,21 +362,6 @@ function mapPlatformField(field: PlatformFormField): FieldDef {
   };
 }
 
-function filterValueToPayload(filter: ViewFilterConfig, value: unknown) {
-  if (value === undefined || value === null || value === '') return null;
-  if (Array.isArray(value) && value.length === 0) return null;
-  if (filter.controlType === 'dateRange' && Array.isArray(value)) {
-    const [start, end] = value;
-    return {
-      field: filter.fieldName,
-      op: filter.operator || 'between',
-      value: [dayjs.isDayjs(start) ? start.format('YYYY-MM-DD') : start, dayjs.isDayjs(end) ? end.format('YYYY-MM-DD') : end],
-    };
-  }
-  if (filter.operator === 'in') return {field:filter.fieldName, op:'in', value:Array.isArray(value)?value:[value]};
-  return { field: filter.fieldName, op: filter.operator, value: dayjs.isDayjs(value) ? value.format(filter.controlType==='date'?'YYYY-MM-DD':'YYYY-MM-DDTHH:mm:ss') : value };
-}
-
 function unwrapApiData<T>(payload: unknown): T | null {
   if (!payload || typeof payload !== 'object') return null;
   const data = (payload as { data?: unknown }).data;
@@ -369,19 +384,21 @@ export interface RecordListComponentProps {
   filterSettings?: FilterSettings;
   fieldControls?: Record<string, FilterControlMode>;
   filterLayout?: {rows:number; columns:number};
+  showRecordMetadata?: boolean;
+  fitTableHeight?: boolean;
   listSettings?: ListSettings;
   tableDensity?: 'compact' | 'standard' | 'comfortable' | null;
   display?: 'all' | 'filters' | 'list';
   filterFields?: string[] | null;
   externalSearch?: string;
-  onFilterChange?: (value: {ready?: boolean; search: string; filters: Array<{field: string; op: string; value: unknown}>}) => void;
-  externalFilters?: Array<{field: string; op: string; value: unknown}>;
+  onFilterChange?: (value: {ready?: boolean; search: string; filters: StructuredFilter[]}) => void;
+  externalFilters?: StructuredFilter[];
   refreshKey?: number;
   onMutated?: () => void;
   readOnly?: boolean;
   disableRowAction?: boolean;
 }
-export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', filterSettings, fieldControls, filterLayout, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
+export default function DynamicPage({formSlug, embedded = false, toolbarTargetId, externalFilters, refreshKey = 0, onMutated, readOnly = false, disableRowAction = false, display = 'all', filterSettings, fieldControls, filterLayout, showRecordMetadata = false, fitTableHeight = false, listSettings, tableDensity, filterFields: selectedFilterFields, externalSearch, onFilterChange}: RecordListComponentProps = {}) {
   const filterFormId = useId();
   const allowedFilterActions = filterButtonActions(filterSettings);
   const canQuery = allowedFilterActions.includes('query');
@@ -404,12 +421,19 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const schemaSlug = useRef<string>();
   const [pageConfig, setPageConfig] = useState<PageConfig | null>(null);
   const [platformForm, setPlatformForm] = useState<PlatformForm | null>(null);
+  const platformFormId = platformForm?.id;
+  const recordActorOptionLoaders = useMemo(() => platformFormId == null ? null : ({
+    _created_by: (options: OptionSearchRequest) => getFormRecordActorOptions(platformFormId, '_created_by', options),
+    _updated_by: (options: OptionSearchRequest) => getFormRecordActorOptions(platformFormId, '_updated_by', options),
+  }), [platformFormId]);
   const workspaceTitle = pageConfig?.title || platformForm?.name;
   useShellPageTitle(workspaceTitle, !embedded);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [referenceLabels,setReferenceLabels]=useState<Record<string,Record<string,string>>>({});
   const [mutationLayout, setMutationLayout] = useState<FormLayoutNode[] | null>(null);
   const [mutationGap,setMutationGap]=useState(12);
+  const [mutationAppearance, setMutationAppearance] = useState<FormAppearance>({});
+  const mutationSchemaRequest = useRef(0);
   const [mutationFields, setMutationFields] = useState<FieldDef[]>([]);
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [total, setTotal] = useState(0);
@@ -515,6 +539,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     return () => { cancelled = true; clearTimeout(timer); };
   }, [modalOpen, platformForm?.id, editingRecord?.id, mutationFields, ruleRevision, form]);
   const usesDraftLifecycle = Boolean(platformForm?.runtime_submission_available && (!editingRecord || editingRecord._approval));
+  const approvalStatusAvailable = platformForm?.runtime_approval_available ?? platformForm?.runtime_submission_available ?? false;
 
   const requestIdRef = useRef(0);
   const [selectedViewTab, setSelectedViewTab] = useState('');
@@ -524,19 +549,37 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     const view=normalizeRuntimeViewConfig(activeViewTab || pageConfig?.config?.viewConfig, fields);
     if(!view||display!=='filters')return view;
     const selectedNames=selectedFilterFields??view.filters.filter(item=>item.enabled).map(item=>item.fieldName);
-    const filters=selectedNames.flatMap((name,index)=>{
+    const filters=selectedNames.flatMap<ViewFilterConfig>((name,index)=>{
+      if (name === APPROVAL_STATUS_FIELD) {
+        return approvalStatusAvailable ? [{
+          id: `component-filter-${name}`,
+          fieldName: name,
+          label: APPROVAL_STATUS_LABEL,
+          controlType: 'select',
+          operator: 'equals',
+          enabled: true,
+          advanced: false,
+          sortOrder: index,
+        }] : [];
+      }
+      const recordMetadataFilter=recordMetadataFilterConfig(name,index);
+      if (recordMetadataFilter) return [recordMetadataFilter];
       const field=fields.find(item=>item.field_name===name);
       if(!field)return [];
       const existing=view.filters.find(item=>item.fieldName===name);
       return [sourceFilterConfig(field,index,existing,fieldControls?.[name])];
     });
     return {...view,filters};
-  },[fields,activeViewTab,pageConfig?.config?.viewConfig,display,selectedFilterFields,fieldControls]);
+  },[fields,activeViewTab,pageConfig?.config?.viewConfig,display,selectedFilterFields,fieldControls,approvalStatusAvailable]);
   // Parents recreate configuration objects during inspector edits. Only content changes
   // should invalidate the list query and reset pagination.
   const listSettingsKey = JSON.stringify(listSettings ?? null);
   const stableListSettings = useMemo(() => JSON.parse(listSettingsKey) as ListSettings | null, [listSettingsKey]);
-  const viewConfig = useMemo(()=>resolveListView(baseViewConfig,stableListSettings ?? undefined),[baseViewConfig,stableListSettings]);
+  const indexedSortFields = useMemo(()=>new Set(fields.filter(field=>field.sortable).map(field=>field.field_name)), [fields]);
+  const viewConfig = useMemo(
+    () => resolveListView(baseViewConfig, stableListSettings ?? undefined, approvalStatusAvailable, showRecordMetadata, indexedSortFields),
+    [baseViewConfig, stableListSettings, approvalStatusAvailable, showRecordMetadata, indexedSortFields],
+  );
   const listPresentation = useMemo(()=>resolveListPresentation(stableListSettings),[stableListSettings]);
   const effectiveSortField = sortState.field && viewConfig?.table.columns.some(column=>column.enabled&&column.sortable&&column.fieldName===sortState.field) ? sortState.field : undefined;
   const effectiveSortOrder = effectiveSortField ? sortState.order : undefined;
@@ -561,7 +604,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const stableExternalFilters = useMemo(() => JSON.parse(externalFiltersKey) as NonNullable<RecordListComponentProps['externalFilters']>, [externalFiltersKey]);
   const structuredFilters = useMemo(() => [...stableExternalFilters, ...(display === 'list' ? [] : activeFilters)
     .map((filter) => filterValueToPayload(filter, Object.prototype.hasOwnProperty.call(filterValues,filter.id) ? filterValues[filter.id] : filter.defaultValue))
-    .filter(Boolean)], [activeFilters, filterValues, stableExternalFilters, display]);
+    .filter((filter): filter is StructuredFilter => filter !== null)], [activeFilters, filterValues, stableExternalFilters, display]);
   useEffect(() => { setPage(1); }, [stableExternalFilters, externalSearch]);
   useEffect(()=>{setPage(1);setSortState({});setSelectedRowKeys([]);},[viewConfig?.table.pageSize,viewConfig?.table.defaultSort?.fieldName,viewConfig?.table.defaultSort?.order]);
   const filterCallback = useRef(onFilterChange);
@@ -605,7 +648,20 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       const nextTotal = res.data?.total ?? records.length;
       const lastPage = Math.max(1, Math.ceil(nextTotal / viewConfig.table.pageSize));
       if (page > lastPage) { setPage(lastPage); return; }
-      setData(records.map((record) => ({ id: record.id, ...(record.data || {}), _status: record.status, _approval: record._approval, _fieldStates: record.field_states })));
+      setData(records.map((record) => ({
+        id: record.id,
+        ...(record.data || {}),
+        ...(showRecordMetadata && {
+          _record_id: record.id,
+          _created_at: formatRecordTimestamp(record.created_at),
+          _updated_at: formatRecordTimestamp(record.updated_at),
+          _created_by: formatRecordActor(record.created_by, record.created_by_name),
+          _updated_by: formatRecordActor(record.updated_by, record.updated_by_name),
+        }),
+        _status: record.status,
+        _approval: record._approval,
+        _fieldStates: record.field_states,
+      })));
       setTotal(nextTotal);setListError('');setSelectedRowKeys([]);
     } catch (error: any) { if (requestId === requestIdRef.current) {
       if (error?.response?.status === 403) {
@@ -625,7 +681,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       }
     } }
     finally { if (requestId === requestIdRef.current) setLoading(false); }
-  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch, fields]);
+  }, [slug, aliasProgramRoute, pageConfig, platformForm, viewConfig, page, search, sortState.field, sortState.order, structuredFilters, configRefreshing, configError, refreshKey, display, externalSearch, fields, showRecordMetadata]);
 
   useEffect(() => {
     if (!slug || aliasProgramRoute) return;
@@ -638,6 +694,10 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     setConfigDenied(false);
     if (schemaSlug.current !== slug) {
       schemaSlug.current = slug;
+      mutationSchemaRequest.current += 1;
+      setMutationAppearance({});
+      setSchemaLoading(false);
+      setModalOpen(false);
       setPageConfig(null);
       setPlatformForm(null);
       setFields([]);
@@ -766,12 +826,13 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       .filter((f): f is FieldDef => !!f);
   const runtimePermissions = platformForm?.runtime_permissions || {};
   const canRunAction = (action: string) => Boolean(platformForm) && (!readOnly || ['view', 'detail', 'refresh'].includes(action)) && runtimePermissions[action] !== false;
+  const canEditRecord = (record: { _approval?: RecordApproval }) => canRunAction('edit') && (!record._approval || record._approval.can_edit);
 
   const standalone = !embedded && !toolbarTargetId && display === 'all';
   useShellPageOwnsHeading(standalone && Boolean(pageConfig && viewConfig));
   const statusTones: Record<string, string> = {
-    running: 'success', idle: 'warning', maintenance: 'primary', fault: 'danger', offline: 'neutral',
-    active: 'success', pending: 'neutral', in_progress: 'primary', completed: 'success',
+    running: 'success', idle: 'warning', maintenance: 'info', fault: 'danger', offline: 'neutral',
+    active: 'success', pending: 'neutral', in_progress: 'info', completed: 'success',
     启用: 'success', 正常: 'success', 已完成: 'success', 通过: 'success',
     维护中: 'warning', 待处理: 'warning', 进行中: 'warning', 预警: 'warning',
     停用: 'neutral', 未启用: 'neutral', 已关闭: 'neutral',
@@ -780,6 +841,8 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   const statusDot = (label: string, raw: unknown) => <span className={`mf-status mf-status-${statusTones[String(raw)] || statusTones[label] || 'neutral'}`}>{label}</span>;
   const emptyMark = <span className="mf-empty-mark">—</span>;
   const tableColumns = listFields.map((field_name, columnIndex) => {
+    if (field_name === APPROVAL_STATUS_FIELD) return approvalTableColumn;
+    const recordMetadata = isRecordMetadataField(field_name);
     const f = fields.find(x => x.field_name === field_name);
     const viewColumn = tableConfigColumns.find((column) => column.fieldName === field_name);
     const numeric = ['int', 'integer', 'float', 'decimal', 'number'].includes(f?.field_type || '') || f?.controlType === 'number' || viewColumn?.renderType === 'number';
@@ -789,13 +852,15 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     const headerMin = [...title].length * 14 + 32 + (sortable ? 20 : 0);
     const contact = /联系|电话|手机|邮箱|负责人|phone|mobile|email|contact/i.test(`${field_name} ${title}`);
     const choice = viewColumn?.renderType === 'tag' || f?.field_type === 'enum' || f?.controlType === 'select' || field_name === 'status';
-    const typeWidth = numeric ? 88 : viewColumn?.renderType === 'date' ? (dateOnly ? 104 : 136)
+    const typeWidth = recordMetadata && viewColumn?.width ? viewColumn.width
+      : numeric ? 88 : viewColumn?.renderType === 'date' ? (dateOnly ? 104 : 136)
       : f?.field_type === 'boolean' || f?.controlType === 'switch' ? 72 : contact || choice ? 96 : 104;
     const emptyText = viewColumn?.emptyText && !['-', '—'].includes(viewColumn.emptyText) ? viewColumn.emptyText : undefined;
     // The first column takes the remaining space; configured widths cap the others but never cut a header.
     const canonWidth = columnIndex === 0 ? undefined : Math.max(headerMin, Math.min(viewColumn?.width ?? Number.POSITIVE_INFINITY, typeWidth));
     const primaryCell = columnIndex === 0 && !disableRowAction;
     const cellContent = (val: any, record: any): React.ReactNode => {
+        if (recordMetadata) return val == null || val === '—' ? emptyMark : String(val);
         if(!record._fieldStates?.[field_name]?.masked&&referenceLabels[field_name]?.[String(val)])return referenceLabels[field_name][String(val)];
         if (typeof val === 'boolean') return val ? '是' : '否';
         if (val === undefined || val === null || val === '' || (Array.isArray(val) && !val.length)) return emptyText || emptyMark;
@@ -834,8 +899,10 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       render: (val: any, record: any) => {
         const protect=(content:React.ReactNode)=><FieldProtection {...record._fieldStates?.[field_name]}>{content}</FieldProtection>;
         const detailAvailable = (viewConfig?.table.rowActions || []).includes('detail') || viewConfig?.table.rowClickAction === 'detail';
-        if (primaryCell && detailAvailable && !record._fieldStates?.[field_name]?.masked && val !== undefined && val !== null && val !== '') {
-          return protect(<button type="button" className="mf-list-primary-link" onClick={() => void openDetail(record)}>{cellContent(val, record)}</button>);
+        const primaryAction = toolbarTargetId ? viewConfig?.table.rowClickAction : detailAvailable ? 'detail' : undefined;
+        const openPrimary = primaryAction === 'detail' ? openDetail : primaryAction === 'edit' && canEditRecord(record) ? openEditModal : undefined;
+        if (primaryCell && openPrimary && !record._fieldStates?.[field_name]?.masked && val !== undefined && val !== null && val !== '' && (!recordMetadata || val !== '—')) {
+          return protect(<button type="button" className="mf-list-primary-link" onClick={() => void openPrimary(record)}>{cellContent(val, record)}</button>);
         }
         return protect(cellContent(val, record));
       },
@@ -879,13 +946,8 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       },
     });
   };
-  if (platformForm?.runtime_submission_available) {
-    const approvalTones: Record<string, string> = { approved: 'success', pending: 'primary', draft: 'neutral', rejected: 'danger' };
-    (tableColumns as any[]).push({ title: '审批状态', key: '_approval', width: 88, fixed: 'right', className: 'mf-cell-approval',
-      render: (_: any, record: any) => record._approval
-        ? <span className={`mf-pill mf-pill-${approvalTones[record._approval.status] || 'neutral'}`}>{approvalStatusLabels[record._approval.status] || record._approval.status}</span>
-        : <span className="mf-empty-mark" title="无审批记录">—</span>,
-    });
+  if (platformForm?.runtime_submission_available && hasImplicitApprovalStatus(stableListSettings) && !listFields.includes(APPROVAL_STATUS_FIELD)) {
+    (tableColumns as any[]).push({ ...approvalTableColumn, key: '_approval', fixed: 'right' });
   }
   const rowActions=viewConfig?.table.rowActions||[];
   const configuredToolbarActions = activeViewTab?.table?.toolbarActions || pageConfig?.config.viewConfig?.table?.toolbarActions;
@@ -934,19 +996,25 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   }
 
   const loadMutationSchema = async (scope: 'create' | 'edit') => {
-    if (!slug || !platformForm) return [];
+    if (!slug || !platformForm || schemaSlug.current !== slug) return null;
+    const request = ++mutationSchemaRequest.current;
     setSchemaLoading(true);
     try {
       const numericFormId = Number(slug);
       const detail = !Number.isNaN(numericFormId)
         ? unwrapApiData<PlatformForm>(await getPlatformForm(numericFormId, { schema: 'published', scope }))
         : unwrapApiData<PlatformForm>(await getPlatformFormByCode(slug, { schema: 'published', scope }));
+      if (request !== mutationSchemaRequest.current) return null;
       const nodes = (detail?.config?.formLayout as { version?: number; nodes?: FormLayoutNode[] } | undefined);
       setMutationGap(Number((detail?.config?.canvasSettings as any)?.gap)||12);
       setMutationLayout(nodes?.version === 2 && Array.isArray(nodes.nodes) ? nodes.nodes : null);
+      setMutationAppearance(normalizeFormAppearance(detail?.config?.formAppearance));
       return (detail?.fields ?? []).filter((field) => !field.archived).map(mapPlatformField);
+    } catch (error) {
+      if (request !== mutationSchemaRequest.current) return null;
+      throw error;
     } finally {
-      setSchemaLoading(false);
+      if (request === mutationSchemaRequest.current) setSchemaLoading(false);
     }
   };
 
@@ -956,6 +1024,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     setEditingRecord(null);
     try {
       const nextFields = await loadMutationSchema('create');
+      if (!nextFields) return;
       setMutationFields(nextFields);
       form.resetFields();
       const defaults:Record<string,unknown>={};
@@ -984,7 +1053,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     form.resetFields();
     let nextFields: FieldDef[] = [];
     try {
-      nextFields = await loadMutationSchema('edit');
+      const loadedFields = await loadMutationSchema('edit');
+      if (!loadedFields) return;
+      nextFields = loadedFields;
       setMutationFields(nextFields);
     } catch {
       message.error('编辑表单配置加载失败');
@@ -1081,6 +1152,18 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     const customPlaceholder = filter.placeholder && !filter.placeholder.includes(filter.label) ? filter.placeholder : undefined;
     const placeholder = customPlaceholder || '输入…';
     const choicePlaceholder = customPlaceholder || '全部';
+    if (filter.fieldName === APPROVAL_STATUS_FIELD) {
+      return <Select aria-label={filter.label} allowClear placeholder={choicePlaceholder} options={approvalStatusOptions} />;
+    }
+    if (filter.fieldName === '_record_id') {
+      return <InputNumber aria-label={filter.label} min={1} max={Number.MAX_SAFE_INTEGER} precision={0} style={{width:'100%'}} placeholder="输入编号" />;
+    }
+    if (filter.fieldName === '_created_at' || filter.fieldName === '_updated_at') {
+      return <DatePicker.RangePicker style={{width:'100%'}} placeholder={['开始日期','结束日期']} />;
+    }
+    if ((filter.fieldName === '_created_by' || filter.fieldName === '_updated_by') && recordActorOptionLoaders) {
+      return <RelationPicker aria-label={filter.label} placeholder="选择人员" modelName="" loadOptions={recordActorOptionLoaders[filter.fieldName]} />;
+    }
     if(display==='filters'&&field){
       if(filter.controlType==='relation'&&platformForm)return <RelationPicker formId={platformForm.id} fieldName={field.field_name} contextData={Object.fromEntries((viewConfig?.filters||[]).map(item=>[item.fieldName,filterForm.getFieldValue(item.id)]))} modelName="" placeholder={choicePlaceholder} allowClear={field.typeSettings?.allowClear!==false} showSearch={field.typeSettings?.displayMode!=='dropdown'}/>;
       if(field.controlType==='switch'||field.field_type==='boolean')return <Select allowClear placeholder={choicePlaceholder} options={[{value:true,label:field.typeSettings?.checkedText||'是'},{value:false,label:field.typeSettings?.uncheckedText||'否'}]}/>;
@@ -1114,25 +1197,38 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
 
   if (!pageConfig || !viewConfig) {
     return renderWorkspace(
-      <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`mf-canon mf-list-page ${standalone ? 'mf-list-standalone' : 'mf-list-embedded'}`} style={CANON_CSS_VARIABLES}>
+      <div onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`mf-canon mf-list-page ${standalone ? 'mf-list-standalone' : 'mf-list-embedded'}`}>
         <div className="mf-list-head">
           <span className={`mf-pill mf-pill-${configDenied ? 'danger' : 'neutral'}`}>{configDenied ? '无访问权限' : '缺少视图配置'}</span>
           {!embedded && workspaceEntry}
         </div>
         <section className="mf-list-card mf-list-empty">
-          <Empty
+          <StateBlock
+            kind={configDenied ? 'denied' : 'empty'}
+            title={configDenied ? '无访问权限' : '缺少数据视图配置'}
             description={configError || '当前表单缺少已发布的数据视图配置'}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         </section>
       </div>
     );
   }
 
+  const defaultFormTitle = editingRecord
+    ? `编辑${pageConfig.title}`
+    : `${platformForm?.runtime_submission_available ? '填写申请：' : '新增记录：'}${pageConfig.title}`;
+  const { title, description, titleAlign, titleColor, backgroundColor } = mutationAppearance;
+  const formSurfaceStyle = backgroundColor ? { backgroundColor } : undefined;
+  const formHeading = title || description || titleAlign || titleColor
+    ? <FormAppearanceHeader
+        appearance={mutationAppearance}
+        fallbackTitle={defaultFormTitle}
+        className="record-form-heading"
+        defaultAlign="left"
+      />
+    : defaultFormTitle;
+
   const keywordInHeader=display==='filters'&&Boolean(toolbarTargetId);
-  // Inline filter widgets always pass the default layout; only a layout that differs from it was configured.
-  const configuredFilterLayout = filterLayout && (filterLayout.columns !== DEFAULT_FILTER_LAYOUT.columns || filterLayout.rows !== DEFAULT_FILTER_LAYOUT.rows) ? filterLayout : undefined;
-  const keywordField=filterSettings?.showKeyword!==false&&<Form.Item name="keyword" label={keywordInHeader||!configuredFilterLayout?undefined:'关键词'} className={keywordInHeader?'component-header-keyword':'mf-filter-keyword'}>
+  const keywordField=filterSettings?.showKeyword!==false&&<Form.Item name="keyword" label={keywordInHeader||!filterLayout?undefined:'关键词'} className={keywordInHeader?'component-header-keyword':'mf-filter-keyword'}>
     <Input aria-label="关键词" allowClear prefix={<SearchOutlined />} placeholder="搜索业务记录" form={filterFormId}
       onPressEnter={keywordInHeader?event=>{event.preventDefault();if(canQuery)filterForm.submit();}:undefined}/>
   </Form.Item>;
@@ -1151,15 +1247,14 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
             {canQuery&&filterSettings?.queryMode!=='change'&&<Button type="primary" htmlType="submit" form={filterFormId}>{filterSettings?.queryLabel||'查询'}</Button>}
           </Space>
   );
-  const canonFilterCount = (keywordField && !keywordInHeader ? 1 : 0) + activeFilters.length;
-  // Without a configured layout the desktop row holds the keyword and three fields; the rest wait behind 更多筛选.
-  const filterRow = !configuredFilterLayout;
+  // The compact legacy layout keeps its expandable field list.
+  const filterRow = !filterLayout;
   const leadFilter = (filter: ViewFilterConfig, index: number) => !filterRow || index < 3 || requiredFilterFields.includes(filter.fieldName);
   const moreFilters = activeFilters.filter((filter, index) => !leadFilter(filter, index));
   const appliedFilterCount = (list: ViewFilterConfig[]) => list.filter(filter => !emptyFilterValue(filterValues[filter.id])).length;
   const moreFilterCount = appliedFilterCount(moreFilters);
   const allFilterCount = appliedFilterCount(activeFilters);
-  const filterToggles = <>
+  const filterToggles = filterRow && <>
     {moreFilters.length > 0 && <Button className="mf-filter-toggle mf-filter-toggle-desktop" aria-expanded={filtersExpanded} onClick={() => setFiltersExpanded(open => !open)}>
       {filtersExpanded ? '收起筛选' : `更多筛选${moreFilterCount ? ` (${moreFilterCount})` : ''}`}
     </Button>}
@@ -1168,13 +1263,31 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     </Button>}
   </>;
   const showBodyActions = !(display==='filters'&&toolbarTargetId);
+  const showFilterActions = showBodyActions && (filterRow || canReset || (canQuery && filterSettings?.queryMode !== 'change'));
+  const keywordInGrid = !keywordInHeader && Boolean(keywordField);
+  const filterFieldContent = <>
+    {keywordInGrid&&keywordField}
+    {activeFilters.map((filter, index) => (
+      <Form.Item key={filter.id} name={filter.id} label={filter.label}
+        className={[
+          filterRow && (leadFilter(filter, index) ? 'mf-filter-lead' : 'mf-filter-more'),
+          filter.controlType==='dateRange' && isRecordMetadataField(filter.fieldName) && 'mf-filter-record-date-range',
+        ].filter(Boolean).join(' ')}
+        hidden={!leadFilter(filter, index) && !filtersExpanded}
+        rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]}
+        initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
+        {renderDynamicFilterControl(filter)}
+      </Form.Item>
+    ))}
+  </>;
   const filterContent = (
       <Form id={filterFormId} onValuesChange={()=>setAutoFilterRevision(value=>value+1)} key={activeViewTab?.id || 'default'}
-        className={['mf-list-filter', display === 'filters' && 'mf-list-filter-bare', filterRow && 'mf-list-filter-row', filtersExpanded && 'is-expanded'].filter(Boolean).join(' ')}
+        className={['mf-list-filter', display === 'filters' && 'mf-list-filter-bare', filterRow ? 'mf-list-filter-row' : 'mf-list-filter-configured', filtersExpanded && 'is-expanded'].filter(Boolean).join(' ')}
         form={filterForm}
         colon={false}
         layout="horizontal"
-        onFinishFailed={() => setFiltersExpanded(true)}
+        onFinishFailed={filterRow ? () => setFiltersExpanded(true) : undefined}
+        scrollToFirstError={filterLayout ? {block:'nearest', focus:true} : undefined}
         onFinish={(values) => {
           if(display==='filters'&&!canQuery)return;
           setPage(1);
@@ -1183,33 +1296,32 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         }}
       >
         {keywordInHeader&&toolbarTarget&&createPortal(canonPortal(<Space size={8} wrap>{keywordField}{filterActions}</Space>),toolbarTarget)}
-        <div className="mf-list-filter-fields" style={filterRow ? undefined : {
-          '--mf-filter-columns': configuredFilterLayout?.columns ?? (canonFilterCount <= 4 ? Math.max(1, canonFilterCount) : Math.min(4, Math.ceil(canonFilterCount / 2))),
-        } as React.CSSProperties}>
-        {!keywordInHeader&&keywordField}
-        {activeFilters.map((filter, index) => (
-          <Form.Item key={filter.id} name={filter.id} label={filter.label} className={leadFilter(filter, index) ? 'mf-filter-lead' : 'mf-filter-more'} hidden={!leadFilter(filter, index) && !filtersExpanded} rules={[{required:requiredFilterFields.includes(filter.fieldName),validator:(_,value)=>requiredFilterFields.includes(filter.fieldName)&&emptyFilterValue(value)?Promise.reject(new Error(`请填写${filter.label}`)):Promise.resolve()}]} initialValue={filter.controlType==='date'?filter.defaultValue&&dayjs(String(filter.defaultValue)):filter.controlType==='dateRange'?Array.isArray(filter.defaultValue)?filter.defaultValue.map(v=>dayjs(v)):undefined:filter.defaultValue}>
-            {renderDynamicFilterControl(filter)}
-          </Form.Item>
-        ))}
-        </div>
-        {(showBodyActions || activeFilters.length > 0) && <Form.Item className={`mf-list-filter-actions${showBodyActions ? '' : ' mf-list-filter-actions-toggle'}`}>
-          <div className="mf-filter-buttons">{filterToggles}{showBodyActions && filterActions}</div>
+        {filterLayout
+          ? (keywordInGrid || activeFilters.length > 0) && <FilterFieldsViewport {...filterLayout}
+              fieldKey={JSON.stringify([keywordInGrid, ...activeFilters.map(filter=>filter.id)])}>
+              {filterFieldContent}
+            </FilterFieldsViewport>
+          : <div className="mf-list-filter-fields">{filterFieldContent}</div>}
+        {(showFilterActions || (filterRow && activeFilters.length > 0)) && <Form.Item className={`mf-list-filter-actions${showBodyActions ? '' : ' mf-list-filter-actions-toggle'}`}>
+          <div className="mf-filter-buttons">{filterToggles}{showFilterActions && filterActions}</div>
         </Form.Item>}
       </Form>
   );
   const missingFilterBinding = requiredFilterFields.some(name=>!activeFilters.some(filter=>filter.fieldName===name));
-  if (display === 'filters') return withCanonTheme(<div className="mf-canon mf-list-filters-only" style={CANON_CSS_VARIABLES}>
+  if (display === 'filters') return withCanonTheme(<div className="mf-canon mf-list-filters-only">
     {missingFilterBinding&&<Alert type="warning" showIcon message="必填筛选字段已失效，请重新配置筛选字段。" />}
     {canQuery&&filterSettings?.queryMode==='change'&&<p className="mf-list-filter-hint">条件变更后自动查询，必填条件校验通过后生效。</p>}
     {configError && <Alert type="warning" showIcon message={configError} />}
     {filterContent}
   </div>);
 
-  const previewToolbar = Boolean(toolbarTargetId && readOnly);
+  const iconOnlyToolbar = Boolean(toolbarTargetId);
+  const previewToolbar = iconOnlyToolbar && readOnly;
   const createLabel = platformForm?.runtime_submission_available ? '填写申请' : '新增';
   const createAction = (toolbarActions.includes('create') && (previewToolbar || canRunAction('create'))) && (
-              <Button aria-label={createLabel} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal}>{createLabel}</Button>
+    <Tooltip title={iconOnlyToolbar ? createLabel : undefined}>
+      <Button aria-label={createLabel} type="primary" icon={<PlusOutlined />} loading={schemaLoading} disabled={readOnly || !toolbarActions.includes('create') || runtimePermissions.create === false} onClick={openCreateModal}>{iconOnlyToolbar ? undefined : createLabel}</Button>
+    </Tooltip>
   );
   const hasViewsRow = standalone || Boolean(runtimeViewTabs?.length);
   const canRefresh = toolbarActions.includes('refresh');
@@ -1219,7 +1331,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   );
   const canImport = toolbarActions.includes('import')&&(previewToolbar || canRunAction('import')&&canRunAction('create'));
   const importDisabled = readOnly || !canRunAction('import') || !canRunAction('create');
-  const importAction = canImport&&<Button disabled={importDisabled} aria-label="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>导入</Button>;
+  const importAction = canImport && <Tooltip title={iconOnlyToolbar ? '批量导入' : undefined}>
+    <Button disabled={importDisabled} aria-label="批量导入" icon={<UploadOutlined/>} onClick={()=>setImportOpen(true)}>{iconOnlyToolbar ? undefined : '导入'}</Button>
+  </Tooltip>;
   const canExport = toolbarActions.includes('export')&&(previewToolbar || canRunAction('export'));
   const exportDisabled = readOnly || !canRunAction('export');
   const exportPage = async()=>{
@@ -1228,7 +1342,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
           const url=URL.createObjectURL(new Blob([res.data],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${pageConfig.title}-第${page}页.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         }catch(error:any){message.error(error?.response?.data?.detail||'导出失败');}finally{setExporting(false);}
   };
-  const exportAction = canExport&&<Tooltip title="导出当前页记录"><Button disabled={exportDisabled} icon={<DownloadOutlined/>} loading={exporting} onClick={exportPage}>导出</Button></Tooltip>;
+  const exportAction = canExport && <Tooltip title="导出当前页记录">
+    <Button disabled={exportDisabled} aria-label="导出当前页记录" icon={<DownloadOutlined/>} loading={exporting} onClick={exportPage}>{iconOnlyToolbar ? undefined : '导出'}</Button>
+  </Tooltip>;
   const showWorkspaceEntry = !embedded && Boolean(workspaceEntry);
   const overflowItems = [
     ...(showWorkspaceEntry ? [{ key: 'ws:form', label: '编辑表单' }, ...workspaceMenuItems.map(item => ({ ...item, key: `ws:${item.key}` }))] : []),
@@ -1275,7 +1391,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
 
   const selectedRows = data.filter(row => selectedRowKeys.includes(row.id));
   const submittableRows = readOnly || !platformForm?.runtime_submission_available ? [] : selectedRows.filter(row => row._approval?.can_submit);
-  const deletableRows = readOnly || !rowActions.includes('delete') || !canRunAction('delete') ? [] : selectedRows.filter(row => !row._approval || row._approval.can_edit);
+  const showDeleteSelected = stableListSettings?.toolbarGroups == null || toolbarActions.includes('delete');
+  const deletableRows = showDeleteSelected && rowActions.includes('delete') && canRunAction('delete')
+    ? selectedRows.filter(row => !row._approval || row._approval.can_edit) : [];
   const bulkDeleteAllowed = deletableRows.length > 0;
   const exportSelected = () => {
     const columns = fields.filter(field => !field.field_name.startsWith('_'));
@@ -1329,7 +1447,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
     });
   };
   const detailTitle = (() => {
-    const fieldName = listFields[0];
+    const fieldName = listFields.find(name => name !== APPROVAL_STATUS_FIELD && !isRecordMetadataField(name));
     const field = fields.find(item => item.field_name === fieldName);
     const value = fieldName ? detailRecord?.[fieldName] : undefined;
     if (!detailRecord) return '';
@@ -1348,6 +1466,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   ].filter(Boolean);
   const detailActions = detailButtons.length ? detailButtons : null;
 
+  const listFiltered = Boolean((externalSearch ?? search) || structuredFilters.length);
   const recordTable = (
       <Table
         className={`mf-list-table${!disableRowAction && viewConfig.table.rowClickAction !== 'none' ? ' mf-list-table-clickable' : ''}`}
@@ -1357,17 +1476,21 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         columns={tableColumns}
         rowKey="id"
         rowSelection={listSettings?.selection&&listSettings.selection!=='none'?{type:listSettings.selection==='single'?'radio':'checkbox',selectedRowKeys,onChange:keys=>setSelectedRowKeys(keys)}:undefined}
-        locale={{emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={listPresentation.emptyText || (listError ? '记录加载失败，请点击上方重试。' : (externalSearch ?? search) || structuredFilters.length ? '暂无匹配记录' : '暂无记录')}>
-          {!listPresentation.emptyText && !listError && <Typography.Text type="secondary">{(externalSearch ?? search) || structuredFilters.length ? '请调整筛选条件后重新查询。' : canRunAction('create') && toolbarActions.includes('create') ? '点击上方新增按钮创建第一条记录。' : '记录添加后会显示在这里。'}</Typography.Text>}
-        </Empty>}}
-        onRow={disableRowAction ? undefined : record=>({onClick:event=>{
+        locale={{emptyText: listError
+          ? <StateBlock kind="error" title="记录加载失败" description={listError} action={<Button size="small" onClick={() => void loadData()}>重试</Button>} />
+          : listPresentation.emptyText
+            ? <StateBlock kind={listFiltered ? 'no-match' : 'empty'} title={listPresentation.emptyText} />
+            : listFiltered
+              ? <StateBlock kind="no-match" title="暂无匹配记录" description="请调整筛选条件后重新查询。" />
+              : <StateBlock kind="empty" title="暂无记录" description={canRunAction('create') && toolbarActions.includes('create') ? '点击上方新增按钮创建第一条记录。' : '记录添加后会显示在这里。'} />}}
+        onRow={disableRowAction || viewConfig.table.rowClickAction === 'none' ? undefined : record=>({onClick:event=>{
           if((event.target as HTMLElement).closest('button,a,input,.ant-select,.ant-popover'))return;
           if(viewConfig.table.rowClickAction==='detail')void openDetail(record);
-          if(viewConfig.table.rowClickAction==='edit'&&canRunAction('edit')&&(!record._approval||record._approval.can_edit))void openEditModal(record);
+          if(viewConfig.table.rowClickAction==='edit'&&canEditRecord(record))void openEditModal(record);
         }})}
         loading={loading || configRefreshing}
         size={tableDensity ? tableDensity === 'compact' ? 'small' : tableDensity === 'comfortable' ? 'large' : 'middle' : viewConfig.table.density === 'compact' ? 'small' : viewConfig.table.density === 'large' ? 'large' : 'middle'}
-        scroll={{ x: canonScrollX }}
+        scroll={{x: canonScrollX, y: fitTableHeight ? '100%' : undefined}}
         onChange={(_pagination, _filters, sorter: any) => {
           const activeSorter = Array.isArray(sorter) ? sorter.find((item) => item.order) : sorter;
           const order = activeSorter?.order === 'ascend'
@@ -1391,7 +1514,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
   );
 
   return renderWorkspace(
-    <div id={listRootId} onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`mf-canon mf-list-page ${standalone ? 'mf-list-standalone' : 'mf-list-embedded'}`} style={CANON_CSS_VARIABLES}>
+    <div id={listRootId} onCopyCapture={protectCopy} onCutCapture={protectCopy} className={`mf-canon mf-list-page ${standalone ? 'mf-list-standalone' : 'mf-list-embedded'}`}>
       {standalone ? <header className="mf-list-head">
           <div className="mf-list-heading">
             <h1>{pageConfig.title}</h1>
@@ -1427,11 +1550,11 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       {platformForm?.code==='alert-center'&&(alertCreateOpen||detailRecord)&&<Suspense fallback={<Spin/>}><AlertRecordPanel key={alertCreateOpen?'create':String(detailRecord?.id)} readOnly={readOnly} createOnly={alertCreateOpen} recordId={detailRecord?Number(detailRecord.id):undefined} onClose={()=>{setAlertCreateOpen(false);setDetailRecord(null);}} onMutated={()=>{void loadData();onMutated?.();}}/></Suspense>}
       <Drawer title={<div className="mf-canon-drawer-title"><strong title={detailTitle}>{detailTitle}</strong><span>{pageConfig.title}</span></div>}
         open={Boolean(detailRecord) && platformForm?.code!=='alert-center'} onClose={() => setDetailRecord(null)} width={560}
-        className="mf-canon-drawer" rootClassName="mf-canon-form-root" styles={{ wrapper: CANON_CSS_VARIABLES }}
+        className="mf-canon-drawer" rootClassName="mf-canon-form-root"
         extra={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}
         footer={detailActions && <div className="mf-canon-drawer-actions">{detailActions}</div>}>
         {detailRecord && <>
-          {detailRecord._approval && <p className="mf-canon-drawer-status">审批状态<span className={`mf-pill mf-pill-${({ approved: 'success', pending: 'primary', draft: 'neutral', rejected: 'danger' } as Record<string, string>)[detailRecord._approval.status] || 'neutral'}`}>{approvalStatusLabels[detailRecord._approval.status] || detailRecord._approval.status}</span></p>}
+          {detailRecord._approval && <p className="mf-canon-drawer-status">{APPROVAL_STATUS_LABEL}{renderApprovalStatus(detailRecord._approval)}</p>}
           <Descriptions bordered column={1} size="small" items={(detailFields.length ? detailFields : fields).filter(f => !f.field_name.startsWith('_') && detailRecord._fieldStates?.[f.field_name]?.visible !== false && (!detailRecord._fieldStates || f.field_name in detailRecord._fieldStates)).map(f => ({ key: f.field_name, label: f.label, children: renderDetailValue(f) }))} />
           {detailRecord._approval && <>
             <Typography.Title level={5}>审批与修改记录</Typography.Title>
@@ -1445,7 +1568,7 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
       <Modal
         className="dynamic-business-modal mf-canon-form"
         rootClassName="mf-canon-form-root"
-        title={editingRecord ? `编辑${pageConfig.title}` : `${platformForm?.runtime_submission_available ? '填写申请：' : '新增记录：'}${pageConfig.title}`}
+        title={formHeading}
         open={modalOpen}
         onOk={handleModalOk}
         onCancel={() => setModalOpen(false)}
@@ -1454,7 +1577,9 @@ export default function DynamicPage({formSlug, embedded = false, toolbarTargetId
         okText={usesDraftLifecycle ? '保存草稿' : '保存'}
         cancelText="取消"
         width={720}
-        styles={{ wrapper: CANON_CSS_VARIABLES }}
+        styles={{
+          ...(formSurfaceStyle && { content: formSurfaceStyle, header: formSurfaceStyle, body: formSurfaceStyle }),
+        }}
       >
         {usesDraftLifecycle && <p className="mf-canon-form-hint"><InfoCircleOutlined aria-hidden />先保存草稿，完成填写后从记录详情提交审批；驳回后可修改并重新提交。</p>}
         <Form

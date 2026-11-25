@@ -24,7 +24,7 @@
   justify-content: space-between;
   padding: 20px 24px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -113,7 +113,7 @@
   gap: 16px;
   padding: 16px 18px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -127,14 +127,14 @@
   margin-bottom: 4px;
   color: #2f5f73;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
   text-transform: uppercase;
 }
 
 .closed-loop-metrics .ant-card {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .closed-loop-workbench {
@@ -150,7 +150,7 @@
 .closed-loop-canvas-panel,
 .closed-loop-governance {
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -166,7 +166,7 @@
   margin-top: 10px;
   padding: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
   color: var(--mf-text);
   cursor: pointer;
@@ -184,7 +184,7 @@
 }
 
 .closed-loop-domain-item span {
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .closed-loop-domain-item small {
@@ -285,7 +285,7 @@
 
 .account-panel-card {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .account-switch-list {
@@ -311,7 +311,7 @@
   gap: 12px;
   padding: 16px 18px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 

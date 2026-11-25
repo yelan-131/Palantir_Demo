@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Alert, Button, Empty, Popconfirm, Drawer, Form, Input, Select, Space, Switch, Table, message } from 'antd';
 import type { PlatformFormField } from '@/services/api';
 import type { FormInstance } from 'antd';
-import { CloseOutlined, DeleteOutlined, SafetyCertificateOutlined, SaveOutlined } from '@ant-design/icons';
+import { CloseOutlined, DeleteOutlined, SafetyCertificateOutlined, SaveOutlined } from '@/components/Icon/ant';
 import { adminCreateRole } from '@/services/api';
 import { propertyError, fieldStorageSize } from './assemblyPersistence';
 import { defaultRoleAccessGroups, RoleAccessSettings, type RoleAccessGroup } from '../ComponentPages/ToolbarGroups';

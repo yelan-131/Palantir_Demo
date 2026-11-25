@@ -11,7 +11,7 @@
 }
 
 .dynamic-business-title-row .ant-typography {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .dynamic-business-filter {
@@ -93,13 +93,13 @@
 }
 .tech-white-shell .app-content .form-workspace-entry .ant-btn-compact-first-item,
 .tech-white-shell .app-content .form-workspace-entry .ant-btn-group > .ant-btn:first-child {
-  border-start-start-radius: 5px;
-  border-end-start-radius: 5px;
+  border-start-start-radius: var(--canon-radius-control);
+  border-end-start-radius: var(--canon-radius-control);
 }
 .tech-white-shell .app-content .form-workspace-entry .ant-btn-compact-last-item,
 .tech-white-shell .app-content .form-workspace-entry .ant-btn-group > .ant-btn:last-child {
-  border-start-end-radius: 5px;
-  border-end-end-radius: 5px;
+  border-start-end-radius: var(--canon-radius-control);
+  border-end-end-radius: var(--canon-radius-control);
 }
 
 /* Compact actions stay alongside the workspace entry on the right. */
@@ -118,7 +118,7 @@
   min-width: 28px;
   height: 28px;
   padding: 0;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 .tech-white-shell .app-content .dynamic-business-toolbar-actions .anticon {
   font-size: 13px;

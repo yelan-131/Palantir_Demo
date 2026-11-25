@@ -17,7 +17,7 @@
   gap: 16px;
   padding: 18px;
   border: 1px solid #dce3ea;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
@@ -48,14 +48,14 @@
   width: 42px;
   height: 42px;
   flex: 0 0 42px;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #ffffff;
   background: #2f6678;
   font-size: 20px;
 }
 
 .app-program-stat {
-  border-radius: 8px;
+  border-radius: 10px;
   border-color: #dce3ea;
 }
 
@@ -81,7 +81,7 @@
 }
 
 .app-program-toolbar-card {
-  border-radius: 8px;
+  border-radius: 10px;
   border-color: #dce3ea;
 }
 
@@ -104,7 +104,7 @@
 
 .app-business-filter-panel,
 .app-business-table-panel {
-  border-radius: 8px;
+  border-radius: 10px;
   border-color: #dce3ea;
   box-shadow: 0 1px 2px rgba(18, 42, 54, 0.04);
 }
@@ -183,7 +183,7 @@
 .app-business-table-panel .ant-table-thead > tr > th {
   background: #f4f7fa;
   color: #263945;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .app-business-row-even td {
@@ -230,7 +230,7 @@
   background: #2f6678;
   border-color: #2f6678;
   color: #ffffff;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .app-business-content {
@@ -333,7 +333,7 @@
   overflow: hidden;
   color: #415563;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -440,7 +440,7 @@
 .app-business-data-table .ant-table-thead > tr > th {
   background: var(--mf-panel-soft);
   color: #253642;
-  font-weight: 700;
+  font-weight: 600;
   border-bottom: 1px solid #d9dee3;
 }
 
@@ -502,7 +502,7 @@
   gap: 14px;
   padding: 14px 16px;
   border: 1px solid #d9dee3;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
@@ -524,7 +524,7 @@
   width: 38px;
   height: 38px;
   flex: 0 0 38px;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #ffffff;
   background: #2f6678;
   font-size: 18px;
@@ -563,7 +563,7 @@
   align-items: center;
   padding: 12px;
   border: 1px solid #d9dee3;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
@@ -587,7 +587,7 @@
   overflow: hidden;
   color: #415563;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -614,7 +614,7 @@
 .alert-business-record-panel {
   min-height: 0;
   border: 1px solid #d9dee3;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
@@ -652,7 +652,7 @@
 .alert-business-table .ant-table-thead > tr > th {
   background: var(--mf-panel-soft);
   color: #253642;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .alert-business-table .ant-table-tbody > tr {
@@ -695,13 +695,13 @@
 
 .alert-business-descriptions .ant-descriptions-item-label {
   color: #627280;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .alert-business-sla {
   padding: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -724,14 +724,14 @@
 .alert-business-section {
   padding: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
 .alert-business-section-title {
   margin-bottom: 8px;
   color: #253642;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .alert-business-section p {
@@ -770,7 +770,7 @@
   gap: 10px;
   height: 210px;
   padding: 18px 8px 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   background:
     linear-gradient(to bottom, rgba(47, 102, 120, 0.08) 1px, transparent 1px) 0 0 / 100% 25%,
     var(--mf-panel-soft);
@@ -779,7 +779,7 @@
 .app-program-line-chart span {
   display: block;
   min-height: 18px;
-  border-radius: 6px 6px 2px 2px;
+  border-radius: 6px 6px 4px 4px;
   background: linear-gradient(180deg, #3e7f92, #8db8c5);
 }
 
@@ -830,7 +830,7 @@
 
 .app-program-card {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 10px;
   border-color: #dce3ea;
 }
 
@@ -870,7 +870,7 @@
   border-radius: 50%;
   background: #e8f0f3;
   color: #2f6678;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .app-program-focus-item .ant-typography {
@@ -896,7 +896,7 @@
 .runtime-analytics-widget {
   min-height: 210px;
   border-color: #dce3ea;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .runtime-analytics-widget .ant-card-body {
@@ -926,7 +926,7 @@
   min-height: 86px;
   padding: 12px;
   border: 1px solid #edf1f5;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f7fafc;
 }
 
@@ -951,14 +951,14 @@
   min-height: 150px;
   padding: 16px;
   border: 1px solid #edf1f5;
-  border-radius: 8px;
+  border-radius: 10px;
   background: linear-gradient(180deg, var(--mf-panel-soft), #f4f8fb);
 }
 
 .runtime-analytics-chart span {
   flex: 1;
   min-height: 18px;
-  border-radius: 5px 5px 0 0;
+  border-radius: 4px 4px 0 0;
   background: var(--mf-primary);
 }
 

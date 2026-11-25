@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Tooltip } from 'antd';
-import { CloseOutlined, PaperClipOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
+import { CloseOutlined, PaperClipOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@/components/Icon/ant';
 import { previewAgentAttachment } from '@/services/api';
 
 const FILE_TYPES = ['.pdf', '.docx', '.xlsx', '.csv', '.txt', '.md'];

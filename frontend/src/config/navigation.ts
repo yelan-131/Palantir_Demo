@@ -30,7 +30,6 @@ export const NAVIGATION_ENTRIES: NavigationEntry[] = [
   { path: '/studio/business-data', label: '业务数据', area: 'studio', adminOnly: true },
   { path: '/studio/templates', label: '模板中心', area: 'studio' },
   { path: '/plugins', label: '插件与扩展', area: 'plugins' },
-  { path: '/data-center/sources', label: '数据接入', area: 'data', group: '数据接入' },
   { path: '/data-center/assets', label: '数据资产', area: 'data', group: '数据治理' },
   { path: '/data-center/reference', label: '基础数据', area: 'data', group: '数据治理', adminOnly: true },
   { path: '/data-center/objects', label: '对象与关系', area: 'data', group: '数据探索' },
@@ -40,7 +39,6 @@ export const NAVIGATION_ENTRIES: NavigationEntry[] = [
   { path: '/admin/reference', label: '字典与基础档案', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/assets', label: '数据资产与映射', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/objects', label: '对象与关系模型', area: 'admin', adminOnly: true, group: '数据与集成' },
-  { path: '/admin/entities', label: '实体与抽取浏览', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/graph', label: '图谱探索', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/knowledge', label: '知识库', area: 'admin', adminOnly: true, group: '数据与集成' },
   { path: '/admin/quality-impact', label: '质量影响与时间线', area: 'admin', adminOnly: true, group: '分析与追溯' },
@@ -71,7 +69,7 @@ export const LEGACY_ACCOUNT_SECTIONS: Record<string, string> = {
   roles: '/admin/identity?tab=roles', orgs: '/admin/identity?tab=orgs',
   'ai-role-policies': '/admin/identity?tab=roles',
   'data-assets': '/data-center/assets', 'palantir-config': '/data-center/assets',
-  'data-ontology': '/data-center/assets', 'semantic-mapping': '/data-center/assets?view=mapping',
+  'data-ontology': '/data-center/assets', 'semantic-mapping': '/data-center/objects?view=ontology&section=mapping&mappingSource=external',
   'ontology-modeling': '/data-center/objects?view=ontology', 'reference-data': '/data-center/reference',
   knowledge: '/data-center/knowledge', 'knowledge-graph': '/data-center/knowledge',
 };
@@ -113,7 +111,7 @@ export function settingsNavigationGroups(isAdmin: boolean) {
   return [
     { key: 'settings-personal', label: '个人设置', description: '账号安全、工作偏好与个人扩展', icon: 'personal', entries: PERSONAL_SETTINGS_ENTRIES },
     { key: 'settings-applications', label: '应用配置', description: '应用、表单、看板与模板', icon: 'applications', entries: visibleNavigationEntries('studio', isAdmin) },
-    { key: 'settings-data', label: '数据中心', description: '数据接入、资产治理与数据探索', icon: 'data', entries: visibleNavigationEntries('data', isAdmin) },
+    { key: 'settings-data', label: '数据中心', description: '数据资产、对象与关系和知识库', icon: 'data', entries: visibleNavigationEntries('data', isAdmin) },
     { key: 'settings-platform', label: '平台管理', description: '组织权限、AI 服务与审计日志', icon: 'platform', entries: adminEntries.filter(entry => entry.group === '平台管理') },
     { key: 'settings-advanced', label: '高级工具', description: '分析追溯、旧版工具与配置迁移', icon: 'advanced', entries: adminEntries.filter(entry => ['分析与追溯', '开发与配置'].includes(entry.group || '')) },
   ].filter(group => group.entries.length);
@@ -121,18 +119,28 @@ export function settingsNavigationGroups(isAdmin: boolean) {
 
 /** Old data URLs keep their filters and open the matching workspace tab. */
 export function dataCenterDestination(pathname: string, search = ''): string | undefined {
-  const path = pathname.replace(/^\/admin\//, '/data-center/');
+  let path = pathname.replace(/^\/admin\//, '/data-center/');
   const params = new URLSearchParams(search);
-  const aliases: Record<string, { path: string; parameter: string; value: string }> = {
-    '/data-center/pipelines': { path: '/data-center/sources', parameter: 'tab', value: 'pipelines' },
-    '/data-center/entities': { path: '/data-center/assets', parameter: 'view', value: 'entities' },
-    '/data-center/graph': { path: '/data-center/objects', parameter: 'view', value: 'graph' },
-  };
-  const alias = aliases[path];
-  if (alias) params.set(alias.parameter, alias.value);
-  const destination = alias?.path || path;
-  if (!NAVIGATION_ENTRIES.some(entry => entry.area === 'data' && entry.path === destination)) return undefined;
-  return destination + (params.size ? `?${params}` : '');
+  const view = params.get('view');
+  if (path === '/data-center/sources' || path === '/data-center/pipelines') {
+    params.set('view', path.endsWith('/pipelines') || params.get('tab') === 'pipelines' ? 'pipelines' : 'connections');
+    params.delete('tab');
+    path = '/data-center/assets';
+  } else if (path === '/data-center/assets' && view === 'mapping') {
+    path = '/data-center/objects';
+    params.set('view', 'ontology');
+    params.set('section', 'mapping');
+    params.set('mappingSource', 'external');
+  } else if (path === '/data-center/entities' || (path === '/data-center/assets' && view === 'entities')) {
+    path = '/data-center/objects';
+    params.set('view', 'browse');
+  } else if (path === '/data-center/graph') {
+    path = '/data-center/objects';
+    params.set('view', 'graph');
+  }
+  if (path === '/data-center/objects') params.delete('graphMode');
+  if (!NAVIGATION_ENTRIES.some(entry => entry.area === 'data' && entry.path === path)) return undefined;
+  return path + (params.size ? `?${params}` : '');
 }
 
 export type BusinessDataDesignTab = 'form' | 'flow' | 'data' | 'style';

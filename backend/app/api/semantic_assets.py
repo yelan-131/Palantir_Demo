@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 from sqlalchemy import and_, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,8 +48,11 @@ from app.services.ontology_candidate_service import (
 )
 from app.services.ontology_ai_candidate_service import OntologyAICandidateError, generate_ai_candidates_from_metadata
 from app.services.metadata_scan_service import parse_connection_config, scan_data_source_metadata
-from app.services.ontology_record_service import MAX_KEY_LENGTH, get_instance, list_instances, set_record_binding, set_record_link
+from app.services.ontology_record_service import (
+    MAX_KEY_LENGTH, get_instance, get_instance_editor, list_instances, set_record_binding, set_record_link, update_instance,
+)
 from app.services.ontology_service import (
+    OntologySimilarityFeature,
     approve_candidate,
     candidate_payload,
     create_or_update_object,
@@ -62,6 +65,7 @@ from app.services.ontology_service import (
     publish_version,
     reject_candidate,
     relation_payload,
+    set_similarity_features,
     visible_version_snapshot,
 )
 from app.services.semantic_mapping_service import (
@@ -102,9 +106,54 @@ class OntologyRecordBindingBody(BaseModel):
     property_fields: dict[str, str] | None = None
 
 
+class OntologySimilarityFeaturesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    features: list[OntologySimilarityFeature] = Field(max_length=120)
+
+
 class OntologyRecordLinkBody(BaseModel):
     source_field: str = Field(min_length=1, max_length=120)
     target_field: str = Field(min_length=1, max_length=120)
+
+
+OntologyRecordTag = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+OntologyRecordPropertyLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+OntologyRecordPropertyCode = Annotated[str, StringConstraints(min_length=1, max_length=120)]
+
+
+class OntologyRecordPropertyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: OntologyRecordPropertyLabel
+    name: OntologyRecordPropertyLabel
+    value: str = Field(max_length=4096)
+
+
+class OntologyRecordMetadataBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[OntologyRecordTag] | None = Field(default=None, max_length=30)
+    properties: list[OntologyRecordPropertyBody] = Field(default_factory=list, max_length=60)
+    property_labels: dict[OntologyRecordPropertyCode, OntologyRecordPropertyLabel] | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def check_duplicates(self):
+        if self.tags is not None and len(self.tags) != len(set(self.tags)):
+            raise ValueError("标签不能重复")
+        if len(self.properties) != len({item.id for item in self.properties}):
+            raise ValueError("自定义属性标识不能重复")
+        return self
+
+
+class OntologyRecordEditBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: dict[str, JsonValue] = Field(default_factory=dict, max_length=500)
+    expected_values: dict[str, JsonValue] = Field(default_factory=dict, max_length=500)
+    token: str = Field(pattern=r"^[0-9a-f]{64}$")
+    record_metadata: OntologyRecordMetadataBody | None = None
+    expected_record_metadata: OntologyRecordMetadataBody | None = None
 
 
 class CandidateGenerateBody(BaseModel):
@@ -1364,6 +1413,23 @@ async def bind_ontology_records(
     return {"data": payload}
 
 
+@router.put("/ontology-objects/{object_id}/similarity-features")
+@diagnose_operation("ONTOLOGY_OBJECT_WRITE_FAILED")
+async def update_ontology_similarity_features(
+    object_id: int,
+    body: OntologySimilarityFeaturesBody,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    obj = await set_similarity_features(
+        db, tenant_id=current_tenant_id(user), object_id=object_id,
+        actor_id=current_user_id(user), features=body.features,
+    )
+    payload = object_payload(obj, include_runtime_config=True)
+    await db.commit()
+    return {"data": payload}
+
+
 @router.put("/ontology-relations/{relation_id}/record-link")
 async def bind_ontology_link(
     relation_id: int,
@@ -1397,6 +1463,32 @@ async def get_ontology_instance(
     user: dict = Depends(get_current_user),
 ):
     return {"data": await get_instance(db, user, object_id, key)}
+
+
+@router.get("/ontology-objects/{object_id}/record-edit")
+async def get_ontology_instance_editor(
+    object_id: int,
+    key: str = Query(min_length=1, max_length=MAX_KEY_LENGTH),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    return {"data": await get_instance_editor(db, user, object_id, key)}
+
+
+@router.put("/ontology-objects/{object_id}/record-edit")
+@diagnose_operation("ONTOLOGY_OBJECT_WRITE_FAILED")
+async def update_ontology_instance(
+    object_id: int,
+    body: OntologyRecordEditBody,
+    key: str = Query(min_length=1, max_length=MAX_KEY_LENGTH),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    return {"data": await update_instance(
+        db, user, object_id, key, body.data, body.expected_values, body.token,
+        record_metadata=body.record_metadata.model_dump() if body.record_metadata is not None else None,
+        expected_record_metadata=body.expected_record_metadata.model_dump() if body.expected_record_metadata is not None else None,
+    )}
 
 
 @router.get("/ontology-mappings")

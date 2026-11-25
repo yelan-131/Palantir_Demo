@@ -36,8 +36,8 @@ test('clearing filters produces explicit empty control values so defaults cannot
 });
 
 test('toolbar groups merge matching server groups independently of source toolbar presentation',()=>{
- const groups=[{id:'a',name:'A',roleIds:[],actions:['create','refresh']},{id:'b',name:'B',roleIds:[],actions:['refresh','export']}];
- assert.deepEqual(plain(resolveListView(view,{toolbarGroups:groups}).table.toolbarActions),['create','refresh','export']);
+ const groups=[{id:'a',name:'A',roleIds:[],actions:['create','refresh']},{id:'b',name:'B',roleIds:[],actions:['refresh','export','delete','disable']}];
+ assert.deepEqual(plain(resolveListView(view,{toolbarGroups:groups}).table.toolbarActions),['create','refresh','export','delete']);
  assert.deepEqual(plain(resolveListView(view,{toolbarGroups:[],toolbarActions:['refresh']}).table.toolbarActions),[]);
 });
 
@@ -46,6 +46,44 @@ test('display groups merge columns in order, preserve explicit empties and sourc
  const result=resolveListView(view,{displayGroups:groups});
  assert.deepEqual(plain(result.table.columns.map(column=>column.fieldName)),['qty','name']);
  assert.deepEqual(plain(resolveListView(view,{displayGroups:[],columns:['name']}).table.columns),[]);
+});
+
+test('an available approval status is an ordered non-sortable column when selected',()=>{
+ const field=context.exports.APPROVAL_STATUS_FIELD;
+ const group={columns:['qty',field,'name'],sortableColumns:[field,'qty'],defaultSort:{field,order:'asc'},approvalStatusConfigured:true};
+ const result=resolveListView(view,{displayGroups:[group]},true);
+ assert.deepEqual(plain(result.table.columns.map(column=>[column.fieldName,column.sortable])),[['qty',true],[field,false],['name',false]]);
+ assert.equal(result.table.defaultSort,undefined);
+ assert.deepEqual(plain(resolveListView(view,{displayGroups:[group]}).table.columns.map(column=>column.fieldName)),['qty','name']);
+});
+
+test('implicit approval status is retained while any projected display group is legacy',()=>{
+ const {hasImplicitApprovalStatus}=context.exports;
+ const configured={columns:['qty'],approvalStatusConfigured:true};
+ assert.equal(hasImplicitApprovalStatus(),true);
+ assert.equal(hasImplicitApprovalStatus({displayGroups:[{columns:['name']},configured]}),true);
+ assert.equal(hasImplicitApprovalStatus({displayGroups:[configured]}),false);
+ assert.equal(hasImplicitApprovalStatus({displayGroups:[]}),false);
+});
+
+test('the business list opts into default record metadata and honors each display group’s exact selection',()=>{
+ const metadata=['_record_id','_created_at','_updated_at','_created_by','_updated_by'];
+ const visibleColumns=(settings,showMetadata=true)=>plain(resolveListView(view,settings,false,showMetadata)
+  .table.columns.filter(column=>column.enabled).map(column=>column.fieldName));
+ assert.deepEqual(visibleColumns(undefined),['name','qty',...metadata]);
+ assert.deepEqual(visibleColumns(undefined,false),['name','qty']);
+ assert.deepEqual(visibleColumns({displayGroups:[{columns:['qty']}]}),['qty',...metadata]);
+ assert.deepEqual(visibleColumns({displayGroups:[]}),[]);
+
+ const chosen=['_updated_by','qty','_record_id'];
+ const group={columns:chosen,recordMetadataConfigured:true,sortableColumns:chosen};
+ const settings={displayGroups:[group]};
+ const result=resolveListView(view,settings,false,true);
+ assert.deepEqual(plain(result.table.columns.map(column=>[column.fieldName,column.sortable])),
+  [['_updated_by',false],['qty',true],['_record_id',false]]);
+ assert.deepEqual(visibleColumns(settings,false),['qty']);
+ assert.deepEqual(visibleColumns({displayGroups:[group,{columns:['name']}]}),
+  [...new Set([...chosen,'name',...metadata])]);
 });
 
 test('filter button permissions preserve legacy behavior and merge projected groups',()=>{
@@ -63,6 +101,17 @@ test('display sorting follows visible matching groups and removes disabled defau
  assert.deepEqual(plain(resolveListView(view,{displayGroups:[{columns:['name'],sortableColumns:['qty']}]}).table.columns.map(column=>column.sortable)),[false]);
  const merged=resolveListView(view,{displayGroups:[{columns:['name'],sortableColumns:[]},{columns:['name','qty'],sortableColumns:['qty']}]});
  assert.deepEqual(plain(merged.table.columns.map(column=>[column.fieldName,column.sortable])),[['name',false],['qty',true]]);
+});
+
+test('display groups inherit legacy sorting and stop sorting by a source field whose index was removed',()=>{
+ const groups=[{columns:['name','qty'],defaultSort:{field:'qty',order:'desc'}}];
+ const settings={displayGroups:groups,sortableColumns:['qty']};
+ const inherited=resolveListView(view,settings,false,false,new Set(['name','qty']));
+ assert.deepEqual(plain(inherited.table.columns.map(column=>[column.fieldName,column.sortable])),[['name',false],['qty',true]]);
+ assert.deepEqual(plain(inherited.table.defaultSort),{fieldName:'qty',order:'descend'});
+ const removed=resolveListView(view,settings,false,false,new Set(['name']));
+ assert.deepEqual(plain(removed.table.columns.map(column=>[column.fieldName,column.sortable])),[['name',false],['qty',false]]);
+ assert.equal(removed.table.defaultSort,undefined);
 });
 
 test('each display audience uses its own default sort and ordered matching groups choose the first valid one',()=>{

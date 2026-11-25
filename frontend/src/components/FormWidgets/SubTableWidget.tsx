@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Table, Button, Input, InputNumber, Select, Space, Popconfirm, message } from 'antd';
-import { PlusOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, SaveOutlined } from '@/components/Icon/ant';
 import { getChildren, createModelData, updateModelData, deleteModelData } from '@/services/api';
 
 interface ColumnDef {

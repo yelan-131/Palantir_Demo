@@ -99,12 +99,9 @@ Neo4j 中同时存在两套互不连通的节点，它们的主键不同。
 - Neo4j 未配置、超时或查询失败：HTTP 503，`code` 为 `GRAPH_UNAVAILABLE`。
 - 查询成功但没有数据：HTTP 409，`code` 为 `SEED_DATA_REQUIRED`。
 
-`backend/app/api/graph.py` 中仍保留 `MOCK_NODES`、`MOCK_RELATIONSHIPS` 和 `raise` 之后的模拟分支代码，这些代码不会被执行。
-
 | 接口 | 行为 |
 | --- | --- |
-| `POST /graph/query` | 优先使用白名单模板（`stats`、`all_factories`、`neighbors`）；也可传自由 Cypher，但含 `CREATE`、`MERGE`、`DELETE`、`DETACH`、`SET`、`REMOVE`、`DROP`、`CALL`、`LOAD`、`FOREACH`、`USING`、`GRANT`、`REVOKE` 的语句会被拒绝（400），因此 `CALL db.labels()` 这类过程调用也不能通过本接口执行 |
-| `GET /graph/neighbors/{id}`、`/path`、`/subgraph/{id}`、`/stats` | 按 `pg_id` 查询主数据图；演示模式下超时 0.8 秒，生产模式 5 秒 |
+| `GET /graph/stats` | 按节点标签和关系类型汇总 Neo4j 图。演示模式超时 0.8 秒，生产模式 5 秒 |
 | `GET /graph/entity/{label}/{id}`、`/graph/entity/{label}/{id}/relationships`、`/graph/impact-analysis/{id}`、`/graph/trace/{id}`、`/graph/analytics/centrality` | 按 `pg_id` 查询，超时固定 5 秒 |
 | `GET /graph/impact-analysis-by-object` | 按业务对象查询 1 到 3 跳子图（最多 120 个节点），超时演示模式 0.8 秒、生产模式 3 秒；见下文 |
 | `GET /quality/events/{id}/impact` | 质量影响页面使用；见下文 |
@@ -129,7 +126,7 @@ Neo4j 中同时存在两套互不连通的节点，它们的主键不同。
 ## 7. 权限与租户
 
 - 所有图谱接口只要求登录，没有管理员或角色校验。
-- Neo4j 节点没有 `tenant_id`。任何登录用户都可以通过只读 Cypher、邻居、路径等接口读取整张图，包括其他租户发布的知识抽取节点。
+- Neo4j 节点没有 `tenant_id`，影响分析、追溯和统计等接口读取的图数据未按租户过滤。
 - 图谱资产接口汇总所有租户的已发布抽取任务，不按租户过滤。
 - `/ontology/entities/{type}/instances` 回退到关系表时直接 `SELECT * FROM <表>`，没有租户条件。
 
@@ -137,13 +134,11 @@ Neo4j 中同时存在两套互不连通的节点，它们的主键不同。
 
 | 入口 | 组件 | 使用的接口 |
 | --- | --- | --- |
-| 数据中心“对象与关系”的图谱视图（`/data-center/objects?view=graph`） | `pages/GraphExplorer` | 统计、邻居、子图、最短路径、Cypher 查询 |
+| 数据中心「对象与关系 → 关系探索」（`/data-center/objects?view=graph`） | `pages/DataCenterWorkspace/RelationshipExplorer` | 从 `/semantic-assets/ontology-objects/{id}/record` 读取当前账号可访问的已发布对象记录及关系 |
 | 后台“质量影响与时间线”（`/admin/quality-impact`，标注为实验功能） | `pages/QualityImpact` | 先调 `impact-analysis-by-object`，失败时对质量事件再调 `/quality/events/{id}/impact`；选中节点时读取关联知识卡片 |
 | 后台“图谱分析与追溯”（`/admin/graph-tools`） | `pages/BackendSettings` | 影响分析、追溯链、中心度 |
 | 后台“实体时间旅行”（`/admin/entity-timeline`） | `pages/BackendSettings` | `/ontology/timeline/{id}`，页面已提示结果含演示回退数据 |
 | 知识库页面的“图谱”视图 | `KnowledgeGraphCenterV2` | `/graph/assets/*` |
-
-已知问题：`GraphExplorer` 读取统计接口的 `node_count`、`edge_count`、`entity_types`、`relation_types` 字段，而 `/graph/stats` 返回的是 `total_nodes`、`total_relationships`、`nodes_by_label`、`rels_by_type`，所以页面顶部的统计卡片始终显示 0。
 
 ## 9. 边界与未实现
 

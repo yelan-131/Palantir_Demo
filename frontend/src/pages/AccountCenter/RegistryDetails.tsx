@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { FileTextOutlined } from '@ant-design/icons';
+import { FileTextOutlined } from '@/components/Icon/ant';
 import { Button, Spin } from 'antd';
 import KnowledgeReader from '@/components/KnowledgeReader';
 import SettingsTabs from '@/components/SettingsTabs';

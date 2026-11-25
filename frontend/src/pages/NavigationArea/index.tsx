@@ -48,21 +48,9 @@ export default function NavigationAreaPage() {
     case '/studio/applications': content = <Applications key="applications" />; break;
     case '/studio/business-data': content = <Applications key={`business-data:${params.get('form') || ''}`} businessData initialFormId={params.get('form') || undefined} />; break;
     case '/studio/templates': content = <Templates />; break;
-    case '/admin/sources':
-    case '/data-center/sources': content = <DataCenterWorkspace workspace="sources" />; break;
-    case '/admin/pipelines':
-    case '/data-center/pipelines': content = <Navigate to="/data-center/sources?tab=pipelines" replace />; break;
-    case '/admin/reference':
     case '/data-center/reference': content = <Reference />; break;
-    case '/admin/assets':
     case '/data-center/assets': content = <DataCenterWorkspace workspace="assets" />; break;
-    case '/admin/objects':
     case '/data-center/objects': content = <DataCenterWorkspace workspace="objects" />; break;
-    case '/admin/entities':
-    case '/data-center/entities': content = <Navigate to="/data-center/assets?view=entities" replace />; break;
-    case '/admin/graph':
-    case '/data-center/graph': content = <Navigate to="/data-center/objects?view=graph" replace />; break;
-    case '/admin/knowledge':
     case '/data-center/knowledge': content = <Knowledge />; break;
     case '/admin/quality-impact': content = <><Alert type="info" showIcon message="质量影响与时间线（实验功能）" description="时间线按记录时间展示带时间戳的节点和关系，供追溯关联形成过程。" /><QualityImpact /></>; break;
     case '/admin/entity-timeline': content = <BackendTools key="entity-timeline" section="entity-timeline" />; break;

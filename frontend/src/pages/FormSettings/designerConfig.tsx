@@ -1,4 +1,4 @@
-import { CalendarOutlined, CheckCircleOutlined, DatabaseOutlined, FileImageOutlined, FileSearchOutlined, FormOutlined, HolderOutlined, LinkOutlined, LockOutlined, NumberOutlined, PaperClipOutlined, SelectOutlined, SettingOutlined, SwitcherOutlined, TableOutlined, TagsOutlined, UserOutlined, UserSwitchOutlined } from '@ant-design/icons';
+import { CalendarOutlined, CheckCircleOutlined, DatabaseOutlined, FileImageOutlined, FileSearchOutlined, FormOutlined, HolderOutlined, LinkOutlined, LockOutlined, NumberOutlined, PaperClipOutlined, SelectOutlined, SettingOutlined, SwitcherOutlined, TableOutlined, TagsOutlined, UserOutlined, UserSwitchOutlined } from '@/components/Icon/ant';
 import { getPlatformForm, getPlatformFormByCode, listPlatformForms } from '@/services/api';
 import type { PlatformForm } from '@/services/api';
 import React from 'react';

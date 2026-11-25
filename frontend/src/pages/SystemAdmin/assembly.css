@@ -86,7 +86,7 @@
 .assembly-resource-search .ant-input-suffix:has(.ant-input-clear-icon-hidden) { display: none; }
 .assembly-resource-toolbar > .ant-btn { flex: none; }
 .assembly-resources-card .assembly-form-list { flex: 1; min-height: 0; gap: 8px; padding: 1px; }
-.assembly-resources-card .assembly-form-card { grid-template-columns: 24px minmax(0, 1fr) 24px; gap: 6px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--mf-border); border-radius: 8px; outline: none; background: var(--mf-panel); }
+.assembly-resources-card .assembly-form-card { grid-template-columns: 24px minmax(0, 1fr) 24px; gap: 6px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--mf-border); border-radius: 10px; outline: none; background: var(--mf-panel); }
 .assembly-resources-card .assembly-form-card:hover, .assembly-resources-card .assembly-form-card.is-selected { border-color: var(--mf-border-strong); background: var(--mf-hover); }
 .assembly-resources-card .assembly-form-card.is-selected { box-shadow: inset 3px 0 var(--mf-primary); }
 .assembly-resources-card .assembly-resource-option {
@@ -113,7 +113,7 @@
   background: var(--mf-selected);
 }
 .app-assembly-workspace .assembly-row-icon { width: 24px; height: 24px; background: var(--mf-selected); font-size: 14px; }
-.assembly-resource-hint, .assembly-menu-hint { margin: 0; color: var(--mf-text-secondary); font-size: 11px; line-height: 1.7; }
+.assembly-resource-hint, .assembly-menu-hint { margin: 0; color: var(--mf-text-secondary); font-size: 12px; line-height: 1.7; }
 .assembly-resource-hint { padding-top: 12px; border-top: 1px solid var(--mf-border); flex-shrink: 0; }
 .assembly-menu-hint { padding: 2px 4px 14px; }
 .app-assembly-workspace .assembly-menu-title { min-width: 0; gap: 6px !important; }
@@ -169,7 +169,7 @@
   height: 36px;
   padding: 5px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel);
   line-height: 24px;
 }
@@ -298,7 +298,7 @@
 .assembly-field-table .ant-table { font-size: 12px; }
 .assembly-field-table .ant-table-thead { position: sticky; top: 0; z-index: 1; }
 .assembly-field-table .ant-table-cell { overflow-wrap: anywhere; }
-.assembly-field-table code { color: var(--mf-text-secondary); font-size: 11px; }
+.assembly-field-table code { color: var(--mf-text-secondary); font-size: 12px; }
 .assembly-field-table .ant-btn-link {
   height: auto;
   padding: 0;
@@ -332,7 +332,7 @@
 }
 .assembly-role-switches th { background: var(--mf-panel-soft, #f7f9fb); font-size: 12px; font-weight: 600; }
 .assembly-role-switches td { border-top: 1px solid var(--mf-border, #e7ebef); }
-.assembly-role-switches td:nth-child(2) { color: var(--mf-text-secondary); font-size: 11px; }
+.assembly-role-switches td:nth-child(2) { color: var(--mf-text-secondary); font-size: 12px; }
 .assembly-role-switches :is(th, td):last-child { width: 74px; text-align: right; }
 
 .assembly-property-form.property-inspector { --property-label-width: min(132px, 40%); }

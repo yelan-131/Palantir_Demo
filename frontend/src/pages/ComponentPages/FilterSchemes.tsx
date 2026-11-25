@@ -1,7 +1,7 @@
 import React from 'react';
-import {Button, Input, Select, Switch, Tooltip} from 'antd';
-import {DeleteOutlined, PlusOutlined} from '@ant-design/icons';
-import ConfigurationTabs from './ConfigurationTabs';
+import {Button, Select, Switch, Tooltip} from 'antd';
+import {DeleteOutlined, PlusOutlined} from '@/components/Icon/ant';
+import ConfigurationTabs, {ConfigurationName} from './ConfigurationTabs';
 import {PropertyRow} from '@/components/PropertyInspector';
 import {createUuid} from '@/utils/uuid';
 import ToolbarGroups, {GroupAudience, PermissionGroupName, PropertySubgroup} from './ToolbarGroups';
@@ -20,7 +20,7 @@ const columnOptions = Array.from({length:6}, (_, index)=>({label:`${index + 1} �
 
 export default function FilterSchemes({settings,names,options,roles,disabled,onChange,selected,onSelect,children}: {
   children:React.ReactNode; selected?:string; onSelect?:(id:string)=>void;
-  settings:FilterSettings;names:string[];options:Array<{label:string;value:string;choice:boolean}>;
+  settings:FilterSettings;names:string[];options:Array<{label:string;value:string;choice:boolean;available?:boolean;controlLabel?:string;system?:boolean}>;
   roles:Array<{id:number;name:string;label?:string}>;disabled:boolean;onChange:(settings:Partial<FilterSettings>)=>void;
 }) {
   const legacy:FilterScheme={id:'default-filter-scheme',name:'默认方案',showKeyword:settings.showKeyword!==false,
@@ -29,18 +29,21 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
   const active=schemes.find(item=>item.id===selected)||schemes[0];
   const groups:FilterScheme['groups'] = active?.groups.length ? active.groups :
     [{id:'default-filter-fields',name:'默认权限组',roleIds:[],actions:[],columns:[]}];
+  const schemeSelectedFields = groups.flatMap(group=>group.columns??[]);
   const commit=(next:FilterScheme[])=>onChange(settings.schemes==null
     ? {schemes:next,requiredFields:[],expandAdvanced:false}
     : {schemes:next});
   const patch=(value:Partial<FilterScheme>)=>commit(schemes.map(item=>item.id===active?.id?{...item,...value}:item));
   const addScheme = () => {
     const copy = structuredClone(active ?? legacy);
+    const id = createUuid();
     commit([...schemes, {
       ...copy,
-      id: createUuid(),
+      id,
       name: `方案 ${schemes.length + 1}`,
       groups: copy.groups.map(group=>({...group,id:createUuid()})),
     }]);
+    onSelect?.(id);
   };
   const deleteActiveScheme = () => {
     const remaining = schemes.filter(item=>item.id !== active?.id);
@@ -55,8 +58,7 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
         onChange={disabled ? undefined : name => update({name})} />}
       subgroup={groups.length===1} disabled={disabled} onChange={update}/>;
   });
-  return <div className="component-config-tab-group">
-      <ConfigurationTabs items={schemes} selected={active?.id} onSelect={onSelect} disabled={disabled} actions={<>
+  return <ConfigurationTabs items={schemes} selected={active?.id} onSelect={onSelect} disabled={disabled} actions={<>
           <Tooltip title="新增筛选方案">
             <Button type="text" size="small" aria-label="新增筛选方案" icon={<PlusOutlined />}
               disabled={disabled || schemes.length >= 12} onClick={addScheme}/>
@@ -65,16 +67,17 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
             <Button type="text" size="small" danger aria-label="删除当前筛选方案" icon={<DeleteOutlined />}
               disabled={disabled || schemes.length <= 1} onClick={deleteActiveScheme}/>
           </Tooltip>
-      </>}/>
-      {active&&<PropertyRow label="方案名称"><Input aria-label="筛选方案名称" maxLength={50} value={active.name} disabled={disabled} onChange={event=>patch({name:event.target.value})}/></PropertyRow>}
+      </>}>
+    {active&&<ConfigurationName label="方案名称" value={active.name} disabled={disabled}
+      onChange={name=>patch({name})}/>}
     {active&&<>
       {groups.length===1?audienceEditors:<PropertySubgroup title="适用对象">{audienceEditors}</PropertySubgroup>}
       <PropertySubgroup title="筛选区域">
-        <PropertyRow label="默认行数" hint="字段不足时预留行高。字段超过设定行数时继续换行，查询和重置按钮放在最后一行字段下方。">
+        <PropertyRow label="默认行数" hint="固定行数决定筛选区可见高度。超出的条件可向下滚动查看，查询和重置按钮留在滚动区外。选择自动时随内容展开。">
           <Select aria-label="默认行数" value={active.defaultRows??DEFAULT_FILTER_LAYOUT.rows} disabled={disabled} options={rowOptions}
             onChange={defaultRows=>patch({defaultRows})}/>
         </PropertyRow>
-        <PropertyRow label="每行筛选项" hint="关键词占一个位置。窄屏每行最多显示两个筛选项。">
+        <PropertyRow label="每行筛选项" hint="关键词占一个位置。空间不足时自动减少每行项数。">
           <Select aria-label="每行筛选项" value={active.fieldsPerRow??DEFAULT_FILTER_LAYOUT.columns} disabled={disabled}
             options={columnOptions} onChange={fieldsPerRow=>patch({fieldsPerRow})}/>
         </PropertyRow>
@@ -84,9 +87,9 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
           const fields=new Set(groups.flatMap(group=>group.columns??[]));
           const fieldControls=Object.fromEntries(Object.entries(active.fieldControls??{}).filter(([name])=>fields.has(name)));
           patch({groups,fieldControls});
-        }} renderGroup={(group,update)=><ColumnPicker mode="filters" value={group.columns??[]} options={options} disabled={disabled} onChange={columns=>update({columns})} renderFieldSettings={(name,selected)=>{
+        }} renderGroup={(group,update)=><ColumnPicker mode="filters" value={group.columns??[]} schemeSelectedFields={schemeSelectedFields} options={options} disabled={disabled} onChange={columns=>update({columns})} renderFieldSettings={(name,selected)=>{
           const field=options.find(item=>item.value===name);
-          if(!field?.choice)return null;
+          if(!field?.choice)return field?.controlLabel ?? null;
           return <Select size="small" className="component-filter-control-mode" aria-label={field.label+'的选择方式'}
             disabled={disabled||!selected} value={active.fieldControls?.[name]??'inherit'} options={controlOptions}
             onChange={(mode:FilterControlMode|'inherit')=>{
@@ -99,5 +102,5 @@ export default function FilterSchemes({settings,names,options,roles,disabled,onC
       </PropertySubgroup>
     </>}
     {children}
-  </div>;
+  </ConfigurationTabs>;
 }

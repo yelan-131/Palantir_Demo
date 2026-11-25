@@ -3,7 +3,7 @@ import useAISettingsNotification from './useAISettingsNotification';
 import api from '@/services/api';
 import SettingsTabs from '@/components/SettingsTabs';
 import type { ReactNode } from 'react';
-import { ApiOutlined, CheckCircleOutlined, KeyOutlined, RobotOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { ApiOutlined, CheckCircleOutlined, KeyOutlined, RobotOutlined, SafetyCertificateOutlined } from '@/components/Icon/ant';
 import { Alert, Button, Form, Space, Switch } from 'antd';
 
 export interface AISettingsSection { key: string; children: ReactNode }

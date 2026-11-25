@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {Alert, Button, Checkbox, Empty, Input, Modal, Popconfirm, Space, message} from 'antd';
-import {ImportOutlined} from '@ant-design/icons';
+import {ImportOutlined} from '@/components/Icon/ant';
 import api from '@/services/api';
 import {createUuid} from '@/utils/uuid';
 import {mergePermissionAudience, type ToolbarGroup} from './businessComponents';

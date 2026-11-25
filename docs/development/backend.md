@@ -148,7 +148,6 @@ app/models    → 表结构
 ## 9. 安全约定
 
 - 前端隐藏菜单或按钮不是安全边界，后端必须自行校验。
-- 图谱自由查询只允许只读 Cypher（见 `tests/test_graph_cypher_safety.py`）。
 - 日志中不要输出密钥、令牌、连接串。
 - 租户导出会脱敏密码、令牌、密钥、SMTP 与 API Key 类字段。
 

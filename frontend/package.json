@@ -1,7 +1,7 @@
 {
   "name": "manufoundry-frontend",
   "private": true,
-  "version": "0.3.26",
+  "version": "0.3.27",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,6 +18,7 @@
     "cytoscape-dagre": "^2.5.0",
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",
+    "lucide-react": "^1.80.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.1",

@@ -35,7 +35,7 @@ import {
   ShopOutlined,
   ToolOutlined,
   UserOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   approveKnowledgeExtractionJob,
   commitKnowledgeExtractionJobToGraph,
@@ -339,7 +339,7 @@ export default function OntologyPage() {
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: selected ? 600 : 400 }}>{entityType.display_name ?? entityType.label ?? key}</div>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{key}</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{key}</Text>
                         </div>
                       </div>
                     </Tooltip>

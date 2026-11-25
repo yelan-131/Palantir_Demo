@@ -1,5 +1,5 @@
 import React from 'react';
-import { DeleteOutlined, DragOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DragOutlined } from '@/components/Icon/ant';
 import type { WidgetInstance } from './types';
 import { TECH_WHITE_PALETTE as colors, TECH_WHITE_GEOMETRY as geometry } from '../../theme/techWhite';
 

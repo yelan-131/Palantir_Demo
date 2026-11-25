@@ -24,7 +24,7 @@ import {
   BarChartOutlined,
   StockOutlined,
   AlertOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import ReactECharts from 'echarts-for-react';
 import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
@@ -421,7 +421,7 @@ export default function SupplyChainPage() {
       render: (factors: string[]) => (
         <Space wrap size={4}>
           {factors.map((f) => (
-            <Tag key={f} color="orange" style={{ fontSize: 11 }}>
+            <Tag key={f} color="orange" style={{ fontSize: 12 }}>
               {f}
             </Tag>
           ))}

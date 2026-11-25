@@ -1,153 +1,103 @@
-.technology-login { --login-gap: clamp(72px, calc(18vh - 40px), 220px); display: grid; grid-template-columns: minmax(480px,1.08fr) minmax(440px,1fr); min-height: calc(100dvh - 48px); margin: 24px; border: 1px solid var(--mf-border); border-radius: 24px; overflow: hidden; background: var(--mf-bg); color: var(--mf-text); box-shadow: 0 16px 60px rgba(26,44,72,.06); }
-.technology-login-intro { position: relative; isolation: isolate; overflow: hidden; padding: 38px clamp(36px,5vw,80px) 42px; background: var(--mf-info-bg); border-right: none; display: flex; flex-direction: column; }
-.technology-login-atmosphere { position: absolute; inset: 0; z-index: -2; pointer-events: none; overflow: hidden; }
-.technology-login-atmosphere span { position: absolute; width: 80%; aspect-ratio: 1; border-radius: 50%; background: #aac9ef; filter: blur(90px); opacity: .45; }
-.technology-login-atmosphere span:nth-child(1) { top: -25%; left: -35%; }
-.technology-login-atmosphere span:nth-child(2) { right: -30%; top: 36%; background: #b3ddd9; }
-.technology-login-atmosphere span:nth-child(3) { left: 10%; bottom: -50%; background: #c1cbe7; }
-.technology-login-intro::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: linear-gradient(125deg,rgba(255,255,255,.46),rgba(246,250,255,.62)); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-.technology-login-intro::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .045; background-image: radial-gradient(rgba(75,101,133,.4) .45px, transparent .65px), radial-gradient(rgba(255,255,255,.7) .4px, transparent .7px); background-size: 3px 3px, 5px 5px; background-position: 0 0, 1px 2px; }
-.technology-login-description { max-width: 660px; margin: calc(42px + var(--login-gap)) 0 auto; }
-.technology-login-kicker { display: flex; align-items: center; gap: 9px; color: var(--mf-primary); font-size: 13px; letter-spacing: 2px; margin-bottom: 24px; }
-.technology-login-kicker i { width: 6px; height: 6px; border-radius: 50%; background: #5c9eaa; box-shadow: 0 0 0 4px rgba(92,158,170,.1); }
-.technology-login-description h1.ant-typography { color: var(--mf-text); font-size: clamp(34px,3.3vw,54px); font-weight: 600; line-height: 1.32; letter-spacing: -1.5px; margin: 0 0 24px; }
-.technology-login-description h1 em { font-style: normal; color: var(--mf-primary); }
-.technology-login-description p { color: var(--mf-muted); font-size: 16px; line-height: 1.9; margin: 0; }
+/* Sign-in follows the active colour card: the introduction uses the navigation surface, the form sits on the canvas. */
+.technology-login { display: grid; grid-template-columns: minmax(480px,1.1fr) minmax(420px,1fr); min-height: 100dvh; background: var(--canon-canvas); color: var(--canon-text); font-family: var(--ui-font-sans); }
+.technology-login-intro { display: flex; flex-direction: column; padding: 36px clamp(36px,5vw,80px) 48px; background: var(--ui-side-bg); color: var(--ui-side-text); }
+.technology-login-brand { display: flex; align-items: center; gap: 10px; font-size: var(--ui-text-section-size); line-height: var(--ui-text-section-line); }
+.technology-login-brand-mark { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--ui-brand); color: var(--ui-brand-text); font: 700 14px/1 var(--ui-font-numeric); letter-spacing: .02em; }
+.technology-login-brand strong { font-weight: 600; color: var(--ui-side-text); }
+.technology-login-brand span:last-child { color: var(--ui-side-muted); font-size: var(--ui-text-control-size); }
+.technology-login-description { max-width: 620px; margin: auto 0; padding-top: 48px; }
+.technology-login-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--ui-side-muted); font-size: var(--ui-text-control-size); line-height: var(--ui-text-control-line); letter-spacing: .12em; }
+.technology-login-kicker i { width: 6px; height: 6px; border-radius: 4px; background: var(--ui-indicator); }
+.technology-login-description h1.ant-typography { margin: 0 0 20px; color: var(--ui-side-text); font-size: clamp(34px,3.2vw,46px); font-weight: 600; line-height: 1.3; letter-spacing: -.02em; }
+.technology-login-description h1 em { font-style: normal; color: var(--ui-indicator); }
+.technology-login-description > p { margin: 0; color: var(--ui-side-muted); font-size: 15px; line-height: 1.8; }
 
-
-.technology-login-access { padding: calc(80px + var(--login-gap)) clamp(28px,4vw,64px) 64px; display: flex; align-items: flex-start; justify-content: center; background: var(--mf-bg); }
-.technology-login-form { width: 100%; max-width: 500px; padding: 44px; border: 1px solid var(--mf-border); border-radius: 20px; background: #fff; box-shadow: 0 12px 40px rgba(32,54,87,.05); }
-.technology-login-form-head { margin-bottom: 32px; }
-.technology-login-form-head h2.ant-typography { color: var(--mf-text); font-size: 30px; line-height: 1.4; margin: 0 0 10px; font-weight: 600; letter-spacing: -.7px; }
-.technology-login-form-head .ant-typography-secondary { font-size: 14px; color: var(--mf-muted); }
-.technology-login-form .ant-form-item { margin-bottom: 22px; }
-.technology-login-form .ant-form-item-label { padding-bottom: 9px; }
-.technology-login-form .ant-form-item-label > label { font-size: 14px; color: var(--mf-text); }
-.technology-login-form .ant-input-affix-wrapper { min-height: 52px; border-radius: 8px; border-color: var(--mf-border); background: var(--mf-panel-soft); padding: 8px 13px; }
-.technology-login-form .ant-input { font-size: 15px; background: transparent; }
-.technology-login-form .ant-input::placeholder { color: #8b97a8; }
-.technology-login-form .ant-input-prefix { font-size: 16px; color: #8191a5; margin-right: 10px; }
-.technology-login-form .ant-input-password-icon { font-size: 16px; padding: 6px; color: #8191a5; }
-.technology-login-form .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):hover { border-color: #6e8ca9; }
-.technology-login-form .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):focus-within { border-color: var(--mf-focus); box-shadow: 0 0 0 3px rgba(76,119,148,.1); }
-.technology-login-form .ant-btn { height: 52px; border-radius: 8px; font-size: 15px; font-weight: 500; }
-.technology-login-form .technology-login-submit { background: var(--mf-primary-strong); box-shadow: none; }
-.technology-login-form .technology-login-submit:not(:disabled):hover { background: var(--mf-primary) !important; }
-.technology-login-form .ant-btn-default { color: var(--mf-primary); border-color: var(--mf-border); box-shadow: none; }
-.technology-login-help { display: flex; justify-content: flex-end; margin: -10px 0 18px; }
-.technology-login-help .ant-btn { height: auto; min-height: 32px; padding: 4px 0; font-size: 12px; color: var(--mf-primary); }
-.technology-login-form .ant-btn:focus-visible { outline: 2px solid var(--mf-focus); outline-offset: 3px; }
-.technology-login-error { margin-bottom: 18px; }
-.technology-login-form .technology-login-divider { margin: 22px 0; color: var(--mf-faint); font-size: 12px; border-color: var(--mf-border); }
-.technology-login-auth-note { margin-top: 24px; color: var(--mf-muted); font-size: 11px; line-height: 1.8; text-align: center; }
-.technology-login-transition { position: absolute; inset: 0 0 0 auto; width: clamp(90px, 10vw, 170px); z-index: -1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(245,247,250,.72) 65%, var(--mf-bg)); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); mask-image: linear-gradient(90deg, transparent, #000 65%); -webkit-mask-image: linear-gradient(90deg, transparent, #000 65%); }
-@media (max-height: 820px) and (min-width: 901px) {
- .technology-login { --login-gap: 56px; }
- .technology-login-intro { padding-top: 28px; }
- .technology-login-description h1.ant-typography { font-size: 38px; margin-bottom: 18px; }
- .technology-login-kicker { margin-bottom: 18px; }
- .technology-login-access { padding-top: calc(70px + var(--login-gap)); padding-bottom: 32px; }
- .technology-login-form { padding: 30px; }
-}
-@media (max-width: 1100px) and (min-width: 901px) {
- .technology-login { grid-template-columns: minmax(440px,1fr) minmax(400px,1fr); margin: 16px; }
- .technology-login-intro { padding-left: 30px; padding-right: 30px; }
- .technology-login-access { padding-left: 24px; padding-right: 24px; }
- .technology-login-form { padding: 28px; }
-}
-@media (max-width: 900px) {
- .technology-login { grid-template-columns: 1fr; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; }
- .technology-login-intro { padding: 26px 28px 32px; border-right: none; border-bottom: 1px solid var(--mf-border-strong); }
- .technology-login-description { margin-top: 34px; }
- .technology-login-kicker { margin-bottom: 16px; font-size: 12px; }
- .technology-login-description h1.ant-typography { font-size: 32px; letter-spacing: -.8px; margin-bottom: 16px; }
- .technology-login-description p { font-size: 14px; }
- .technology-login-access { padding: 28px 20px 40px; }
- .technology-login-form { padding: 28px 24px; border-radius: 16px; }
- .technology-login-form-head h2.ant-typography { font-size: 26px; }
-}
-
-
-.technology-login-introduction-tabs { display: flex; gap: 22px; margin-top: 44px; border-bottom: 1px solid #cbd9e7; }
-.technology-login-introduction-tabs button { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 10px 0 15px; position: relative; border: 0; background: transparent; color: #647990; font: inherit; font-size: 15px; cursor: pointer; white-space: nowrap; }
-.technology-login-introduction-tabs button[aria-selected='true'] { color: #315f79; font-weight: 600; }
-.technology-login-introduction-tabs button[aria-selected='true']::after { content: ''; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: #4e839a; border-radius: 2px; }
-.technology-login-introduction-tabs button:hover { color: #315f79; }
-.technology-login-introduction-tabs button:focus-visible, .technology-login-introduction-panel:focus-visible { outline: 2px solid var(--mf-focus); outline-offset: 4px; border-radius: 3px; }
-.technology-login-introduction-panel { min-height: 270px; padding-top: 28px; max-width: 560px; }
-.technology-login-introduction-panel h2.ant-typography { margin: 0 0 16px; font-size: 23px; line-height: 1.5; font-weight: 600; color: #36546f; letter-spacing: -.4px; }
-.technology-login-introduction-panel p { font-size: 15px; line-height: 1.9; color: #5c7289; }
-.technology-login-introduction-panel ul { display: grid; gap: 12px; padding: 0; margin: 24px 0 0; list-style: none; }
-.technology-login-introduction-panel li { display: flex; align-items: center; gap: 10px; color: #536d85; font-size: 14px; line-height: 1.6; }
-.technology-login-introduction-panel li::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #7fa4b8; flex-shrink: 0; }
-@media (max-width: 1100px) and (min-width: 901px) { .technology-login-introduction-tabs { gap: 18px; } .technology-login-introduction-tabs button { font-size: 14px; gap: 6px; } }
-@media (max-width: 900px) {
- .technology-login-transition { display: none; }
- .technology-login-introduction-tabs { gap: 18px; margin-top: 26px; }
- .technology-login-introduction-tabs button { font-size: 14px; gap: 6px; min-height: 44px; padding-bottom: 12px; }
- .technology-login-introduction-panel { min-height: 0; padding-top: 20px; }
- .technology-login-introduction-panel h2.ant-typography { font-size: 20px; margin-bottom: 10px; }
- .technology-login-introduction-panel p { font-size: 14px; line-height: 1.8; }
- .technology-login-introduction-panel ul { margin-top: 16px; gap: 8px; }
- .technology-login-introduction-panel li { font-size: 13px; }
-}
-
-.technology-login-introduction-switcher { margin-top: 44px; }
-.technology-login-introduction-controls { display: flex; align-items: center; gap: 18px; border-bottom: 1px solid #cbd9e7; }
-.technology-login-introduction-controls .technology-login-introduction-tabs { margin-top: 0; border-bottom: 0; }
-.technology-login-introduction-panel { opacity: 1; transition: opacity 180ms ease; }
+.technology-login-introduction-switcher { margin-top: 40px; }
+.technology-login-introduction-controls { display: flex; align-items: center; gap: 18px; border-bottom: 1px solid var(--ui-side-border); }
+.technology-login-introduction-tabs { display: flex; gap: 22px; }
+.technology-login-introduction-tabs button { position: relative; min-height: 44px; padding: 10px 0 12px; border: 0; background: transparent; color: var(--ui-side-muted); font: inherit; font-size: var(--ui-text-body-size); cursor: pointer; white-space: nowrap; transition: color 120ms ease; }
+.technology-login-introduction-tabs button:hover, .technology-login-introduction-tabs button[aria-selected='true'] { color: var(--ui-side-text); }
+.technology-login-introduction-tabs button[aria-selected='true'] { font-weight: 600; }
+.technology-login-introduction-tabs button[aria-selected='true']::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--ui-indicator); }
+.technology-login-introduction-tabs button:focus-visible, .technology-login-introduction-panel:focus-visible { outline: 2px solid var(--ui-indicator); outline-offset: 4px; border-radius: 4px; }
+.technology-login-introduction-panel { min-height: 240px; max-width: 560px; padding-top: 24px; opacity: 1; transition: opacity 180ms ease; }
 .technology-login-introduction-panel.is-leaving { opacity: 0; }
+.technology-login-introduction-panel h2.ant-typography { margin: 0 0 12px; color: var(--ui-side-text); font-size: var(--ui-text-heading-size); line-height: var(--ui-text-heading-line); font-weight: 600; }
+.technology-login-introduction-panel p { margin: 0; color: var(--ui-side-muted); font-size: var(--ui-text-body-size); line-height: var(--ui-text-body-line); }
+.technology-login-introduction-panel ul { display: grid; gap: 10px; padding: 0; margin: 20px 0 0; list-style: none; }
+.technology-login-introduction-panel li { display: flex; align-items: center; gap: 10px; color: var(--ui-side-text); font-size: var(--ui-text-body-size); line-height: var(--ui-text-body-line); }
+.technology-login-introduction-panel li::before { content: ''; flex-shrink: 0; width: 4px; height: 4px; border-radius: 4px; background: var(--ui-indicator); }
+
+.technology-login-access { display: flex; align-items: center; justify-content: center; padding: 48px clamp(28px,4vw,64px); background: var(--canon-canvas); }
+.technology-login-form { width: 100%; max-width: 400px; }
+.technology-login-form-head { margin-bottom: 28px; }
+.technology-login-form-head h2.ant-typography { margin: 0 0 6px; color: var(--canon-text); font-size: var(--ui-text-title-size); line-height: var(--ui-text-title-line); font-weight: 600; letter-spacing: -.01em; }
+.technology-login-form-head .ant-typography-secondary { color: var(--canon-muted); font-size: var(--ui-text-body-size); }
+.technology-login-form .ant-form-item { margin-bottom: 20px; }
+.technology-login-form .ant-form-item-label { padding-bottom: 6px; }
+.technology-login-form .ant-form-item-label > label { color: var(--canon-text); font-size: var(--ui-text-control-size); }
+.technology-login-form .ant-input-affix-wrapper { min-height: 40px; padding: 4px 12px; background: var(--canon-surface); }
+.technology-login-form .ant-input { font-size: var(--ui-text-body-size); }
+.technology-login-form .ant-input::placeholder { color: var(--canon-muted); }
+.technology-login-form .ant-input-prefix { margin-right: 8px; color: var(--canon-muted); }
+.technology-login-form .ant-btn { height: 40px; font-size: var(--ui-text-body-size); font-weight: 500; }
+.technology-login-help { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
+.technology-login-help .ant-btn { height: auto; min-height: 32px; padding: 4px 0; font-size: var(--ui-text-caption-size); }
+.technology-login-error { margin-bottom: 16px; }
+.technology-login-form .technology-login-divider { margin: 20px 0; color: var(--canon-muted); font-size: var(--ui-text-caption-size); }
+.technology-login-auth-note { margin-top: 20px; color: var(--canon-muted); font-size: var(--ui-text-caption-size); line-height: var(--ui-text-caption-line); text-align: center; }
+
+@media (max-width: 1100px) and (min-width: 901px) {
+  .technology-login { grid-template-columns: minmax(420px,1fr) minmax(380px,1fr); }
+  .technology-login-intro { padding-inline: 32px; }
+  .technology-login-introduction-tabs { gap: 14px; }
+}
+@media (max-height: 760px) and (min-width: 901px) {
+  .technology-login-description { padding-top: 24px; }
+  .technology-login-description h1.ant-typography { font-size: 34px; }
+  .technology-login-introduction-switcher { margin-top: 24px; }
+  .technology-login-introduction-panel { min-height: 200px; }
+}
+@media (max-width: 900px) {
+  .technology-login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .technology-login-intro { padding: 24px 24px 28px; }
+  .technology-login-description { padding-top: 32px; }
+  .technology-login-description h1.ant-typography { font-size: 30px; margin-bottom: 14px; }
+  .technology-login-description > p { font-size: var(--ui-text-body-size); }
+  .technology-login-introduction-switcher { margin-top: 24px; }
+  .technology-login-introduction-controls { flex-wrap: wrap; }
+  .technology-login-introduction-tabs { gap: 14px; }
+  .technology-login-introduction-panel { min-height: 0; padding-top: 16px; }
+  .technology-login-access { padding: 32px 20px 40px; }
+}
+@media (max-width: 600px) {
+  .technology-login-intro { padding: 16px 20px; }
+  .technology-login-description { display: none; }
+  .technology-login-access { align-items: flex-start; padding: 32px 20px; }
+  .technology-login-form-head h2.ant-typography { font-size: var(--ui-text-heading-size); line-height: var(--ui-text-heading-line); }
+}
+
+/* Gentle, one-time arrivals keep the login form steady. */
+.technology-login-kicker { animation: login-arrive 450ms 40ms both; }
+.technology-login-description > h1.ant-typography { animation: login-text-lift 600ms 80ms both; }
+.technology-login-description > p { animation: login-arrive 500ms 120ms both; }
+.technology-login-introduction-controls { animation: login-arrive 420ms 140ms both; }
 .technology-login-introduction-panel h2.ant-typography { animation: login-text-lift 550ms both; }
 .technology-login-introduction-panel p { animation: login-text-soft 450ms 40ms both; }
 .technology-login-introduction-panel li { animation: login-text-soft 450ms 80ms both; }
 .technology-login-introduction-panel li:nth-child(2) { animation-delay: 120ms; }
 .technology-login-introduction-panel li:nth-child(3) { animation-delay: 160ms; }
-@keyframes login-text-lift {
-  0% { opacity: 0; transform: translateY(5px); }
-  58% { opacity: 1; transform: translateY(-1px); }
-  80% { opacity: 1; transform: translateY(.5px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-@media (max-width: 1100px) and (min-width: 901px) { .technology-login-introduction-controls { gap: 10px; } .technology-login-introduction-controls .technology-login-introduction-tabs { gap: 12px; } }
-@media (max-width: 900px) {
- .technology-login-introduction-switcher { margin-top: 26px; }
- .technology-login-introduction-controls { flex-wrap: wrap; gap: 0 12px; }
- .technology-login-introduction-controls .technology-login-introduction-tabs { gap: 14px; }
- .technology-login-introduction-panel { min-height: 310px; }
-}
-@media (prefers-reduced-motion: reduce) {
- .technology-login-introduction-panel { transition: none; }
- .technology-login-introduction-panel h2.ant-typography, .technology-login-introduction-panel p, .technology-login-introduction-panel li { animation: none; }
-}
-
-/* Gentle, one-time arrivals and small responses keep the login form steady. */
-.technology-login-kicker { animation: login-arrive 450ms 40ms both; }
-.technology-login-description > h1.ant-typography { animation: login-text-lift 600ms 80ms both; }
-.technology-login-description > p { animation: login-arrive 500ms 120ms both; }
-.technology-login-introduction-controls { animation: login-arrive 420ms 140ms both; }
-.technology-login-introduction-tabs button { transition: color 180ms ease, transform 180ms ease; }
-.technology-login-introduction-tabs button:hover { transform: translateY(-2px); }
-.technology-login-introduction-tabs button:active { transform: translateY(0); }
-.technology-login-form { animation: login-card-arrive 380ms 40ms both; transition: border-color 240ms ease, box-shadow 240ms ease; }
-.technology-login-form:focus-within { border-color: #becfdd; box-shadow: 0 16px 44px rgba(32,54,87,.075); }
+.technology-login-form { animation: login-card-arrive 380ms 40ms both; }
 .technology-login-form-head { animation: login-arrive 300ms 80ms both; }
 .technology-login-form .ant-form-item { animation: login-arrive 300ms 100ms both; }
 .technology-login-form .ant-form-item:nth-child(2) { animation-delay: 140ms; }
-.technology-login-form .ant-input-affix-wrapper { transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease; }
-.technology-login-form .ant-input-affix-wrapper:focus-within { background: #fff; }
-.technology-login-form .ant-btn { transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
-.technology-login-form .ant-btn:not(:disabled):not(.ant-btn-link):hover { transform: translateY(-1px); }
-.technology-login-form .ant-btn:not(:disabled):active { transform: translateY(1px); }
-.technology-login-form .technology-login-submit:not(:disabled):hover { box-shadow: 0 6px 16px rgba(34,62,89,.14); }
-.technology-login.is-entering-workspace .technology-login-intro, .technology-login.is-entering-workspace .technology-login-access { pointer-events: none; }
 @keyframes login-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes login-card-arrive { from { opacity: 0; transform: translateY(7px) scale(.996); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@media (prefers-reduced-motion: reduce) {
- .technology-login-kicker, .technology-login-description > h1.ant-typography, .technology-login-description > p, .technology-login-introduction-controls, .technology-login-form, .technology-login-form-head, .technology-login-form .ant-form-item { animation: none; }
- .technology-login-form, .technology-login-form .ant-input-affix-wrapper, .technology-login-form .ant-btn, .technology-login-introduction-tabs button { transition: none; }
- .technology-login-form .ant-btn:hover, .technology-login-form .ant-btn:active, .technology-login-introduction-tabs button:hover { transform: none !important; }
+@keyframes login-card-arrive { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes login-text-lift {
+  0% { opacity: 0; transform: translateY(5px); }
+  58% { opacity: 1; transform: translateY(-1px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes login-text-soft {
   0% { opacity: 0; transform: translateY(3px); }
   72% { opacity: 1; transform: translateY(-.4px); }
@@ -155,6 +105,9 @@
 }
 
 .technology-login { opacity: 1; transition: opacity 120ms ease-in; }
-.technology-login.is-entering-workspace { pointer-events: none; }
+.technology-login.is-entering-workspace, .technology-login.is-entering-workspace :is(.technology-login-intro, .technology-login-access) { pointer-events: none; }
 .technology-login.is-entering-workspace[data-transition-mode="fade"] { opacity: .25; }
-@media (prefers-reduced-motion: reduce) { .technology-login { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .technology-login, .technology-login-introduction-panel, .technology-login-introduction-tabs button { transition: none; }
+  .technology-login *, .technology-login-form { animation: none !important; }
+}

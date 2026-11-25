@@ -6,7 +6,7 @@ import {
   PlusOutlined,
   ProfileOutlined,
   TagsOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Button, Card, Col, Empty, Form, Input, Modal, Row, Segmented, Space, Table, Tag, Typography, message } from 'antd';
 import { getReferenceData, saveReferenceData } from '@/services/api';
 
@@ -172,25 +172,14 @@ export default function ReferenceDataManagement() {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <Card loading={loading}>
-        <Row gutter={[16, 16]} align="middle">
-          <Col flex="auto">
-            <Space direction="vertical" size={2}>
-              <Typography.Text type="secondary">
-                维护可复用的字典条目与基础档案。
-              </Typography.Text>
-            </Space>
-          </Col>
-          <Col>
-            <Segmented
-              value={mode}
-              onChange={(value) => setMode(value as 'dictionary' | 'master')}
-              options={[
-                { label: '数据字典', value: 'dictionary', icon: <TagsOutlined /> },
-                { label: '基础档案', value: 'master', icon: <ProfileOutlined /> },
-              ]}
-            />
-          </Col>
-        </Row>
+        <Segmented
+          value={mode}
+          onChange={(value) => setMode(value as 'dictionary' | 'master')}
+          options={[
+            { label: '数据字典', value: 'dictionary', icon: <TagsOutlined /> },
+            { label: '基础档案', value: 'master', icon: <ProfileOutlined /> },
+          ]}
+        />
       </Card>
 
       {mode === 'dictionary' ? (

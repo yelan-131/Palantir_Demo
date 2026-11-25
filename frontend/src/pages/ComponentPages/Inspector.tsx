@@ -6,10 +6,11 @@ import ToolbarGroups from './ToolbarGroups';
 import OptionPicker from '@/components/OptionPicker';
 import type {AddableWidgetType} from './componentOperations';
 import BusinessProperties from './BusinessProperties';
+import {useListConfigurationPreview} from './ListConfigurationPreview';
 import type {ViewConfig} from '@/utils/viewConfig';
-import React, {useLayoutEffect, useRef, useState} from 'react';
+import React, {useLayoutEffect, useRef} from 'react';
 import {Alert, Button, ConfigProvider, Empty, Input, InputNumber, Popconfirm, Select, Switch, ColorPicker} from 'antd';
-import {BarChartOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, FilterOutlined, NumberOutlined, PlusOutlined, SafetyCertificateOutlined, SkinOutlined, TableOutlined} from '@ant-design/icons';
+import {BarChartOutlined, CopyOutlined, DatabaseOutlined, DeleteOutlined, FilterOutlined, NumberOutlined, PlusOutlined, SafetyCertificateOutlined, SkinOutlined, TableOutlined} from '@/components/Icon/ant';
 import {PropertyInspectorHeader, PropertyHelp, PropertyGroup, PropertyRow, PropertyAdvanced} from '@/components/PropertyInspector';
 import type {PlatformForm, PlatformFormField} from '@/services/api';
 import {bindWidgetSource, widgetSourceId, type PageDefinition, type PageWidget} from './model';
@@ -45,11 +46,14 @@ interface Props {
   selected?: string;
   fields: PlatformFormField[];
   forms: PlatformForm[];
+  listSource?: {form?:PlatformForm; error?:string};
   roles: Array<{id:number;name:string;label?:string}>;
   disabled: boolean;
   sourceOpen: boolean;
   sourceSlots?:Record<'properties'|'actions'|'status',React.RefCallback<HTMLDivElement>>;
   sourceIsBusiness: boolean;
+  approvalStatusAvailable?: boolean;
+  approvalStatusDefaultVisible?: boolean;
   onPanel: (panel: Panel) => void;
   onTab: (tab: WidgetTab) => void;
   onSelect: (id: string) => void;
@@ -70,13 +74,14 @@ export default function Inspector(props: Props) {
   const panelKey = panel==='widget' ? `${widget?.id}:${tab}` : panel;
   const panelBody = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
-  const [selectedFilterSchemes,setSelectedFilterSchemes] = useState<Record<string,string>>({});
-  const [selectedDisplayGroups,setSelectedDisplayGroups] = useState<Record<string,string>>({});
+  const preview = useListConfigurationPreview(widget?.id);
   useLayoutEffect(()=>{
     if(panelBody.current)panelBody.current.scrollTop=scrollPositions.current.get(panelKey)??0;
   },[panelKey]);
   const options = fields.map(field => ({label:field.label,value:field.field_name}));
   const sourceView = forms.find(form => form.id === (panel === 'widget' ? widgetSourceId(definition, widget) : definition.sourceFormId))?.config?.viewConfig as ViewConfig | undefined;
+  const publishedListView = props.listSource?.form?.config?.viewConfig as ViewConfig | undefined;
+  const listActionsView = props.listSource?.form ? publishedListView?.tabs?.[0] ?? publishedListView : sourceView;
   const configuredFilterNames = sourceView?.filters?.filter(filter => filter.enabled).map(filter => filter.fieldName);
   const filterOptions = options.filter(option => !configuredFilterNames || configuredFilterNames.includes(option.value));
   const numeric = fields.filter(field => /^(int|integer|float|decimal|number)$/.test(field.field_type)).map(field => ({label:field.label,value:field.field_name}));
@@ -100,10 +105,10 @@ export default function Inspector(props: Props) {
 
     {tab === 'basic' && <>
       <PropertyGroup title="基本信息"><PropertyRow label="组件名称" hint="同时用作画布标题；在标题与操作区设置是否显示及文字样式。"><Input maxLength={100} value={widget.title} onChange={event=>update({title:event.target.value})} /></PropertyRow><PropertyRow label="组件类型"><OptionPicker value={widget.type} disabled options={[...componentTypes, ...(props.workspace ? [{type:'workspace' as AddableWidgetType,label:'工作台模块',description:'待办、未完成工作、业务表单与最近工作',icon:<DatabaseOutlined />}]:[])].map(item=>({value:item.type,label:item.label}))} onChange={()=>{}} /></PropertyRow></PropertyGroup>
-      <PresentationSettings value={widget.presentation} resolved={resolvePresentation(definition,widget)} onChange={presentation=>update({presentation})} layout={<>
-        <PropertyRow label="自定义宽度" hint="单位 px；清空后使用布局占比。"><InputNumber min={160} max={3840} suffix="px" placeholder="自动" value={widget.customWidth} onChange={customWidth=>update({customWidth})}/></PropertyRow>
-        <PropertyRow label="自定义高度" hint="单位 px；清空后随内容自适应。"><InputNumber min={120} max={3000} suffix="px" placeholder="自动" value={widget.customHeight} onChange={customHeight=>update({customHeight})}/></PropertyRow>
-        <PropertyRow label="布局占比"><OptionPicker numericValues={[25,33.33,50,75,100]} value={String(widget.width)} options={[{value:'6',label:'25%'},{value:'8',label:'33%'},{value:'12',label:'50%'},{value:'18',label:'75%'},{value:'24',label:'整行'}]} onChange={value=>update({width:Number(value) as PageWidget['width']})} /></PropertyRow>
+      <PresentationSettings value={widget.presentation} resolved={resolvePresentation(definition,widget)} onChange={presentation=>update({presentation})} recordList={widget.type==='record-list'} layout={<>
+        <PropertyRow label="自定义宽度" hint="按像素设置宽度，最大为画布可用宽度。清空后按布局占比显示。"><InputNumber min={160} max={3840} precision={0} suffix="px" placeholder="自动" value={widget.customWidth} onChange={customWidth=>update({customWidth})}/></PropertyRow>
+        <PropertyRow label="自定义高度" hint={widget.type==='record-list'&&!props.workspace&&definition.widgets.length===1 ? '按像素设置高度。清空后，列表自动填满画布可用高度。' : '按像素设置高度。清空后，组件高度随内容自适应。'}><InputNumber min={120} max={3000} precision={0} suffix="px" placeholder="自动" value={widget.customHeight} onChange={customHeight=>update({customHeight})}/></PropertyRow>
+        <PropertyRow label="布局占比" hint="使用自动宽度时，按画布宽度计算占比。屏幕或画布较窄时，组件自动整行显示。"><OptionPicker numericValues={[25,33.33,50,75,100]} value={String(widget.width)} options={[{value:'6',label:'25%'},{value:'8',label:'33%'},{value:'12',label:'50%'},{value:'18',label:'75%'},{value:'24',label:'整行'}]} onChange={value=>update({width:Number(value) as PageWidget['width']})} /></PropertyRow>
         {statistical&&<PropertyRow label="组件配色"><OptionPicker value={appearance.palette||'inherit'} options={[{value:'inherit',label:'跟随页面主题'},...Object.keys(widgetPalettes).map(value=>({value,label:paletteNames[value as keyof typeof paletteNames]}))]} onChange={value=>patchAppearance({palette:value==='inherit'?undefined:value as keyof typeof paletteNames})} /></PropertyRow>}
       </>} titleSettings={<>
           <PropertyAdvanced title="标题高级选项">
@@ -149,7 +154,7 @@ export default function Inspector(props: Props) {
             </PropertyRow>
           </PropertyAdvanced>
       </>} actionSettings={<>
-        {widget.type==='record-list'&&<BusinessProperties roles={roles} widget={widget} tab="toolbar" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} />}
+        {widget.type==='record-list'&&<BusinessProperties roles={roles} widget={widget} tab="toolbar" fields={fields} view={listActionsView} onChange={update} disabled={disabled||sourceOpen} />}
       </>}/>
         {widget.type==='chart'&&<PropertyGroup title="图表展示" defaultOpen={false}>
           <PropertyRow label="图表高度"><InputNumber min={160} max={600} step={20} addonAfter="px" value={widget.height??280} onChange={height=>update({height:height??280})} /></PropertyRow>
@@ -162,7 +167,7 @@ export default function Inspector(props: Props) {
         <PropertyRow label="显示单位"><Input value={widget.unit} maxLength={30} placeholder="如：件、万元" onChange={event=>update({unit:event.target.value})} /></PropertyRow>
         {widget.type==='metric'&&<PropertyRow label="阈值颜色" hint="例如：红色 > 100；支持红色、绿色、黄色、橙色。"><Input value={widget.threshold} maxLength={100} placeholder="红色 > 100" onChange={event=>update({threshold:event.target.value})} /></PropertyRow>}
       </PropertyGroup>}
-      {widget.type==='record-list'&&<BusinessProperties roles={roles} widget={widget} tab="interaction" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen} />}
+      {widget.type==='record-list'&&<BusinessProperties roles={roles} widget={widget} tab="interaction" fields={fields} view={listActionsView} onChange={update} disabled={disabled||sourceOpen} />}
       {widget.type==='chart'&&<PropertyGroup title="交互行为" hint="图表可联动使用同一业务来源的列表、指标和其他图表。">
         <PropertyRow label="点击图表">
           <Select value={widget.interaction??'filter'} options={[{label:'筛选数据',value:'filter'},{label:'打开业务明细',value:'drilldown'},{label:'进入来源表单',value:'navigate'},{label:'不触发联动',value:'none'}]} onChange={interaction=>update({interaction})} />
@@ -188,11 +193,13 @@ export default function Inspector(props: Props) {
       <PropertyGroup title="数据来源"><PropertyRow label="业务来源" hint="来源统一在「应用配置 → 业务数据」中管理。也可右键组件，选择「业务配置 → 字段与录入」打开当前来源。"><Select aria-label="组件业务来源" showSearch optionFilterProp="label" placeholder="选择业务数据来源" value={widgetSourceId(definition, widget)} options={forms.map(form=>({label:form.name,value:form.id}))} onChange={formId=>onChange(bindWidgetSource(definition, widget.id, formId))} /></PropertyRow></PropertyGroup>
       {statistical&&<PropertyGroup title="自定义指标" defaultOpen={Boolean(widget.expression)} hint={<>支持 count()、sum、avg、min、max、count_distinct、count_if 及四则运算；字段使用业务编码。百分比公式返回比例，例如 sum(actual) / sum(target)。清空后沿用下方统计方式。</>}>{widget.sharedMetricId&&<Alert type="info" message={`共享指标 · v${widget.sharedMetricVersion}`} description="公式由指标库管理，发布新口径时同步更新引用。" action={<Button size="small" onClick={()=>update({sharedMetricId:null,sharedMetricVersion:null,sharedFields:[]})}>转为独立指标</Button>}/>}<PropertyRow label="指标公式"><Input.TextArea disabled={Boolean(widget.sharedMetricId)} value={widget.expression||''} maxLength={512} autoSize={{minRows:2,maxRows:5}} placeholder="例如 sum(actual) / sum(target)" onChange={event=>update({expression:event.target.value||null})}/></PropertyRow></PropertyGroup>}
 
-      {widget.type !== 'record-list' ? <PropertyGroup title="统计口径"><PropertyRow label="统计方式"><Select value={widget.aggregate} options={[{label:'记录数',value:'count'},{label:'数值求和',value:'sum'},{label:'平均值',value:'avg'},{label:'最小值',value:'min'},{label:'最大值',value:'max'}]} onChange={aggregate=>update({aggregate})} /></PropertyRow>{widget.aggregate!=='count'&&<PropertyRow label="数值字段"><Select value={widget.measure} options={numeric} onChange={measure=>update({measure})} /></PropertyRow>}{widget.type==='chart'&&<PropertyRow label="分组字段"><Select value={widget.dimension} options={options} onChange={dimension=>update({dimension})} /></PropertyRow>}</PropertyGroup> : <BusinessProperties roles={roles} widget={widget} tab="data" fields={fields} view={sourceView} onChange={update} disabled={disabled||sourceOpen}
-        selectedDisplayGroup={selectedDisplayGroups[widget.id]}
-        onSelectDisplayGroup={id=>setSelectedDisplayGroups(previous=>({...previous,[widget.id]:id}))}
-        selectedFilterScheme={selectedFilterSchemes[widget.id]}
-        onSelectFilterScheme={id=>setSelectedFilterSchemes(previous=>({...previous,[widget.id]:id}))} />}
+      {widget.type !== 'record-list' ? <PropertyGroup title="统计口径"><PropertyRow label="统计方式"><Select value={widget.aggregate} options={[{label:'记录数',value:'count'},{label:'数值求和',value:'sum'},{label:'平均值',value:'avg'},{label:'最小值',value:'min'},{label:'最大值',value:'max'}]} onChange={aggregate=>update({aggregate})} /></PropertyRow>{widget.aggregate!=='count'&&<PropertyRow label="数值字段"><Select value={widget.measure} options={numeric} onChange={measure=>update({measure})} /></PropertyRow>}{widget.type==='chart'&&<PropertyRow label="分组字段"><Select value={widget.dimension} options={options} onChange={dimension=>update({dimension})} /></PropertyRow>}</PropertyGroup> : props.listSource?.form ? <BusinessProperties roles={roles} widget={widget} tab="data" fields={(props.listSource.form.fields??[]).filter(field=>!field.archived)} view={publishedListView} onChange={update} disabled={disabled||sourceOpen}
+        approvalStatusAvailable={props.listSource.form.runtime_approval_available ?? props.approvalStatusAvailable}
+        approvalStatusDefaultVisible={props.listSource.form.runtime_submission_available ?? props.approvalStatusDefaultVisible}
+        selectedDisplayGroup={preview?.displayGroup.id}
+        onSelectDisplayGroup={preview?.displayGroup.onSelect}
+        selectedFilterScheme={preview?.filterScheme.id}
+        onSelectFilterScheme={preview?.filterScheme.onSelect} /> : widgetSourceId(definition, widget) ? <Alert type={props.listSource?.error ? 'warning' : 'info'} showIcon message={props.listSource?.error ? '加载来源表单失败' : '正在读取来源表单'} description={props.listSource?.error} /> : null}
     </>}
   </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击左侧组件配置属性" />;
   else if (panel==='style') content=<>

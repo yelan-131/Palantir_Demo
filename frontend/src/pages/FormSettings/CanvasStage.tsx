@@ -1,6 +1,6 @@
 import { Button, Checkbox, Form, Input, InputNumber, Select, Switch } from 'antd';
 import type { FormInstance } from 'antd';
-import { CopyOutlined, DeleteOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, HolderOutlined, PlusOutlined } from '@/components/Icon/ant';
 import FieldControl from '@/components/FormWidgets/FieldControl';
 import RelationPicker from '@/components/FormWidgets/RelationPicker';
 import { PropertyGroup, PropertyHelp } from '@/components/PropertyInspector';

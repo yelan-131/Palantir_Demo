@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { BranchesOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, FileSearchOutlined, FileTextOutlined, FolderOutlined, InboxOutlined, LinkOutlined, MenuFoldOutlined, MenuUnfoldOutlined, NodeIndexOutlined, OrderedListOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, SendOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
+import { BranchesOutlined, CheckCircleOutlined, DatabaseOutlined, DownloadOutlined, FileSearchOutlined, FileTextOutlined, FolderOutlined, InboxOutlined, LinkOutlined, MenuFoldOutlined, MenuUnfoldOutlined, NodeIndexOutlined, OrderedListOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, SendOutlined, SettingOutlined, UserOutlined } from '@/components/Icon/ant';
 import { Alert, Button, Card, Col, Divider, Empty, Form, Input, List, Modal, Progress, Row, Segmented, Select, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import GlobalSearch from '../../components/GlobalSearch';
@@ -784,7 +784,7 @@ export function KnowledgeCenter() {
               <p className="ant-upload-hint">支持上传资料，保留抽取与发布流程</p>
             </Upload.Dragger>
           </Card>
-          <button type="button" className="knowledge-vault-switcher" onClick={() => navigate('/data-center/sources')}><DatabaseOutlined /><span>数据中心</span><SettingOutlined /></button>
+          <button type="button" className="knowledge-vault-switcher" onClick={() => navigate('/data-center/assets')}><DatabaseOutlined /><span>数据中心</span><SettingOutlined /></button>
           {renderResizeHandle('library')}
         </aside>
 

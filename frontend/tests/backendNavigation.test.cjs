@@ -36,7 +36,7 @@ test('backend tools are administrator-only and have no duplicate navigation path
 
 test('backend navigation omits the removed overview and preserves data links', () => {
   assert.equal(NAVIGATION_ENTRIES.some(entry => entry.path === '/admin/overview'), false);
-  assert.ok(visibleNavigationEntries('data', false).some(entry => entry.path === '/data-center/sources'));
+  assert.ok(visibleNavigationEntries('data', false).some(entry => entry.path === '/data-center/assets'));
   assert.equal(navigationAreaForPath('/data-sources'), 'data');
 });
 
@@ -55,7 +55,7 @@ test('settings categories separate personal, application, data and privileged co
 
 test('settings selection follows canonical data routes and distinguishes work preferences', () => {
   const key = context.exports.settingsDestinationKey;
-  assert.equal(key('/admin/sources'), '/data-center/sources');
+  assert.equal(key('/admin/sources'), '/data-center/assets');
   assert.equal(key('/admin/identity'), '/admin/identity');
   assert.equal(key('/account-center', '?tab=preferences'), '/account-center?tab=preferences');
   assert.equal(key('/account-center'), '/account-center');

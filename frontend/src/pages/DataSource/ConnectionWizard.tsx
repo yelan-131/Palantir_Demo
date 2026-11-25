@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Steps, Switch, Tag, Typography, message } from 'antd';
-import { BranchesOutlined, CheckCircleOutlined, DatabaseOutlined, NodeIndexOutlined, RobotOutlined } from '@ant-design/icons';
+import { BranchesOutlined, CheckCircleOutlined, DatabaseOutlined, NodeIndexOutlined, RobotOutlined } from '@/components/Icon/ant';
 import { adminListUsers, createDataSource, getDataSource, getReferenceData, testDataSourceConfig, updateDataSource } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 

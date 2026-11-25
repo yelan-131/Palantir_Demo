@@ -1,9 +1,9 @@
 import PermissionTemplates from './PermissionTemplates';
 import React, {useEffect, useRef, useState} from 'react';
-import {Button, Input, Select, Switch, Tooltip} from 'antd';
-import {CopyOutlined, DeleteOutlined, PlusOutlined} from '@ant-design/icons';
+import {Button, Input, Select, Switch, Tooltip, type InputRef} from 'antd';
+import {CopyOutlined, DeleteOutlined, PlusOutlined} from '@/components/Icon/ant';
 import {PropertyHelp, PropertyRow} from '@/components/PropertyInspector';
-import ConfigurationTabs from './ConfigurationTabs';
+import ConfigurationTabs, {ConfigurationName} from './ConfigurationTabs';
 import api from '@/services/api';
 import {createUuid} from '@/utils/uuid';
 import {mergePermissionAudience, type ToolbarGroup} from './businessComponents';
@@ -87,7 +87,13 @@ export function PermissionGroupName({name, onChange, onRequestEdit, requestEdit 
     } : undefined}>{name}</span>;
 }
 
-const actions = [{value:'create',label:'新增 / 填写申请'},{value:'refresh',label:'刷新'},{value:'import',label:'批量导入'},{value:'export',label:'导出'},{value:'disable',label:'禁用'},{value:'delete',label:'删除'}];
+const actions = [
+  {value:'create',label:'新增 / 填写申请'},
+  {value:'refresh',label:'刷新'},
+  {value:'import',label:'批量导入'},
+  {value:'export',label:'导出'},
+  {value:'delete',label:'删除所选',hint:'启用记录选择后，选中可删除的记录时显示。删除仍受来源权限和记录状态约束。'},
+];
 export default function ToolbarGroups({groups,roles,disabled,onChange,renderGroup,initialValues,selectedGroup,onSelectGroup,scope='toolbar',accessTarget='应用',headingHint,renameGroupId,onRenameRequest,onRenameStarted}: {
   scope?:'toolbar'|'access'|'roles'|'display'|'filter-fields'; initialValues?:Partial<ToolbarGroup>; renderGroup?:(group:ToolbarGroup,patch:(value:Partial<ToolbarGroup>)=>void)=>React.ReactNode;
   accessTarget?: '应用' | '菜单';
@@ -101,6 +107,14 @@ export default function ToolbarGroups({groups,roles,disabled,onChange,renderGrou
   const isFilterArea = scope==='filter-fields';
   const canManageGroups = !isFilterArea;
   const [displayRenameId, setDisplayRenameId] = useState<string>();
+  const displayNameInput = useRef<InputRef>(null);
+  const activeDisplayGroup = scope==='display' ? groups.find(group=>group.id===selectedGroup) ?? groups[0] : undefined;
+  useEffect(() => {
+    if (displayRenameId && displayRenameId === activeDisplayGroup?.id) {
+      displayNameInput.current?.focus({cursor:'all'});
+      setDisplayRenameId(undefined);
+    }
+  }, [activeDisplayGroup?.id, displayRenameId]);
   const patch = (id:string,update:Partial<ToolbarGroup>)=>onChange(groups.map(group=>group.id===id?{...group,...update}:group));
   const addGroup = () => {
     const group = {id:createUuid(),name:`权限组 ${groups.length+1}`,roleIds:[],actions:[],...initialValues};
@@ -114,9 +128,8 @@ export default function ToolbarGroups({groups,roles,disabled,onChange,renderGrou
     return copy.id;
   };
   if(scope==='display'){
-    const active = groups.find(group=>group.id===selectedGroup) ?? groups[0];
-    return <div className="component-config-tab-group">
-      <ConfigurationTabs items={groups} selected={active?.id} onSelect={onSelectGroup} disabled={disabled}
+    const active = activeDisplayGroup;
+    return <ConfigurationTabs items={groups} selected={active?.id} onSelect={onSelectGroup} disabled={disabled}
         onRename={id => { onSelectGroup?.(id); setDisplayRenameId(id); }} actions={<>
         <Tooltip title="新增权限组"><Button type="text" size="small" aria-label="新增权限组" icon={<PlusOutlined/>}
           disabled={disabled||groups.length>=20} onClick={()=>{const id=addGroup();onSelectGroup?.(id);}}/></Tooltip>
@@ -124,16 +137,14 @@ export default function ToolbarGroups({groups,roles,disabled,onChange,renderGrou
           disabled={disabled||!active||groups.length>=20} onClick={()=>{if(active){const id=copyGroup(active);onSelectGroup?.(id);}}}/></Tooltip>
         <Tooltip title="删除当前权限组"><Button type="text" size="small" danger aria-label="删除当前权限组" icon={<DeleteOutlined/>}
           disabled={disabled||!active} onClick={()=>active&&onChange(groups.filter(group=>group.id!==active.id))}/></Tooltip>
-      </>}/>
+      </>}>
       {active&&<React.Fragment key={active.id}>
-        <PropertyRow label="权限组名称">
-          <PermissionGroupName name={active.name} onChange={disabled ? undefined : name => patch(active.id, {name})}
-            requestEdit={displayRenameId === active.id} onEditStarted={() => setDisplayRenameId(undefined)} />
-        </PropertyRow>
+        <ConfigurationName label="权限组名称" inputRef={displayNameInput}
+          value={active.name} disabled={disabled} commitOnBlur onChange={name=>patch(active.id,{name})}/>
         <GroupAudience group={active} roles={roles} disabled={disabled} subgroup onChange={update=>patch(active.id,update)}/>
         {renderGroup?.(active,value=>patch(active.id,value))}
       </React.Fragment>}
-    </div>;
+    </ConfigurationTabs>;
   }
   return <div className="component-toolbar-groups">
     {canManageGroups&&<PermissionGroupsHeading hint={headingHint} actions={<Button type="text" size="small" aria-label="新增权限组" disabled={disabled || groups.length>=20} icon={<PlusOutlined />} onClick={addGroup}/>}/>}
@@ -143,7 +154,7 @@ export default function ToolbarGroups({groups,roles,disabled,onChange,renderGrou
         ? <RoleAudience target={accessTarget} group={group} roles={roles} disabled={disabled} onChange={roleIds=>patch(group.id,{roleIds})}/>
         : !isFilterArea && <GroupAudience group={group} roles={roles} disabled={disabled} onChange={update=>patch(group.id,update)}/>}
       {renderGroup?renderGroup(group,value=>patch(group.id,value)):<details className="component-toolbar-buttons" open><summary>按钮组</summary>
-      {actions.map(action=><PropertyRow key={action.value} label={action.label}><Switch size="small" checked={group.actions.includes(action.value)} disabled={disabled} onChange={checked=>patch(group.id,{actions:checked?[...group.actions,action.value]:group.actions.filter(value=>value!==action.value)})}/></PropertyRow>)}
+      {actions.map(action=><PropertyRow key={action.value} label={action.label} hint={action.hint}><Switch size="small" checked={group.actions.includes(action.value)} disabled={disabled} onChange={checked=>patch(group.id,{actions:checked?[...group.actions,action.value]:group.actions.filter(value=>value!==action.value)})}/></PropertyRow>)}
       </details>}
       </>;
       return <details className="component-toolbar-group" key={group.id} open>

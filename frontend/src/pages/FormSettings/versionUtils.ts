@@ -125,6 +125,7 @@ function sectionValues(snapshot: Snapshot): Record<VersionChange['key'], unknown
       layout: config.formLayout ?? layoutConfig(snapshot, 'form') ?? null,
       controls: config.formDesignerControls ?? null,
       canvas: config.canvasSettings ?? null,
+      appearance: config.formAppearance ?? null,
     },
     views: config.viewConfig ?? config.viewConfigDraft ?? layoutConfig(snapshot, 'view') ?? null,
     workflow: sortedRecords(bindingsOf(snapshot)),
@@ -149,7 +150,7 @@ export function compareVersions(current: Snapshot, previous?: Snapshot): Version
   const currentSections = sectionValues(current);
   const previousSections = sectionValues(previous);
   const sections: Array<[VersionChange['key'], string, string]> = [
-    ['layout', '表单布局', '表单布局、控件或画布设置有调整'],
+    ['layout', '表单布局', '表单布局、控件或外观有调整'],
     ['views', '数据视图', '数据视图配置有调整'],
     ['workflow', '流程绑定', '绑定流程、触发条件或流程配置有调整'],
     ['permissions', '权限', '角色权限或字段权限有调整'],

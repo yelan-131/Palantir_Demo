@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 
-def runtime_view_config(config, *, user_id, role_ids, org_ids, is_admin=False, visible_fields=None):
+def runtime_view_config(config, *, user_id, role_ids, org_ids, is_admin=False, visible_fields=None, display_fields=frozenset()):
     if not isinstance(config, dict):
         return config
     result = deepcopy(config)
@@ -11,7 +11,8 @@ def runtime_view_config(config, *, user_id, role_ids, org_ids, is_admin=False, v
         if visible_fields is not None:
             view['filters'] = [item for item in view.get('filters', []) if isinstance(item, dict) and item.get('fieldName') in visible_fields]
             table = view.get('table') if isinstance(view.get('table'), dict) else {}
-            table['columns'] = [item for item in table.get('columns', []) if isinstance(item, dict) and item.get('fieldName') in visible_fields]
+            column_fields = visible_fields | display_fields
+            table['columns'] = [item for item in table.get('columns', []) if isinstance(item, dict) and item.get('fieldName') in column_fields]
             if (table.get('defaultSort') or {}).get('fieldName') not in visible_fields:
                 table.pop('defaultSort', None)
             view['table'] = table

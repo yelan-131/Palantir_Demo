@@ -1,0 +1,111 @@
+div.semantic-mapping-workbench {
+  grid-template-columns: minmax(210px, 1fr) minmax(0, 2.6fr) minmax(180px, 0.95fr);
+}
+
+.semantic-mapping-canvas-card .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.semantic-mapping-canvas-card .ant-card-head-title {
+  white-space: normal;
+}
+
+.semantic-mapping-canvas-card .ant-card-extra {
+  margin-inline-start: 0;
+  padding-block: 0 8px;
+}
+
+.semantic-mapping-canvas-card .ant-card-head-title .ant-typography-secondary {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.semantic-mapping-canvas-card > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.semantic-mapping-canvas-card .semantic-mapping-canvas {
+  flex: 1;
+  height: auto;
+  min-height: 380px;
+}
+
+.semantic-mapping-canvas-actions {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mf-border);
+}
+
+.semantic-mapping-target-select {
+  min-width: 10rem;
+  max-width: min(60vw, 18rem);
+}
+
+.semantic-source-list-heading,
+.semantic-source-field-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+}
+
+.semantic-source-list-heading {
+  justify-content: space-between;
+}
+
+.semantic-source-table-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.semantic-source-field-list .ant-list-item {
+  padding: 2px 0;
+}
+
+.semantic-source-field-select {
+  flex: 1;
+  justify-content: flex-start;
+  min-width: 0;
+  padding-inline: 4px;
+}
+
+.semantic-source-field-select > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-source-action {
+  flex-shrink: 0;
+}
+
+.semantic-flow-node.semantic-flow-node-actionable {
+  padding-inline-end: 34px;
+}
+
+.semantic-flow-node-actionable .semantic-source-action {
+  position: absolute;
+  inset-block-start: 5px;
+  inset-inline-end: 6px;
+}
+
+@media (max-width: 1120px) {
+  div.semantic-mapping-workbench {
+    grid-template-columns: minmax(200px, 0.9fr) minmax(0, 2.4fr);
+    grid-template-rows: minmax(520px, 1fr) auto;
+    overflow: auto;
+  }
+
+  .semantic-mapping-detail {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  div.semantic-mapping-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(320px, 0.6fr) minmax(520px, 1fr) auto;
+  }
+}

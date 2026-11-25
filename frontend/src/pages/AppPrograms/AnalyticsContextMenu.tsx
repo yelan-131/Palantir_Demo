@@ -1,6 +1,6 @@
 import React from 'react';
 import type { MenuProps } from 'antd';
-import { EditOutlined, FilterOutlined, SettingOutlined, SkinOutlined } from '@ant-design/icons';
+import { EditOutlined, FilterOutlined, SettingOutlined, SkinOutlined } from '@/components/Icon/ant';
 
 interface ContextMenuOptions {
   widgetTitle?: string;

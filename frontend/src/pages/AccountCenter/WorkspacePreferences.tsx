@@ -1,14 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Button, Collapse, Radio, Select, Switch, Tag, Typography, message } from 'antd';
-import { BellOutlined, CheckCircleFilled, DesktopOutlined, EditOutlined, InfoCircleOutlined, LayoutOutlined, MessageOutlined, RobotOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
-import { TECH_WHITE_PALETTE as colors } from '../../theme/techWhite';
+import { BellOutlined, CheckCircleFilled, DesktopOutlined, EditOutlined, InfoCircleOutlined, LayoutOutlined, MessageOutlined, RobotOutlined, SaveOutlined, UndoOutlined } from '@/components/Icon/ant';
+import { THEME_CARDS, getThemeCard, themeCardCssVariables } from '../../theme/cards';
 import ThemePalette from '../../components/ThemePalette';
 import { useShellPreferences, type ShellPreferences } from '../../hooks/useShellPreferences';
 
-const fields = ['density', 'sidebar', 'aiBubbleVisible', 'home', 'language', 'theme'] as const;
+const fields = ['density', 'sidebar', 'aiBubbleVisible', 'home', 'language', 'theme', 'layout'] as const;
 type EditablePreferences = Pick<ShellPreferences, typeof fields[number]>;
-const pick = (p: ShellPreferences): EditablePreferences => ({ density: p.density, sidebar: p.sidebar, aiBubbleVisible: p.aiBubbleVisible, home: p.home, language: p.language, theme: p.theme });
+const pick = (p: ShellPreferences): EditablePreferences => ({ density: p.density, sidebar: p.sidebar, aiBubbleVisible: p.aiBubbleVisible, home: p.home, language: p.language, theme: p.theme, layout: p.layout });
 const densityLabels = { compact: '紧凑', standard: '标准', relaxed: '宽松' };
+const layoutOptions = [
+  { value: 'classic', label: '经典分栏', description: '导航与工作区并排' },
+  { value: 'float', label: '悬浮画布', description: '工作区浮于导航之上' },
+] as const;
 
 function SettingRow({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return <div className="preferences-setting-row"><div className="preferences-row-label"><strong>{title}</strong><p>{description}</p></div><div className="preferences-row-control">{children}</div></div>;
@@ -19,19 +23,20 @@ function SettingGroup({ title, description, icon, children }: { title: string; d
 
 function WorkspacePreview({ draft }: { draft: EditablePreferences }) {
   const [expanded, setExpanded] = useState(false);
+  const card = getThemeCard(draft.theme);
   return <aside className={`preferences-preview${expanded ? ' is-expanded' : ''}`} aria-label="工作空间实时预览">
     <div className="preferences-preview-heading"><h3>工作空间预览</h3><span><i />实时</span><Button className="preferences-preview-toggle" type="text" size="small" aria-expanded={expanded} aria-controls="preferences-preview-mini" onClick={() => setExpanded(value => !value)}>{expanded ? '收起预览' : '展开预览'}</Button></div>
     <p>调整左侧选项，查看布局变化</p>
-    <div id="preferences-preview-mini" className={`preferences-mini preferences-mini-${draft.density} preferences-mini-${draft.sidebar}`} role="img" aria-label={`${densityLabels[draft.density]}密度，菜单栏${draft.sidebar === 'expanded' ? '展开' : '折叠'}，AI 助手${draft.aiBubbleVisible ? '显示' : '隐藏'}`}>
+    <div id="preferences-preview-mini" className={`preferences-mini preferences-mini-${draft.density} preferences-mini-${draft.sidebar} preferences-mini-${draft.layout}`} style={themeCardCssVariables(card) as CSSProperties} role="img" aria-label={`${card.name}，${draft.layout === 'float' ? '悬浮画布' : '经典分栏'}，${densityLabels[draft.density]}密度，菜单栏${draft.sidebar === 'expanded' ? '展开' : '折叠'}，AI 助手${draft.aiBubbleVisible ? '显示' : '隐藏'}`}>
       <div className="preferences-mini-rail" aria-hidden="true"><LayoutOutlined /><DesktopOutlined /><RobotOutlined /></div>
       <div className="preferences-mini-menu" aria-hidden="true"><b /><i /><i /><i /></div>
       <div className="preferences-mini-workspace" aria-hidden="true"><div className="preferences-mini-topbar"><b /><i /></div><div className="preferences-mini-content"><div className="preferences-mini-title">我的工作台<span>示例</span></div><div className="preferences-mini-metrics"><div><span>待审批</span><strong>12</strong></div><div><span>进行中</span><strong>8</strong></div></div><div className="preferences-mini-table"><div className="preferences-mini-table-head"><span>工作事项</span><span>状态</span></div>{['生产计划审核', '质量事件复核', '设备维护申请'].map(t => <div className="preferences-mini-table-row" key={t}><span>{t}</span><i /></div>)}</div></div></div>
       {draft.aiBubbleVisible && <span className="preferences-mini-ai" aria-hidden="true"><MessageOutlined /></span>}
     </div>
-    <div className="preferences-preview-caption"><span>浅雾蓝</span><strong>{densityLabels[draft.density]}密度</strong></div>
+    <div className="preferences-preview-caption"><span>{card.name} · {draft.layout === 'float' ? '悬浮画布' : '经典分栏'}</span><strong>{densityLabels[draft.density]}密度</strong></div>
     <div className="preferences-preview-note"><CheckCircleFilled /><p>先预览，再应用。<br /><span>保存后更新真实工作空间。</span></p></div>
-    <div className="preferences-preview-colors" aria-hidden="true">{[colors.surface, colors.hover, colors.borderStrong, colors.muted, colors.text, colors.primaryStrong].map(c => <i key={c} style={{ background: c }} />)}</div>
-    <Collapse ghost className="preferences-palette" items={[{ key: 'palette', label: '标准色系与设计规范', children: <ThemePalette /> }]} />
+    <div className="preferences-preview-colors" aria-hidden="true">{(['canvas', 'surface', 'rail', 'side', 'accent', 'text'] as const).map(key => <i key={key} style={{ background: card.palette[key] }} />)}</div>
+    <Collapse ghost className="preferences-palette" items={[{ key: 'palette', label: '色板与设计规范', children: <ThemePalette card={card} /> }]} />
   </aside>;
 }
 
@@ -58,8 +63,22 @@ export default function WorkspacePreferences() {
     <div className="preferences-scroll">
       <header className="preferences-page-heading"><div><Typography.Title level={2}>工作偏好</Typography.Title><p>调整界面与工作习惯，找到适合自己的办公节奏。</p></div><Tag>个人偏好</Tag></header>
       <div className="preferences-layout"><div className="preferences-groups">
-        <SettingGroup title="外观与布局" description="柔和的雾蓝层次，舒适的显示密度" icon={<DesktopOutlined />}>
-          <SettingRow title="界面主题" description="浅蓝底色与深蓝灰文字，清晰而柔和。"><Radio.Group aria-label="界面主题" value={draft.theme} onChange={event => update('theme', event.target.value)} className="preferences-theme-options"><Radio.Button value="tech-white"><span className="preferences-theme-thumb" aria-hidden="true"><i /><i /><i /></span><strong>浅雾蓝</strong><CheckCircleFilled /></Radio.Button><Radio.Button value="dark" disabled><span className="preferences-dark-dot" />深色 · 规划中</Radio.Button></Radio.Group></SettingRow>
+        <SettingGroup title="外观与布局" description="颜色卡、显示密度与菜单栏" icon={<DesktopOutlined />}>
+          <SettingRow title="颜色卡" description="整套界面配色，只改变颜色，不改变布局和功能。"><Radio.Group aria-label="颜色卡" value={draft.theme} onChange={event => update('theme', event.target.value)} className="preferences-theme-options">
+            {THEME_CARDS.map(card => <Radio.Button key={card.id} value={card.id} disabled={!card.available} title={card.description}>
+              <span className="preferences-theme-thumb" aria-hidden="true" style={{ '--thumb-rail': card.palette.rail, '--thumb-side': card.palette.side, '--thumb-canvas': card.palette.canvas, '--thumb-surface': card.palette.surface, '--thumb-accent': card.palette.accent, '--thumb-border': card.palette.border } as CSSProperties}><i /><i /><i /></span>
+              <strong>{card.name}</strong>
+              {!card.available ? <small>规划中</small> : card.tag && <small>{card.tag}</small>}
+              {draft.theme === card.id && <CheckCircleFilled />}
+            </Radio.Button>)}
+          </Radio.Group></SettingRow>
+          <SettingRow title="布局" description="导航与工作区的组合方式。窄屏始终使用经典分栏。"><Radio.Group aria-label="布局" value={draft.layout} onChange={event => update('layout', event.target.value)} className="preferences-theme-options preferences-layout-options">
+            {layoutOptions.map(option => <Radio.Button key={option.value} value={option.value} title={option.description}>
+              <span className={`preferences-layout-thumb is-${option.value}`} aria-hidden="true"><i /><i /><i /></span>
+              <strong>{option.label}</strong>
+              {draft.layout === option.value && <CheckCircleFilled />}
+            </Radio.Button>)}
+          </Radio.Group></SettingRow>
           <SettingRow title="显示密度" description="调整列表、表格与控件的留白。"><Radio.Group aria-label="显示密度" optionType="button" buttonStyle="solid" value={draft.density} onChange={event => update('density', event.target.value)} options={[{ value: 'compact', label: '紧凑' }, { value: 'standard', label: '标准' }, { value: 'relaxed', label: '宽松' }]} /></SettingRow>
           <SettingRow title="默认菜单栏" description="设置工作空间导航的展开方式。"><Radio.Group aria-label="默认菜单栏" optionType="button" buttonStyle="solid" value={draft.sidebar} onChange={event => update('sidebar', event.target.value)} options={[{ value: 'expanded', label: '展开' }, { value: 'collapsed', label: '折叠' }]} /></SettingRow>
         </SettingGroup>

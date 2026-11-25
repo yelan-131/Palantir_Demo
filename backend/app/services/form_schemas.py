@@ -1,6 +1,6 @@
 """Shared form schemas contracts for HTTP and tool callers."""
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from app.services.workflow_definitions import WorkflowDefCreate
 
@@ -25,6 +25,26 @@ class DesignerRulePreviewRequest(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class _FormAppearance(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=600)
+    titleAlign: Literal['left', 'center'] | None = None
+    titleColor: str | None = Field(default=None, pattern=r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
+    backgroundColor: str | None = Field(default=None, pattern=r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
+
+
+def _validate_form_config(config: dict | None) -> dict | None:
+    if config is None or 'formAppearance' not in config:
+        return config
+    validated = dict(config)
+    appearance = validated.pop('formAppearance')
+    if appearance is not None:
+        appearance = _FormAppearance.model_validate(appearance).model_dump(exclude_none=True)
+        if appearance:
+            validated['formAppearance'] = appearance
+    return validated
+
+
 class FormCreate(BaseModel):
     name: str
     code: str
@@ -37,6 +57,8 @@ class FormCreate(BaseModel):
     config: dict = Field(default_factory=dict)
     designer_draft: FormDesignerDraftCreate | None = None
 
+    validate_config = field_validator('config')(_validate_form_config)
+
 
 class FormUpdate(BaseModel):
     expected_token: Optional[str] = Field(default=None, max_length=64)
@@ -47,6 +69,8 @@ class FormUpdate(BaseModel):
     storage_mode: Optional[str] = None
     status: Optional[str] = None
     config: Optional[dict] = None
+
+    validate_config = field_validator('config')(_validate_form_config)
 
 
 class FormCopy(BaseModel):

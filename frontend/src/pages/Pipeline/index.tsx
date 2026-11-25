@@ -29,7 +29,7 @@ import {
   ClockCircleOutlined,
   SyncOutlined,
   EyeOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   listPipelines,
   createPipeline,

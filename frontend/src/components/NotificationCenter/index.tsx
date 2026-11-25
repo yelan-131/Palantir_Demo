@@ -1,4 +1,4 @@
-import { BellOutlined, ReloadOutlined } from '@ant-design/icons';
+import { BellOutlined, ReloadOutlined } from '@/components/Icon/ant';
 import { Alert, Badge, Button, Empty, Pagination, Popover, Space, Spin, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -94,13 +94,13 @@ export default function NotificationCenter() {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><Tag color={['result', 'approval_result'].includes(notice.category || '') ? (notice.workflow_status === 'rejected' ? 'red' : 'green') : ['todo', 'approval'].includes(notice.category || '') ? 'blue' : undefined}>{categoryLabels[notice.category || ''] || '其他'}</Tag>{!notice.is_read && <Badge status="processing" text="未读" />}{['todo', 'approval'].includes(notice.category || '') && notice.actionable === false && <Typography.Text type="secondary">{['approved', 'rejected', 'cancelled', 'completed'].includes(notice.workflow_status || '') ? '流程已结束' : '当前无需处理'}</Typography.Text>}</div>
           <Typography.Text strong={!notice.is_read}>{notice.title}</Typography.Text>
           {notice.content && <div style={{ color: '#5d6972', fontSize: 12, marginTop: 4 }}>{notice.content}</div>}
-          <div style={{ color: '#8a97a1', fontSize: 11, marginTop: 4 }}>{formatServerDateTime(notice.created_at)}</div>
+          <div style={{ color: '#8a97a1', fontSize: 12, marginTop: 4 }}>{formatServerDateTime(notice.created_at)}</div>
         </button>)}
       </div>
     </Spin>
     {total > PAGE_SIZE && <Pagination style={{ marginTop: 12 }} size="small" current={page} total={total} pageSize={PAGE_SIZE} showSizeChanger={false} onChange={setPage} />}
   </div>;
   return <Popover content={content} title={null} trigger="click" placement="bottomRight" open={open} onOpenChange={next => { setOpen(next); if (next) void load(); }}>
-    <Badge count={unread} size="small" overflowCount={999}><Button type="text" aria-label={`通知中心，${unread}条未读`} icon={<BellOutlined />} /></Badge>
+    <Badge count={unread} size="small" overflowCount={999} offset={[-4, 4]}><Button type="text" aria-label={`通知中心，${unread}条未读`} icon={<BellOutlined />} /></Badge>
   </Popover>;
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, Spin } from 'antd';
-import { CheckOutlined, DownOutlined, EyeOutlined, HistoryOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons';
+import { CheckOutlined, DownOutlined, EyeOutlined, HistoryOutlined, ReloadOutlined, RollbackOutlined } from '@/components/Icon/ant';
 import { getAnalyticsVersion, listAnalyticsVersions } from './analyticsApi';
 import { analyticsErrorMessage } from './analyticsEditorState';
 import type { AnalyticsVersion, AnalyticsVersionDetail, RuntimeAnalyticsDesign } from './analyticsTypes';

@@ -25,7 +25,7 @@ import {
   ThunderboltOutlined,
   ToolOutlined,
   WarningOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import ReactECharts from 'echarts-for-react';
 import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import { TECH_WHITE_PALETTE } from '../../theme/techWhite';

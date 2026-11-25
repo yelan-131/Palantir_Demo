@@ -1,4 +1,4 @@
-import { Alert, Button, Empty, Form, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Dropdown, Empty, Form, Modal, Select, Space, Table, Tabs, Tag, Typography, type MenuProps } from 'antd';
 import { useEffect, useState } from 'react';
 import { getPlatformForm, listPlatformForms, type PlatformForm, type PlatformFormField } from '../../services/api';
 import {
@@ -54,7 +54,12 @@ function ObjectBindingEditor({ models, initialObjectId, onChange }: {
   </> : <Empty description="请先在模型设计中发布对象类型" />;
 }
 
-function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; onChange: () => void }) {
+export function ObjectBindingFields({ model, onChange, showSourceFields = false, initialFormCode }: {
+  model: RuntimeObjectType;
+  onChange: () => void;
+  showSourceFields?: boolean;
+  initialFormCode?: string;
+}) {
   const [forms, setForms] = useState<PlatformForm[]>([]);
   const [fields, setFields] = useState<PlatformFormField[]>([]);
   const [draft, setDraft] = useState(model.record_binding ?? emptyBinding);
@@ -64,6 +69,7 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [openFieldMenu, setOpenFieldMenu] = useState<string>();
   const [revision, setRevision] = useState(0);
   const props = objectFields(model);
 
@@ -72,15 +78,20 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
     setFormsLoading(true);
     setLoadError('');
     listPlatformForms().then(response => {
-      const data: PlatformForm[] = response.data.data;
-      if (active) setForms(data.filter(form => form.status === 'published'));
+      if (!active) return;
+      const published = (response.data.data as PlatformForm[]).filter(form => form.status === 'published');
+      setForms(published);
+      const initialForm = initialFormCode ? published.find(form => form.code === initialFormCode) : undefined;
+      if (initialForm) {
+        setDraft(current => current.form_id ? current : { ...emptyBinding, form_id: initialForm.id });
+      }
     }).catch(error => {
       if (active) setLoadError(objectRuntimeError(error, '无法读取业务表单。'));
     }).finally(() => {
       if (active) setFormsLoading(false);
     });
     return () => { active = false; };
-  }, [revision]);
+  }, [initialFormCode, revision]);
 
   useEffect(() => {
     let active = true;
@@ -118,6 +129,32 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
     applyDraft({ ...draft, property_fields: { ...matched, ...draft.property_fields } });
   }
 
+  function changeMapping(propertyCode: string, fieldName?: string) {
+    const mapped = { ...draft.property_fields };
+    if (fieldName) mapped[propertyCode] = fieldName;
+    else delete mapped[propertyCode];
+    applyDraft({ ...draft, property_fields: mapped });
+  }
+
+  function sourceMappingMenu(source: PlatformFormField): MenuProps {
+    return {
+      items: [{
+        key: 'assign-property',
+        type: 'group',
+        label: '映射到对象属性',
+        children: props.map(property => {
+          const mapped = draft.property_fields[property.code];
+          const label = property.label === property.code ? property.label : `${property.label}（${property.code}）`;
+          return { key: property.code, label: mapped === source.field_name ? `移除 ${label} 的映射` : label };
+        }),
+      }],
+      onClick: ({ key }) => {
+        setOpenFieldMenu(undefined);
+        changeMapping(key, draft.property_fields[key] === source.field_name ? undefined : source.field_name);
+      },
+    };
+  }
+
   async function save() {
     setSaving(true);
     setSaveError('');
@@ -149,6 +186,7 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
           options={forms.map(form => ({ value: form.id, label: `${form.name}（${form.code}）` }))}
           loading={formsLoading}
           onChange={formId => {
+            setOpenFieldMenu(undefined);
             setLoadError('');
             applyDraft({ form_id: formId, key_field: '', property_fields: {} });
           }}
@@ -167,7 +205,44 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
           onChange={keyField => applyDraft({ ...draft, key_field: keyField })}
         />
       </Form.Item>
-      {draft.form_id > 0 && <Table
+      {draft.form_id > 0 && showSourceFields && <Table
+        className="object-binding-fields"
+        title={() => <div className="object-browser-toolbar">
+          <Space direction="vertical" size={2}>
+            <Typography.Text strong>来源字段</Typography.Text>
+            <Typography.Text type="secondary">右键字段或点击「映射」，选择对应的对象属性。</Typography.Text>
+          </Space>
+          <Button size="small" disabled={!fields.length} onClick={matchFields}>按相同编码匹配</Button>
+        </div>}
+        size="small"
+        rowKey="field_name"
+        pagination={fields.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+        loading={fieldsLoading}
+        dataSource={fields}
+        onRow={field => ({ onContextMenu: event => {
+          if (saving || !props.length) return;
+          event.preventDefault();
+          setOpenFieldMenu(field.field_name);
+        } })}
+        columns={[
+          { title: '表单字段', key: 'source', render: (_, field) => fieldName(field) },
+          { title: '类型', dataIndex: 'field_type', key: 'type' },
+          { title: '对象属性', key: 'properties', render: (_, field) => {
+            const mapped = props.filter(property => draft.property_fields[property.code] === field.field_name);
+            return mapped.length ? <Space wrap size={4}>{mapped.map(property => <Tag key={property.code}>{property.label}</Tag>)}</Space> : '—';
+          } },
+          { title: '操作', key: 'mapping', render: (_, field) => <Dropdown
+            trigger={['click']}
+            open={openFieldMenu === field.field_name}
+            disabled={saving || !props.length}
+            menu={sourceMappingMenu(field)}
+            onOpenChange={open => setOpenFieldMenu(current => open ? field.field_name : current === field.field_name ? undefined : current)}
+          >
+            <Button size="small" aria-label={`映射字段 ${field.label}`}>映射</Button>
+          </Dropdown> },
+        ]}
+      />}
+      {draft.form_id > 0 && !showSourceFields && <Table
         className="object-binding-fields"
         title={() => <div className="object-browser-toolbar">
           <Typography.Text strong>对象属性绑定</Typography.Text>
@@ -189,12 +264,7 @@ function ObjectBindingFields({ model, onChange }: { model: RuntimeObjectType; on
             disabled={!fields.length}
             value={draft.property_fields[field.code] || undefined}
             options={options}
-            onChange={fieldName => {
-              const mapped = { ...draft.property_fields };
-              if (fieldName) mapped[field.code] = fieldName;
-              else delete mapped[field.code];
-              applyDraft({ ...draft, property_fields: mapped });
-            }}
+            onChange={fieldName => changeMapping(field.code, fieldName)}
           /> },
         ]}
       />}

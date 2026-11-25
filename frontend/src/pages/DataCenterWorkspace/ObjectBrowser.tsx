@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, BranchesOutlined, ReloadOutlined, SettingOutlined } from '@/components/Icon/ant';
 import { Alert, Button, Card, Empty, Input, Select, Skeleton, Table, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -224,7 +224,9 @@ export default function ObjectBrowser({ isAdmin, openModelDesign }: { isAdmin: b
             ]}
           />
         </Card>
-        <Card title="关联记录">
+        <Card title="关联记录" extra={<Link to={`?${new URLSearchParams({ view: 'graph', objectType: String(typeId), objectKey: record.key })}`}>
+          <BranchesOutlined /> 查看关系图
+        </Link>}>
           {!record.relations.length && <Empty description="暂无可浏览的关联记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           <div className="object-browser-relations">
             {record.relations.map(relation => <section key={`${relation.id}:${relation.direction}`} className="object-browser-relation">

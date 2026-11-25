@@ -31,7 +31,7 @@ import {
   SearchOutlined,
   TeamOutlined,
   WarningOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   adminCreateOrgUnit,
   adminDeleteOrgUnit,

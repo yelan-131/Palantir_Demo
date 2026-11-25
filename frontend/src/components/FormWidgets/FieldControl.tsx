@@ -2,7 +2,7 @@ import { createUuid } from '@/utils/uuid';
 import FieldProtection, {type FieldPolicy} from '@/components/FieldProtection';
 import React, { useEffect, useState, useRef } from 'react';
 import { Button, Checkbox, DatePicker, Input, InputNumber, Radio, Select, Space, Switch, Table, Tooltip, Upload, message } from 'antd';
-import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@/components/Icon/ant';
 import dayjs from 'dayjs';
 import { downloadFormFile, uploadFormFile, listPlatformDynamicRecords } from '@/services/api';
 import { enumOptions, matchesOptionSearch, fileAccept, normalizeText, type ControlSettings } from '@/utils/formControls';

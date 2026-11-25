@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { Tag } from 'antd';
-import type { DataQualityRuleInfo, KnowledgeOcrBlock } from '../../services/api';
+import type { DataQualityRuleInfo, KnowledgeOcrBlock, OntologySimilarityFeature } from '../../services/api';
 
 export type DataQualityRule = Partial<DataQualityRuleInfo> & {
   key: string;
@@ -48,6 +48,7 @@ export type OntologyObject = {
   version?: number;
   confidence?: number;
   review_status?: string;
+  similarity_features?: OntologySimilarityFeature[];
   fields: Array<{ id?: number; name: string; label: string; code?: string; type: string; source_field?: string | null; list?: boolean; form?: boolean; search?: boolean; status?: string; confidence?: number }>;
 };
 

@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import ast
 import re
-from typing import Literal
+from typing import Annotated, Literal
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.principal import current_tenant_id
 from app.core.permissions import get_user_role_ids, has_form_permission
 from app.models.relational import ComponentPage, ComponentPageVersion, Form, Role, User, OrgUnit
-from app.services.records import runtime_fields
+from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD
+from app.services.records import RECORD_LIST_METADATA_FIELDS, runtime_fields
 from app.services.analytics_runtime import source_errors, design_errors
 
 
@@ -96,6 +97,29 @@ class ToolbarGroup(BaseModel):
     actions: list[Literal['create', 'refresh', 'import', 'export', 'disable', 'delete']] = Field(default_factory=list, max_length=6)
 
 
+SYSTEM_DISPLAY_COLUMNS = RECORD_LIST_METADATA_FIELDS | {APPROVAL_STATUS_FIELD}
+MAX_BUSINESS_DISPLAY_COLUMNS = 100
+
+
+def _check_business_display_columns(columns: list[str]) -> list[str]:
+    if sum(column not in SYSTEM_DISPLAY_COLUMNS for column in columns) > MAX_BUSINESS_DISPLAY_COLUMNS:
+        raise ValueError(f'列表最多配置 {MAX_BUSINESS_DISPLAY_COLUMNS} 个业务列')
+    return columns
+
+
+DisplayColumns = Annotated[
+    list[str],
+    Field(max_length=MAX_BUSINESS_DISPLAY_COLUMNS + len(SYSTEM_DISPLAY_COLUMNS)),
+    AfterValidator(_check_business_display_columns),
+]
+
+
+class DisplayGroup(ToolbarGroup):
+    columns: DisplayColumns | None = None
+    approvalStatusConfigured: bool | None = None
+    recordMetadataConfigured: bool | None = None
+
+
 class FilterToolbarGroup(ToolbarGroup):
     actions: list[Literal['query', 'reset']] = Field(default_factory=list, max_length=2)
 
@@ -124,13 +148,13 @@ class FilterSettings(BaseModel):
 
 class ListSettings(BaseModel):
     sortableColumns: list[str] | None = Field(default=None, max_length=100)
-    displayGroups: list[ToolbarGroup] | None = Field(default=None, max_length=20)
+    displayGroups: list[DisplayGroup] | None = Field(default=None, max_length=20)
     toolbarGroups: list[ToolbarGroup] | None = Field(default=None, max_length=20)
-    columns: list[str] | None = Field(default=None, min_length=1, max_length=100)
+    columns: DisplayColumns | None = Field(default=None, min_length=1)
     pageSize: int | None = Field(default=None, ge=1, le=200)
     defaultSort: ListSort | None = None
     rowClick: Literal['none', 'detail', 'edit'] | None = None
-    toolbarActions: list[Literal['create', 'refresh', 'import', 'export']] | None = None
+    toolbarActions: list[Literal['create', 'refresh', 'import', 'export', 'delete']] | None = None
     rowActions: list[Literal['detail', 'edit', 'delete']] | None = None
     selection: Literal['none', 'single', 'multiple'] = 'none'
     emptyText: str = Field(default='暂无符合条件的数据', min_length=1, max_length=100)
@@ -386,6 +410,8 @@ async def validate_publish(db, user, definition):
 
 
 async def validate_source_publish(db, user, definition):
+    from app.core.production_errors import coded_error
+
     form = await source_form(db, user, definition)
     if (form.config or {}).get('assemblyKind') in {'analysis', 'analytics', 'dashboard', 'report'} and not (form.config or {}).get('analyticsDesign'):
         raise HTTPException(422, '请在页面设置中选择业务表单作为数据来源')
@@ -403,16 +429,24 @@ async def validate_source_publish(db, user, definition):
     configured_columns = {item.get('fieldName') for current in views for item in current.get('table', {}).get('columns', []) if item.get('enabled', True)}
     references = set(definition.filterFields)
     target_ids = {widget.id for widget in definition.widgets if widget.type != 'record-filter'}
+    list_ids = {widget.id for widget in definition.widgets if widget.type == 'record-list'}
     for widget in definition.widgets:
         if widget.type in {'record-filter', 'record-list'}:
+            filter_system_fields = {APPROVAL_STATUS_FIELD} if (
+                widget.type == 'record-list' or set(widget.targetWidgetIds) <= list_ids
+            ) else set()
             schemes = widget.filterSettings.schemes
             if schemes is not None:
+                if filter_system_fields:
+                    filter_system_fields = filter_system_fields | RECORD_LIST_METADATA_FIELDS
                 if len({scheme.id for scheme in schemes}) != len(schemes):
                     raise HTTPException(422, '筛选方案 ID 不能重复')
                 for scheme in schemes:
                     scheme_fields = {field for group in scheme.groups for field in (group.columns or [])}
                     if set(scheme.fieldControls) - scheme_fields:
                         raise HTTPException(422, '筛选控件必须对应方案已启用的字段')
+                    if set(scheme.fieldControls) & RECORD_LIST_METADATA_FIELDS:
+                        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录系统字段使用固定的筛选控件')
                     if len(scheme_fields) > 30:
                         raise HTTPException(422, '每个筛选方案最多配置 30 个字段')
                     if len({group.id for group in scheme.groups}) != len(scheme.groups):
@@ -420,12 +454,12 @@ async def validate_source_publish(db, user, definition):
                     for group in scheme.groups:
                         if group.columns is None or len(set(group.columns)) != len(group.columns):
                             raise HTTPException(422, '筛选权限组需要配置不重复的字段')
-                        references.update(group.columns)
+                        references.update(set(group.columns) - filter_system_fields)
 
             if widget.type == 'record-filter' and (not widget.targetWidgetIds or set(widget.targetWidgetIds) - target_ids):
                 raise HTTPException(422, '筛选组件需要关联有效的列表、指标或图表')
-            references.update((widget.filterFields or []) if schemes is None else [])
-            references.update(widget.filterSettings.requiredFields if schemes is None else [])
+            if schemes is None:
+                references.update((set(widget.filterFields or []) | set(widget.filterSettings.requiredFields)) - filter_system_fields)
             if schemes is None and widget.filterFields is not None and set(widget.filterSettings.requiredFields) - set(widget.filterFields):
                 raise HTTPException(422, '必填筛选条件必须包含在组件筛选字段中')
             if schemes is None and not widget.filterSettings.showKeyword and widget.filterFields == []:
@@ -434,20 +468,25 @@ async def validate_source_publish(db, user, definition):
             columns = widget.listSettings.columns
             if columns is not None and len(set(columns)) != len(columns):
                 raise HTTPException(422, '列表显示列不能重复')
-            references.update(columns or [])
+            list_fields = configured_columns | SYSTEM_DISPLAY_COLUMNS
+            references.update(set(columns or []) - SYSTEM_DISPLAY_COLUMNS)
+            if SYSTEM_DISPLAY_COLUMNS.intersection(widget.listSettings.sortableColumns or []):
+                raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
             for group in widget.listSettings.displayGroups or []:
                 if group.columns is None:
                     raise HTTPException(422, '显示权限组需要配置显示列')
+                if SYSTEM_DISPLAY_COLUMNS.intersection(group.sortableColumns or []):
+                    raise coded_error(422, 'COMPONENT_QUERY_INVALID', '系统显示列不支持排序')
                 if group.sortableColumns is not None and set(group.sortableColumns) - set(group.columns):
                     raise HTTPException(422, '允许排序字段必须为可见列')
                 if group.defaultSort:
                     references.add(group.defaultSort.field)
                     if group.defaultSort.field not in group.columns or (group.sortableColumns is not None and group.defaultSort.field not in group.sortableColumns):
                         raise HTTPException(422, '权限组默认排序必须为本组可见且允许排序的字段')
-                references.update(group.columns)
-                if len(set(group.columns)) != len(group.columns) or (view and set(group.columns) - configured_columns):
+                references.update(set(group.columns) - SYSTEM_DISPLAY_COLUMNS)
+                if len(set(group.columns)) != len(group.columns) or (view and set(group.columns) - list_fields):
                     raise HTTPException(422, '显示权限组包含重复或来源视图未开放的列')
-            if view and columns is not None and set(columns) - configured_columns:
+            if view and columns is not None and set(columns) - list_fields:
                 raise HTTPException(422, '列表显示列不属于来源发布视图')
             if widget.listSettings.defaultSort:
                 references.add(widget.listSettings.defaultSort.field)
@@ -470,6 +509,10 @@ async def validate_source_publish(db, user, definition):
             if widget.measure not in available or available[widget.measure].field_type not in {'int', 'integer', 'float', 'decimal', 'number'}:
                 raise HTTPException(422, '求和需要有效的数值字段')
             references.add(widget.measure)
+    if references & RECORD_LIST_METADATA_FIELDS:
+        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '记录元数据仅用于列表显示或记录列表的筛选方案')
+    if APPROVAL_STATUS_FIELD in references:
+        raise coded_error(422, 'COMPONENT_QUERY_INVALID', '审批状态仅用于记录列表的筛选和显示')
     if references - available.keys():
         raise HTTPException(422, '页面引用了不存在或已归档的字段')
     roles = set((await db.scalars(select(Role.id).where(Role.tenant_id == form.tenant_id, Role.id.in_(definition.roleIds)))).all())

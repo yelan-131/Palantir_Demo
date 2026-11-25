@@ -95,14 +95,14 @@ python -m pytest tests/test_ready_path_smoke.py tests/test_productization_bounda
 
 | 领域 | 测试文件 |
 | --- | --- |
-| 安全与鉴权 | `test_security`、`test_auth_hardening`、`test_route_auth_coverage`（公开路由白名单）、`test_permission_resolver`、`test_field_policies`、`test_identity_access_center`、`test_graph_cypher_safety`、`test_model_driven_safety` |
+| 安全与鉴权 | `test_security`、`test_auth_hardening`、`test_route_auth_coverage`（公开路由白名单）、`test_permission_resolver`、`test_field_policies`、`test_identity_access_center`、`test_model_driven_safety` |
 | 架构约束 | `test_layering`（`core`、`models`、`services` 不得导入 `api`）、`test_logging_setup` |
 | 租户与产品化 | `test_tenant_onboarding`、`test_saas_hardening`、`test_business_tenant_isolation`、`test_productization_boundaries`、`test_ready_path_smoke`、`test_release_api`、`test_bump_release` |
 | 表单平台 | `test_forms_platform`、`test_form_lifecycle_integration`、`test_form_shared_services`、`test_form_control_validation`、`test_form_defaults`、`test_form_calculations`、`test_form_rules`、`test_form_view_tabs`、`test_form_sources_imports`、`test_conditional_encoding_rules`、`test_static_options`、`test_option_search`、`test_multiselect_limits`、`test_date_range_boundaries`、`test_reference_data_defaults`、`test_designer_execution`、`test_publish_cache_recovery`、`test_version` |
 | 业务记录 | `test_record_service`、`test_record_domains`、`test_record_read_performance`（查询次数预算）、`test_assembly_persistence`、`test_settings_concurrency` |
 | 应用、菜单与页面 | `test_application_menu_integrity`、`test_component_pages`、`test_page_content_migration`、`test_backend_demo_workbenches`、`test_dashboard_programs`、`test_templates`、`test_config_io` |
 | 流程与审批 | `test_workflow`、`test_workflow_routing`、`test_workflow_dispatch`、`test_workflow_start_source`、`test_unified_workflow_inbox`、`test_approval_assignment_guards`、`test_approval_group_policies`、`test_approval_notification_flow`、`test_form_approval_config`、`test_business_form_approvals`、`test_material_workflow`、`test_material_approval_config`、`test_multi_user_business_acceptance` |
-| 分析与告警 | `test_analytics_editor`、`test_analytics_runtime`、`test_analytics_sources`、`test_analytics_versions`、`test_analytics_metric_library`、`test_analytics_dataset_range`、`test_alerts`、`test_alert_migration`、`test_quality_timeseries_graph` |
+| 分析与告警 | `test_analytics_editor`、`test_analytics_runtime`、`test_analytics_sources`、`test_analytics_versions`、`test_analytics_metric_library`、`test_analytics_dataset_range`、`test_alerts`、`test_alert_migration`、`test_quality_timeseries_graph`、`test_retired_graph_routes` |
 | 规则、通知与其他 | `test_rules`、`test_rules_trigger`、`test_notifications`、`test_audit`、`test_phase4_small`（定时任务、搜索、AI 搭建建议） |
 | 知识库 | `test_knowledge_ingestion`、`test_knowledge_extraction`、`test_ai_knowledge_api` |
 | AI 运行时与 Harness | `test_events`、`test_hooks`（Agent 事件总线与内置钩子）、`test_harness_integration`、`test_harness_updates`、`test_dsh_upgrade`、`test_ai_tool_use_loop`、`test_tool_loader`、`test_tool_result_processor`、`test_confirmation_store`、`test_context_layers`、`test_compactor`、`test_budget`、`test_ai_context_headroom`、`test_ai_agent_services`、`test_ai_assistant`、`test_ai_settings_effectiveness`、`test_ai_model_catalog` |

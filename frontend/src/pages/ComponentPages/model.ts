@@ -1,5 +1,6 @@
 import type {ComponentPresentation} from './presentation';
 import type {FilterSettings, ListSettings, ToolbarGroup} from './businessComponents';
+import type {StructuredFilter} from './filterControls';
 import type {AnalyticsWidgetAppearance} from '../AppPrograms/analyticsWidgetAppearance';
 export type WidgetType = 'record-list' | 'record-filter' | 'metric' | 'chart' | 'workspace';
 export interface PageWidget {
@@ -85,7 +86,7 @@ export function pageDataSignature(definition?: PageDefinition | null) {
     widgets: definition.widgets.map(({id, type, dataBinding, dimension, aggregate, expression, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}) => ({id, type, dataBinding, dimension, aggregate, expression, measure, format, roleIds, accessGroups, targetWidgetIds, filterFields, filterSettings}))});
 }
 
-export interface FilterContribution {schemeId?: string;ready?: boolean; search: string; filters: Array<{field: string; op: string; value: unknown}>}
+export interface FilterContribution {schemeId?: string;ready?: boolean; search: string; filters: StructuredFilter[]}
 /** Only explicitly linked lists receive a filter component's conditions. */
 export function linkedListQuery(widgets: PageWidget[], values: Record<string, FilterContribution>, target: string) {
   const linked = widgets.filter(widget => widget.type === 'record-filter' && widget.targetWidgetIds?.includes(target));
@@ -111,7 +112,7 @@ export function bindWidgetSource(definition: PageDefinition, id: string, formId?
   const next = {...definition, schemaVersion: 2 as const, widgets: definition.widgets.map(item => item.id !== id && !linked.includes(item.id) ? item : {
     ...item, dataBinding: formId ? {formId} : null, dimension: undefined, measure: undefined,
     filterFields: null, filterSettings: {...item.filterSettings, requiredFields: [], schemes:null},
-    listSettings: {...item.listSettings, columns: null, displayGroups:null, defaultSort: null}, aggregate: 'count' as const, expression: null, sharedMetricId:null, sharedMetricVersion:null, sharedFields:[],
+    listSettings: {...item.listSettings, columns: null, displayGroups:null, sortableColumns:null, defaultSort: null}, aggregate: 'count' as const, expression: null, sharedMetricId:null, sharedMetricVersion:null, sharedFields:[],
     targetWidgetIds: linked.includes(item.id) ? item.targetWidgetIds?.filter(target=>target===id) : [],
   })};
   return {...next, widgets: next.widgets.map(item => ({...item, targetWidgetIds: item.targetWidgetIds?.filter(targetId => {

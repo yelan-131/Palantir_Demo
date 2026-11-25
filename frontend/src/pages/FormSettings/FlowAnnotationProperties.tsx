@@ -1,5 +1,5 @@
 import { Button, ColorPicker, Input, InputNumber, Select, Switch } from 'antd';
-import { CopyOutlined, DeleteOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined } from '@/components/Icon/ant';
 import { PropertyGroup, PropertyRow } from '@/components/PropertyInspector';
 import { widgetFontOptions } from '../AppPrograms/analyticsWidgetAppearance';
 import { FLOW_ANNOTATION_APPEARANCE, FLOW_ANNOTATION_TITLE_LIMIT, type FlowAnnotation, type FlowAnnotationBorderStyle } from './flowAnnotations';

@@ -8,7 +8,7 @@ import {
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
   CopyOutlined, MoreOutlined, FolderOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   listReports, getReport, createReport, updateReport,
   deleteReport, createSnapshot, listSnapshots,
@@ -180,7 +180,7 @@ export default function ReportCenter() {
                     title={
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                        {r.is_published && <Tag color={TECH_WHITE_PALETTE.success} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>已发布</Tag>}
+                        {r.is_published && <Tag color={TECH_WHITE_PALETTE.success} style={{ fontSize: 12, lineHeight: '16px', padding: '0 4px' }}>已发布</Tag>}
                       </div>
                     }
                     description={

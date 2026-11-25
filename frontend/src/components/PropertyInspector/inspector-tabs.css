@@ -3,7 +3,7 @@
 .inspector-tabs.ant-tabs > .ant-tabs-nav { margin:0;padding:4px 0 0;border-bottom:0; }
 .inspector-tabs > .ant-tabs-nav::before { display:none; }
 .inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-nav-list { width:var(--inspector-tab-list-width,100%);gap:3px; }
-.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab { flex:var(--inspector-tab-flex,1);justify-content:center;min-height:0;height:28px;box-sizing:border-box;margin:0!important;padding:4px var(--inspector-tab-padding,0);border-radius:8px 8px 0 0;background:transparent;font-size:12px;line-height:20px;transition:background 160ms ease; }
+.inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab { flex:var(--inspector-tab-flex,1);justify-content:center;min-height:0;height:28px;box-sizing:border-box;margin:0!important;padding:4px var(--inspector-tab-padding,0);border-radius:10px 10px 0 0;background:transparent;font-size:12px;line-height:20px;transition:background 160ms ease; }
 .inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-disabled):not(.ant-tabs-tab-active):hover { background:#f2f3f5; }
 .inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active,
 .inspector-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active:hover { background:var(--inspector-tab-surface,#e9ebee); }

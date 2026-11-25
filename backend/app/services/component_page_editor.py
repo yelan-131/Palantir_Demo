@@ -90,7 +90,7 @@ def resolve_toolbar_groups(widget, roles, user_id=None, org_unit_ids=None):
     if groups is None:
         return widget
     matching = [group for group in groups if audience_matches(group, roles, user_id, org_unit_ids)]
-    actions = list(dict.fromkeys(action for group in matching for action in group.get('actions', []) if action in {'create', 'refresh', 'import', 'export'}))
+    actions = list(dict.fromkeys(action for group in matching for action in group.get('actions', []) if action in {'create', 'refresh', 'import', 'export', 'delete'}))
     return {**widget, 'listSettings': {**settings, 'toolbarGroups': matching, 'toolbarActions': actions}}
 
 
@@ -208,6 +208,9 @@ async def runtime_source_data(db, user, page, definition, filters, widget_filter
 
 
 def linked_record_queries(definition, filter_queries, chart_values):
+    from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD, split_approval_filters
+    from app.services.record_metadata_filters import RECORD_LIST_METADATA_FIELDS, split_record_metadata_filters
+
     by_id = {widget.id: widget for widget in definition.widgets}
     result = {}
     for source_id, query in filter_queries.items():
@@ -233,6 +236,14 @@ def linked_record_queries(definition, filter_queries, chart_values):
                 raise invalid_runtime_query('筛选值格式无效')
             if len(str(value))>2000:
                 raise invalid_runtime_query('筛选值过长')
+        if any(condition.get('field') == APPROVAL_STATUS_FIELD for condition in query.filters):
+            if any(by_id[target].type != 'record-list' for target in widget.targetWidgetIds if target in by_id):
+                raise invalid_runtime_query('审批状态仅支持筛选记录列表')
+            split_approval_filters(query.filters, error_code='COMPONENT_QUERY_INVALID')
+        if any(condition.get('field') in RECORD_LIST_METADATA_FIELDS for condition in query.filters):
+            if scheme is None or any(by_id[target].type != 'record-list' for target in widget.targetWidgetIds if target in by_id):
+                raise invalid_runtime_query('记录系统字段仅支持筛选方案中的记录列表')
+            split_record_metadata_filters(query.filters, error_code='COMPONENT_QUERY_INVALID', status_code=422)
         def filled(value):
             return value not in (None, '') and (not isinstance(value, list) or bool(value) and all(filled(part) for part in value))
         present = {c.get('field') for c in query.filters if filled(c.get('value'))}

@@ -9,12 +9,12 @@ import {
   LoadingOutlined,
   SearchOutlined,
   SettingOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { settingsNavigationGroups, visibleNavigationEntries } from '../../config/navigation';
 import { listApplicationMenus, listApplications } from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
-import { CANON_CSS_VARIABLES, CANON_PALETTE, CANON_TYPE, canonTheme } from '../../theme/canon';
+import { UI_SCALE } from '../../theme/cards';
 import './style.css';
 
 type GroupKey = 'apps' | 'pages' | 'workspace' | 'settings';
@@ -68,9 +68,8 @@ const WORKFLOW_OWNED_ROUTES = ['/program/material-application', '/workflow?secti
 
 /** Older names users still type for settings destinations. */
 const SETTINGS_KEYWORDS: Record<string, string[]> = {
-  '/data-center/sources': ['数据源', '数据连接', '同步', '管道'],
-  '/data-center/assets': ['实体', '映射', '语义'],
-  '/data-center/objects': ['图谱', '本体'],
+  '/data-center/assets': ['数据接入', '数据源', '连接管理', '资产目录', '同步', '管道'],
+  '/data-center/objects': ['模型设计', '字段映射', '语义', '图谱', '本体'],
   '/data-center/reference': ['字典', '基础档案'],
   '/studio/applications': ['菜单', '页面设计', '表单设计'],
   '/admin/audit': ['日志'],
@@ -92,16 +91,10 @@ const IS_MAC = (() => {
 })();
 const SHORTCUT_LABEL = IS_MAC ? '⌘K' : 'Ctrl+K';
 
-const rgba = (hex: string, alpha: number) => {
-  const [r, g, b] = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16));
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
 const ROOT_STYLE = {
-  ...CANON_CSS_VARIABLES,
-  '--gs-focus-ring': canonTheme.token?.controlOutline,
-  '--gs-shadow': `0 8px 24px ${rgba(CANON_PALETTE.text, 0.12)}`,
-  fontFamily: CANON_TYPE.fontFamily,
+  '--gs-focus-ring': 'color-mix(in srgb, var(--canon-focus) 20%, transparent)',
+  '--gs-shadow': 'var(--ui-shadow-popover)',
+  fontFamily: UI_SCALE.fontFamily,
 } as React.CSSProperties;
 
 let indexCache: { userId: number | string; promise: Promise<ApplicationIndex> } | null = null;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Button, Input, Modal, Space, Tag } from 'antd';
-import { DeleteOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, HolderOutlined, PlusOutlined } from '@/components/Icon/ant';
 import { staticOptionErrors, type SelectOption } from '@/utils/selectOptions';
 import './static-options.css';
 

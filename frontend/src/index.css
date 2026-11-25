@@ -33,9 +33,26 @@ body {
   overflow: hidden;
   background: var(--mf-bg);
   color: var(--mf-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  font-family: var(--ui-font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Typography roles (UI_TYPE in theme/cards.ts). Body size and line height are not set on <body>:
+   unstyled legacy elements inherit browser defaults, and changing those would shift existing layouts. */
+.ui-num, .ant-statistic-content { font-family: var(--ui-font-numeric); font-variant-numeric: tabular-nums; }
+.ui-icon-spin > svg { animation: ui-icon-spin 1s linear infinite; }
+@keyframes ui-icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-icon-spin > svg { animation-duration: 3s; } }
+.ant-table { font-variant-numeric: tabular-nums; }
+code, kbd, samp, pre, .ui-mono { font-family: var(--ui-font-mono); }
+.ui-text-display, .ui-text-title, .ui-text-heading, .ui-text-section, .ui-text-body, .ui-text-control, .ui-text-caption { margin: 0; }
+.ui-text-display { font: var(--ui-text-display-weight) var(--ui-text-display-size)/var(--ui-text-display-line) var(--ui-font-numeric); letter-spacing: var(--ui-text-display-tracking); font-variant-numeric: tabular-nums; }
+.ui-text-title { font: var(--ui-text-title-weight) var(--ui-text-title-size)/var(--ui-text-title-line) var(--ui-font-sans); letter-spacing: var(--ui-text-title-tracking); }
+.ui-text-heading { font: var(--ui-text-heading-weight) var(--ui-text-heading-size)/var(--ui-text-heading-line) var(--ui-font-sans); }
+.ui-text-section { font: var(--ui-text-section-weight) var(--ui-text-section-size)/var(--ui-text-section-line) var(--ui-font-sans); }
+.ui-text-body { font: var(--ui-text-body-weight) var(--ui-text-body-size)/var(--ui-text-body-line) var(--ui-font-sans); }
+.ui-text-control { font: var(--ui-text-control-weight) var(--ui-text-control-size)/var(--ui-text-control-line) var(--ui-font-sans); }
+.ui-text-caption { font: var(--ui-text-caption-weight) var(--ui-text-caption-size)/var(--ui-text-caption-line) var(--ui-font-sans); color: var(--mf-muted); }
 
 #root {
   height: calc(100vh / var(--app-ui-scale));
@@ -108,7 +125,7 @@ button {
   align-items: flex-start;
   padding: 10px 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -122,7 +139,7 @@ button {
   background: rgba(47, 95, 115, 0.1);
   color: var(--mf-primary-strong);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .release-update-item p {
@@ -196,7 +213,7 @@ button {
   justify-content: center;
   background: var(--mf-primary-strong);
   color: #fff;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -214,7 +231,7 @@ button {
 
 .app-brand-title span {
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .app-menu {
@@ -260,7 +277,7 @@ button {
 .app-menu .ant-menu-item-selected {
   background: #dce8ed !important;
   color: var(--mf-primary-strong) !important;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .app-menu .ant-menu-item-divider {
@@ -295,7 +312,7 @@ button {
   color: var(--mf-text);
   background: #fff;
   border-color: var(--mf-border);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .application-switch-item {
@@ -312,7 +329,7 @@ button {
 .application-switch-item span {
   margin-top: 2px;
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
   white-space: normal;
 }
 
@@ -430,7 +447,7 @@ button {
 .ant-card-head-title {
   color: #26343d;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .ant-card-body {
@@ -466,7 +483,7 @@ button {
 .kpi-card .kpi-value {
   color: var(--mf-primary);
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .kpi-card .kpi-label {
@@ -490,7 +507,7 @@ button {
   border-color: #c5d4db;
   background: #ecf3f6;
   color: var(--mf-primary-strong);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .identity-scene-switcher button.active {
@@ -510,7 +527,7 @@ button {
   gap: 14px;
   padding: 18px;
   border: 1px solid rgba(47, 95, 115, 0.13);
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.82), rgba(239,247,249,0.7)),
     repeating-linear-gradient(90deg, transparent 0 82px, rgba(47, 95, 115, 0.045) 82px 83px);
@@ -611,7 +628,7 @@ button {
 .demo-account-row > .ant-typography {
   color: #758891 !important;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .demo-account-grid {
@@ -629,7 +646,7 @@ button {
   justify-content: flex-start;
   padding: 8px 9px;
   border: 1px solid rgba(156, 181, 190, 0.45);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.52);
   text-align: left;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
@@ -655,7 +672,7 @@ button {
 
 .demo-account-button small {
   color: #788b95;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 15px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -798,7 +815,7 @@ button {
   border-radius: 4px;
   background: #fff;
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -833,7 +850,7 @@ button {
 .preview-toolbar span {
   color: var(--mf-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .builder-preview aside em {
@@ -869,7 +886,7 @@ button {
   min-height: 66px;
   padding: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: #fff;
   color: var(--mf-muted);
   font-size: 12px;
@@ -910,7 +927,7 @@ button {
   align-items: center;
   justify-content: space-between;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: #fff;
   cursor: pointer;
   text-align: left;
@@ -1025,7 +1042,7 @@ button {
   margin-bottom: 12px;
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .builder-panel-title .anticon {
@@ -1045,7 +1062,7 @@ button {
   grid-template-columns: 30px 1fr;
   gap: 4px 8px;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--mf-panel-soft);
   color: var(--mf-text);
   cursor: pointer;
@@ -1070,7 +1087,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #dfecef;
   color: var(--mf-primary);
 }
@@ -1086,7 +1103,7 @@ button {
 
 .builder-palette small {
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -1107,11 +1124,11 @@ button {
   align-items: center;
   justify-content: space-between;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: rgba(255,255,255,0.9);
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .canvas-widget {
@@ -1146,19 +1163,19 @@ button {
 
 .widget-head span {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .widget-binding {
   justify-content: flex-start;
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .runtime-kpi {
   color: var(--mf-primary-strong);
   font-size: 34px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .runtime-kpi span {
@@ -1168,7 +1185,7 @@ button {
 
 .runtime-chart {
   height: 76px;
-  border-radius: 5px;
+  border-radius: 4px;
   background:
     linear-gradient(180deg, transparent 20%, rgba(47,95,115,0.08) 20% 21%, transparent 21% 48%, rgba(47,95,115,0.08) 48% 49%, transparent 49%),
     linear-gradient(135deg, transparent 0 12%, #bdd1d8 12% 14%, transparent 14% 30%, #6f94a3 30% 32%, transparent 32% 52%, #2f5f73 52% 54%, transparent 54%);
@@ -1189,17 +1206,17 @@ button {
 
 .runtime-table i {
   height: 11px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: linear-gradient(90deg, #dfecef 28%, #eef4f6 28% 100%);
 }
 
 .runtime-filter {
   padding: 16px;
   border: 1px dashed #9bb6c2;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #f4f8fa;
   color: var(--mf-primary-strong);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .dynamic-view-filter-bar {
@@ -1210,7 +1227,7 @@ button {
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid #e4eaf0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -1238,7 +1255,7 @@ button {
   overflow: hidden;
   color: #415563;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1286,7 +1303,7 @@ button {
 .runtime-alerts b {
   height: 14px;
   border-left: 3px solid var(--mf-warning);
-  border-radius: 3px;
+  border-radius: 4px;
   background: #f6f1e9;
 }
 
@@ -1296,7 +1313,7 @@ button {
   padding: 12px;
   overflow: auto;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: #111a20;
   color: #d9e7ec;
   font-size: 12px;
@@ -1362,12 +1379,12 @@ button {
   gap: 6px;
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .form-field-preview small {
   color: var(--mf-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .field-control {
@@ -1376,7 +1393,7 @@ button {
   display: flex;
   align-items: center;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--mf-panel-soft);
   color: var(--mf-muted);
   font-size: 12px;
@@ -1416,7 +1433,7 @@ button {
 .studio-panel .ant-card-head-title {
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .flow-canvas {
@@ -1454,7 +1471,7 @@ button {
   border-radius: 50%;
   background: #dfecef;
   color: var(--mf-primary);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .flow-node strong,
@@ -1502,7 +1519,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #dfecef;
   color: var(--mf-primary);
 }
@@ -1623,7 +1640,7 @@ button {
   margin-bottom: 5px;
   color: var(--mf-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .application-card-footer {
@@ -1645,11 +1662,11 @@ button {
 .admin-rule-strip span {
   padding: 8px 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--mf-panel-soft);
   color: var(--mf-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .admin-app-list-card,
@@ -1671,7 +1688,7 @@ button {
   min-height: 38px;
   padding: 7px 8px !important;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
 }
@@ -1872,7 +1889,7 @@ button {
 .source-connection-fields .ant-select-selector,
 .source-connection-fields .ant-input-affix-wrapper {
   min-height: 32px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .source-connection-row.short {
@@ -2069,7 +2086,7 @@ button {
 
 .source-permission-toggle em {
   color: #788891;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -2165,7 +2182,7 @@ button {
 .knowledge-tree-node.source strong,
 .knowledge-tree-node.folder strong {
   color: #224d5e;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .knowledge-tree-node.document {
@@ -2408,7 +2425,7 @@ button {
 
 .config-list-card .ant-card-head-title {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .config-list-card .ant-list-items {
@@ -2499,7 +2516,7 @@ button {
   overflow: hidden;
   color: var(--mf-text);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2720,8 +2737,8 @@ button {
   min-height: 26px;
   padding: 0 6px;
   color: rgba(21, 54, 66, 0.58);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   background: #f1f6f8;
   border-bottom: 1px solid #e4edf1;
 }
@@ -2762,8 +2779,8 @@ button {
   width: 24px;
   height: 22px;
   color: #175d75;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
   background: #e7f2f6;
   border: 1px solid rgba(31, 111, 139, 0.14);
@@ -2904,11 +2921,14 @@ button {
 .role-management-console,
 .org-management-console {
   display: flex;
-  height: calc(100vh / var(--app-ui-scale) - 342px);
   min-height: 0;
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
+}
+
+.org-management-console {
+  height: calc(100vh / var(--app-ui-scale) - 342px);
 }
 
 .user-management-toolbar,
@@ -3004,10 +3024,6 @@ button {
   -ms-overflow-style: auto;
 }
 
-.user-management-table .ant-table-content::-webkit-scrollbar:horizontal,
-.user-management-table .ant-table-body::-webkit-scrollbar:horizontal,
-.role-management-table .ant-table-content::-webkit-scrollbar:horizontal,
-.role-management-table .ant-table-body::-webkit-scrollbar:horizontal,
 .org-management-table .ant-table-content::-webkit-scrollbar:horizontal,
 .org-management-table .ant-table-body::-webkit-scrollbar:horizontal {
   height: 0;
@@ -3066,7 +3082,7 @@ button {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -3103,7 +3119,7 @@ button {
   background: #2f6b7f;
   color: #fff;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .user-preview-panel {
@@ -3226,7 +3242,7 @@ button {
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -3245,7 +3261,7 @@ button {
 .user-preview-stats > div {
   padding: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f8fbfc;
 }
 
@@ -3302,7 +3318,7 @@ button {
   align-items: center;
   padding: 9px 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -3347,25 +3363,27 @@ button {
 }
 
 @media (max-width: 1180px) {
-  .user-management-workbench,
-  .role-management-workbench,
   .org-management-workbench {
     grid-template-columns: 1fr;
   }
 
-  .user-preview-panel,
-  .role-preview-panel,
   .org-preview-panel {
     min-height: 360px;
     max-height: none;
   }
 
   .user-detail-grid,
-  .role-detail-grid,
   .org-detail-grid {
     grid-template-columns: 1fr;
   }
 
+}
+
+@media (max-width: 1050px) {
+  .user-management-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 2fr) minmax(0, 3fr);
+  }
 }
 
 .account-center-grid.two-columns {
@@ -3476,7 +3494,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
 }
@@ -3571,7 +3589,7 @@ button {
 .todo-metric-item:focus-visible {
   outline: 2px solid rgba(47, 118, 210, 0.28);
   outline-offset: 8px;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .todo-metric-icon {
@@ -3602,7 +3620,7 @@ button {
   color: var(--mf-text);
   font-size: 24px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 30px;
 }
 
@@ -3658,7 +3676,7 @@ button {
 .favorite-app-entry strong {
   color: var(--mf-text);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .favorite-app-entry:hover span,
@@ -3678,7 +3696,7 @@ button {
 .favorite-app-entry:focus-visible {
   outline: 2px solid rgba(47, 118, 210, 0.28);
   outline-offset: 8px;
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .workspace-hero-row {
@@ -3689,7 +3707,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -3701,7 +3719,7 @@ button {
 .favorite-entry-card {
   width: 100%;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
   text-align: left;
   cursor: pointer;
@@ -3769,7 +3787,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
 }
@@ -3820,7 +3838,7 @@ button {
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 6px 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -3862,7 +3880,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
 }
@@ -3876,7 +3894,7 @@ button {
 
 body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-tab-active:not(.ant-tabs-tab-disabled) { background: transparent; }
 
-.workflow-inbox-action .anticon { font-size: 10px; }
+.workflow-inbox-action .anticon { font-size: 12px; }
 
 .workflow-business-sheet-value.is-changed strong,
 .workflow-business-sheet-value.is-changed .workflow-business-choice-tag {
@@ -3946,7 +3964,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   gap: 12px;
   align-items: center;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
   text-align: left;
 }
@@ -3974,7 +3992,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
   font-size: 19px;
@@ -4030,7 +4048,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   gap: 10px;
   align-items: center;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
   text-align: left;
   cursor: pointer;
@@ -4071,7 +4089,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
 .workbench-watch-row {
   padding: 11px 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -4106,7 +4124,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   gap: 5px;
   align-content: start;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
   text-align: left;
 }
@@ -4121,7 +4139,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
 .workbench-shortcut span:not(.anticon) {
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .workbench-activity-item small {
@@ -4151,7 +4169,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   min-height: 112px;
   padding: 14px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -4162,7 +4180,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
 }
@@ -4196,7 +4214,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   align-items: start;
   padding: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -4206,10 +4224,10 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #fff;
   background: #2f5f73;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .closure-step-row strong,
@@ -4339,7 +4357,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   border-color: #2f6f86;
   background: #e8f5f8;
   color: #17475a;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .quality-timeline-track.dragging .quality-now-line {
@@ -4457,7 +4475,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   color: rgba(220, 241, 246, 0.72);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .object-canvas-view-switch button:hover,
@@ -4536,7 +4554,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   border-radius: 999px;
   background: rgba(10, 35, 48, 0.46);
   color: rgba(226, 246, 250, 0.82);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 20px;
 }
 
@@ -4553,8 +4571,8 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   border-left: 1px solid rgba(132, 216, 232, 0.07);
   padding: 76px 10px 12px;
   color: rgba(192, 222, 230, 0.18);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -4585,7 +4603,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   padding: 7px 10px;
   background: rgba(8, 26, 36, 0.68);
   color: rgba(221, 242, 247, 0.74);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .object-canvas-legend span {
@@ -4763,7 +4781,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   width: 136px;
   min-height: 66px;
   border: 1px solid rgba(45, 120, 145, 0.2);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 12px 28px rgba(35, 95, 118, 0.12);
   color: #153847;
@@ -5132,7 +5150,7 @@ body:has(.tech-white-shell) .workflow-inbox .workflow-approval-tabs .ant-tabs-ta
   border-color: rgba(45, 166, 140, 0.24);
   background: rgba(237, 251, 247, 0.92);
   color: #1f735f;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 @media (max-width: 1180px) {
@@ -5166,10 +5184,8 @@ html[data-login-transition="active"]::view-transition-new(root) { animation: log
  html[data-login-transition="active"]::view-transition-old(root), html[data-login-transition="active"]::view-transition-new(root) { animation: none; }
 }
 
-/* User directory: full-height list and on-demand account details. */
+/* User directory: full-height list and account details. */
 .user-management-console { height: calc(100dvh / var(--app-ui-scale) - 170px); min-height: 320px; }
-.user-management-workbench { display: flex; overflow: hidden; }
-.user-management-workbench > .user-list-panel { flex: 1; min-height: 0; }
 .user-directory-search { width: min(360px, 100%); }
 .user-management-toolbar { align-items: center; flex-wrap: wrap; }
 .user-directory-person { display: flex; align-items: center; gap: 10px; padding: 4px 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; font: inherit; width: 100%; }
@@ -5177,6 +5193,4 @@ html[data-login-transition="active"]::view-transition-new(root) { animation: log
 .user-directory-person strong { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-directory-person small { display: block; color: var(--mf-text-secondary, #74808b); margin-top: 3px; font-size: 12px; }
 .user-management-table .ant-table-tbody > tr { cursor: pointer; }
-.user-detail-drawer .ant-drawer-body { display: flex; padding: 0; overflow: hidden; }
-.user-detail-drawer .user-preview-panel { flex: 1; height: 100%; min-height: 0; border: 0; border-radius: 0; padding: 20px 24px; }
 .user-management-pagination .ant-pagination { flex-wrap: wrap; }

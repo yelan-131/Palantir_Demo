@@ -35,7 +35,7 @@
 
 .theme-palette-group-heading > span {
   color: var(--mf-muted, #707c88);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .theme-palette-swatches {
@@ -58,7 +58,7 @@
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  border-radius: 7px;
+  border-radius: 6px;
   border: 1px solid rgba(55, 65, 80, .12);
 }
 
@@ -84,12 +84,12 @@
 .theme-palette-swatch-label code {
   color: var(--mf-muted, #707c88);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .2px;
 }
 
 .theme-palette-usage {
   color: var(--mf-muted, #707c88);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }

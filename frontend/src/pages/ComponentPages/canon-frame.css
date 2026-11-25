@@ -1,12 +1,13 @@
-/* Canon frame for record-list and record-filter widgets. WidgetFrame sets the --widget-* values
-   from canon variables; these rules own typography, header layout and the embedded list surface. */
+/* Canon frame for record-list and record-filter widgets. These rules own typography,
+   header layout and the embedded list surface. */
 .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-header {
   flex-wrap: wrap;
   row-gap: 8px;
   min-height: 48px;
+  padding-block-end: 0;
 }
 .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-header[data-divider="true"] {
-  padding-bottom: 12px;
+  padding-block-end: max(0px, calc(var(--widget-header-padding) - 4px));
   border-bottom-color: var(--canon-border-soft);
 }
 .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-title {
@@ -45,30 +46,52 @@
 
 /* The frame is the card: the list drops its own border and runs edge to edge like the standalone table card. */
 .mf-canon-frame .mf-list-embedded .mf-list-card {
-  margin: 0 -16px -16px;
+  --list-outer-offset: calc(0px - var(--widget-padding));
+  margin: 0 var(--list-outer-offset) var(--list-outer-offset);
   border: 0;
   border-top: 1px solid var(--canon-border);
   border-radius: 0;
   background: transparent;
 }
+.mf-canon-frame:is([data-inner-surface="plain"], [data-inner-surface="soft"]) .mf-list-embedded .mf-list-card {
+  border-top: 0;
+}
+.mf-canon-frame[data-inner-surface="soft"] .mf-list-embedded .mf-list-card,
+.mf-canon-frame[data-inner-surface="soft"] .mf-list-embedded .mf-list-table .ant-table-tbody > tr:not(:hover) > td:is(.ant-table-cell-fix-left, .ant-table-cell-fix-right):not(.ant-table-cell-row-hover) {
+  background: var(--canon-canvas);
+}
+.mf-canon-frame[data-density="comfortable"] .mf-list-embedded .mf-list-table .ant-table-tbody > tr.ant-table-row > td {
+  height: calc(var(--canon-row-height) + 8px);
+}
 /* With nothing above the list, the header divider already separates it; avoid a double rule. */
 .mf-canon-frame:has(> .component-frame-header[data-divider="true"]:not([hidden])) > .component-frame-content > .form-workspace:first-child .mf-list-embedded > .mf-list-card:first-child {
-  margin-top: -16px;
+  margin-top: var(--list-outer-offset);
   border-top: 0;
 }
 
-/* A page whose only component is a list fills the viewport and keeps pagination at the frame's foot.
-   Phones skip this: the page scrolls as one column instead of nesting a scroller in the card. */
-@media (min-width: 601px) {
-  .component-page-fill-list .mf-canon-frame :is(.form-workspace-runtime, .mf-list-embedded, .mf-list-card,
-    .mf-list-table, .mf-list-table > .ant-spin-nested-loading, .mf-list-table .ant-spin-container) {
-    display: flex;
-    flex: 1 0 auto;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .component-page-fill-list .mf-canon-frame .mf-list-table .ant-spin-container > .ant-table { flex: 1 0 auto; }
+/* Let the record area shrink through Ant Design's wrappers. Its body is the scroller. */
+.mf-canon-frame[data-fit-list-height] :is(
+  .component-frame-content > .form-workspace,
+  .form-workspace-runtime, .mf-list-embedded, .mf-list-card, .mf-list-table,
+  .mf-list-table > .ant-spin-nested-loading,
+  .mf-list-table .ant-spin-container,
+  .mf-list-table .ant-spin-container > .ant-table,
+  .mf-list-table .ant-table-container
+) {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
+.mf-canon-frame[data-fit-list-height] .component-frame-content > .form-workspace { height: auto; }
+.mf-canon-frame[data-fit-list-height] > .component-frame-content > :not(.form-workspace, .component-resize-handle) {
+  flex: none;
+}
+/* Keep a usable body and footer when the widget is too short for its filters and chrome. */
+.mf-canon-frame[data-fit-list-height] .mf-list-card:not(.mf-list-empty) { min-block-size: 150px; }
+.mf-canon-frame[data-fit-list-height] .mf-list-table .ant-table-body { flex: 1 1 0; min-height: 0; }
+.mf-canon-frame[data-fit-list-height] .mf-list-table :is(.ant-table-header, .ant-table-pagination) { flex: none; }
 
 @media (max-width: 600px) {
   .tech-white-shell .app-content .component-page .mf-canon-frame .component-frame-actions { flex: 1 1 100%; margin-left: 0; }

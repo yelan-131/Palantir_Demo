@@ -10,6 +10,7 @@ from app.models.relational import (
     DataSource,
     DataSourceMetadata,
     OntologyCandidate,
+    OntologyField,
     OntologyMapping,
     OntologyMappingLayout,
     OntologyObject,
@@ -131,6 +132,38 @@ async def get_semantic_mapping_workbench(
                 "data": {"readonly": True},
             })
 
+    mapping_edges: list[dict[str, Any]] = []
+    for mapping in mappings:
+        source_node = f"source-field:{mapping.source_system}:{mapping.source_entity}.{mapping.source_field}"
+        target_node = f"object-field:{mapping.target_object_code}.{mapping.target_field_code}" if mapping.target_field_code else f"object:{mapping.target_object_code}"
+        mapping_edges.append({
+            "id": f"mapping:{mapping.id}",
+            "source": source_node,
+            "target": target_node,
+            "type": "semantic_mapping",
+            "status": mapping.status,
+            "label": "已批准",
+            "data": {"mapping": mapping_payload(mapping), "confidence": mapping.confidence},
+        })
+
+    for candidate in candidates:
+        payload = candidate.payload or {}
+        mapping = payload.get("mapping") if isinstance(payload.get("mapping"), dict) else None
+        if not mapping:
+            continue
+        source_node = f"source-field:{mapping.get('source_system')}:{mapping.get('source_entity')}.{mapping.get('source_field')}"
+        target_node = f"object-field:{mapping.get('target_object_code')}.{mapping.get('target_field_code')}" if mapping.get("target_field_code") else f"object:{mapping.get('target_object_code')}"
+        mapping_edges.append({
+            "id": f"candidate:{candidate.id}",
+            "source": source_node,
+            "target": target_node,
+            "type": "semantic_candidate",
+            "status": candidate.status,
+            "label": "候选",
+            "data": {"candidate": candidate_payload(candidate), "confidence": candidate.confidence},
+        })
+
+    mapped_source_nodes = {edge["source"] for edge in mapping_edges if edge["target"] in node_ids}
     for row_index, row in enumerate(metadata_rows):
         source = sources.get(row.source_id)
         table_node_id = f"source-table:{row.source_id}:{row.entity_name}"
@@ -149,11 +182,14 @@ async def get_semantic_mapping_workbench(
             40,
             80 + row_index * 240,
         ))
-        for field_index, field in enumerate((row.fields or [])[:12]):
+        field_y = 110 + row_index * 240
+        for field_index, field in enumerate(row.fields or []):
             field_name = str(field.get("name") or "")
             if not field_name:
                 continue
             field_node_id = f"source-field:{row.source_id}:{row.entity_name}.{field_name}"
+            if field_index >= 12 and field_node_id not in mapped_source_nodes:
+                continue
             add_node(_node(
                 field_node_id,
                 "source_field",
@@ -167,8 +203,9 @@ async def get_semantic_mapping_workbench(
                     "sample_values": [sample.get(field_name) for sample in (row.sample_rows or []) if isinstance(sample, dict) and field_name in sample],
                 },
                 300,
-                110 + row_index * 240 + field_index * 42,
+                field_y,
             ))
+            field_y += 42
             edges.append({
                 "id": f"source-field-edge:{row.source_id}:{row.entity_name}.{field_name}",
                 "source": table_node_id,
@@ -179,36 +216,7 @@ async def get_semantic_mapping_workbench(
                 "data": {"readonly": True},
             })
 
-    for mapping in mappings:
-        source_id_text = str(mapping.source_system)
-        source_node = f"source-field:{source_id_text}:{mapping.source_entity}.{mapping.source_field}"
-        target_node = f"object-field:{mapping.target_object_code}.{mapping.target_field_code}" if mapping.target_field_code else f"object:{mapping.target_object_code}"
-        edges.append({
-            "id": f"mapping:{mapping.id}",
-            "source": source_node,
-            "target": target_node,
-            "type": "semantic_mapping",
-            "status": mapping.status,
-            "label": "已批准",
-            "data": {"mapping": mapping_payload(mapping), "confidence": mapping.confidence},
-        })
-
-    for candidate in candidates:
-        payload = candidate.payload or {}
-        mapping = payload.get("mapping") if isinstance(payload.get("mapping"), dict) else None
-        if not mapping:
-            continue
-        source_node = f"source-field:{mapping.get('source_system')}:{mapping.get('source_entity')}.{mapping.get('source_field')}"
-        target_node = f"object-field:{mapping.get('target_object_code')}.{mapping.get('target_field_code')}" if mapping.get("target_field_code") else f"object:{mapping.get('target_object_code')}"
-        edges.append({
-            "id": f"candidate:{candidate.id}",
-            "source": source_node,
-            "target": target_node,
-            "type": "semantic_candidate",
-            "status": candidate.status,
-            "label": "候选",
-            "data": {"candidate": candidate_payload(candidate), "confidence": candidate.confidence},
-        })
+    edges.extend(edge for edge in mapping_edges if edge["source"] in node_ids and edge["target"] in node_ids)
 
     return {
         "object_code": effective_object_code,
@@ -305,7 +313,17 @@ async def create_manual_mapping_candidate(
         "source": {"source_id": source_id, "entity_name": entity_name, "field_name": field_name},
         "evidence": [note or "manual canvas connection"],
     }
+    existing_field_id = None
     if target_field_code:
+        existing_field_id = await db.scalar(
+            select(OntologyField.id).join(OntologyObject, OntologyObject.id == OntologyField.object_id).where(
+                OntologyObject.tenant_id == tenant_id,
+                OntologyObject.code == object_code,
+                OntologyField.tenant_id == tenant_id,
+                OntologyField.code == target_field_code,
+            )
+        )
+    if target_field_code and existing_field_id is None:
         payload["field"] = {
             "object_code": object_code,
             "code": target_field_code,

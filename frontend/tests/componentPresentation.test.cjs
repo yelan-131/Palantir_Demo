@@ -18,3 +18,46 @@ test('server null defaults never erase legacy settings; automatic background can
 test('workspace content uses the shared plain inner surface without workspace CSS overrides',()=>{
  const r=resolvePresentation({}, {type:'workspace',appearance:{showTitle:false}});assert.equal(r.container.surface,'plain');assert.equal(r.content.innerSurface,'plain');assert.equal(r.header.titleVisible,false);
 });
+
+test('business frames apply container settings and use theme colors when following the page', () => {
+ const frameSource = fs.readFileSync(path.join(__dirname, '../src/pages/ComponentPages/WidgetFrame.tsx'), 'utf8');
+ const frameExports = {};
+ vm.runInNewContext(ts.transpileModule(frameSource, {compilerOptions: {module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX}}).outputText, {
+  exports: frameExports,
+  require(name) {
+   if (name === 'react') return {useLayoutEffect() {}, useRef: () => ({current: null}), useState: initial => [initial]};
+   if (name === '@/theme/ThemeCardProvider') return {CanonThemeScope: 'theme'};
+   return name.endsWith('.css') ? {} : require(name);
+  },
+ });
+ const page = {style: {componentDefaults: {container: {surface: 'soft', padding: 24, border: 'light', shadow: 'soft'}}}};
+ const frame = (container, header, content) => {
+  const presentation = resolvePresentation(page, {type: 'record-list', presentation: {container, header, content}});
+  return frameExports.default({presentation, heading: '产成品', canon: true}).props.children.props;
+ };
+ const own = frame({surface: 'card', background: '#123456', border: 'strong', shadow: 'none', radius: 4, padding: 0});
+ assert.equal(own['data-surface'], 'card');
+ assert.equal(own.style['--widget-background'], '#123456');
+ assert.equal(own.style['--widget-border'], 'var(--canon-border-strong)');
+ assert.equal(own.style['--widget-shadow'], 'none');
+ assert.equal(own.style['--widget-radius'], '4px');
+ assert.equal(own.style['--widget-padding'], '0px');
+ const follow = frame(null);
+ assert.equal(follow['data-surface'], 'soft');
+ assert.equal(follow.style['--widget-background'], 'var(--canon-canvas)');
+ assert.equal(follow.style['--widget-border'], 'var(--canon-border)');
+ assert.notEqual(follow.style['--widget-shadow'], 'none');
+ assert.equal(follow.style['--widget-padding'], '24px');
+ const plain = frame({surface: 'plain', background: '#123456'});
+ assert.equal(plain.style['--widget-background'], 'transparent');
+ assert.equal(plain.style['--widget-border'], 'transparent');
+ assert.equal(plain.style['--widget-shadow'], 'none');
+ assert.equal(plain.style['--widget-padding'], '24px');
+ const customSections = frame(null, {padding: 0}, {gap: 30, density: 'comfortable', innerSurface: 'soft', separators: false, overflow: 'hidden'});
+ assert.equal(customSections.style['--widget-header-padding'], '0px');
+ assert.equal(customSections.style['--widget-gap'], '30px');
+ assert.equal(customSections['data-density'], 'comfortable');
+ assert.equal(customSections['data-inner-surface'], 'soft');
+ assert.equal(customSections['data-separators'], false);
+ assert.equal(customSections.children[2].props.style.overflow, 'hidden');
+});

@@ -34,7 +34,7 @@ registerTheme(TECH_WHITE_CHART_THEME_NAME, {
     borderWidth: 1,
     padding: [10, 12],
     textStyle: { color: colors.text, fontFamily: typography.fontFamily, fontSize: typography.compact },
-    extraCssText: 'border-radius:8px;box-shadow:0 6px 20px rgba(32,35,38,.08);',
+    extraCssText: 'border-radius:10px;box-shadow:0 6px 20px rgba(32,35,38,.08);',
     axisPointer: { lineStyle: { color: colors.borderStrong }, crossStyle: { color: colors.muted }, shadowStyle: { color: 'rgba(82,107,134,.06)' } },
   },
   categoryAxis: { ...axis, splitLine: { show: false } },

@@ -189,7 +189,7 @@
   display: block;
   margin-top: 2px;
   color: #7a8a92;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .data-source-list-head {
@@ -198,7 +198,7 @@
   gap: 8px;
   padding: 0 8px 6px;
   color: #7d8d94;
-  font-size: 10px;
+  font-size: 12px;
   border-bottom: 1px solid #e4ebef;
 }
 
@@ -285,14 +285,14 @@
 .semantic-flow-node small {
   margin-top: 3px;
   color: #6f7f87;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .semantic-flow-node-kicker {
   margin-bottom: 4px;
   color: #2f6f86;
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .semantic-flow-node-source_table,
@@ -331,7 +331,7 @@
 
 .semantic-mapping-metrics span {
   color: #75868e;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .semantic-mapping-source-item {
@@ -401,13 +401,13 @@
 .data-source-row-main small {
   margin-top: 1px;
   color: #71828a;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 14px;
 }
 
 .data-source-row-count {
   color: #5f727b;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -530,7 +530,7 @@
 .data-quality-definition-summary span {
   margin-top: 2px;
   color: #667780;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -557,7 +557,7 @@
 .data-quality-rule-desc {
   margin-top: 2px;
   color: #71828a;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -578,7 +578,7 @@
 }
 
 .data-quality-result .ant-typography {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .data-quality-mini-stats {
@@ -590,10 +590,10 @@
 .data-quality-mini-stats span {
   padding: 5px 6px;
   border: 1px solid #e5ecef;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #fff;
   color: #516871;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
@@ -625,12 +625,38 @@
 
 .ontology-workbench {
   display: grid;
-  grid-template-columns: minmax(260px, 0.72fr) minmax(720px, 2.6fr);
+  grid-template-columns: minmax(210px, 0.72fr) minmax(0, 2.6fr);
   gap: 12px;
   flex: 1;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.ontology-workbench-mapping {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ontology-field-mapping {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ontology-field-mapping > .ant-segmented {
+  align-self: flex-start;
+}
+
+.ontology-form-mapping-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.ontology-form-mapping-header > .ant-select {
+  width: min(100%, 280px);
 }
 
 .ontology-directory,
@@ -787,7 +813,7 @@
   max-width: 100%;
   overflow: hidden;
   color: #6b7b84;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
 }
 
@@ -813,7 +839,7 @@
 
 .data-candidate-item span {
   color: #71828a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .semantic-side-card,
@@ -847,7 +873,7 @@
 .graph-asset-governance {
   min-width: 0;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -1004,7 +1030,7 @@
   gap: 2px;
   padding: 9px;
   border: 1px solid var(--mf-border);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--mf-panel-soft);
 }
 
@@ -1119,7 +1145,7 @@
   gap: 8px;
   padding: 12px;
   border: 1px solid rgba(45, 120, 145, 0.16);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fbfdfe;
 }
 
@@ -1205,9 +1231,9 @@
   padding: 8px 10px;
   color: #224d5e;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   border: 1px solid rgba(45, 120, 145, 0.14);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f4f9fb;
 }
 
@@ -1225,7 +1251,7 @@
   min-width: 0;
   min-height: 38px;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: 6px;
 }
 
 .knowledge-directory-tree .ant-tree-switcher,
@@ -1267,7 +1293,7 @@
 .knowledge-tree-node small {
   overflow: hidden;
   color: #73838c;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1338,7 +1364,7 @@
   text-align: left;
   background: #fff;
   border: 1px solid rgba(28, 76, 96, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
@@ -1425,7 +1451,7 @@
   min-height: 20px;
   padding: 1px 6px;
   color: #175d75;
-  font-weight: 700;
+  font-weight: 600;
   border-radius: 6px;
   background: #e7f4f8;
   box-shadow: inset 0 -2px 0 rgba(47, 95, 115, 0.22);
@@ -1439,7 +1465,7 @@
   margin: 14px 0 24px;
   padding: 16px;
   border: 1px solid rgba(28, 76, 96, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -1537,7 +1563,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   border: 1px solid rgba(28, 76, 96, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fbfdfe;
 }
 
@@ -1593,7 +1619,7 @@
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid rgba(28, 76, 96, 0.1);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
 }
 
@@ -1629,7 +1655,7 @@
   line-height: 18px;
   background: #edf7fa;
   border: 1px solid rgba(45, 120, 145, 0.16);
-  border-radius: 7px;
+  border-radius: 6px;
 }
 
 .knowledge-binding-grid {
@@ -1675,7 +1701,7 @@
   overflow: auto;
   padding: 14px 12px;
   border: 1px solid rgba(28, 76, 96, 0.08);
-  border-radius: 8px;
+  border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(238, 246, 248, 0.84), rgba(246, 249, 250, 0.92)),
     #f4f7f8;
@@ -1708,7 +1734,7 @@
 
 .knowledge-chat-name {
   color: #8a99a1;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 14px;
 }
 
@@ -1796,7 +1822,7 @@
   gap: 0;
   overflow: hidden;
   border: 1px solid rgba(28, 76, 96, 0.1);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f4f7f8;
 }
 
@@ -1851,7 +1877,7 @@
   overflow: auto;
   padding: 8px;
   border: 1px solid rgba(28, 76, 96, 0.1);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fbfdfe;
 }
 
@@ -1888,7 +1914,7 @@
   padding: 8px;
   color: #8aa0aa;
   border: 1px dashed rgba(28, 76, 96, 0.16);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fbfdfe;
 }
 
@@ -1928,7 +1954,7 @@
   align-items: center;
   padding: 10px;
   border: 1px solid rgba(28, 76, 96, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fbfdfe;
 }
 

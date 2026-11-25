@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Table, Button, Space, Modal, Input, Tag, Typography, message,
 } from 'antd';
-import { CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined } from '@/components/Icon/ant';
 import { wfListInstances, wfApproveOrReject } from '@/services/api';
 import { formatServerDateTime } from '@/utils/dateTime';
 

@@ -1,0 +1,12 @@
+.relationship-object-editor {
+  min-width: 0;
+}
+
+.relationship-object-editor .relationship-object-editor__field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.relationship-object-editor__number {
+  width: 100%;
+}

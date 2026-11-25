@@ -269,21 +269,35 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
             published_old = await request(client, 'GET', f'/forms/{cfid}?schema=published&scope=create')
             assert published_old['config']['formLayout']['nodes'][0]['children'][0]['children'][0]['slotId'] == 'b'
             # Designer controls survive draft save, rule preview, publication and fresh requests.
-            f = await request(client,'POST','/forms',{'name':'控件持久化','code':'controls-roundtrip'})
+            appearance = {'title': '填写说明表', 'description': '填写后保存。', 'titleAlign': 'left',
+                          'titleColor': '#334', 'backgroundColor': '#F6F8FA'}
+            f = await request(client,'POST','/forms',{'name':'控件持久化','code':'controls-roundtrip',
+                                                     'config': {'formAppearance': appearance}})
             fid=f['id']
+            assert f['config']['formAppearance'] == appearance
+            unpublished = await request(client, 'GET', f'/forms/{fid}?schema=published&scope=create')
+            assert 'formAppearance' not in unpublished['config']
             await request(client,'POST',f'/forms/{fid}/fields',{'field_name':'note','label':'说明','field_type':'string','validation':{'maxBytes':32}})
             await request(client,'POST',f'/forms/{fid}/fields',{'field_name':'items','label':'明细','field_type':'json'})
             controls=[{'id':'note','source':'field','fieldKey':'note','controlType':'text','name':'说明','typeSettings':{'minLength':2,'maxLength':8,'trimMode':'trim','caseMode':'upper'},'rules':{'visible':{'enabled':True}}},
                       {'id':'items','source':'field','fieldKey':'items','controlType':'editable-table','typeSettings':{'maxRows':2,'columns':[{'key':'qty','label':'数量','type':'number','required':True}]}}]
-            config={'formDesignerControls':controls,'canvasSettings':{'columns':3,'gap':16}}
+            config={'formDesignerControls':controls,'canvasSettings':{'columns':3,'gap':16},'formAppearance':appearance}
+            await request(client, 'PUT', f'/forms/{fid}',
+                          {'config': {**config, 'formAppearance': {'backgroundColor': 'transparent'}}}, expected=422)
             await request(client,'PUT',f'/forms/{fid}',{'config':config})
             preview=await request(client,'POST',f'/forms/{fid}/rules/preview',{'controls':controls,'data':{'note':' ab '}})
             assert preview['data']['note']=='AB'
             loaded=await request(client,'GET',f'/forms/{fid}?schema=draft&scope=designer')
             assert loaded['config']==config
-            await request(client,'POST',f'/forms/{fid}/publish')
+            version = await request(client,'POST',f'/forms/{fid}/publish')
+            assert version['snapshot']['form']['config']['formAppearance'] == appearance
             published=await request(client,'GET',f'/forms/{fid}?schema=published&scope=create')
             assert published['config']['canvasSettings']==config['canvasSettings']
+            assert published['config']['formAppearance'] == appearance
+            editing = await request(client, 'GET', '/forms/code/controls-roundtrip?schema=published&scope=edit')
+            assert editing['config']['formAppearance'] == appearance
+            listing = await request(client, 'GET', f'/forms/{fid}?schema=published&scope=list')
+            assert 'formAppearance' not in listing['config']
             assert published['fields'][0]['ui_config']['typeSettings']['maxLength']==8
             assert published['fields'][0]['validation']['maxBytes']==32
             await request(client,'POST',f'/forms/{fid}/records',{'data':{'note':'x'}},expected=422)
@@ -292,6 +306,10 @@ async def test_assembly_save_publish_reload_and_copy_preserve_field_names(tmp_pa
             assert restored['data']=={'note':'AB','items':[{'qty':3}]}
             controls.append({**controls[0],'id':'copy-note'})
             await request(client,'PUT',f'/forms/{fid}',{'config':{'formDesignerControls':controls}})
+            cleared = await request(client, 'GET', f'/forms/{fid}?schema=draft&scope=designer')
+            assert 'formAppearance' not in cleared['config']
+            still_published = await request(client, 'GET', f'/forms/{fid}?schema=published&scope=create')
+            assert still_published['config']['formAppearance'] == appearance
             await request(client,'POST',f'/forms/{fid}/publish',expected=409)
     finally:
         await engine.dispose()

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined, SaveOutlined } from '@/components/Icon/ant';
 import { Alert, Button, Card, Empty, Input, Modal, Select, Space, Spin, Switch, Tag, Typography, message } from 'antd';
 import { getFormApprovalSettings, saveFormApprovalSettings, formApprovalError, type ApprovalStage, type FormApprovalSettings as Settings } from '@/services/formApprovals';
 import './style.css';

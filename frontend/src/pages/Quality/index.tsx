@@ -25,7 +25,7 @@ import {
   LineChartOutlined,
   PlusOutlined,
   DownloadOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import ReactECharts from 'echarts-for-react';
 import { CHART_SERIES_COLORS, TECH_WHITE_CHART_THEME_NAME } from '../../theme/charts';
 import { TECH_WHITE_PALETTE } from '../../theme/techWhite';
@@ -280,7 +280,7 @@ export default function QualityPage() {
           `LCL: ${(point.lcl ?? 0).toFixed(4)}`,
         ];
         if (point.out_of_control) {
-          lines.push(`<span style="color:${TECH_WHITE_PALETTE.danger};font-weight:bold">失控点!</span>`);
+          lines.push(`<span style="color:${TECH_WHITE_PALETTE.danger};font-weight:600">失控点!</span>`);
         }
         return lines.join('<br/>');
       },
@@ -302,7 +302,7 @@ export default function QualityPage() {
           return p.timestamp;
         }
       }),
-      axisLabel: { rotate: 30, fontSize: 10 },
+      axisLabel: { rotate: 30, fontSize: 12 },
     },
     yAxis: {
       type: 'value' as const,
@@ -364,7 +364,7 @@ export default function QualityPage() {
     xAxis: {
       type: 'category' as const,
       data: paretoData.map((d) => d.defect_type),
-      axisLabel: { rotate: 30, fontSize: 10 },
+      axisLabel: { rotate: 30, fontSize: 12 },
     },
     yAxis: [
       { type: 'value' as const, name: '数量', position: 'left' },

@@ -139,7 +139,7 @@ AI 能力
 | 产品层 | 状态 | 当前代码位置 |
 | --- | --- | --- |
 | 低代码平台 | 已实现 | 应用与菜单 `/studio/applications`（`pages/SystemAdmin/AppMenuManagement.tsx`）、业务数据 `/studio/business-data`、表单设计 `/form-settings/:formId`（`pages/FormSettings`）、页面设计 `/studio/page-design`（`pages/ComponentPages`）；后端 `api/forms.py`、`api/applications.py`、`api/component_pages.py`、`services/form_*`。旧版模型驱动工具（`pages/ModelDriven`、`api/model_driven*.py`）只保留在 `/admin/model-tools` |
-| Foundry 风格底座 | 部分实现 | 数据中心 `/data-center/sources`、`/data-center/assets`、`/data-center/objects`（`pages/DataCenterWorkspace`、`pages/SystemAdmin/SemanticAssetCenter.tsx`、`pages/GraphExplorer`）；后端 `api/data_sources.py`、`api/pipeline.py`、`api/ontology.py`、`api/semantic_assets.py`、`api/graph.py`、`services/graph_service.py`、`services/ontology_service.py`。对象动作层未统一建模 |
+| Foundry 风格底座 | 部分实现 | 数据资产 `/data-center/assets`、对象与关系 `/data-center/objects`（`pages/DataCenterWorkspace`、`pages/SystemAdmin/SemanticAssetCenter.tsx`、`pages/DataCenterWorkspace/RelationshipExplorer`）。相关后端包括 `api/data_sources.py`、`api/pipeline.py`、`api/ontology.py`、`api/semantic_assets.py`、`api/graph.py`、`services/graph_service.py`、`services/ontology_service.py`。对象动作层未统一建模 |
 | AIP 风格智能层 | 部分实现 | 全局 AI 面板 `components/AiChatWidget`；后端 `api/ai_assistant.py`、`services/ai/`（编排、工具注册、权限策略、确认令牌）。独立页面 `pages/AIAssistant` 未挂路由，`/ai-assistant` 重定向到首页 |
 | Gotham 风格指挥台 | 部分实现 | 质量影响与时间线 `/admin/quality-impact`（`pages/QualityImpact`，标注为实验功能，仅管理员可见）；后端 `api/quality.py` 的质量事件接口。面向业务角色的指挥台未实现 |
 | 流程与动作 | 部分实现 | 流程与待办 `/workflow`（`pages/Workflow`）、`api/workflow.py`、`services/workflow_*.py`、`api/notifications.py`、`api/rules.py`。质量事件处置动作多为演示返回 |

@@ -1,7 +1,7 @@
 import './designer-dialog.css';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Empty, Input, Modal, Segmented, Spin, Tag } from 'antd';
-import { ArrowRightOutlined, CheckCircleOutlined, FileTextOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UndoOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, CheckCircleOutlined, FileTextOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UndoOutlined } from '@/components/Icon/ant';
 import { getPlatformFormVersion, listPlatformFormVersions, type PlatformForm, type PlatformFormVersion } from '@/services/api';
 import { compareVersions, filterVersions, formatVersionTime, getVersionFields, sortVersions } from './versionUtils';
 import './version-manager.css';

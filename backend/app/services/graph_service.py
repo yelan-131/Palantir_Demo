@@ -325,20 +325,6 @@ class GraphService:
             )
             return await result.data()
 
-    async def get_shortest_path(self, src_id: int, tgt_id: int, max_hops: int = 6) -> list[dict]:
-        self._check_driver()
-        async with neo4j_driver.session() as session:
-            cypher = CYPHER_TEMPLATES["shortest_path"].format(max_hops=max_hops)
-            result = await session.run(cypher, src_id=src_id, tgt_id=tgt_id)
-            return await result.data()
-
-    async def get_subgraph(self, entity_id: int, depth: int = 2, limit: int = 100) -> list[dict]:
-        self._check_driver()
-        async with neo4j_driver.session() as session:
-            cypher = CYPHER_TEMPLATES["subgraph"].format(depth=depth)
-            result = await session.run(cypher, entity_id=entity_id, limit=limit)
-            return await result.data()
-
     async def impact_analysis(self, entity_id: int, max_hops: int = 5, limit: int = 200) -> list[dict]:
         self._check_driver()
         async with neo4j_driver.session() as session:

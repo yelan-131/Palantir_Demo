@@ -27,7 +27,7 @@ import {
   ReloadOutlined,
   SafetyCertificateOutlined,
   SendOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   PlatformTenantDetail,
   PlatformTenantInvite,

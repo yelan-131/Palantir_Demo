@@ -335,14 +335,6 @@ CYPHER_TEMPLATES = {
         "CASE WHEN startNode(r) = n THEN 'outgoing' ELSE 'incoming' END AS direction "
         "LIMIT $limit"
     ),
-    "shortest_path": (
-        "MATCH p = shortestPath((a {{pg_id: $src_id}})-[*..{max_hops}]-(b {{pg_id: $tgt_id}})) "
-        "RETURN p"
-    ),
-    "subgraph": (
-        "MATCH (n {{pg_id: $entity_id}})-[r*1..{depth}]-(m) "
-        "RETURN n, r, m LIMIT $limit"
-    ),
     "impact_analysis": (
         "MATCH (src {{pg_id: $entity_id}})-[r*1..{max_hops}]->(affected) "
         "RETURN src, r, affected, length(r) AS distance "

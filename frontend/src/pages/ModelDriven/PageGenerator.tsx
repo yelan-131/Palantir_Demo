@@ -3,7 +3,7 @@ import {
   Table, Button, Space, Modal, Form, Input, Select, Tag, Popconfirm,
   Typography, message,
 } from 'antd';
-import { PlusOutlined, ThunderboltOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, ThunderboltOutlined, DeleteOutlined } from '@/components/Icon/ant';
 import {
   listModels, listPages, createPage, generatePage, deletePage,
 } from '@/services/api';

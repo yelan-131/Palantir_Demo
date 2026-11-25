@@ -1,6 +1,6 @@
 import React from 'react';
 import {Alert, Button, Empty, Input, Select, Space, Spin, Tabs, Tag, message} from 'antd';
-import {ArrowLeftOutlined, DatabaseOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, SearchOutlined} from '@ant-design/icons';
+import {ArrowLeftOutlined, DatabaseOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, SearchOutlined} from '@/components/Icon/ant';
 import {getPlatformFormByCode} from '@/services/api';
 import {checkSharedMetricImpact, createSharedAnalyticsMetric, getSharedAnalyticsMetric, getSharedMetricReferences, listSharedAnalyticsMetrics, publishSharedAnalyticsMetric, saveSharedAnalyticsMetric} from './analyticsApi';
 import {analyticsErrorMessage} from './analyticsEditorState';

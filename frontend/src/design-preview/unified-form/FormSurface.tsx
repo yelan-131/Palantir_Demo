@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties, type DragEvent } from 'react';
 import { Input, InputNumber, Select } from 'antd';
-import { HolderOutlined, LockOutlined } from '@ant-design/icons';
+import { HolderOutlined, LockOutlined } from '@/components/Icon/ant';
 import type { FormDesign } from './model';
 
 interface FormSurfaceProps {

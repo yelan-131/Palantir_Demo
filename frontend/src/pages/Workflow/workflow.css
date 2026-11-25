@@ -13,7 +13,7 @@
   justify-content: space-between;
   gap: 16px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -35,7 +35,7 @@
   align-items: center;
   gap: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
   text-align: left;
   cursor: pointer;
@@ -48,7 +48,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
 }
@@ -187,7 +187,7 @@
 .workflow-business-form .ant-select-selector {
   min-height: 36px;
   border-color: #d9e3e8 !important;
-  border-radius: 7px;
+  border-radius: 6px;
   background: #fff;
 }
 
@@ -223,7 +223,7 @@
   align-items: center;
   gap: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f8fbfc;
 }
 
@@ -246,14 +246,14 @@
 .workflow-progress-card {
   padding: 14px 14px 4px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
 .workflow-operation-log-card {
   padding: 14px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -298,7 +298,7 @@
   margin-top: 4px;
   padding: 14px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -313,7 +313,7 @@
   padding-left: 10px;
   color: var(--mf-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .workflow-form-section-title::before {
@@ -341,7 +341,7 @@
   justify-content: center;
   gap: 7px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: linear-gradient(180deg, #ffffff 0%, #f7fafb 100%);
 }
 
@@ -363,7 +363,7 @@
   flex-direction: column;
   gap: 8px;
   border: 1px solid #d8e7ee;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f3f8fa;
 }
 
@@ -385,7 +385,7 @@
   align-items: center;
   gap: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -455,7 +455,7 @@
   justify-content: space-between;
   gap: 16px;
   border: 1px solid #e1e8ed;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -467,7 +467,7 @@
 .workflow-approval-tabs {
   padding: 0 22px;
   border: 1px solid #e1e8ed;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -499,7 +499,7 @@
 .workflow-approval-tabs .ant-tabs-tab-btn {
   color: #5f6e78;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .workflow-approval-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
@@ -508,7 +508,7 @@
 
 .workflow-approval-tabs .ant-tabs-ink-bar {
   height: 3px;
-  border-radius: 3px 3px 0 0;
+  border-radius: 4px 4px 0 0;
   background: #2f5f73;
 }
 
@@ -525,12 +525,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #edf4f7;
   color: #2f5f73;
   font-style: normal;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .workflow-approval-list {
@@ -667,7 +667,7 @@
   gap: 18px;
   align-items: center;
   border: 1px solid #e7edf1;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
   text-align: left;
   cursor: pointer;
@@ -738,7 +738,7 @@
   flex-wrap: wrap;
   gap: 6px 14px;
   color: #74828d;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -813,7 +813,7 @@
   gap: 12px 24px;
   align-items: center;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel);
   transition: background-color 150ms ease-out, border-color 150ms ease-out;
 }
@@ -865,7 +865,7 @@
   color: #9aa4ac;
   font-size: 12px;
   line-height: 18px;
-  font-weight: 700;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -880,7 +880,7 @@
   color: #182832;
   font-size: 15px;
   line-height: 22px;
-  font-weight: 700;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1027,7 +1027,7 @@
   min-height: 36px;
   padding: 4px 11px;
   border: 1px solid #d9e3e8 !important;
-  border-radius: 7px;
+  border-radius: 6px;
   background: #fff;
   color: #263945;
   font-size: 13px;
@@ -1078,7 +1078,7 @@
   gap: 4px;
   color: #7b8790;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1087,7 +1087,7 @@
 .workflow-business-sheet-label em {
   color: #ff4d4f;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .workflow-business-sheet-value {
@@ -1143,7 +1143,7 @@
 
 .workflow-field-change-tooltip strong {
   color: #fff;
-  font-weight: 700;
+  font-weight: 600;
   word-break: break-all;
 }
 

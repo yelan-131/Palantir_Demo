@@ -1,7 +1,9 @@
-import type { Dispatch, SetStateAction } from 'react';
-import { ApartmentOutlined, BranchesOutlined, CheckCircleOutlined, NodeIndexOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, List, Modal, Progress, Row, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type FormInstance } from 'antd';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { ApartmentOutlined, BranchesOutlined, CheckCircleOutlined, LinkOutlined, NodeIndexOutlined, ReloadOutlined } from '@/components/Icon/ant';
+import { Alert, Button, Card, Checkbox, Col, Dropdown, Empty, Form, Input, List, Modal, Progress, Row, Select, Space, Spin, Switch, Table, Tabs, Tag, Typography, type FormInstance } from 'antd';
 import type { OntologyCandidateInfo } from '../../services/api';
+import { useAuthStore } from '@/stores/authStore';
+import OntologySimilaritySettings from './OntologySimilaritySettings';
 import { boolTag, type OntologyMapping, type OntologyObject, type OntologyRelation, type OntologyVersion } from './semanticAssetShared';
 
 type OntologyModelState = {
@@ -15,7 +17,7 @@ type OntologyModelState = {
   ontologyCandidates: OntologyCandidateInfo[];
   ontologyPublishStats: { objects: number; fields: number; relations: number; graphRelations: number; mappings: number };
   ontologyTab: string;
-  setOntologyTab: Dispatch<SetStateAction<string>>;
+  setOntologyTab: (tab: string) => void;
   ontologyVersions: OntologyVersion[];
   relations: OntologyRelation[];
   requestedCandidate: number | undefined;
@@ -30,12 +32,14 @@ type OntologyModelState = {
 type OntologyActions = {
   deprecateSelectedObject: () => void;
   objectModalOpen: boolean;
+  editingObject: boolean;
   setObjectModalOpen: Dispatch<SetStateAction<boolean>>;
   ontologyObjectForm: FormInstance;
   openObjectModal: (object?: OntologyObject) => void;
   saveOntologyObject: () => Promise<void>;
   savingObject: boolean;
-  openRelationModal: () => void;
+  openRelationModal: (source?: OntologyObject) => void;
+  openObjectMapping: (object: OntologyObject) => void;
   relationModalOpen: boolean;
   setRelationModalOpen: Dispatch<SetStateAction<boolean>>;
   ontologyRelationForm: FormInstance;
@@ -49,7 +53,8 @@ type OntologyActions = {
   load: () => Promise<void>;
 };
 
-export function OntologyView({ model, actions }: { model: OntologyModelState; actions: OntologyActions }) {
+export function OntologyView({ model, actions, fieldMapping }: { model: OntologyModelState; actions: OntologyActions; fieldMapping: ReactNode }) {
+  const isAdmin = Boolean(useAuthStore(state => state.user?.is_admin));
   const {
     candidateStats,
     impactLoading,
@@ -76,12 +81,14 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
   const {
     deprecateSelectedObject,
     objectModalOpen,
+    editingObject,
     setObjectModalOpen,
     ontologyObjectForm,
     openObjectModal,
     saveOntologyObject,
     savingObject,
     openRelationModal,
+    openObjectMapping,
     relationModalOpen,
     setRelationModalOpen,
     ontologyRelationForm,
@@ -97,17 +104,13 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
   const unavailable = loadFailed
     ? <Alert type="error" message="无法读取数据中心" action={<Button size="small" onClick={load}>重试</Button>} />
     : <div className="data-center-empty"><Spin /></div>;
+  const mappingSelected = ontologyTab === 'mapping';
+  const objectName = (code: string) => objects.find(item => item.code === code)?.name || code;
 
   return (
     <>
-      {!objects.length && !relations.length && !ontologyCandidates.length && !ontologyVersions.length
-        ? loading || loadFailed ? unavailable : <section className="data-center-empty">
-          <h3>还没有业务对象</h3>
-          <p>新建第一个对象，定义它的字段，再建立对象之间的关系。</p>
-          <Button type="primary" icon={<ApartmentOutlined />} onClick={() => openObjectModal()}>新增对象</Button>
-        </section>
-        : <div className="ontology-workbench">
-        <aside className="ontology-directory">
+      <div className={`ontology-workbench${mappingSelected ? ' ontology-workbench-mapping' : ''}`}>
+        {!mappingSelected && <aside className="ontology-directory">
           <Card
             className="semantic-side-card"
             title="对象目录"
@@ -129,29 +132,29 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
               className="ontology-object-list"
               dataSource={objects}
               locale={{ emptyText: '暂无正式对象，可从候选审核批准或手工新增' }}
-              renderItem={(item) => (
-                <List.Item
-                  className={item.id === selectedObject?.id ? 'semantic-list-item active' : 'semantic-list-item'}
-                  onClick={() => setSelectedObjectId(item.id)}
-                >
+              renderItem={(item) => <Dropdown trigger={['contextMenu']} menu={{ items: [
+                { key: 'mapping', label: '映射来源字段', icon: <LinkOutlined />, onClick: () => openObjectMapping(item) },
+                { key: 'relation', label: '从此对象新建关系', icon: <BranchesOutlined />, onClick: () => openRelationModal(item) },
+              ] }}>
+                <List.Item className={item.id === selectedObject?.id ? 'semantic-list-item active' : 'semantic-list-item'} onClick={() => setSelectedObjectId(item.id)}>
                   <List.Item.Meta
                     avatar={<ApartmentOutlined />}
                     title={<Space><span>{item.name}</span><Tag>{item.status ?? 'published'}</Tag></Space>}
-                    description={`${item.code} · ${item.fields.length} 字段 · ${item.source}`}
+                    description={`${item.code} · ${item.fields.length} 个属性`}
                   />
                 </List.Item>
-              )}
+              </Dropdown>}
             />
           </Card>
-        </aside>
+        </aside>}
         <main className="ontology-main">
           <section className="ontology-toolbar">
             <div>
-              <Typography.Text type="secondary">候选对象须审核后发布为正式模型。</Typography.Text>
+              <Typography.Text type="secondary">定义对象与关系。用字段映射把来源数据对应到对象属性。</Typography.Text>
             </div>
             <Space wrap>
               <Button icon={<ReloadOutlined />} onClick={refreshOntologyGovernance}>刷新</Button>
-              <Button icon={<BranchesOutlined />} onClick={openRelationModal} disabled={!objects.length}>新增关系</Button>
+              <Button icon={<BranchesOutlined />} onClick={() => openRelationModal()} disabled={!objects.length}>新增关系</Button>
               <Button type="primary" icon={<CheckCircleOutlined />} loading={publishingOntology} onClick={publishOntologyVersion}>发布版本</Button>
             </Space>
           </section>
@@ -181,20 +184,22 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
                         <div><span>领域</span><strong>{selectedObject.domain ?? 'manufacturing'}</strong></div>
                         <div><span>状态</span><strong>{selectedObject.status ?? 'published'}</strong></div>
                         <div><span>置信度</span><strong>{Math.round((selectedObject.confidence ?? 1) * 100)}%</strong></div>
-                        <div><span>映射</span><strong>{selectedObjectMappings.length}</strong></div>
+                        <div><span>外部映射</span><strong>{selectedObjectMappings.length}</strong></div>
                       </div>
                     </Card>
-                    <Card title="字段定义">
+                    <Card title="对象属性" extra={<Space wrap>
+                      {isAdmin && <OntologySimilaritySettings key={selectedObject.id} object={selectedObject} onSaved={refreshOntologyGovernance} />}
+                      <Button size="small" icon={<LinkOutlined />} onClick={() => openObjectMapping(selectedObject)}>映射来源字段</Button>
+                    </Space>}>
                       <Table
                         size="small"
                         rowKey={(record) => record.id ?? record.name}
                         dataSource={selectedObject.fields}
                         pagination={{ pageSize: 8 }}
                         columns={[
-                          { title: '对象字段', dataIndex: 'label' },
-                          { title: '字段编码', dataIndex: 'name' },
+                          { title: '属性名称', dataIndex: 'label' },
+                          { title: '属性编码', dataIndex: 'name' },
                           { title: '类型', dataIndex: 'type', render: (type: string) => <Tag>{type}</Tag> },
-                          { title: '来源字段', dataIndex: 'source_field' },
                           { title: '列表', dataIndex: 'list', render: boolTag },
                           { title: '表单', dataIndex: 'form', render: boolTag },
                           { title: '搜索', dataIndex: 'search', render: boolTag },
@@ -202,24 +207,31 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
                         ]}
                       />
                     </Card>
-                    <Card title="数据映射">
+                    <Card title="已批准的外部字段映射">
                       <Table
                         size="small"
                         rowKey="id"
                         dataSource={selectedObjectMappings}
                         pagination={{ pageSize: 5 }}
-                        locale={{ emptyText: '暂无字段映射，可从数据资产候选审核生成' }}
+                        locale={{ emptyText: '暂无已批准的外部映射' }}
                         columns={[
                           { title: '来源系统', dataIndex: 'source_system', width: 100 },
-                          { title: '来源实体', dataIndex: 'source_entity' },
+                          { title: '来源表', dataIndex: 'source_entity' },
                           { title: '来源字段', dataIndex: 'source_field' },
-                          { title: '目标字段', dataIndex: 'target_field_code' },
+                          { title: '对象属性', dataIndex: 'target_field_code', render: (code: string) => selectedObject.fields.find(field => (field.code || field.name) === code)?.label || code },
                           { title: '置信度', dataIndex: 'confidence', width: 120, render: (value: number) => <Progress percent={Math.round((value ?? 0) * 100)} size="small" /> },
                         ]}
                       />
                     </Card>
                   </Space>
-                ) : <Empty description="暂无对象模型" />,
+                ) : loading || loadFailed ? unavailable : <section className="data-center-empty">
+                  <h3>还没有业务对象</h3>
+                  <p>可以直接新增对象，也可以在字段映射里从来源表创建对象草稿。</p>
+                  <Space wrap>
+                    <Button type="primary" icon={<ApartmentOutlined />} onClick={() => openObjectModal()}>新增对象</Button>
+                    <Button icon={<LinkOutlined />} onClick={() => setOntologyTab('mapping')}>查看来源字段</Button>
+                  </Space>
+                </section>,
               },
               {
                 key: 'relations',
@@ -227,16 +239,16 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
                 children: (
                   <Row gutter={[16, 16]}>
                     <Col xs={24} xl={15}>
-                      <Card title={<Space><BranchesOutlined />对象关系 / 图谱边</Space>} extra={<Button size="small" onClick={openRelationModal}>新增关系</Button>}>
+                      <Card title={<Space><BranchesOutlined />对象关系</Space>} extra={<Button size="small" disabled={!objects.length} onClick={() => openRelationModal()}>新增关系</Button>}>
                         <Table
                           size="small"
                           rowKey="id"
                           dataSource={relations}
                           pagination={{ pageSize: 10 }}
                           columns={[
-                            { title: '源对象', dataIndex: 'source' },
+                            { title: '源对象', dataIndex: 'source', render: objectName },
                             { title: '关系', dataIndex: 'label', render: (text, record: OntologyRelation) => <Space><Tag color="blue">{record.type}</Tag>{text}</Space> },
-                            { title: '目标对象', dataIndex: 'target' },
+                            { title: '目标对象', dataIndex: 'target', render: objectName },
                             { title: '进入图谱', dataIndex: 'graph', render: boolTag },
                             { title: '状态', dataIndex: 'status', render: (value) => <Tag>{value ?? 'published'}</Tag> },
                           ]}
@@ -246,12 +258,12 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
                     <Col xs={24} xl={9}>
                       <Card title="关系图预览">
                         <div className="ontology-graph-preview">
-                          <div className="ontology-graph-node main">{selectedObject?.code ?? 'Object'}</div>
+                          {selectedObject && <div className="ontology-graph-node main">{selectedObject.name}</div>}
                           {objectRelations.slice(0, 4).map((relation, index) => {
                             const target = relation.source === selectedObject?.code || relation.source === selectedObject?.id ? relation.target : relation.source;
                             return (
                               <div className={`ontology-graph-node node-${index + 1}`} key={relation.id}>
-                                <span>{target}</span>
+                                <span>{objectName(target)}</span>
                                 <small>{relation.type}</small>
                               </div>
                             );
@@ -262,6 +274,7 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
                   </Row>
                 ),
               },
+              { key: 'mapping', label: '字段映射', children: fieldMapping },
               {
                 key: 'candidates',
                 label: `候选审核 ${candidateStats.total}`,
@@ -391,12 +404,12 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
             ]}
           />
         </main>
-      </div>}
+      </div>
       <Modal title="对象模型" open={objectModalOpen} onCancel={() => setObjectModalOpen(false)} onOk={saveOntologyObject} confirmLoading={savingObject} width={780} okText="保存">
         <Form form={ontologyObjectForm} layout="vertical">
           <Row gutter={12}>
             <Col span={12}><Form.Item name="name" label="对象名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="code" label="对象编码" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="code" label="对象编码" rules={[{ required: true, whitespace: true }, { max: 120 }]}><Input disabled={editingObject} /></Form.Item></Col>
             <Col span={12}><Form.Item name="domain" label="领域"><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="status" label="状态"><Select options={[{ value: 'draft', label: 'draft' }, { value: 'published', label: 'published' }, { value: 'deprecated', label: 'deprecated' }]} /></Form.Item></Col>
           </Row>
@@ -404,13 +417,12 @@ export function OntologyView({ model, actions }: { model: OntologyModelState; ac
           <Form.List name="fields">
             {(fields, { add, remove }) => (
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Space style={{ justifyContent: 'space-between', width: '100%' }}><Typography.Text strong>字段</Typography.Text><Button size="small" onClick={() => add({ type: 'string', list: true, form: true })}>新增字段</Button></Space>
+                <Space style={{ justifyContent: 'space-between', width: '100%' }}><Typography.Text strong>属性</Typography.Text><Button size="small" onClick={() => add({ type: 'string', list: true, form: true })}>新增属性</Button></Space>
                 {fields.map((field) => (
                   <Row gutter={8} key={field.key} align="middle">
-                    <Col span={5}><Form.Item name={[field.name, 'code']} rules={[{ required: true }]}><Input placeholder="编码" /></Form.Item></Col>
-                    <Col span={5}><Form.Item name={[field.name, 'label']}><Input placeholder="名称" /></Form.Item></Col>
-                    <Col span={4}><Form.Item name={[field.name, 'type']}><Select options={['string', 'number', 'datetime', 'enum', 'boolean'].map((value) => ({ value, label: value }))} /></Form.Item></Col>
-                    <Col span={5}><Form.Item name={[field.name, 'source_field']}><Input placeholder="来源字段" /></Form.Item></Col>
+                    <Col span={7}><Form.Item name={[field.name, 'code']} rules={[{ required: true, whitespace: true }, { max: 120 }]}><Input placeholder="属性编码" /></Form.Item></Col>
+                    <Col span={7}><Form.Item name={[field.name, 'label']} rules={[{ max: 200 }]}><Input placeholder="属性名称" /></Form.Item></Col>
+                    <Col span={5}><Form.Item name={[field.name, 'type']}><Select options={['string', 'number', 'datetime', 'enum', 'boolean'].map((value) => ({ value, label: value }))} /></Form.Item></Col>
                     <Col span={3}><Form.Item name={[field.name, 'search']} valuePropName="checked"><Checkbox>搜索</Checkbox></Form.Item></Col>
                     <Col span={2}><Button danger size="small" onClick={() => remove(field.name)}>删</Button></Col>
                   </Row>

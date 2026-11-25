@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert, Button, Dropdown, Empty, Input, Modal, Select, Space, Spin, Tooltip, Typography, message } from 'antd';
-import { DatabaseOutlined, FilterOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SafetyCertificateOutlined, SaveOutlined, SkinOutlined, UndoOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, FilterOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SafetyCertificateOutlined, SaveOutlined, SkinOutlined, UndoOutlined } from '@/components/Icon/ant';
 import { Link, useBlocker, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import AnalyticsDashboard, { type AnalyticsDataQuery } from './AnalyticsDashboard';

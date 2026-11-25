@@ -10,7 +10,7 @@ import {
   ShoppingCartOutlined,
   StarOutlined,
   UserOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Badge, Button, Drawer, Input, Segmented, Space, Tag } from 'antd';
 import './style.css';
 

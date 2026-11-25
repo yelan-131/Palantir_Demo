@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Empty, Input, Popover, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
-import { BookOutlined, CheckOutlined, DownOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PlusOutlined, ProjectOutlined, SearchOutlined, SortAscendingOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
+import { BookOutlined, CheckOutlined, DownOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PlusOutlined, ProjectOutlined, SearchOutlined, SortAscendingOutlined, StarFilled, StarOutlined } from '@/components/Icon/ant';
 import { useAuthStore } from '../../stores/authStore';
 import { explorerDefaults, explorerStorageKey, moveExplorerDocument, normalizeExplorerPreferences, removeExplorerFolder, sortExplorerDocuments, type ExplorerDocument, type ExplorerFolder, type ExplorerPreferences } from '../../utils/knowledgeExplorer';
 import { createUuid } from '../../utils/uuid';

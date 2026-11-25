@@ -4,6 +4,8 @@
 
 当前 GitHub 版本为 [0.3.26](releases/release-0.3.26.md)，发布于 2026-11-20。
 
+当前开发草稿为 [0.3.27](releases/release-0.3.27.md)。
+
 版本编号与发布流程见[版本策略](operations/version-policy.md)。
 
 ## 1. 目录结构

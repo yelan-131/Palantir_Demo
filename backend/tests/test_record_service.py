@@ -502,6 +502,73 @@ async def test_pagination_and_null_updates_are_consistent(environment):
     assert result['total'] == 2 and result['data'][0]['id'] == first['id']
 
 
+def test_postgresql_dynamic_record_numeric_sort_compiles_as_guarded_numeric():
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql, sqlite
+    from app.models.relational import DynamicRecord
+    from app.services.form_engine.query import _apply_record_sort_query
+
+    statement = select(DynamicRecord.id)
+    numeric = _apply_record_sort_query(statement, DynamicRecord, 'qty', 'asc',
+                                       numeric=True, dialect='postgresql')
+    compiled = str(numeric.compile(dialect=postgresql.dialect(), compile_kwargs={'literal_binds': True}))
+    assert 'ORDER BY CASE WHEN' in compiled and ' ~ ' in compiled and 'AS NUMERIC' in compiled
+    assert 'ASC, dynamic_records.id DESC' in compiled
+    text_sort = _apply_record_sort_query(statement, DynamicRecord, 'title', 'desc', dialect='postgresql')
+    assert 'AS VARCHAR) DESC' in str(text_sort.compile(dialect=postgresql.dialect()))
+    sqlite_sort = _apply_record_sort_query(statement, DynamicRecord, 'qty', 'asc', numeric=True)
+    assert 'ORDER BY JSON_EXTRACT' in str(sqlite_sort.compile(dialect=sqlite.dialect()))
+
+
+@pytest.mark.asyncio
+async def test_numeric_sort_applies_before_admin_list_pagination(environment):
+    _, _, _, user, client = environment
+    user['is_admin'] = True
+    for qty in (10, 100, 2):
+        response = await client.post('/forms/1/records', json={'data': {'title': str(qty), 'qty': qty}})
+        assert response.status_code == 200, response.text
+    result = await client.get('/forms/1/records', params={'sort_field': 'qty', 'sort_order': 'asc', 'page_size': 2})
+    assert result.status_code == 200, result.text
+    assert result.json()['total'] == 3
+    assert [row['data']['qty'] for row in result.json()['data']] == [2, 10]
+
+
+@pytest.mark.asyncio
+async def test_business_quantity_and_boolean_filters_match_for_admins_and_readers(environment):
+    db, _, _, user, client = environment
+    db.add(FormField(tenant_id=1, form_id=1, field_name='enabled', label='enabled',
+        field_type='boolean', searchable=True))
+    await db.commit()
+    for payload in ({'title': 'Target', 'qty': 2, 'enabled': False}, {'title': 'Other', 'qty': 3, 'enabled': True}):
+        response = await client.post('/forms/1/records', json={'data': payload})
+        assert response.status_code == 200, response.text
+    for is_admin in (False, True):
+        user['is_admin'] = is_admin
+        for field, operator, value in [('qty', 'equals', 2), ('qty', 'in', [2]), ('enabled', 'equals', False)]:
+            response = await client.get('/forms/1/records', params={
+                'filters': json.dumps([{'field': field, 'op': operator, 'value': value}]),
+            })
+            assert response.status_code == 200, response.text
+            assert response.json()['total'] == 1, (is_admin, field, operator, response.text)
+            assert [item['data']['title'] for item in response.json()['data']] == ['Target']
+
+
+@pytest.mark.asyncio
+async def test_unindexed_record_filters_include_a_diagnostic_code(environment):
+    db, _, _, user, client = environment
+    db.add(FormField(tenant_id=1, form_id=1, field_name='memo', label='Memo', field_type='string',
+        searchable=False, sortable=False))
+    await db.commit()
+    user['is_admin'] = True
+
+    response = await client.get('/forms/1/records', params={
+        'filters': json.dumps([{'field': 'memo', 'op': 'equals', 'value': 'test'}]),
+    })
+    assert response.status_code == 400, response.text
+    assert response.headers['X-Error-Code'] == 'RECORD_FILTER_INVALID'
+    assert 'memo' in response.json()['detail']
+
+
 @pytest.mark.asyncio
 async def test_json_boolean_types_and_metadata_protection(environment):
     db, _, form, user, client = environment
@@ -799,3 +866,206 @@ async def test_calculations_are_authoritative_in_runtime_preview_create_and_upda
     await db.commit()
     invalid = await client.post('/forms/1/records', json={'data': {'title': '应阻止', 'qty': 3, 'price': 19.9}})
     assert invalid.status_code == 422 and '除数不能为 0' in invalid.text
+
+
+@pytest.mark.asyncio
+async def test_approval_status_filter_uses_lifecycle_history_before_pagination_and_export(environment):
+    import json
+    from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD, audit
+
+    db, _, form, user, client = environment
+    form.config = {'viewConfig': {
+        'filters': [{'fieldName': APPROVAL_STATUS_FIELD, 'enabled': True}],
+        'table': {'columns': [{'fieldName': APPROVAL_STATUS_FIELD, 'enabled': True}]},
+    }}
+    await db.commit()
+    await db.refresh(form)
+    before = (await client.get('/forms/1', params={'schema': 'published', 'scope': 'list'})).json()['data']
+    assert before['runtime_approval_available'] is False
+
+    pending = await seed(db, 'Pending application')
+    draft = await seed(db, 'Draft application')
+    legacy = await seed(db, 'Legacy record')
+    other_owner = await seed(db, 'Other owner', uid=2)
+    for record in (pending, draft, other_owner):
+        await audit(db, form, record['id'], user, 'create_draft', status='draft')
+    await records.set_record_status(db, form, pending, 'pending', user)
+    await audit(db, form, pending['id'], user, 'submit', status='pending')
+    db.add(AuditLog(tenant_id=2, resource_id=legacy['id'], resource_type='form_application:1', action='create_draft'))
+    db.add(RolePermission(tenant_id=1, role_id=1, resource_type='form', resource_key='1',
+        action='view', effect='allow', data_scope='self'))
+    await db.commit()
+
+    schema = (await client.get('/forms/1', params={'schema': 'published', 'scope': 'list'})).json()['data']
+    assert schema['runtime_submission_available'] is False
+    assert schema['runtime_approval_available'] is True
+    assert schema['config']['viewConfig']['table']['columns'][0]['fieldName'] == APPROVAL_STATUS_FIELD
+    assert schema['config']['viewConfig']['filters'][0]['fieldName'] == APPROVAL_STATUS_FIELD
+    assert APPROVAL_STATUS_FIELD not in {field['field_name'] for field in schema['fields']}
+
+    statuses = [{'field': APPROVAL_STATUS_FIELD, 'op': 'in', 'value': ['pending', 'draft']}]
+    pending_status = {'field': APPROVAL_STATUS_FIELD, 'op': 'equals', 'value': 'pending'}
+    for admin in (False, True):
+        user['is_admin'] = admin
+        response = await client.get('/forms/1/records', params={'filters': json.dumps(statuses), 'page_size': 1})
+        assert response.status_code == 200, response.text
+        assert response.json()['total'] == (3 if admin else 2)
+        assert [row['id'] for row in response.json()['data']] == [other_owner['id'] if admin else draft['id']]
+        assert response.json()['data'][0]['_approval']['status'] == 'draft'
+
+        filters = statuses + [pending_status, {'field': 'title', 'op': 'contains', 'value': 'Pending'}]
+        response = await client.get('/forms/1/records', params={'filters': json.dumps(filters)})
+        assert response.status_code == 200, response.text
+        assert response.json()['total'] == 1
+        assert [row['id'] for row in response.json()['data']] == [pending['id']]
+        assert response.json()['data'][0]['_approval']['status'] == 'pending'
+
+        export = await client.get('/forms/1/records-export', params={'filters': json.dumps(filters)})
+        assert export.status_code == 200, export.text
+        assert 'Pending application' in export.text
+        assert 'Draft application' not in export.text
+        assert 'Legacy record' not in export.text
+
+        invalid = await client.get('/forms/1/records', params={'filters': json.dumps([{**pending_status, 'op': 'contains'}])})
+        assert invalid.status_code == 422
+        assert invalid.headers['X-Error-Code'] == 'RECORD_FILTER_INVALID'
+
+
+@pytest.mark.asyncio
+async def test_record_list_metadata_resolves_tenant_actor_names_and_keeps_columns(environment):
+    from sqlalchemy import update
+    from app.models.relational import DynamicRecord
+    from app.services.records import RECORD_LIST_METADATA_FIELDS
+
+    db, _, form, user, client = environment
+    creator = await db.get(User, 1)
+    creator.display_name = 'Record creator'
+    db.add(User(id=3, tenant_id=2, username='foreign', display_name='Other tenant', hashed_password='test'))
+    form.config = {'viewConfig': {
+        'filters': [{'fieldName': '_created_by'}],
+        'table': {'columns': [{'fieldName': name} for name in sorted(RECORD_LIST_METADATA_FIELDS)],
+                  'defaultSort': {'fieldName': '_created_at'}},
+    }}
+    await db.commit()
+    await db.refresh(form)
+    row = await seed(db, 'Record with metadata')
+    older = await seed(db, 'Historical row')
+    if form.storage_mode == 'physical_table':
+        await db.execute(text('UPDATE t1_business_contract SET updated_by=3 WHERE id=:id'), {'id': older['id']})
+    else:
+        await db.execute(update(DynamicRecord).where(DynamicRecord.id == older['id']).values(updated_by=3))
+    await db.commit()
+
+    user['uid'] = 2
+    updated = await client.put(f'/forms/1/records/{row["id"]}', json={'data': {'title': 'Updated record'}})
+    assert updated.status_code == 200, updated.text
+    user['uid'] = 1
+
+    schema = (await client.get('/forms/1', params={'schema': 'published', 'scope': 'list'})).json()['data']
+    view = schema['config']['viewConfig']
+    assert view['filters'] == []
+    assert view['table'].get('defaultSort') is None
+    assert {col['fieldName'] for col in view['table']['columns']} == RECORD_LIST_METADATA_FIELDS
+    assert not RECORD_LIST_METADATA_FIELDS.intersection(field['field_name'] for field in schema['fields'])
+
+    for admin in (False, True):
+        user['is_admin'] = admin
+        listed = await client.get('/forms/1/records')
+        assert listed.status_code == 200, listed.text
+        by_id = {item['id']: item for item in listed.json()['data']}
+        updated_row = by_id[row['id']]
+        assert updated_row['created_at'] and updated_row['updated_at']
+        assert updated_row['created_by'] == 1 and updated_row['created_by_name'] == 'Record creator'
+        assert updated_row['updated_by'] == 2 and updated_row['updated_by_name'] == 'user2'
+        assert by_id[older['id']]['updated_by_name'] is None
+
+
+@pytest.mark.asyncio
+async def test_system_filters_apply_before_pagination_and_export(environment):
+    from datetime import datetime, timedelta
+    from sqlalchemy import update
+    from app.models.relational import DynamicRecord
+
+    db, _, form, user, client = environment
+    start = datetime(2026, 11, 18, 16)
+    end = datetime(2026, 11, 19, 16)
+    target = await seed(db, 'Target batch')
+    outside = await seed(db, 'Outside', uid=2)
+    just_before_end = await seed(db, 'Still inside Target batch')
+    for row, created_at, updated_at, actor in (
+        (target, start, start, 2),
+        (outside, end, end, 1),
+        (just_before_end, end - timedelta(microseconds=1), end - timedelta(microseconds=1), 2),
+    ):
+        values = {'created_at': created_at, 'updated_at': updated_at, 'updated_by': actor}
+        if form.storage_mode == 'physical_table':
+            if db.bind.dialect.name == 'sqlite':
+                values.update(created_at=created_at.isoformat(' '), updated_at=updated_at.isoformat(' '))
+            await db.execute(text('UPDATE t1_business_contract SET created_at=:created_at, updated_at=:updated_at, '
+                'updated_by=:updated_by WHERE id=:id'), {**values, 'id': row['id']})
+        else:
+            await db.execute(update(DynamicRecord).where(DynamicRecord.id == row['id']).values(**values))
+    await db.commit()
+
+    bounds = {'op': 'between', 'value': ['2026-11-19T00:00:00+08:00', '2026-11-20T00:00:00+08:00'],
+              'endExclusive': True}
+    for admin in (False, True):
+        user['is_admin'] = admin
+        conditions = [{**bounds, 'field': '_created_at'}, {**bounds, 'field': '_updated_at'},
+            {'field': '_created_by', 'value': '1'}, {'field': '_updated_by', 'value': 2},
+            {'field': 'title', 'op': 'contains', 'value': 'Target batch'}]
+        params = {'filters': json.dumps(conditions), 'page_size': 1}
+        for page, expected in [(1, just_before_end), (2, target)]:
+            listed = await client.get('/forms/1/records', params={**params, 'page': page})
+            assert listed.status_code == 200, listed.text
+            assert listed.json()['total'] == 2
+            assert [row['id'] for row in listed.json()['data']] == [expected['id']]
+        conditions.append({'field': '_record_id', 'value': target['id']})
+        params['filters'] = json.dumps(conditions)
+        exact = await client.get('/forms/1/records', params=params)
+        assert exact.json()['total'] == 1
+        assert [row['id'] for row in exact.json()['data']] == [target['id']]
+        exported = await client.get('/forms/1/records-export', params=params)
+        assert exported.status_code == 200 and 'Target' in exported.text and 'Outside' not in exported.text
+        invalid = await client.get('/forms/1/records', params={'filters':
+            json.dumps([{'field': '_updated_at', 'op': 'between', 'value': ['2026-11-21', '2026-11-20']}])})
+        assert invalid.status_code == 422
+        assert invalid.headers['X-Error-Code'] == 'RECORD_FILTER_INVALID'
+
+
+@pytest.mark.asyncio
+async def test_record_actor_options_obey_row_access_and_keep_historical_actors(environment):
+    db, _, _, user, client = environment
+    await seed(db, 'Own record')
+    await seed(db, 'Another own record')
+    hidden = await seed(db, 'Hidden record', uid=2)
+    hidden_actor = await db.get(User, 2)
+    hidden_actor.display_name = 'Hidden actor'
+    hidden_actor.is_active = False
+    path = '/forms/1/records/actor-options'
+    await db.commit()
+
+    for admin in (False, True):
+        user['is_admin'] = admin
+        first = await client.get(path, params={'field': '_created_by', 'page_size': 1})
+        assert first.status_code == 200, first.text
+        assert first.json() == {'data': [{'id': 1, 'label': 'user1'}], 'has_more': True}
+        second = await client.get(path, params={'field': '_created_by', 'page_size': 1, 'page': 2})
+        assert second.json() == {'data': [{'id': 2, 'label': 'Hidden actor'}], 'has_more': False}
+        matched = await client.get(path, params={'field': '_created_by', 'query': 'hidden'})
+        assert matched.json()['data'] == [{'id': 2, 'label': 'Hidden actor'}]
+
+    db.add(RolePermission(tenant_id=1, role_id=1, resource_type='form', resource_key='1',
+                          action='view', effect='allow', data_scope='self'))
+    await db.commit()
+    user['is_admin'] = False
+    for params in ({'query': 'hidden'}, {'selected': 2}):
+        denied = await client.get(path, params={**params, 'field': '_created_by'})
+        assert denied.status_code == 200 and denied.json() == {'data': [], 'has_more': False}
+    hidden_rows = await client.get('/forms/1/records', params={'filters': json.dumps([
+        {'field': '_record_id', 'value': hidden['id']}, {'field': '_created_by', 'value': 2}])})
+    assert hidden_rows.status_code == 200 and hidden_rows.json()['total'] == 0
+    own = await client.get(path, params={'field': '_created_by'})
+    assert own.json() == {'data': [{'id': 1, 'label': 'user1'}], 'has_more': False}
+    user['tenant_id'] = 2
+    assert (await client.get(path, params={'field': '_created_by'})).status_code == 404

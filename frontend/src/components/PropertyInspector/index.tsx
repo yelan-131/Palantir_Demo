@@ -1,6 +1,6 @@
 import React, {useId, useState} from 'react';
 import {Tooltip} from 'antd';
-import {QuestionCircleOutlined} from '@ant-design/icons';
+import {QuestionCircleOutlined} from '@/components/Icon/ant';
 import './style.css';
 
 export function PropertyInspectorHeader({title, context, titleAccessory, actions, className = ''}: {title:string;context?:string;titleAccessory?:React.ReactNode;actions?:React.ReactNode;className?:string}) {

@@ -1,4 +1,4 @@
-import { ApiOutlined, ArrowRightOutlined, FileTextOutlined, MessageOutlined, RobotOutlined } from '@ant-design/icons';
+import { ApiOutlined, ArrowRightOutlined, FileTextOutlined, MessageOutlined, RobotOutlined } from '@/components/Icon/ant';
 import { Alert, AutoComplete, Button, Collapse, Form, Input, InputNumber, Select, Switch, Tag } from 'antd';
 import type { FormInstance } from 'antd';
 

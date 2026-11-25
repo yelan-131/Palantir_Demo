@@ -336,7 +336,8 @@ body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer, .ant-dropdown, .ant-sel
 }
 .tech-white-shell .app-content :is(.shell-page-heading, .runtime-page-bar) h3.ant-typography {
   color: var(--mf-text) !important;
-  font-size: var(--mf-font-title) !important;
+  font-size: var(--ui-text-title-size) !important;
+  line-height: var(--ui-text-title-line);
   font-weight: 600;
   line-height: 1.4 !important;
 }
@@ -370,7 +371,7 @@ body:has(.tech-white-shell) :is(.ant-modal, .ant-drawer, .ant-dropdown, .ant-sel
 .tech-white-shell .app-menu .ant-menu-item-group-title { font-size: var(--mf-font-auxiliary); }
 .tech-white-shell .shell-search-input .ant-input,
 .tech-white-shell .shell-search-result { font-size: var(--mf-font-compact); }
-.tech-white-shell .shell-search-shortcut { font-size: 11px; }
+.tech-white-shell .shell-search-shortcut { font-size: 12px; }
 .tech-white-shell .app-content .workflow-approval-card-primary small {
   color: var(--mf-muted);
   font-size: var(--mf-font-auxiliary);
@@ -502,7 +503,8 @@ body:has(.tech-white-shell) :is(.ant-alert-info .ant-alert-icon, .ant-message-in
   box-shadow: none;
 }
 .tech-white-shell .app-content :is(.alert-center-header, .material-applications-header) h2 {
-  font-size: var(--mf-font-title);
+  font-size: var(--ui-text-title-size);
+  line-height: var(--ui-text-title-line);
   font-weight: 600;
 }
 .tech-white-shell .app-content .quality-impact-page { background: var(--mf-bg); }
@@ -536,7 +538,7 @@ body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-se
 
 /* Emphasis follows the task hierarchy: page, next action, then reference content. */
 .tech-white-shell .app-content .workbench-page-heading { padding: 4px 0 6px; }
-.tech-white-shell .app-content .workbench-page-heading h2.ant-typography { margin: 0 0 6px; font-size: 28px; font-weight: 650; letter-spacing: -.5px; line-height: 1.4; }
+.tech-white-shell .app-content .workbench-page-heading h2.ant-typography { margin: 0 0 6px; font-size: 28px; font-weight: 600; letter-spacing: -.5px; line-height: 1.4; }
 .tech-white-shell .app-content .workbench-page-heading .ant-typography-secondary { font-size: 13px; }
 .tech-white-shell .app-content .todo-center-panel { min-height: 0; padding: 24px; }
 .tech-white-shell .app-content .todo-center-content { grid-template-columns: minmax(0,1fr); margin-top: 20px; }
@@ -554,14 +556,14 @@ body:has(.tech-white-shell) .ai-session-history-scope :is(.ant-segmented-item-se
 .tech-white-shell .app-content .todo-metric-primary:hover { background: #304359; border-color: #304359; }
 .tech-white-shell .app-content .todo-metric-primary:hover strong { color: #fff; }
 .tech-white-shell .app-content .favorite-center-panel { padding: 24px; }
-.tech-white-shell .app-content .business-form-directory-entry > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--mf-hover); color: var(--mf-muted); font-size: 18px; }
+.tech-white-shell .app-content .business-form-directory-entry > span:first-child { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--mf-hover); color: var(--mf-muted); font-size: 18px; }
 .tech-white-shell .app-content .business-form-directory-entry { border-color: var(--mf-border); }
 .tech-white-shell .app-content .business-form-directory-entry .ant-tag { color: var(--mf-muted); border-color: var(--mf-border); background: var(--mf-bg); }
 .tech-white-shell .app-content .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous),
 body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
 .tech-white-shell .app-content .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover,
 body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover { background: #304359; border-color: #304359; }
-.tech-white-shell .app-content :is(.shell-page-heading,.runtime-page-bar) h3.ant-typography { font-size: 26px !important; font-weight: 650; letter-spacing: -.4px; }
+.tech-white-shell .app-content :is(.shell-page-heading,.runtime-page-bar) h3.ant-typography { font-size: 26px !important; font-weight: 600; letter-spacing: -.4px; }
 @media (max-width: 1100px) {
   .tech-white-shell .app-content .todo-metric-item { padding: 20px 16px; grid-template-columns: minmax(0,1fr); gap: 12px; }
 }
@@ -578,7 +580,7 @@ body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:di
 .tech-white-shell .app-content .app-business-title-row h4.ant-typography,
 .tech-white-shell .app-content :is(.alert-center-header,.material-applications-header) h2.ant-typography,
 .tech-white-shell .app-content .workspace-page-header h4.ant-typography {
-  margin: 0 0 6px; font-size: 26px !important; line-height: 1.4; font-weight: 650; letter-spacing: -.4px;
+  margin: 0 0 6px; font-size: 26px !important; line-height: 1.4; font-weight: 600; letter-spacing: -.4px;
 }
 .tech-white-shell .app-content .workspace-page-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 24px; }
 .tech-white-shell .app-content .workspace-page-header h4.ant-typography { margin: 0; }
@@ -598,7 +600,7 @@ body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:di
 .tech-white-shell .app-content :is(.system-admin-page,.app-admin-workspace) > .ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn { font-weight: 600; }
 .tech-white-shell .app-content .config-editor-title span { font-size: 16px; font-weight: 600; color: var(--mf-text); }
 .tech-white-shell .app-content .config-editor-title small { font-size: 12px; color: var(--mf-muted); }
-.tech-white-shell .app-content .account-center-head h3 { font-size: 24px; font-weight: 650; }
+.tech-white-shell .app-content .account-center-head h3 { font-size: 24px; font-weight: 600; }
 .tech-white-shell .app-content .audit-summary-card h3 { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tech-white-shell .app-content .form-designer-actions .ant-btn-primary { font-weight: 600; }
 @media (max-width: 760px) {
@@ -619,11 +621,11 @@ body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .ant-btn-primary:not(:di
 .tech-white-shell .content-surface:has(> .supply-chain-page) > .runtime-page-bar { min-height: 48px; padding-block: 10px; background: transparent; border-color: transparent; }
 .tech-white-shell .content-surface:has(> .supply-chain-page) > .runtime-page-bar h3.ant-typography { font-size: 14px !important; font-weight: 500; letter-spacing: 0; color: var(--mf-muted) !important; }
 .tech-white-shell .app-content .supply-chain-page > .ant-row { margin-inline: 0 !important; }
-.tech-white-shell .app-content .quality-command-hero h3.ant-typography { font-weight: 650 !important; }
+.tech-white-shell .app-content .quality-command-hero h3.ant-typography { font-weight: 600 !important; }
 .tech-white-shell .app-content .quality-command-hero .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) { background: var(--mf-primary-strong); border-color: var(--mf-primary-strong); }
 
 /* Overlays lead with the task title, then the record and its actionable fields. */
-body:has(.tech-white-shell) :is(.ant-modal-title,.ant-modal-confirm-title,.ant-drawer-title) { font-size: 20px; line-height: 1.4; font-weight: 650; letter-spacing: -.2px; }
+body:has(.tech-white-shell) :is(.ant-modal-title,.ant-modal-confirm-title,.ant-drawer-title) { font-size: 20px; line-height: 1.4; font-weight: 600; letter-spacing: -.2px; }
 body:has(.tech-white-shell) :is(.ant-modal-header,.ant-drawer-header) { border-bottom-color: var(--mf-border-strong); }
 body:has(.tech-white-shell) :is(.ant-modal-body,.ant-drawer-body) .ant-form-item-label > label { color: var(--mf-text); font-weight: 500; }
 body:has(.tech-white-shell) :is(.ant-modal-body,.ant-drawer-body) .ant-form-item-label > label.ant-form-item-required { font-weight: 600; }
@@ -637,7 +639,7 @@ body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .form-field-primary .ant
 body:has(.tech-white-shell) :is(.ant-modal,.ant-drawer) .form-field-primary .ant-input:not(:disabled):not([readonly]):not(.ant-input-status-error):not(.ant-input-status-warning),
 .tech-white-shell .app-content .report-config-panel .form-field-primary .ant-input:not(:disabled):not([readonly]):not(.ant-input-status-error):not(.ant-input-status-warning) { background: var(--mf-info-bg); }
 body:has(.tech-white-shell) .overlay-record-heading { padding: 16px 0; margin-bottom: 4px; border-bottom: 1px solid var(--mf-border); }
-body:has(.tech-white-shell) .overlay-record-heading h4.ant-typography { margin: 0 0 8px; font-size: 22px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+body:has(.tech-white-shell) .overlay-record-heading h4.ant-typography { margin: 0 0 8px; font-size: 22px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 body:has(.tech-white-shell) .overlay-record-heading > .ant-typography-secondary { font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 body:has(.tech-white-shell) .overlay-key-value { font-size: 14px; font-weight: 600; color: var(--mf-text); overflow-wrap: anywhere; }
 body:has(.tech-white-shell) .overlay-record-key { font-size: 20px; font-weight: 600; color: var(--mf-primary-strong); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -646,7 +648,7 @@ body:has(.tech-white-shell) :is(.alert-center-detail-actions,.material-applicati
 body:has(.tech-white-shell) .workflow-approval-detail-head .ant-typography:first-child { font-size: 20px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 body:has(.tech-white-shell) .workflow-business-sheet-label { color: var(--mf-muted); font-size: 13px; }
 body:has(.tech-white-shell) .workflow-business-sheet-value { color: var(--mf-text); font-size: 14px; }
-.tech-white-shell .app-content .form-designer-title h4.ant-typography { font-size: 18px !important; font-weight: 650; }
+.tech-white-shell .app-content .form-designer-title h4.ant-typography { font-size: 18px !important; font-weight: 600; }
 .tech-white-shell .app-content .form-designer-right .designer-prop-summary,
 .tech-white-shell .app-content .report-widget-summary { padding: 10px 12px; border: 1px solid var(--mf-border); border-left: 3px solid var(--mf-primary-strong); border-radius: var(--mf-control-radius); background: var(--mf-info-bg); }
 .tech-white-shell .app-content .form-designer-right .designer-prop-summary strong { font-size: 15px; font-weight: 600; }
@@ -655,7 +657,7 @@ body:has(.tech-white-shell) .workflow-business-sheet-value { color: var(--mf-tex
 .tech-white-shell .app-content .form-designer-right .designer-prop-row-key > span { font-weight: 600; color: var(--mf-text); }
 .tech-white-shell .app-content .form-designer-right .designer-prop-row-key { background: var(--mf-info-bg); }
 .tech-white-shell .app-content .canvas-field-active { box-shadow: inset 3px 0 0 var(--mf-primary-strong); }
-.tech-white-shell .app-content .report-editor-title { font-size: 18px; font-weight: 650; }
+.tech-white-shell .app-content .report-editor-title { font-size: 18px; font-weight: 600; }
 .tech-white-shell .app-content .report-widget-summary { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
 .tech-white-shell .app-content .report-widget-summary .ant-typography-secondary { font-size: 12px; }
 .tech-white-shell .app-content .report-widget-summary .ant-typography:last-child { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
@@ -825,5 +827,5 @@ body:has(.tech-white-shell) :is(.ant-modal-footer, .ant-drawer-footer) {
   background: var(--mf-sidebar);
 }
 
-.workflow-approval-empty { margin: 0; padding: 16px; border: 1px solid var(--mf-border); border-radius: 8px; background: var(--mf-panel); color: var(--mf-muted); }
+.workflow-approval-empty { margin: 0; padding: 16px; border: 1px solid var(--mf-border); border-radius: 10px; background: var(--mf-panel); color: var(--mf-muted); }
 .workflow-approval-tab-count { color: var(--mf-muted); font-size: 12px; font-variant-numeric: tabular-nums; }

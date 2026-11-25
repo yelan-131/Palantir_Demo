@@ -7,13 +7,14 @@ import {
   SettingOutlined,
   TeamOutlined,
   UserSwitchOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import { Button, Card, Form, Input, InputNumber, Space, Statistic, Switch, Typography, message } from 'antd';
 import { adminGetIamSettings, adminUpdateIamSettings } from '@/services/api';
 import OrganizationManagement from './OrganizationManagement';
 import RoleManagement from './RoleManagement';
 import TenantManagement from './TenantManagement';
 import UserManagement from './UserManagement';
+import './identityAccess.css';
 
 interface IdentityAccessManagementProps {
   defaultActiveKey?: string;

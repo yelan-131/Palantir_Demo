@@ -183,7 +183,7 @@
   margin-bottom: 18px;
   color: #37515c;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -225,13 +225,13 @@
   display: grid;
   place-items: center;
   border: 1px solid rgba(255,255,255,0.68);
-  border-radius: 13px;
+  border-radius: 14px;
   background:
     radial-gradient(circle at 28% 20%, rgba(255,255,255,0.32), transparent 38%),
     linear-gradient(145deg, #123442, #2f6578);
   color: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 600;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 16px 34px rgba(24, 63, 78, 0.18);
 }
 
@@ -248,7 +248,7 @@
   margin-top: 7px;
   color: #6c8089;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -271,7 +271,7 @@
   background: rgba(255,255,255,0.74);
   color: #193541;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   box-shadow: 0 8px 24px rgba(15, 42, 54, 0.05);
 }
 
@@ -293,7 +293,7 @@
   align-items: center;
   padding: 12px 13px;
   border: 1px solid rgba(205, 216, 222, 0.9);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.68);
   backdrop-filter: blur(12px);
   box-shadow: 0 12px 30px rgba(16, 42, 52, 0.06);
@@ -304,7 +304,7 @@
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #e7f1f4;
   color: var(--mf-primary);
   font-size: 18px;
@@ -331,7 +331,7 @@
   isolation: isolate;
   overflow: hidden;
   border: 1px solid rgba(126, 160, 172, 0.5);
-  border-radius: 18px;
+  border-radius: 14px;
   background:
     linear-gradient(135deg, rgba(255,255,255,0.9), rgba(235,244,247,0.72)),
     linear-gradient(90deg, rgba(47, 95, 115, 0.16), transparent 42%);
@@ -398,7 +398,7 @@
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid rgba(47, 95, 115, 0.18);
-  border-radius: 12px;
+  border-radius: 10px;
   background:
     radial-gradient(circle at 28% 20%, rgba(255,255,255,0.7), transparent 36%),
     linear-gradient(145deg, #ecf5f7, #d8e9ef);
@@ -421,8 +421,8 @@
 
 .identity-panel-eyebrow {
   color: #52727e;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -437,7 +437,7 @@
   background: rgba(237, 248, 241, 0.84);
   color: #28715d;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .identity-live-dot::before {
@@ -456,7 +456,7 @@
   margin-bottom: 12px;
   padding: 5px;
   border: 1px solid #dce7eb;
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(241, 247, 249, 0.78);
 }
 
@@ -468,12 +468,12 @@
   gap: 7px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   color: #536873;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -488,7 +488,7 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 6px;
   background: #e7f1f4;
   color: #2f6578;
 }
@@ -537,11 +537,11 @@
   display: grid;
   place-items: center;
   margin-bottom: 18px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #2f6578;
   color: #fff;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .identity-assembly-step strong {
@@ -560,7 +560,7 @@
 .identity-agent-queue {
   min-height: 272px;
   border: 1px solid rgba(47, 95, 115, 0.13);
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.72);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.82);
 }
@@ -608,7 +608,7 @@
   display: grid;
   place-items: center;
   border: 1px solid rgba(255,255,255,0.72);
-  border-radius: 24px;
+  border-radius: 14px;
   background:
     radial-gradient(circle at 30% 20%, rgba(255,255,255,0.32), transparent 36%),
     linear-gradient(145deg, #123442, #2f6578);
@@ -684,11 +684,11 @@
   height: 88px;
   display: grid;
   place-items: center;
-  border-radius: 26px;
+  border-radius: 14px;
   background: linear-gradient(145deg, #123442, #2f6578);
   color: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 600;
   transform: translate(-50%, -50%);
   box-shadow: 0 24px 48px rgba(24, 63, 78, 0.22);
 }
@@ -701,8 +701,8 @@
   border-radius: 999px;
   background: rgba(255,255,255,0.9);
   color: #264f5f;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -716,7 +716,7 @@
   min-height: 194px;
   position: relative;
   border: 1px solid rgba(47, 95, 115, 0.13);
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     linear-gradient(rgba(47, 95, 115, 0.045) 1px, transparent 1px),
     linear-gradient(90deg, rgba(47, 95, 115, 0.04) 1px, transparent 1px),
@@ -731,11 +731,11 @@
   min-width: 76px;
   padding: 9px 12px;
   border: 1px solid rgba(47, 95, 115, 0.15);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.9);
   color: #244d5d;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   text-align: center;
   box-shadow: 0 12px 24px rgba(21, 61, 76, 0.08);
 }
@@ -757,7 +757,7 @@
 .identity-ontology-list div {
   padding: 12px;
   border: 1px solid rgba(47, 95, 115, 0.12);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.68);
 }
 
@@ -789,7 +789,7 @@
   min-height: 272px;
   position: relative;
   border: 1px solid rgba(47, 95, 115, 0.13);
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     radial-gradient(circle at 50% 50%, rgba(47,101,120,0.17), transparent 44%),
     repeating-linear-gradient(135deg, rgba(47, 95, 115, 0.045) 0 1px, transparent 1px 12px),
@@ -828,13 +828,13 @@
   display: grid;
   place-items: center;
   border: 1px solid rgba(255,255,255,0.72);
-  border-radius: 26px;
+  border-radius: 14px;
   background:
     radial-gradient(circle at 32% 20%, rgba(255,255,255,0.34), transparent 36%),
     linear-gradient(145deg, #123442, #2f6578);
   color: #fff;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 600;
   transform: translate(-50%, -50%);
   box-shadow: 0 24px 48px rgba(24, 63, 78, 0.24);
   animation: identityCorePulse 3.2s ease-in-out infinite;
@@ -848,8 +848,8 @@
   border-radius: 999px;
   background: rgba(255,255,255,0.9);
   color: #264f5f;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 600;
   text-align: center;
   box-shadow: 0 12px 24px rgba(21, 61, 76, 0.09);
   animation: identityNodeFloat 4.2s ease-in-out infinite;
@@ -874,7 +874,7 @@
   padding: 16px;
   position: relative;
   border: 1px solid rgba(47, 95, 115, 0.13);
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.88), rgba(242,248,250,0.78)),
     linear-gradient(90deg, rgba(47, 95, 115, 0.06), transparent);
@@ -902,7 +902,7 @@
   min-height: 54px;
   padding: 10px 12px 10px 48px;
   border: 1px solid rgba(47, 95, 115, 0.11);
-  border-radius: 12px;
+  border-radius: 10px;
   background:
     linear-gradient(90deg, rgba(47, 95, 115, 0.09), transparent 18%),
     rgba(255,255,255,0.64);
@@ -919,11 +919,11 @@
   height: 24px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #2f6578;
   color: #fff;
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 600;
   transform: translateY(-50%);
   box-shadow: 0 8px 18px rgba(47, 95, 115, 0.2);
 }
@@ -974,8 +974,8 @@
   border-radius: 10px;
   background: rgba(238, 246, 248, 0.78);
   color: #315866;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 600;
   text-align: center;
 }
 
@@ -1194,7 +1194,7 @@
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(119, 154, 166, 0.36) !important;
-  border-radius: 18px !important;
+  border-radius: 14px !important;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.9), rgba(242,247,249,0.82)),
     radial-gradient(circle at 14% 8%, rgba(63, 142, 166, 0.12), transparent 34%) !important;
@@ -1252,7 +1252,7 @@
   background: #e8f2f5;
   color: #255c70;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .identity-card-head h3 {
@@ -1290,14 +1290,14 @@
 .identity-card .ant-form-item-label > label {
   color: #37515c !important;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .identity-card .ant-input-affix-wrapper,
 .identity-card .ant-select-selector {
   min-height: 42px !important;
   border-color: rgba(156, 181, 190, 0.58) !important;
-  border-radius: 9px !important;
+  border-radius: 10px !important;
   background: rgba(255,255,255,0.64) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.86);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
@@ -1327,7 +1327,7 @@
   border: 0;
   border-radius: 10px;
   background: linear-gradient(135deg, #244f61, #347186) !important;
-  font-weight: 800;
+  font-weight: 600;
   box-shadow: 0 12px 24px rgba(47, 95, 115, 0.22);
 }
 
@@ -1414,7 +1414,7 @@
 .assembly-column-card .ant-card-head-title,
 .assembly-property-card .ant-card-head-title {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .assembly-column-card .ant-card-body,
@@ -1469,7 +1469,7 @@
   color: var(--mf-text-secondary);
   background: #fff;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -1489,7 +1489,7 @@
   min-height: 34px;
   padding: 6px 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #fff;
   cursor: grab;
 }
@@ -1500,7 +1500,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #e5f0f3;
   color: var(--mf-primary);
 }
@@ -1548,7 +1548,7 @@
   min-height: 100%;
   padding: 4px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   background: #fff;
 }
 
@@ -1615,477 +1615,18 @@
   border-radius: 6px;
 }
 
-.identity-access-workspace,
-.identity-access-tabs,
-.identity-access-tabs > .ant-tabs-content-holder,
-.identity-access-tabs > .ant-tabs-content-holder > .ant-tabs-content,
-.identity-access-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
-  flex: 1;
-  min-height: 0;
-}
-
-.identity-access-workspace,
-.identity-access-tabs,
-.identity-access-tabs > .ant-tabs-content-holder,
-.identity-access-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
-  display: flex;
-  flex-direction: column;
-}
-
-.identity-access-workspace,
-.identity-access-tabs {
-  overflow: hidden;
-}
-
-.identity-access-tabs > .ant-tabs-content-holder > .ant-tabs-content {
-  height: 100%;
-}
-
-.identity-access-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active {
-  overflow: hidden;
-}
-
-.role-management-workbench {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
-  gap: 12px;
-  align-items: stretch;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-}
-
-.role-list-panel,
-.role-preview-panel {
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.role-list-panel {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.role-list-panel .role-management-table {
-  flex: 1;
-  min-height: 0;
-}
-
-.role-list-panel .role-management-table .ant-table-body {
-  min-height: 0;
-}
-
-.role-management-table .ant-table-thead > tr > th {
-  background: #f8fbfc;
-  padding: 8px 8px;
-}
-
-.role-management-table .ant-table-tbody > tr > td {
-  height: 58px;
-  padding: 14px 8px;
-  vertical-align: middle;
-}
-
-.role-management-pagination {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: flex-end;
-  padding: 10px 12px 12px;
-  border-top: 1px solid #eef2f4;
-  background: #fff;
-}
-
-.role-row-selected > td {
-  background: #eef6f9 !important;
-}
-
-.role-preview-panel {
-  display: flex;
-  align-self: stretch;
-  flex-direction: column;
-  height: 100%;
-  padding: 14px;
-  overflow: hidden;
-}
-
-.role-preview-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 8px;
-}
-
-.role-preview-head h5 {
-  margin: 0;
-}
-
-.role-preview-head > div,
 .org-preview-head > div {
   min-width: 0;
 }
 
-.role-head-actions,
 .org-head-actions {
   flex: 0 0 auto;
   justify-content: flex-end;
   white-space: nowrap;
 }
 
-.role-head-actions .ant-btn,
 .org-head-actions .ant-btn {
   white-space: nowrap;
-}
-
-.role-preview-tabs {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.role-preview-tabs > .ant-tabs-nav {
-  flex: 0 0 auto;
-  margin-bottom: 10px;
-}
-
-.role-preview-tabs > .ant-tabs-content-holder {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.role-detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-.role-info-card,
-.role-impact-card,
-.role-action-card,
-.role-section-card {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.role-impact-card {
-  border-color: #cfe0ff;
-  background: #f6f9ff;
-}
-
-.role-preview-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.role-preview-stats > div,
-.role-scope-list > div {
-  padding: 10px;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: #f8fbfc;
-}
-
-.role-preview-stats span,
-.role-scope-list span {
-  display: block;
-  color: #6c7c84;
-  font-size: 12px;
-}
-
-.role-preview-stats strong,
-.role-scope-list strong {
-  display: block;
-  margin-top: 2px;
-  color: var(--mf-text);
-  font-size: 20px;
-  line-height: 1.15;
-}
-
-.role-rule-list,
-.role-user-list,
-.role-scope-list {
-  display: grid;
-  gap: 8px;
-}
-
-.role-user-list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.role-user-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-  padding: 9px 10px;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: var(--mf-panel-soft);
-}
-
-.role-user-row strong,
-.role-user-row small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.role-user-row small {
-  color: #7d8b94;
-  font-size: 12px;
-}
-
-.role-rule-item {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-  padding: 9px 10px;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: var(--mf-panel-soft);
-}
-
-.role-rule-item > span:first-child {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #edf4f7;
-  color: #2f5f73;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.role-rule-item strong,
-.role-rule-item small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.role-rule-item small {
-  color: #7d8b94;
-  font-size: 12px;
-}
-
-.role-action-card {
-  flex: 0 0 auto;
-  margin-top: 12px;
-}
-
-.role-permission-editor .ant-form-item {
-  margin-bottom: 8px;
-}
-
-.role-permission-alert {
-  margin-bottom: 10px;
-}
-
-.role-permission-alert .ant-alert-message {
-  margin-bottom: 2px;
-}
-
-.role-permission-rule-list {
-  display: grid;
-  gap: 10px;
-}
-
-.role-permission-rule-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.role-permission-rule-card {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--mf-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.role-permission-rule-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.role-permission-rule-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.role-permission-rule-title .ant-typography {
-  margin: 0;
-}
-
-.role-permission-enable {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #61707b;
-  font-size: 12px;
-}
-
-.role-permission-card-body {
-  display: grid;
-  gap: 8px;
-}
-
-.role-permission-target-row {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  padding: 9px;
-  border: 1px solid var(--mf-border);
-  border-radius: 7px;
-  background: #f8fbfc;
-}
-
-.role-permission-target-row > .ant-typography {
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.role-permission-target-fields {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1fr);
-  gap: 8px;
-}
-
-.role-permission-action-grid {
-  display: grid;
-  grid-template-columns: minmax(100px, 0.72fr) minmax(130px, 1fr) minmax(130px, 1fr);
-  gap: 8px;
-}
-
-.role-permission-action-grid .ant-form-item {
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--mf-border);
-  border-radius: 7px;
-  background: var(--mf-panel-soft);
-}
-
-.role-permission-business-grid {
-  display: grid;
-  grid-template-columns: minmax(260px, 1.55fr) minmax(110px, 0.7fr) minmax(140px, 0.85fr) minmax(160px, 0.9fr);
-  gap: 8px;
-  align-items: stretch;
-}
-
-.role-permission-business-block {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--mf-border);
-  border-radius: 7px;
-  background: var(--mf-panel-soft);
-}
-
-.role-permission-business-block > .ant-typography {
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.role-permission-inline-fields {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.85fr) minmax(120px, 1fr);
-  gap: 6px;
-}
-
-.role-permission-rule-grid {
-  display: grid;
-  grid-template-columns: 72px minmax(88px, 0.7fr) minmax(140px, 1.05fr) minmax(140px, 1fr) minmax(116px, 0.85fr) minmax(140px, 1fr) 86px;
-  gap: 8px;
-  align-items: start;
-}
-
-.role-permission-json-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.role-permission-advanced {
-  margin-top: 8px;
-  border-top: 1px dashed #d9e4e9;
-}
-
-.role-permission-advanced > summary {
-  padding: 8px 0 0;
-  color: #61707b;
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.role-permission-advanced-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-  padding-top: 8px;
-}
-
-.role-permission-rule-card .ant-form-item-label {
-  padding-bottom: 2px;
-}
-
-.role-permission-rule-card .ant-form-item-label > label {
-  height: auto;
-  color: #61707b;
-  font-size: 12px;
-}
-
-.role-permission-rule-card .ant-select,
-.role-permission-rule-card .ant-input-number {
-  width: 100%;
-}
-
-.role-permission-rule-card .ant-select-selector,
-.role-permission-rule-card .ant-input,
-.role-permission-rule-card .ant-input-number {
-  border-radius: 6px;
-}
-
-.role-permission-rule-card textarea.ant-input {
-  min-height: 54px;
-  font-size: 12px;
-}
-
-.role-permission-rule-toolbar .ant-typography {
-  font-size: 12px;
-}
-
-.role-action-card > .ant-space {
-  margin-top: 10px;
 }
 
 .org-management-console {
@@ -2128,7 +1669,7 @@
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -2308,7 +1849,7 @@
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -2399,7 +1940,7 @@
 .org-preview-stats > div {
   padding: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #f8fbfc;
 }
 
@@ -2460,7 +2001,7 @@
   min-height: 48px;
   padding: 8px 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -2481,7 +2022,7 @@
   min-height: 34px;
   padding: 7px 10px;
   border: 1px dashed #c9d8df;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel-soft);
   color: #2f5f73;
   cursor: pointer;
@@ -2498,7 +2039,7 @@
   gap: 0;
   margin-top: 10px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -2515,7 +2056,7 @@
 .org-child-table > div:first-child {
   color: #6c7c84;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   background: #f8fbfc;
 }
 
@@ -2605,21 +2146,6 @@
   background: var(--mf-panel-soft);
 }
 
-@media (max-width: 1180px) {
-  .role-permission-rule-grid,
-  .role-permission-json-grid,
-  .role-permission-business-grid,
-  .role-permission-action-grid,
-  .role-permission-advanced-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .role-permission-inline-fields,
-  .role-permission-target-fields {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 760px) {
   .org-toolbar {
     align-items: flex-start;
@@ -2645,8 +2171,8 @@
 
 .role-workspace-kicker {
   color: var(--mf-primary);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2660,7 +2186,7 @@
   gap: 5px 12px;
   align-items: start;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
   cursor: pointer;
   text-align: left;
@@ -2680,7 +2206,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 9px;
+  border-radius: 10px;
   color: #2f5f73;
   background: #eef6f8;
   font-size: 20px;
@@ -2714,6 +2240,6 @@
 /* Keep the form/board heading readable in its fixed 250px column. */
 .assembly-grid > .ant-col:nth-child(2) .ant-card-head { padding-inline: 12px; }
 
-.assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-tag { margin-inline-end: 0; font-size: 11px; padding-inline: 4px; }
+.assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-tag { margin-inline-end: 0; font-size: 12px; padding-inline: 4px; }
 
 .assembly-grid > .ant-col:nth-child(2) .ant-card-extra .ant-btn { width: 24px; padding: 0; }

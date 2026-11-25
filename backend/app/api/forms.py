@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form as FormParam
 from pydantic import BaseModel, Field
@@ -310,14 +310,19 @@ async def _scope_runtime_view_tabs(payload: dict, user: dict, db: AsyncSession, 
         return payload
     from app.core.permissions import get_user_org_ids
     from app.services.form_view_tabs import runtime_view_config
+    from app.services.form_application_lifecycle import APPROVAL_STATUS_FIELD
+    from app.services.records import RECORD_LIST_METADATA_FIELDS
 
     result = copy.deepcopy(payload)
     config = result.get('config') or {}
     view = config.get('viewConfig')
     roles = await get_user_role_ids(user, db) if isinstance(view, dict) and view.get('tabs') else []
     orgs = await get_user_org_ids(user, db) if isinstance(view, dict) and view.get('tabs') else []
+    visible_fields = {field['field_name'] for field in result.get('fields', [])}
+    if result.get('runtime_approval_available'):
+        visible_fields.add(APPROVAL_STATUS_FIELD)
     config['viewConfig'] = runtime_view_config(view, user_id=user.get('uid'), role_ids=roles, org_ids=orgs,
-        is_admin=bool(user.get('is_admin')), visible_fields={field['field_name'] for field in result.get('fields', [])})
+        is_admin=bool(user.get('is_admin')), visible_fields=visible_fields, display_fields=RECORD_LIST_METADATA_FIELDS)
     result['config'] = config
     return result
 
@@ -366,6 +371,8 @@ def _scoped_form_payload(payload: dict, scope: str) -> dict:
             "publishedSchemaVersion": config.get("publishedSchemaVersion"),
             "publishedAt": config.get("publishedAt"),
         }
+        if config.get("formAppearance"):
+            scoped["config"]["formAppearance"] = config["formAppearance"]
         allowed_names = {field.get("field_name") for field in scoped["fields"]}
         field_permissions = scoped.get("runtime_field_permissions")
         if isinstance(field_permissions, dict):
@@ -404,6 +411,16 @@ async def _runtime_submission_available(db, tenant_id, form_id, trigger_action="
                WorkflowDef.tenant_id == tenant_id, WorkflowDef.status.in_(["published", "active"]))
         .limit(1)
     ))
+
+
+async def _set_runtime_approval_capabilities(db, form, payload):
+    from app.services.form_application_lifecycle import has_approval_history
+
+    can_submit = await _runtime_submission_available(db, form.tenant_id, form.id)
+    payload["runtime_submission_available"] = can_submit
+    payload["runtime_approval_available"] = (
+        can_submit and form.code not in {"material-application", "alert-center"}
+    ) or await has_approval_history(db, form)
 
 
 async def _runtime_permission_summary(user: dict, form_id: int, db: AsyncSession) -> dict:
@@ -1125,12 +1142,14 @@ async def get_form(
             if not user.get("is_admin") and not _is_anonymous_reader(user):
                 visible_names = await allowed_form_fields(user, form_id, "view", fields, db)
                 payload["fields"] = [field for field in payload["fields"] if field.get("field_name") in visible_names]
-            payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
+            await _set_runtime_approval_capabilities(db, form, payload)
             payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
             payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, payload.get("fields") or [], db)
             return {"data": _scoped_form_payload(await _scope_runtime_view_tabs(payload, user, db, scope), scope)}
     payload = _form_payload(form, fields=fields, applications=applications)
-    payload["runtime_submission_available"] = await _runtime_submission_available(db, tenant_id, form_id)
+    if schema == "published" and "formAppearance" in payload["config"]:
+        payload["config"] = {key: value for key, value in payload["config"].items() if key != "formAppearance"}
+    await _set_runtime_approval_capabilities(db, form, payload)
     payload["runtime_permissions"] = await _runtime_permission_summary(user, form_id, db)
     payload["runtime_field_permissions"] = await _runtime_field_permission_summary(user, form, fields, db)
     return {"data": _scoped_form_payload(await _scope_runtime_view_tabs(payload, user, db, scope), scope)}
@@ -1347,8 +1366,31 @@ async def list_dynamic_records(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    from app.services.records import list_records
-    return await list_records(form_id, db, user, include_deleted=include_deleted, search=search, filters_json=filters_json, sort_field=sort_field, sort_order=sort_order, cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id, include_total=include_total, page=page, page_size=page_size)
+    from app.services.records import add_record_actor_names, list_records
+
+    result = await list_records(form_id, db, user, include_deleted=include_deleted, search=search,
+        filters_json=filters_json, sort_field=sort_field, sort_order=sort_order,
+        cursor_after_id=cursor_after_id, cursor_before_id=cursor_before_id, include_total=include_total,
+        page=page, page_size=page_size)
+    await add_record_actor_names(db, current_tenant_id(user), result['data'])
+    return result
+
+
+@router.get('/{form_id}/records/actor-options')
+async def list_record_actor_options(
+    form_id: int,
+    field: Literal['_created_by', '_updated_by'],
+    query: str = Query(default='', max_length=100),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    selected: int | None = Query(default=None, ge=1, le=2**63 - 1),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    from app.services.records import record_actor_options
+
+    return await record_actor_options(form_id, db, user, field=field, query=query, page=page,
+                                      page_size=page_size, selected=selected)
 
 
 @router.get('/{form_id}/records-export')

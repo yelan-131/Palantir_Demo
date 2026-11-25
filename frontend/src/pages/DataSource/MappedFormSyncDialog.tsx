@@ -215,7 +215,7 @@ export default function MappedFormSyncDialog({ sourceId, sourceName, initialEnti
           <Select
             showSearch optionFilterProp="label" placeholder="选择已审核源主键映射的对象"
             disabled={!table || loadFailed} options={objectOptions}
-            notFoundContent={objectOptions.length ? '没有匹配的对象' : <Link to={`/data-center/assets?view=mapping&sourceId=${sourceId}`}>前往字段映射审核主键映射</Link>}
+            notFoundContent={objectOptions.length ? '没有匹配的对象' : <Link to={`/data-center/objects?view=ontology&section=mapping&sourceId=${sourceId}`}>前往模型设计配置主键映射</Link>}
             onChange={code => form.setFieldValue('form_id', objects.find(item => item.code === code)?.record_binding?.form_id)}
           />
         </Form.Item>

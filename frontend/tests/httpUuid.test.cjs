@@ -37,7 +37,7 @@ test('component audience editor mounts on HTTP for new and existing permission g
  const Select = ({'aria-label': label}) => React.createElement('select', {'aria-label': label});
  const ToolbarGroups = load('pages/ComponentPages/ToolbarGroups.tsx', httpCrypto, {
   antd: {Button: renderChildren, Select, Tooltip: renderChildren},
-  '@ant-design/icons': {PlusOutlined: () => null, DeleteOutlined: () => null},
+  '@/components/Icon/ant': {PlusOutlined: () => null, DeleteOutlined: () => null},
   '@/components/PropertyInspector': {PropertyHelp: renderChildren},
   '@/services/api': {},
   '@/utils/uuid': load('utils/uuid.ts', httpCrypto),

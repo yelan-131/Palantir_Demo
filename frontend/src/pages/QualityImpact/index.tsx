@@ -34,7 +34,7 @@ import {
   ThunderboltOutlined,
   ToolOutlined,
   WarningOutlined,
-} from '@ant-design/icons';
+} from '@/components/Icon/ant';
 import {
   createCapa,
   executeQualityEventAction,

@@ -85,16 +85,18 @@ test('component bindings override legacy defaults and reload their query',()=>{
 test('switching one component source clears its stale fields and incompatible links only',()=>{
  const {bindWidgetSource}=context.exports;
  const page={sourceFormId:1,filterFields:['title'],widgets:[
-  {id:'one',type:'record-list',listSettings:{columns:['title'],pageSize:25},dimension:'title'},
-  {id:'two',type:'record-list',listSettings:{columns:['qty']}},
+  {id:'one',type:'record-list',listSettings:{columns:['title'],sortableColumns:['title'],pageSize:25},dimension:'title'},
+  {id:'two',type:'record-list',listSettings:{columns:['qty'],sortableColumns:['qty']}},
   {id:'filter',type:'record-filter',targetWidgetIds:['one','two']}
  ]};
  const next=bindWidgetSource(page,'one',20);
  assert.deepEqual(plain(next.widgets[0].dataBinding),{formId:20});
  assert.equal(next.widgets[0].listSettings.columns,null);
+ assert.equal(next.widgets[0].listSettings.sortableColumns,null);
  assert.equal(next.widgets[0].listSettings.pageSize,25);
  assert.equal(next.widgets[0].dimension,undefined);
  assert.deepEqual(plain(next.widgets[1].listSettings.columns),['qty']);
+ assert.deepEqual(plain(next.widgets[1].listSettings.sortableColumns),['qty']);
  assert.deepEqual(plain(next.widgets[2].targetWidgetIds),['one']);
  assert.equal(next.widgets[2].dataBinding.formId,20);
  assert.deepEqual(page.widgets[2].targetWidgetIds,['one','two']);

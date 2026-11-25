@@ -2,9 +2,10 @@ import {flushSync} from 'react-dom';
 import React, {lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useBlocker, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {Alert, Button, Card, Col, Dropdown, Drawer, Modal, Row, Select, Space, Spin, Tooltip, Typography, message} from 'antd';
-import {CheckCircleOutlined, DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@ant-design/icons';
+import {CheckCircleOutlined, DatabaseOutlined, FilterOutlined, HolderOutlined, HistoryOutlined, PlusOutlined, RedoOutlined, SaveOutlined, SkinOutlined, UndoOutlined} from '@/components/Icon/ant';
 import StatisticalWidget from './StatisticalWidget';
 import FilterWidget from './FilterWidget';
+import {ListConfigurationPreviewProvider} from './ListConfigurationPreview';
 import RecordListWidget from './RecordListWidget';
 import ResizeHandle from './ResizeHandle';
 import {dashboardStyleDefaults} from '../AppPrograms/analyticsWidgetAppearance';
@@ -71,6 +72,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
   const [draft, setDraft] = useState<PageDefinition>();
   const [sources, setSources] = useState<Record<number, PlatformForm>>({});
   const [sourceErrors, setSourceErrors] = useState<Record<number,string>>({});
+  const [listSourceState, setListSourceState] = useState<{key:string; form?:PlatformForm; error?:string}>();
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<string>();
   const [panel,setPanel] = useState<Panel>('widget');
@@ -115,6 +117,10 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     : panel === 'widget' || sourceEditor ? widgetSourceId(active, selectedWidget) : active?.sourceFormId;
   const sourceActive = Boolean(editing && draft && sourceEditor && sourceId);
   const source = sourceId ? sources[sourceId] : undefined;
+  const listSourceId = admin && editing && panel==='widget' && !sourceActive &&
+    (widgetTab === 'basic' || widgetTab === 'data') && selectedWidget?.type==='record-list' ? sourceId : undefined;
+  const listSourceKey = listSourceId ? JSON.stringify([accountKey, listSourceId, refreshKey]) : undefined;
+  const listSource = listSourceKey && listSourceState?.key === listSourceKey ? listSourceState : undefined;
   const globalSource = active?.sourceFormId ? sources[active.sourceFormId] : undefined;
   const globalFields = globalSource?.fields?.filter(field=>!field.archived) || [];
   const globalLabels = Object.fromEntries(globalFields.map(field=>[field.field_name,field.label]));
@@ -215,6 +221,17 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     }));
     return ()=>{current=false;};
   }, [sourceIdsKey, refreshKey, editing, admin]);
+
+  useEffect(() => {
+    if (!listSourceId || !listSourceKey) return;
+    let current = true;
+    getPlatformForm(listSourceId, {schema:'published',scope:'designer'}).then(response=>{
+      if (current) setListSourceState({key:listSourceKey, form:unwrap<PlatformForm>(response)});
+    }).catch(failure=>{
+      if (current) setListSourceState({key:listSourceKey, error:errorText(failure)});
+    });
+    return ()=>{current=false;};
+  }, [listSourceId, listSourceKey]);
 
   const filterFieldsKey = JSON.stringify(active?.filterFields || []);
   useEffect(() => { setFilters(previous => retainFilters(previous, JSON.parse(filterFieldsKey))); }, [filterFieldsKey]);
@@ -410,6 +427,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     if (!editing) return;
     const onEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented || saving || exitPrompt) return;
+      if (event.target instanceof HTMLElement && event.target.hasAttribute('data-editor-escape-handled')) return;
       // Observe overlays before their own handlers close them, so one Esc only closes one layer.
       const overlayOpen = Array.from(document.querySelectorAll<HTMLElement>(
         '.ant-modal-wrap, .ant-drawer-open .ant-drawer-content-wrapper, .ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-dropdown:not(.ant-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-popover:not(.ant-popover-hidden)',
@@ -452,7 +470,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     try{const response=await api.post('/pages/'+code+'/preview',{definition:draft,filters:{}});setPublishCheck({errors:response.data.analyticsData?.errors||[]});}
     catch(failure){setPublishCheck({errors:[errorText(failure)]});}finally{setSaving(false);}
   };
-  const renderWidget = (item: PageWidget) => {
+  const renderWidget = (item: PageWidget, fitTableHeight: boolean) => {
     if (item.type === 'workspace') return renderWorkspaceWidget ? renderWorkspaceWidget(item) : <Alert type="info" message="此组件用于我的工作台" />;
     const boundId = widgetSourceId(active,item);
     const source = boundId ? sources[boundId] : undefined;
@@ -464,7 +482,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     if (item.type === 'record-filter') return source?.status === 'published' ? <FilterWidget key={`${source.id}:${item.id}`} widget={item} sourceId={source.id} onChange={value=>setWidgetFilters(previous=>({...previous,[item.id]:value}))}/> : <Alert type="info" message="请先发布来源业务表单" />;
     const query = componentQuery(active!, widgetFilters, chartFilters, item.id);
     if(!query.ready)return <Alert type="info" showIcon message="请先填写必填筛选条件并查询" description="关联的筛选组件校验通过后，将显示列表数据。" />;
-    if (item.type === 'record-list') return source?.status==='published' ? <RecordListWidget key={`${item.id}:${source.id}:${item.showFilters !== false}`} widget={item} sourceId={source.id} embedded toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
+    if (item.type === 'record-list') return source?.status==='published' ? <RecordListWidget key={`${item.id}:${source.id}:${item.showFilters !== false}`} widget={item} sourceId={source.id} embedded fitTableHeight={fitTableHeight} toolbarTargetId={`component-toolbar-${item.id}`} listSettings={item.listSettings} readOnly={editing} disableRowAction={editing} externalSearch={query.search} tableDensity={resolvePresentation(active || {}, item).content.density} externalFilters={[...componentGlobalFilters, ...query.filters]} refreshKey={refreshKey} onMutated={refresh} /> : <Alert type="info" showIcon message="业务列表等待数据配置" description="通过右键菜单配置并发布来源表单的字段与列表，即可预览真实数据。" />;
     if (loadingData) return <div className="component-widget-preview"><Spin /></div>;
     const widgetErrors = data?.widgetErrors?.[item.id] ?? data?.errors;
     if (dataError || widgetErrors?.length) return <Alert type="warning" showIcon message="统计暂不可用"
@@ -487,15 +505,9 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
   const selectWidget = (id:string) => {if(!saving&&!sourceActive){setSelected(id);setPanel('widget');}};
   const errorNotice = error && <Alert type="error" showIcon message={error} />;
   const onlyWidget = active?.widgets.length === 1 ? active.widgets[0] : undefined;
-  const fillList = !sourceActive && !workspace && onlyWidget?.type === 'record-list' && !onlyWidget.customHeight;
-  const canvas = <main className={'analytics-workspace-canvas component-page-canvas component-filter-layout-'+(active?.style?.filterTheme??'toolbar')} aria-label="业务页面画布" tabIndex={admin?0:undefined}
-    onContextMenuCapture={admin?event=>{
-      const target=event.target instanceof Element?event.target:null;
-      if(target?.closest('input,textarea,[contenteditable="true"],[role="combobox"]')){event.stopPropagation();setContextOpen(false);return;}
-      const id = target?.closest<HTMLElement>('[data-component-widget-id]')?.dataset.componentWidgetId;
-      // rc-trigger opens immediately; resolve the target before it captures its menu.
-      flushSync(()=>setContextWidgetId(id));
-    }:undefined}>
+  const singleRecordList = !sourceActive && !workspace && onlyWidget?.type === 'record-list';
+  const fillList = singleRecordList && !onlyWidget?.customHeight;
+  const canvas = <main className={'analytics-workspace-canvas component-page-canvas component-filter-layout-'+(active?.style?.filterTheme??'toolbar')} aria-label="业务页面画布" tabIndex={admin?0:undefined}>
     {!editing&&errorNotice}
     {active&&<>
       {(active.filterFields.length>0||Object.keys(chartFilters).length>0)&&<div className="runtime-analytics-filters component-page-filters">
@@ -504,26 +516,28 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
       </div>}
       {!active.widgets.length&&<div className="component-page-empty"><Typography.Title level={4}>空白页面</Typography.Title><Typography.Paragraph>{admin?'右键添加组件，开始搭建业务页面。':'此页面暂未添加组件。'}</Typography.Paragraph></div>}
       <div className="component-page-grid" onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event)}>
-        <Row gutter={[fillList ? 0 : active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
+        <Row gutter={[singleRecordList ? 0 : active.style?.componentGap??12,active.style?.componentGap??12]}>{active.widgets.map(item=>{
           const appearance = item.appearance;
           const presentation = resolvePresentation(active, item);
           const titleAlign = appearance?.titleAlign ?? 'left';
           const canonFrame = item.type==='record-list'||item.type==='record-filter';
-          const titleStyle: React.CSSProperties = canonFrame ? {
-            textAlign: titleAlign,
-            marginBottom: appearance?.showTitle === false ? undefined : appearance?.titleGap,
-          } : {
+          const titleStyle: React.CSSProperties = {
             textAlign: titleAlign,
             fontSize: appearance?.titleFontSize,
             fontFamily: appearance?.titleFontFamily,
             fontWeight: appearance?.titleWeight,
             fontStyle: appearance?.titleItalic ? 'italic' : undefined,
             color: appearance?.titleColor,
-            marginBottom: appearance?.showTitle === false ? undefined : appearance?.titleGap,
-            lineHeight: appearance?.titleFontSize ? Math.max(20, Math.ceil(appearance.titleFontSize * 1.25)) + 'px' : undefined,
+            marginBottom: appearance?.titleGap,
+            lineHeight: appearance?.titleFontSize ? Math.max(canonFrame ? 24 : 20, Math.ceil(appearance.titleFontSize * 1.25)) + 'px' : undefined,
           };
-          return <Col key={item.id} xs={24} lg={item.width} style={item.customWidth?{flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'}:undefined}>
-          <WidgetFrame data-component-widget-id={item.id} presentation={presentation} canon={canonFrame}
+          const fitTableHeight = item.type === 'record-list' && (fillList || Boolean(item.customHeight));
+          const columnStyle = {
+            '--component-column-width': `${item.width / 24 * 100}%`,
+            ...(item.customWidth ? {flex:`0 0 ${item.customWidth}px`,maxWidth:'100%'} : {}),
+          } as React.CSSProperties;
+          return <Col key={item.id} span={24} style={columnStyle}>
+          <WidgetFrame data-component-widget-id={item.id} data-fit-list-height={fitTableHeight || undefined} presentation={presentation} canon={canonFrame}
             style={{height:item.customHeight??undefined} as React.CSSProperties}
             className={'component-page-widget component-page-widget-'+item.type+(editing?' analytics-editable-widget':'')+(editing&&panel==='widget'&&selected===item.id?' analytics-selected-widget':'')}
             onDragOver={event=>{if(editing)event.preventDefault();}} onDrop={event=>dropComponent(event,item.id)}
@@ -534,7 +548,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
               onKeyDown={event=>{if(event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();move(item.id,event.key==='ArrowUp'?-1:1);}}}
               onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
               onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:item.title}</div>}
-            description={appearance?.subtitle?.trim()?<span style={{fontSize:appearance.subtitleFontSize,color:appearance.subtitleColor,textAlign:appearance.subtitleAlign}}>{appearance.subtitle}</span>:undefined}
+            description={appearance?.subtitle?.trim()?<div style={{fontSize:appearance.subtitleFontSize,color:appearance.subtitleColor,textAlign:appearance.subtitleAlign,lineHeight:appearance.subtitleFontSize?1.5:undefined}}>{appearance.subtitle}</div>:undefined}
             actions={(item.type==='record-list'||item.type==='record-filter'||chartFilters[item.id]!==undefined)?<Space size={6}>{(item.type==='record-list'||item.type==='record-filter')&&<span className="component-list-header-actions" id={`component-toolbar-${item.id}`} />}{chartFilters[item.id]!==undefined&&<Button type="text" size="small" onClick={()=>setChartFilters(previous=>{const next={...previous};delete next[item.id];return next;})}>清除联动</Button>}</Space>:undefined}
             editorHandle={editing&&(!presentation.header.visible||!presentation.header.titleVisible)?<button className="analytics-widget-select"
               style={{justifyContent:titleAlign==='center'?'center':titleAlign==='right'?'flex-end':'flex-start',textAlign:'inherit'}} type="button" draggable disabled={saving||sourceActive} aria-label={'配置'+item.title}
@@ -542,7 +556,7 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
               onKeyDown={event=>{if(event.altKey&&['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();move(item.id,event.key==='ArrowUp'?-1:1);}}}
               onDragStart={event=>{selectWidget(item.id);event.dataTransfer.setData('component/id',item.id);event.dataTransfer.effectAllowed='move';}}
               onDragOver={event=>event.preventDefault()} onDrop={event=>dropComponent(event,item.id)}><HolderOutlined />{item.title}</button>:undefined}>
-            {renderWidget(item)}
+            {renderWidget(item, fitTableHeight)}
             {editing&&!saving&&!sourceActive&&item.type!=='record-filter'&&<ResizeHandle title={item.title} onCommit={size=>{if(draft)changeDraft({...draft,widgets:draft.widgets.map(widget=>widget.id===item.id?{...widget,...size}:widget)});}}/>}
           </WidgetFrame>
         </Col>;})}</Row>
@@ -584,23 +598,29 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
     <Tooltip title="保存草稿"><Button type="text" aria-label="保存草稿" icon={<SaveOutlined />} loading={saving} disabled={!dirty||saving||sourceActive} onClick={()=>void save(false)} /></Tooltip>
     <Tooltip title={publishLabel}><Button type="primary" aria-label={publishLabel} icon={<CheckCircleOutlined />} disabled={!publishable||saving||sourceActive} onClick={()=>void checkPublish()} /></Tooltip>
   </Space></div>;
-  return <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')+(fillList?' component-page-fill-list':'')}>
+  const page = <div ref={pageElement} style={{'--analytics-paper':active?.style?.background||dashboardStyleDefaults.background, '--analytics-grid-size':`${active?.style?.gridSize??dashboardStyleDefaults.gridSize}px`, '--analytics-card-opacity':active?.style?.cardOpacity??dashboardStyleDefaults.cardOpacity, '--analytics-card-blur':`${active?.style?.cardBlur??dashboardStyleDefaults.cardBlur}px`} as React.CSSProperties} data-card-border={active?.style?.cardBorder??'light'} className={'component-page analytics-workspace'+(workspace?' component-workbench':'')+(editing?' analytics-workspace-configuring':'')+(sourceActive?' component-page-source-open':'')+(fillList?' component-page-fill-list':'')}
+    onContextMenuCapture={admin ? event=>{
+      const target = event.target;
+      if (!(target instanceof Element) || !event.currentTarget.contains(target) ||
+        target.closest('.analytics-settings-page,.component-page-source-editor,input,textarea,[contenteditable="true"],[role="combobox"]')) {
+        event.stopPropagation();
+        setContextOpen(false);
+        return;
+      }
+      const id = target.closest<HTMLElement>('[data-component-widget-id]')?.dataset.componentWidgetId;
+      // Resolve the workspace or widget target before the dropdown opens.
+      flushSync(()=>setContextWidgetId(id));
+    } : undefined}>
     {!sourceActive&&<NavigationGuard enabled={dirty||saving} onBlocked={reportBlocked} />}
     <div className="analytics-workspace-body">
       <div className="component-page-preview">
-        <div className="component-page-canvas-host" hidden={sourceActive}>{admin?<Dropdown trigger={['contextMenu']} disabled={saving||sourceActive} open={contextOpen} onOpenChange={setContextOpen} overlayClassName="analytics-context-menu" menu={{
-          'aria-label':contextWidget?contextWidget.title+'配置菜单':workspace?'工作台配置菜单':'表单页面配置菜单',
-          items:[
-            ...buildAnalyticsContextMenu({widgetTitle:contextWidget?.title,pageLabel:workspace?'工作台':'页面',sections}),
-            {key:'business',popupClassName:'analytics-context-submenu',icon:<DatabaseOutlined />,label:'业务配置',disabled:!(contextWidget ? sources[widgetSourceId(active,contextWidget)||0] : globalSource),children:[
-              {key:'source:form',label:'字段与录入'},{key:'source:flow',label:'流程与审批'},
-            ]},
-          ],onClick:({key})=>void openContextAction(key),
-        }}>{canvas}</Dropdown>:canvas}</div>
+        <div className="component-page-canvas-host" hidden={sourceActive}>{canvas}</div>
         {sourceActive&&sourceId&&<div className="component-page-source-editor"><Suspense fallback={<Spin />}><FormSettings key={sourceId} formId={String(sourceId)} requestExitRef={sourceExitRequest} workspaceTargets={{properties:sourcePropertiesTarget,actions:sourceActionsTarget,status:sourceStatusTarget}} initialTab={sourceInitialTab.current} requestedTab={sourceEditor} onTabChange={openBusiness} onExit={()=>{setSourceEditor(undefined);setWidgetTab(pendingWidgetTab.current??'basic');pendingWidgetTab.current=undefined;sourceInitialTab.current=undefined;refresh();}} onPublished={refresh} /></Suspense></div>}
       </div>
       {editing&&draft&&<div className="analytics-settings-page">
-        <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles}
+        <Inspector workspace={workspace} panel={panel} tab={widgetTab} definition={draft} selected={selected} fields={fields} forms={forms} roles={roles} listSource={listSource}
+          approvalStatusAvailable={Boolean(source?.runtime_approval_available ?? source?.runtime_submission_available)}
+          approvalStatusDefaultVisible={Boolean(source?.runtime_submission_available)}
           sourceSlots={{properties:setSourcePropertiesTarget,actions:setSourceActionsTarget,status:setSourceStatusTarget}} disabled={saving} sourceOpen={sourceActive} sourceIsBusiness={Boolean(sourceIsBusiness)}
           onPanel={setPanel} onTab={changeWidgetTab} onChange={changeDraft} onAdd={add} onSelect={selectWidget}
           onBusiness={openBusiness} onClose={requestExit} headerStatus={headerStatus} headerActions={headerActions} status={errorNotice&&<div className="analytics-settings-status">{errorNotice}</div>} />
@@ -630,4 +650,15 @@ export default function ComponentPages({pageCode, openEditor = false, businessDa
       <Typography.Paragraph className="analytics-publish-summary">将发布 {draft?.widgets.length||0} 个组件。记录与统计沿用来源业务表单权限，每个组件独立校验业务来源，字段和流程草稿保持独立。</Typography.Paragraph>
     </Modal>
   </div>;
+  return <ListConfigurationPreviewProvider key={JSON.stringify([code, accountKey])} editing={editing}>
+    {admin ? <Dropdown trigger={['contextMenu']} disabled={saving||sourceActive} open={contextOpen} onOpenChange={setContextOpen} overlayClassName="analytics-context-menu" menu={{
+      'aria-label':contextWidget?contextWidget.title+'配置菜单':workspace?'工作台配置菜单':'表单页面配置菜单',
+      items:[
+        ...buildAnalyticsContextMenu({widgetTitle:contextWidget?.title,pageLabel:workspace?'工作台':'页面',sections}),
+        {key:'business',popupClassName:'analytics-context-submenu',icon:<DatabaseOutlined />,label:'业务配置',disabled:!(contextWidget ? sources[widgetSourceId(active,contextWidget)||0] : globalSource),children:[
+          {key:'source:form',label:'字段与录入'},{key:'source:flow',label:'流程与审批'},
+        ]},
+      ],onClick:({key})=>void openContextAction(key),
+    }}>{page}</Dropdown> : page}
+  </ListConfigurationPreviewProvider>;
 }

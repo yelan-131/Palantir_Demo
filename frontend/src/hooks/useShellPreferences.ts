@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { DEFAULT_THEME_CARD, resolveThemeCardId, type ThemeCardId } from '../theme/cards';
 
 export interface ShellPreferences {
   density: 'compact' | 'standard' | 'relaxed';
@@ -9,7 +10,8 @@ export interface ShellPreferences {
   collapsedMenuKeysByApp: Record<string, string[]>;
   home: string;
   language: string;
-  theme: string;
+  theme: ThemeCardId;
+  layout: 'classic' | 'float';
 }
 
 const CHANGE_EVENT = 'mf-shell-preferences-change';
@@ -26,7 +28,8 @@ const defaults: ShellPreferences = {
   collapsedMenuKeysByApp: {},
   home: 'workspace',
   language: 'zh-CN',
-  theme: 'tech-white',
+  theme: DEFAULT_THEME_CARD,
+  layout: 'classic',
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -74,7 +77,9 @@ function normalize(value: unknown): ShellPreferences {
     home: ['workspace', 'current-app', 'system-admin'].includes(String(input.home))
       ? String(input.home) : defaults.home,
     language: input.language === 'en-US' ? 'en-US' : 'zh-CN',
-    theme: 'tech-white',
+    // The stored legacy value 'tech-white' was never a user choice, so it resolves to the default card.
+    theme: resolveThemeCardId(input.theme),
+    layout: input.layout === 'float' ? 'float' : 'classic',
   };
 }
 

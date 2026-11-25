@@ -7,11 +7,12 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, case, select, cast, String
+from sqlalchemy import func, or_, case, select, cast, Numeric, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.permissions import allowed_form_fields
+from app.core.production_errors import coded_error
 
 
 def _is_anonymous_reader(user: dict) -> bool:
@@ -153,10 +154,16 @@ def _ensure_sort_field_allowed(sort_field: Optional[str], fields: list, visible_
         raise HTTPException(400, f"Field is not indexed for sorting: {sort_field}")
 
 
-def _apply_record_sort_query(query, record_model, sort_field: Optional[str], sort_order: str):
+def _apply_record_sort_query(query, record_model, sort_field: Optional[str], sort_order: str, *, numeric=False, dialect="sqlite"):
     if not sort_field:
         return query.order_by(record_model.id.desc())
     expr = _json_text_expr(record_model.data, sort_field)
+    if numeric and dialect == "postgresql":
+        # The PostgreSQL JSON text extractor loses numeric typing. Bound legacy
+        # numeric strings before casting so malformed values cannot fail the query.
+        value = func.trim(expr)
+        numeric_literal = r"^[+-]?([0-9]{1,100}(\.[0-9]{0,100})?|\.[0-9]{1,100})([eE][+-]?[0-9]{1,4})?$"
+        expr = case((value.op("~")(numeric_literal), cast(value, Numeric)))
     if sort_order.lower() == "asc":
         return query.order_by(expr.asc(), record_model.id.desc())
     return query.order_by(expr.desc(), record_model.id.desc())
@@ -204,8 +211,12 @@ def _apply_record_filters_query(query, record_model, fields: list, filters: list
         if expected in (None, ""):
             continue
         if field not in allowed_fields:
-            raise HTTPException(400, f"Field is not indexed for filtering: {field}")
+            raise coded_error(400, "RECORD_FILTER_INVALID", f"Field is not indexed for filtering: {field}")
         expr = _json_text_expr(record_model.data, field)
+        if dialect == 'sqlite':
+            # JSON_EXTRACT returns native integers and booleans in SQLite.
+            # The comparison values below use the same text semantics as the physical table.
+            expr = cast(expr, String)
         if op == "contains":
             query = query.where(func.lower(expr).like(f"%{str(expected).lower()}%"))
         elif op == "in":

@@ -1,9 +1,9 @@
 import './semanticCenter.css';
 import '../QualityImpact/command.css';
-import { useEffect, useMemo, useState } from 'react';
-import { FileSearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Button, Form, Modal, Space, Tabs, Tag, Typography, message } from 'antd';
-import { addEdge, type Connection, type Edge, type Node } from 'reactflow';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { FileSearchOutlined, ReloadOutlined } from '@/components/Icon/ant';
+import { Button, Card, Empty, Form, Input, Modal, Segmented, Select, Space, Tabs, Tag, Typography, message } from 'antd';
+import { type Connection, type Edge, type Node } from 'reactflow';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { type OntologyCandidateInfo, approveSemanticOntologyCandidate, createSemanticDataQualityRule, createSemanticMappingCandidate, createSemanticOntologyObject, createSemanticOntologyRelation, deleteSemanticDataQualityRule, generateSemanticOntologyCandidates, getSemanticMappingWorkbench, getSemanticOntologyImpact, listSemanticDataAssets, listSemanticOntologyCandidates, listSemanticOntologyMappings, listSemanticOntologyObjects, listSemanticOntologyRelations, listSemanticOntologyVersions, publishSemanticOntology, rejectSemanticOntologyCandidate, saveSemanticMappingLayout, scanSemanticDataAssetMetadata, updateSemanticDataQualityRule, type SemanticMappingWorkbenchResponse } from '../../services/api';
 import { getTableQualityRules, tableMatchesBusinessDomain, type DataAsset, type DataQualityRule, type OntologyMapping, type OntologyObject, type OntologyRelation, type OntologyVersion, type SemanticAssetCenterView } from './semanticAssetShared';
@@ -12,21 +12,46 @@ import './dataAssetWorkspace.css';
 import { DataAssetView } from './DataAssetView';
 import { OntologyView } from './OntologyView';
 import { SemanticMappingView } from './SemanticMappingView';
+import { ObjectBindingFields } from '../DataCenterWorkspace/ObjectRuntimeSettings';
 import MappedFormSyncDialog from '../DataSource/MappedFormSyncDialog';
 import { useAuthStore } from '@/stores/authStore';
 
 export { KnowledgeCenter } from './KnowledgeCenter';
 
+type ObjectPropertyDraft = {
+  code: string;
+  label: string;
+  type: string;
+  source_field?: string | null;
+  search?: boolean;
+  list?: boolean;
+  form?: boolean;
+};
+
+const propertyTypeOptions = ['string', 'number', 'datetime', 'enum', 'boolean'].map(value => ({ value, label: value }));
+
+function propertyTypeForSource(type: string) {
+  if (/bool/i.test(type)) return 'boolean';
+  if (/date|time/i.test(type)) return 'datetime';
+  if (/int|number|numeric|decimal|float|double|real/i.test(type)) return 'number';
+  return 'string';
+}
+
 export default function SemanticAssetCenter({ view, onViewChange, embedded = false }: { view?: SemanticAssetCenterView; onViewChange?: (view: SemanticAssetCenterView) => void; embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const isAdmin = Boolean(useAuthStore(state => state.user?.is_admin));
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const requestedSource = Number(params.get('sourceId')) || undefined;
   const requestedCandidate = Number(params.get('candidateId')) || undefined;
+  const requestedSection = params.get('section') || 'objects';
+  const requestedObjectCode = params.get('objectCode') || undefined;
+  const requestedSourceKind = params.get('mappingSource') === 'external' || (requestedSource && params.get('mappingSource') !== 'form') ? 'external' : 'form';
+  const requestedMappingStatus = params.get('status') || '';
   const [qualityRuleForm] = Form.useForm();
   const [qualityScoreForm] = Form.useForm();
   const [ontologyObjectForm] = Form.useForm();
   const [ontologyRelationForm] = Form.useForm();
+  const [propertyCandidateForm] = Form.useForm<ObjectPropertyDraft>();
   const [assets, setAssets] = useState<DataAsset[]>([]);
   const [objects, setObjects] = useState<OntologyObject[]>([]);
   const [relations, setRelations] = useState<OntologyRelation[]>([]);
@@ -40,8 +65,11 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   const [selectedCandidateId, setSelectedCandidateId] = useState(requestedCandidate);
   const [assetSearch, setAssetSearch] = useState('');
   const [activeDomain, setActiveDomain] = useState('全部');
-  const [ontologyTab, setOntologyTab] = useState(params.get('section') === 'candidates' ? 'candidates' : 'objects');
+  const [ontologyTab, setOntologyTab] = useState(requestedSection);
   const [objectModalOpen, setObjectModalOpen] = useState(false);
+  const [editingObject, setEditingObject] = useState(false);
+  const [propertyCandidate, setPropertyCandidate] = useState<{ source: Node; object: OntologyObject }>();
+  const [savingPropertyCandidate, setSavingPropertyCandidate] = useState(false);
   const [relationModalOpen, setRelationModalOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
@@ -61,12 +89,14 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
   const [assetLoadFailed, setAssetLoadFailed] = useState(false);
   const [semanticCenterTab, setSemanticCenterTab] = useState<SemanticAssetCenterView>(view ?? 'data');
   const [mappingWorkbench, setMappingWorkbench] = useState<SemanticMappingWorkbenchResponse | undefined>();
+  const mappingRequest = useRef(0);
   const [mappingNodes, setMappingNodes] = useState<Node[]>([]);
   const [mappingEdges, setMappingEdges] = useState<Edge[]>([]);
   const [mappingLoading, setMappingLoading] = useState(false);
-  const [mappingObjectCode, setMappingObjectCode] = useState<string | undefined>();
+  const [mappingObjectCode, setMappingObjectCode] = useState(requestedObjectCode);
   const [mappingSourceId, setMappingSourceId] = useState(requestedSource);
-  const [mappingStatus, setMappingStatus] = useState<string>('');
+  const [mappingSourceKind, setMappingSourceKind] = useState<string>(requestedSourceKind);
+  const [mappingStatus, setMappingStatus] = useState(requestedMappingStatus);
   const [selectedMappingElement, setSelectedMappingElement] = useState<Node | Edge | undefined>();
   const [savingMappingLayout, setSavingMappingLayout] = useState(false);
 
@@ -97,9 +127,12 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     navigate(`/data-center/objects?view=ontology&section=candidates&candidateId=${candidateId}`);
   };
   const openMapping = () => {
-    const search = new URLSearchParams({ view: 'mapping' });
-    if (selectedAsset) search.set('sourceId', String(selectedAsset.id));
-    navigate(`/data-center/assets?${search}`);
+    const search = new URLSearchParams({ view: 'ontology', section: 'mapping' });
+    if (selectedAsset?.persisted) {
+      search.set('sourceId', String(selectedAsset.id));
+      if (selectedTable) search.set('entity', selectedTable.name);
+    }
+    navigate(`/data-center/objects?${search}`);
   };
   const selectedQualityRules = useMemo(() => getTableQualityRules(selectedTable), [selectedTable]);
   const selectedQualityRuleStats = useMemo(() => ({
@@ -109,7 +142,8 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     scoring: selectedQualityRules.filter((rule) => rule.include_in_score !== false && rule.passRate !== null && rule.passRate !== undefined).length,
   }), [selectedQualityRules]);
   const selectedObject = useMemo(() => objects.find((item) => item.id === selectedObjectId) ?? objects[0], [objects, selectedObjectId]);
-  const objectRelations = relations.filter((item) => item.source === selectedObject?.id || item.target === selectedObject?.id);
+  const objectRelations = relations.filter(item => item.source === selectedObject?.code || item.target === selectedObject?.code);
+  const mappingObject = objects.find(item => item.code === mappingObjectCode);
   const selectedObjectMappings = useMemo(
     () => ontologyMappings.filter((item) => item.target_object_code === selectedObject?.code),
     [ontologyMappings, selectedObject],
@@ -180,7 +214,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       if (assetResult.status === 'fulfilled') {
         const nextAssets: DataAsset[] = assetResult.value.data?.data ?? [];
         setAssets(nextAssets);
-        setSelectedAssetId(prev => prev ?? nextAssets[0]?.id);
+        setSelectedAssetId(prev => prev ?? requestedSource ?? nextAssets[0]?.id);
         setSelectedTableId(prev => nextAssets.some(asset => asset.tables.some(table => table.id === prev)) ? prev : nextAssets[0]?.tables[0]?.id);
       }
       if (ontologyResult.status === 'rejected') throw ontologyResult.reason;
@@ -194,7 +228,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       setOntologyMappings(mappingRes.data?.data ?? []);
       setOntologyVersions(versionRes.data?.data ?? []);
       setSelectedObjectId((prev) => prev ?? nextObjects[0]?.id);
-      setMappingObjectCode((prev) => prev ?? nextObjects[0]?.code);
+      setMappingObjectCode((prev) => nextObjects.some(item => item.code === prev) ? prev : nextObjects[0]?.code);
       setSelectedCandidateId((prev) => prev ?? nextCandidates[0]?.id);
     } catch {
       setLoadFailed(true);
@@ -228,10 +262,49 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     if (requestedCandidate) setSelectedCandidateId(requestedCandidate);
   }, [requestedCandidate]);
 
-  const reviewRequested = params.get('section') === 'candidates';
   useEffect(() => {
-    if (reviewRequested) setOntologyTab('candidates');
-  }, [reviewRequested]);
+    setOntologyTab(['objects', 'relations', 'mapping', 'candidates', 'publish', 'impact'].includes(requestedSection) ? requestedSection : 'objects');
+  }, [requestedSection]);
+
+  useEffect(() => {
+    if (requestedObjectCode) setMappingObjectCode(requestedObjectCode);
+  }, [requestedObjectCode]);
+
+  useEffect(() => {
+    setMappingSourceKind(requestedSourceKind);
+  }, [requestedSourceKind]);
+
+  useEffect(() => {
+    setMappingStatus(requestedMappingStatus);
+  }, [requestedMappingStatus]);
+
+  function changeOntologyTab(tab: string) {
+    setOntologyTab(tab);
+    if (embedded && view === 'ontology') {
+      setParams(previous => {
+        const next = new URLSearchParams(previous);
+        if (tab === 'objects') next.delete('section');
+        else next.set('section', tab);
+        if (tab !== 'candidates') next.delete('candidateId');
+        return next;
+      }, { replace: true });
+    }
+  }
+
+  function openObjectMapping(object: OntologyObject) {
+    setSelectedObjectId(object.id);
+    setMappingObjectCode(object.code);
+    if (embedded && view === 'ontology') {
+      setParams(previous => {
+        const next = new URLSearchParams(previous);
+        next.set('section', 'mapping');
+        next.set('objectCode', object.code);
+        return next;
+      });
+    } else {
+      setOntologyTab('mapping');
+    }
+  }
 
   useEffect(() => {
     if (filteredTables.length && !filteredTables.some((table) => table.id === selectedTableId)) {
@@ -296,7 +369,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     try {
       if (action === 'approve') {
         await approveSemanticOntologyCandidate(candidate.id);
-        message.success('候选已批准并写入正式对象模型');
+        message.success(candidate.candidate_type === 'mapping' ? '字段映射已批准' : '候选已批准并写入对象模型');
       } else {
         await rejectSemanticOntologyCandidate(candidate.id);
         message.success('候选已拒绝');
@@ -372,10 +445,11 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         stroke: edge.type === 'semantic_candidate' ? '#d48806' : edge.type === 'semantic_mapping' ? '#2f7d5b' : '#9aa8b3',
         strokeWidth: edge.type.includes('semantic') ? 2 : 1,
       },
-      labelStyle: { fill: '#172026', fontSize: 11 },
+      labelStyle: { fill: '#172026', fontSize: 12 },
     }));
 
   const loadSemanticMappingWorkbench = async () => {
+    const request = ++mappingRequest.current;
     setMappingLoading(true);
     try {
       const res = await getSemanticMappingWorkbench({
@@ -383,6 +457,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         source_id: mappingSourceId,
         status: mappingStatus || undefined,
       });
+      if (request !== mappingRequest.current) return;
       const data = res.data?.data;
       setMappingWorkbench(data);
       setMappingObjectCode((prev) => prev ?? data?.object_code ?? undefined);
@@ -390,20 +465,22 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       setMappingEdges(toFlowEdges(data?.edges ?? []));
       setSelectedMappingElement(undefined);
     } catch (error: any) {
+      if (request !== mappingRequest.current) return;
       message.error(error?.response?.data?.detail ?? '语义映射工作台加载失败');
       setMappingWorkbench(undefined);
       setMappingNodes([]);
       setMappingEdges([]);
     } finally {
-      setMappingLoading(false);
+      if (request === mappingRequest.current) setMappingLoading(false);
     }
   };
 
+  const externalMappingActive = semanticCenterTab === 'mapping'
+    || (semanticCenterTab === 'ontology' && ontologyTab === 'mapping' && mappingSourceKind === 'external');
+
   useEffect(() => {
-    if (semanticCenterTab === 'mapping') {
-      loadSemanticMappingWorkbench();
-    }
-  }, [semanticCenterTab, mappingObjectCode, mappingSourceId, mappingStatus]);
+    if (externalMappingActive) void loadSemanticMappingWorkbench();
+  }, [externalMappingActive, mappingObjectCode, mappingSourceId, mappingStatus]);
 
   const saveCurrentMappingLayout = async (nodes = mappingNodes) => {
     if (!mappingWorkbench?.object_code && !mappingObjectCode) return;
@@ -422,33 +499,66 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     }
   };
 
-  const connectSemanticMapping = async (connection: Connection) => {
-    const sourceNode = mappingNodes.find((node) => node.id === connection.source);
-    const targetNode = mappingNodes.find((node) => node.id === connection.target);
-    if (!sourceNode || !targetNode) return;
+  const createMappingFromNodes = async (sourceNode: Node, targetNode: Node) => {
     const sourceType = String(sourceNode.data?.nodeType ?? '');
     const targetType = String(targetNode.data?.nodeType ?? '');
     if (sourceType !== 'source_field' || !['object', 'object_field'].includes(targetType)) {
       message.warning('请从来源字段连接到对象或对象字段');
-      return;
+      return false;
     }
-    setMappingEdges((current) => addEdge({ ...connection, type: 'smoothstep', animated: true, label: '候选' }, current));
+    const source = sourceNode.data;
+    const target = targetNode.data;
+    const sourceId = Number(source.source_id);
+    const objectCode = target.object_code ?? target.object?.code;
+    const targetFieldCode = target.field?.code;
+    const asset = assets.find(item => item.id === sourceId && item.persisted);
+    if (asset?.allow_ontology === false) {
+      message.warning('当前数据源未开启对象建模权限，请先到数据资产中检查治理设置。');
+      return false;
+    }
+    const conflict = targetFieldCode && ontologyMappings.find(mapping =>
+      ['approved', 'published'].includes(mapping.status) && mapping.source_system === String(sourceId)
+      && mapping.source_entity === source.entity_name && mapping.target_object_code === objectCode
+      && mapping.target_field_code === targetFieldCode && mapping.source_field !== source.field_name,
+    );
+    if (conflict) {
+      message.warning(`此表已通过 ${conflict.source_field} 映射到该属性。`);
+      return false;
+    }
+    const sourceTypeName = source.source_type ?? mappingWorkbench?.metadata.find(item =>
+      item.source_id === sourceId && item.entity_name === source.entity_name,
+    )?.source_type;
     try {
-      await createSemanticMappingCandidate({
-        source_node: { id: sourceNode.id, type: sourceType, label: String(sourceNode.data?.label ?? ''), data: sourceNode.data as Record<string, unknown>, position: sourceNode.position },
-        target_node: { id: targetNode.id, type: targetType, label: String(targetNode.data?.label ?? ''), data: targetNode.data as Record<string, unknown>, position: targetNode.position },
+      const response = await createSemanticMappingCandidate({
+        source_node: { id: sourceNode.id, type: sourceType, label: String(source.label ?? ''), data: { ...source, source_type: sourceTypeName }, position: sourceNode.position },
+        target_node: { id: targetNode.id, type: targetType, label: String(target.label ?? ''), data: target, position: targetNode.position },
         confidence: 0.72,
-        note: '人工在语义映射画布中创建候选连线',
+        note: '人工在字段映射中选择来源字段与对象属性',
       });
-      message.success('已创建映射候选，批准后才会进入正式对象模型');
-      await loadSemanticMappingWorkbench();
+      const candidate = response.data.data;
+      if (candidate.status === 'pending_review') {
+        setOntologyCandidates(current => [candidate, ...current.filter(item => item.id !== candidate.id)]);
+        message.success('已提交映射候选，批准后生效');
+      } else {
+        message.info('这条字段映射已建立');
+      }
+      void loadSemanticMappingWorkbench();
+      return true;
     } catch (error: any) {
       message.error(error?.response?.data?.detail ?? '创建映射候选失败');
-      await loadSemanticMappingWorkbench();
+      return false;
     }
   };
 
+  const connectSemanticMapping = async (connection: Connection) => {
+    const sourceNode = mappingNodes.find(node => node.id === connection.source);
+    const targetNode = mappingNodes.find(node => node.id === connection.target);
+    if (sourceNode && targetNode) await createMappingFromNodes(sourceNode, targetNode);
+  };
+
   const openObjectModal = (object?: OntologyObject) => {
+    setEditingObject(Boolean(object));
+    ontologyObjectForm.resetFields();
     ontologyObjectForm.setFieldsValue(object ? {
       name: object.name,
       code: object.code,
@@ -457,6 +567,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       status: object.status ?? 'published',
       source_type: 'manual',
       source_ref: object.source,
+      fields: object.fields.map(field => ({ ...field, code: field.code || field.name })),
     } : {
       domain: 'manufacturing',
       status: 'draft',
@@ -466,27 +577,88 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     setObjectModalOpen(true);
   };
 
+  const createObjectFromTable = (sourceTable: Node) => {
+    const source = sourceTable.data;
+    const sourceId = Number(source.source_id);
+    if (assets.some(asset => asset.id === sourceId && asset.persisted && asset.allow_ontology === false)) {
+      message.warning('当前数据源未开启对象建模权限，请先到数据资产中检查治理设置。');
+      return;
+    }
+    const metadata = mappingWorkbench?.metadata.find(item => item.source_id === sourceId && item.entity_name === source.entity_name);
+    if (!metadata) {
+      message.warning('找不到此表的扫描字段，请刷新字段映射。');
+      return;
+    }
+    openObjectModal();
+    ontologyObjectForm.setFieldsValue({
+      name: metadata.entity_label || metadata.entity_name,
+      code: metadata.entity_name.replace(/[^\p{L}\p{N}_-]/gu, '_').slice(0, 120),
+      source_ref: metadata.entity_name,
+      fields: metadata.fields.filter(field => field.name).map(field => ({
+        code: String(field.name), label: String(field.label || field.name), source_field: String(field.name),
+        type: propertyTypeForSource(String(field.type || '')), list: true, form: true,
+      })),
+    });
+  };
+
+  const createPropertyFromField = (source: Node) => {
+    if (!mappingObject) return;
+    propertyCandidateForm.resetFields();
+    propertyCandidateForm.setFieldsValue({
+      code: source.data.field_name,
+      label: source.data.label || source.data.field_name,
+      type: propertyTypeForSource(String(source.data.field?.type || '')),
+    });
+    setPropertyCandidate({ source, object: mappingObject });
+  };
+
+  const savePropertyCandidate = async () => {
+    if (!propertyCandidate) return;
+    const field = await propertyCandidateForm.validateFields();
+    const { source, object } = propertyCandidate;
+    const code = field.code.trim();
+    if (object.fields.some(item => (item.code || item.name) === code)) {
+      propertyCandidateForm.setFields([{ name: 'code', errors: ['该属性已存在，请选择映射到现有属性。'] }]);
+      return;
+    }
+    setSavingPropertyCandidate(true);
+    try {
+      const saved = await createMappingFromNodes(source, {
+        id: `object-field:${object.code}.${code}`,
+        position: { x: 0, y: 0 },
+        data: { nodeType: 'object_field', object_code: object.code, label: field.label, field: { ...field, code } },
+      });
+      if (saved) setPropertyCandidate(undefined);
+    } finally {
+      setSavingPropertyCandidate(false);
+    }
+  };
+
   const saveOntologyObject = async () => {
     const values = await ontologyObjectForm.validateFields();
+    if (!editingObject && objects.some(object => object.code === values.code.trim())) {
+      ontologyObjectForm.setFields([{ name: 'code', errors: ['对象编码已存在，请使用新的编码。'] }]);
+      return;
+    }
     setSavingObject(true);
     try {
       await createSemanticOntologyObject({
         name: values.name,
-        code: values.code,
+        code: values.code.trim(),
         domain: values.domain,
         description: values.description,
         status: values.status,
         source_type: values.source_type ?? 'manual',
         source_ref: values.source_ref,
-        fields: (values.fields ?? []).map((field: any) => ({
-          name: field.code || field.name,
-          code: field.code || field.name,
-          label: field.label || field.name,
+        fields: (values.fields ?? []).map((field: ObjectPropertyDraft) => ({
+          name: field.label || field.code,
+          code: field.code,
+          label: field.label || field.code,
           type: field.type || 'string',
           source_field: field.source_field,
           list: field.list ?? true,
           form: field.form ?? true,
-          search: field.search ?? false,
+          searchable: field.search ?? false,
         })),
       });
       setObjectModalOpen(false);
@@ -521,11 +693,12 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
     });
   };
 
-  const openRelationModal = () => {
+  const openRelationModal = (source: OntologyObject | undefined = selectedObject) => {
+    ontologyRelationForm.resetFields();
     ontologyRelationForm.setFieldsValue({
       relation_type: 'RELATED_TO',
       graph_enabled: true,
-      source_object_code: selectedObject?.code,
+      source_object_code: source?.code,
     });
     setRelationModalOpen(true);
   };
@@ -827,6 +1000,9 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         runSemanticMappingRecognition,
         navigate,
         openCandidateReview,
+        createObjectFromTable,
+        createPropertyFromField,
+        requestedTableName: params.get('entity') || undefined,
       }}
       canvas={{
         mappingWorkbench,
@@ -839,13 +1015,44 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         loadSemanticMappingWorkbench,
         saveCurrentMappingLayout,
         connectSemanticMapping,
+        connectSourceField: createMappingFromNodes,
         selectedMappingElement,
         setSelectedMappingElement,
       }}
     />
   );
+  const fieldMapping = <div className="ontology-field-mapping">
+    <Segmented
+      aria-label="字段映射来源类型"
+      value={mappingSourceKind}
+      onChange={setMappingSourceKind}
+      options={[{ label: '业务表单', value: 'form' }, { label: '外部数据源', value: 'external' }]}
+    />
+    {ontologyTab === 'mapping' && (mappingSourceKind === 'external' ? semanticMappingView : <Card size="small" title="业务表单字段">
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <div className="ontology-form-mapping-header">
+          <Select
+            aria-label="绑定业务表单的对象"
+            placeholder="选择已发布的对象"
+            value={mappingObject?.status === 'published' ? mappingObject.code : undefined}
+            onChange={setMappingObjectCode}
+            options={objects.filter(object => object.status === 'published').map(object => ({ value: object.code, label: object.name }))}
+          />
+          <Typography.Text type="secondary">绑定后，对象浏览会使用这张表的记录。</Typography.Text>
+        </div>
+        {mappingObject?.status === 'published' ? <ObjectBindingFields
+          key={mappingObject.id}
+          model={mappingObject}
+          showSourceFields
+          initialFormCode={params.get('formCode') || undefined}
+          onChange={() => void refreshOntologyGovernance().catch(() => message.warning('记录来源已保存，刷新对象模型后可查看。'))}
+        /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择要绑定业务表单的已发布对象" />}
+      </Space>
+    </Card>)}
+  </div>;
   const ontologyView = (
     <OntologyView
+      fieldMapping={fieldMapping}
       model={{
         candidateStats,
         impactLoading,
@@ -857,7 +1064,7 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         ontologyCandidates,
         ontologyPublishStats,
         ontologyTab,
-        setOntologyTab,
+        setOntologyTab: changeOntologyTab,
         ontologyVersions,
         relations,
         requestedCandidate,
@@ -871,12 +1078,14 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
       actions={{
         deprecateSelectedObject,
         objectModalOpen,
+        editingObject,
         setObjectModalOpen,
         ontologyObjectForm,
         openObjectModal,
         saveOntologyObject,
         savingObject,
         openRelationModal,
+        openObjectMapping,
         relationModalOpen,
         setRelationModalOpen,
         ontologyRelationForm,
@@ -908,6 +1117,25 @@ export default function SemanticAssetCenter({ view, onViewChange, embedded = fal
         sourceId={syncTarget.id} sourceName={syncTarget.name} initialEntity={syncTarget.entity}
         onClose={() => setSyncTarget(undefined)} onSynced={() => void load()}
       />}
+      <Modal
+        title="新建对象属性并映射"
+        open={Boolean(propertyCandidate)}
+        onCancel={() => setPropertyCandidate(undefined)}
+        onOk={savePropertyCandidate}
+        okText="提交候选"
+        confirmLoading={savingPropertyCandidate}
+        forceRender
+      >
+        {propertyCandidate && <Typography.Paragraph type="secondary">
+          {propertyCandidate.source.data.entity_name}.{propertyCandidate.source.data.field_name} → {propertyCandidate.object.name}
+        </Typography.Paragraph>}
+        <Form layout="vertical" form={propertyCandidateForm}>
+          <Form.Item label="属性名称" name="label" rules={[{ required: true, whitespace: true }, { max: 200 }]}><Input /></Form.Item>
+          <Form.Item label="属性编码" name="code" rules={[{ required: true, whitespace: true }, { max: 120 }]}><Input /></Form.Item>
+          <Form.Item label="属性类型" name="type" rules={[{ required: true }]}><Select options={propertyTypeOptions} /></Form.Item>
+          <Typography.Text type="secondary">候选批准后会同时新建属性和保存映射。</Typography.Text>
+        </Form>
+      </Modal>
       {embedded ? (view === 'ontology' ? ontologyView : view === 'mapping' ? semanticMappingView : dataAssetView) : view === 'ontology' ? ontologyView : <Tabs
         activeKey={semanticCenterTab}
         onChange={(key) => {

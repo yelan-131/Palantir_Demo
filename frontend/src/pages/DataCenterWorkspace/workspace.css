@@ -2,14 +2,6 @@
   min-width: 0;
 }
 
-.data-center-workspace-heading h4.ant-typography {
-  margin: 0 0 6px;
-}
-
-.data-center-workspace-heading .ant-typography-secondary {
-  margin-bottom: 12px;
-}
-
 .data-center-workspace > .ant-tabs > .ant-tabs-nav {
   margin-bottom: 18px;
 }
@@ -26,7 +18,7 @@
   gap: 8px;
   padding: 24px;
   border: 1px solid var(--mf-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--mf-panel);
 }
 .data-center-empty h3 { margin: 0; color: var(--mf-text); font-size: 16px; font-weight: 600; }
