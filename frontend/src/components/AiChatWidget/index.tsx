@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Input, Modal, Popover, Segmented, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Dropdown, Input, Modal, Popover, Segmented, Space, Tag, Tooltip, Typography, message as toast } from 'antd';
 import {
   CheckCircleOutlined,
   CloseOutlined,
@@ -45,6 +45,7 @@ import { ConfigurationReviewEditor } from './ConfigurationReviewEditor';
 import RecordConfirmationReview from './RecordConfirmationReview';
 import { NativeDesignerReview, NativeLayoutReview } from './NativeDesignerReview';
 import { AgentExecutionTrace } from './AgentExecutionTrace';
+import { getRelationshipQuery, isRelationshipGraphLocation, relationshipQueryPath, type RelationshipQuery } from './relationshipQuery';
 import { getTraceQueryContext, getTraceStatusLabel } from './tracePresentation';
 import type { TracePresentationInput as AgentTraceItem } from './tracePresentation';
 
@@ -110,6 +111,7 @@ interface ChatMessage {
   confirmationPayload?: Record<string, unknown>;
   actionState?: AgentActionState;
   executionResult?: AgentExecutionResult;
+  relationshipQuery?: RelationshipQuery;
   confirmationCancelled?: boolean;
   confirmationError?: string;
 }
@@ -172,6 +174,7 @@ interface AiChatWidgetProps {
   enabled?: boolean;
   pageTitle: string;
   applicationName?: string;
+  applicationId?: number;
 }
 
 interface AssistantReply {
@@ -235,6 +238,7 @@ function buildMessageContext(options: {
   route: string;
   pageContext: PageContext;
   applicationName?: string;
+  applicationId?: number;
   knowledgeContext?: AiKnowledgeContext;
 }) {
   const contextNeed = getClientContextNeed(options.message, Boolean(options.knowledgeContext));
@@ -251,6 +255,7 @@ function buildMessageContext(options: {
     pageTitle: options.pageContext.title,
     scope: options.pageContext.scope,
     applicationName: options.applicationName,
+    application_id: options.applicationId,
     documentId: options.knowledgeContext?.documentId,
     document_id: options.knowledgeContext?.documentId,
     documentTitle: options.knowledgeContext?.documentTitle,
@@ -456,6 +461,7 @@ function mapServerMessage(message: AgentMessagePayload): ChatMessage {
     requiresConfirmation: isAssistant && !terminal ? Boolean(confirmationPayload?.confirmation_token || message.requires_confirmation) : false,
     confirmationPayload: isAssistant ? confirmationPayload : undefined,
     executionResult: isAssistant && message.run_status === 'completed' ? getStoredExecutionResult(items) : undefined,
+    relationshipQuery: isAssistant ? getRelationshipQuery(message) : undefined,
     confirmationCancelled: isAssistant && message.run_status === 'cancelled' && Boolean(getConfirmationItemPayload(items)),
     confirmationError: isAssistant && message.run_status === 'failed' && typeof failedResult?.error === 'string'
       ? failedResult.error
@@ -1075,11 +1081,22 @@ function getExecutionResult(result: Record<string, unknown>): AgentExecutionResu
     ? result.route_path
     : '';
   if (routePath) {
+    if (result.menu_id) {
+      return {
+        kind: 'form_definition',
+        title: result.page_code ? '组件页面已挂载到应用菜单' : '表单已挂载到应用菜单',
+        detail: typeof result.destination === 'string' ? result.destination : routePath,
+        href: routePath,
+      };
+    }
     const savedDraft = asRecord(result.form).status === 'draft';
+    const binding = asRecord(result.application_binding);
+    const appName = typeof binding.application_name === 'string' ? binding.application_name : '';
+    const appDetail = appName ? `应用 ${appName}` : result.application_binding === null ? '尚未关联应用' : '';
     return {
       kind: 'form_definition',
-      title: savedDraft ? '表单草稿已保存' : result.menu_id ? '表单已挂载到应用菜单' : '表单已创建',
-      detail: savedDraft ? '发布需要单独确认' : routePath,
+      title: savedDraft ? '表单草稿已保存' : '表单已创建',
+      detail: savedDraft ? [appDetail, '发布需要单独确认'].filter(Boolean).join(' · ') : routePath,
       href: routePath,
     };
   }
@@ -1116,7 +1133,7 @@ function generateUnavailableReply(): AssistantReply {
   };
 }
 
-export default function AiChatWidget({ pageTitle, applicationName, enabled = true }: AiChatWidgetProps) {
+export default function AiChatWidget({ pageTitle, applicationName, applicationId, enabled = true }: AiChatWidgetProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { knowledgeContext, enqueuePageAction, finishPageAction, designerContext, componentPageContext, setDesignPreview } = useAiWorkbench();
@@ -1134,7 +1151,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
   const [historyScope, setHistoryScope] = useState<'recent' | 'archived'>('recent');
   const [archivedSessions, setArchivedSessions] = useState<AgentSession[]>([]);
   const [sending, setSending] = useState(false);
-  const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string; menuTarget?: NonNullable<PageAction['draft']>['menu_target'] }>();
+  const [nativeDraftReview, setNativeDraftReview] = useState<{ sessionId: string; draftId: string; applicationName?: string; menuTarget?: NonNullable<PageAction['draft']>['menu_target'] }>();
   const streamController = useRef<AbortController | null>(null);
   const activeContinuation = useRef<{ conversationId: string; runId: string } | null>(null);
   useEffect(() => () => streamController.current?.abort(), []);
@@ -1494,6 +1511,15 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     });
   };
 
+  const openRelationshipQuery = (query: RelationshipQuery) => {
+    if (document.querySelector('[data-relationship-editing="true"]')) {
+      toast.info('请先保存或取消当前对象编辑。');
+      return;
+    }
+    setOpen(false);
+    navigate(relationshipQueryPath(query), { state: { relationship_query: query } });
+  };
+
   const turnEventHandler = (
     sessionId: string,
     assistantMessageId: string,
@@ -1519,7 +1545,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       }
       pageActionIds.add(action.id);
       if (action.type === 'form_designer' && action.draft_id) setNativeDraftReview(previous => previous?.draftId === action.draft_id ? previous : {
-        sessionId, draftId: action.draft_id!, menuTarget: action.draft?.menu_target,
+        sessionId, draftId: action.draft_id!, applicationName: action.draft?.application_name, menuTarget: action.draft?.menu_target,
       });
       enqueuePageAction(action);
       return;
@@ -1577,6 +1603,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
     }
     if (event === 'answer.completed') {
       const payload = data as AgentChatResponse;
+      const confirmationPayload = getConfirmationItemPayload(payload.items);
       setDesignPreview(current => current?.messageId === assistantMessageId
         ? { ...current, runId: payload.run_id } : current);
       const answerContent = payload.answer || payload.assistant_message?.content || '后端没有返回可展示的回答。';
@@ -1591,9 +1618,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         source: getAgentResponseSource(payload),
         contextSources: getContextSources(payload),
         runId: payload.run_id,
-        requiresConfirmation: Boolean(getConfirmationItemPayload(payload.items)?.confirmation_token || payload.requires_confirmation),
-        confirmationPayload: getConfirmationItemPayload(payload.items),
+        requiresConfirmation: Boolean(confirmationPayload?.confirmation_token || payload.requires_confirmation),
+        confirmationPayload,
         actionState: payload.action_state,
+        relationshipQuery: confirmationPayload || payload.requires_confirmation ? undefined : getRelationshipQuery(payload),
       }));
       if (payload.conversation) {
         const updated = mapServerConversation(payload.conversation, contextKey, intro);
@@ -1645,8 +1673,11 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
       }],
     };
     const sessionId = activeSession.id;
+    const origin = currentLocation.current;
+    const startedOnRelationshipGraph = isRelationshipGraphLocation(origin);
     const pageActionIds = new Set<string>();
     let accepted = false;
+    let relationshipQuery: RelationshipQuery | undefined;
     appendSessionMessages(sessionId, userMessage, assistantPlaceholder);
     setInput('');
     setSending(true);
@@ -1655,9 +1686,10 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         message: trimmed,
         sessionId,
         surface,
-        route: location.pathname,
+        route: startedOnRelationshipGraph ? '/data-center/objects?view=graph' : origin.pathname,
         pageContext,
         applicationName,
+        applicationId,
         knowledgeContext,
       });
       Object.assign(runtimeContext, { pageControlsSupported: true, designerContext }, extraContext || {},
@@ -1669,8 +1701,18 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
         context: attachments.length ? { ...runtimeContext, chatAttachments: attachments } : runtimeContext,
       }, (event) => {
         handleEvent(event);
-        if (event.event === 'answer.completed') onAnswered?.();
+        if (event.event === 'answer.completed') {
+          const payload = event.data as AgentChatResponse;
+          if (!payload.requires_confirmation && !getConfirmationItemPayload(payload.items)) {
+            relationshipQuery = getRelationshipQuery(payload);
+          }
+          onAnswered?.();
+        }
       }, controller.signal);
+      if (relationshipQuery && startedOnRelationshipGraph && !controller.signal.aborted
+        && visibleSessionId.current === sessionId && currentLocation.current.key === origin.key) {
+        openRelationshipQuery(relationshipQuery);
+      }
     } catch {
       if (controller.signal.aborted) {
         updateSessionMessage(sessionId, assistantMessageId, (message) => ({
@@ -2128,6 +2170,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               const layoutReviewId = layoutReviewItem ? layoutReviewItem.item_id || layoutReviewItem.id : undefined;
               const traceItems = message.trace || [];
               const executionHref = message.executionResult?.href;
+              const relationshipQuery = message.relationshipQuery;
               const activeRun = (sending && message.id === messages[messages.length - 1]?.id)
                 || Boolean(confirmingRunId && confirmingRunId === message.runId);
 
@@ -2144,6 +2187,11 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                   {canShowAssistantMeta && message.source ? (
                     <span className="ai-chat-source">{message.source}</span>
                   ) : null}
+                  {canShowAssistantMeta && relationshipQuery && (
+                    <div className="ai-context-source-row">
+                      <Button size="small" onClick={() => openRelationshipQuery(relationshipQuery)}>查看关系图</Button>
+                    </div>
+                  )}
                   {canShowAssistantMeta && message.contextSources ? (
                     <div className="ai-context-source-row">
                       <Tag>最近消息 {message.contextSources.recent_messages ?? 0}</Tag>
@@ -2177,7 +2225,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
                 </div>
                 {typeof layoutReviewId === 'string' && typeof layoutReview.form_id === 'number' && typeof layoutReview.operation_count === 'number' && (
                   <NativeLayoutReview key={layoutReviewId} reviewId={layoutReviewId} formId={layoutReview.form_id}
-                    operationCount={layoutReview.operation_count} disabled={sending || Boolean(confirmingRunId)} />
+                    operationCount={layoutReview.operation_count} fieldName={typeof layoutReview.field_name === 'string' ? layoutReview.field_name : undefined} disabled={sending || Boolean(confirmingRunId)} />
                 )}
                 {canShowAssistantMeta && message.confirmationCancelled && (
                   <div className="ai-confirmation-card ai-confirmation-cancelled">已取消操作</div>
@@ -2354,7 +2402,7 @@ export default function AiChatWidget({ pageTitle, applicationName, enabled = tru
               </div>
               );
             })}
-            {nativeDraftReview && nativeDraftReview.sessionId === activeSession?.id && !sending && !messages[messages.length - 1]?.content.startsWith('执行失败') && <NativeDesignerReview key={nativeDraftReview.draftId} draftId={nativeDraftReview.draftId} disabled={sending || Boolean(confirmingRunId)} menuTarget={nativeDraftReview.menuTarget} onSaved={formId => {
+            {nativeDraftReview && nativeDraftReview.sessionId === activeSession?.id && !sending && !messages[messages.length - 1]?.content.startsWith('执行失败') && <NativeDesignerReview key={nativeDraftReview.draftId} draftId={nativeDraftReview.draftId} disabled={sending || Boolean(confirmingRunId)} applicationName={nativeDraftReview.applicationName} menuTarget={nativeDraftReview.menuTarget} onSaved={formId => {
               const target = nativeDraftReview.menuTarget;
               if (!target) return;
               void sendMessage(`请准备把刚保存的表单发布并挂载到应用菜单「${target.destination}」的确认卡片。`, {

@@ -216,11 +216,11 @@ AI 通过 Harness 运行时调用平台工具，权限、确认和审计的通�
 - `services/ai/form_configuration_tools.py` 用显式白名单把工具映射到服务函数，模型不能指定任意函数。所有调用都要求管理员。
   - 只读检查：`forms.preview_publish`、`forms.list_versions`、`forms.get_version`、`forms.get_layouts`、`forms.evaluate_rules`，组成技能 `low_code.inspect_form`。
   - 设计写入：`forms.update_field`、`forms.archive_field`、`forms.save_layout`、`forms.publish`、`forms.restore_draft`、`forms.update_definition`、`forms.copy`、`forms.delete`，以及动作、权限、流程绑定的 `list`、`create`、`update`、`delete`。写操作沿用平台的确认卡片。
-- `services/ai/low_code_tools.py` 的 `forms.create_form_definition` 在一个事务中创建表单、批量字段（调用 `form_fields.add_form_fields`）、布局、可选的应用绑定和菜单，并对业务表单调用 `form_versions.publish_form(defer_commit=True)` 完成首次发布；分析表单保持草稿。
+- `forms.create_form_definition` 在一个事务中保存表单草稿、批量字段和布局，可同时保存应用关联和审批流程草稿。表单发布和菜单挂载需要分别确认。
 - 记录类工具（查询、详情、更新、新建草稿）调用 `services/records.py`。
 - 组件页面工具（`pages.*`）与页面联动工具 `ui.component_page.*`、表单设计器联动工具 `ui.form_designer` 分别见 `component_page_tools.py`、`component_page_controls.py`、`page_controls.py`。页面联动工具只修改当前浏览器中的未保存草稿，由用户最终保存或发布。
 
-工具定义在 `data/agent_registry/tools.json` 和 `skills.json`，打包副本在 `backend/app/services/ai/assets/`。已有数据库的注册表不会因种子文件变化而更新，表单设计写入工具需要运行 `scripts/register_form_design_tools.py` 补齐（保留已有定义和停用状态）。代码中具备某个工具，不等于某个部署已经启用它。
+工具定义在 `data/agent_registry/tools.json` 和 `skills.json`，打包副本在 `backend/app/services/ai/assets/`。运行时读取已初始化的租户注册表时，会刷新采用旧内置定义的表单工具 schema，保留租户自定义项和启用状态。缺少表单设计写入工具时可用 `scripts/register_form_design_tools.py` 补齐。
 
 ## 8. 已知限制
 

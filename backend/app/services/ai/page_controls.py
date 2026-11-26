@@ -3,11 +3,13 @@ import asyncio
 import uuid
 from typing import Annotated, Literal
 
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
 from app.core.db import db_session
-from app.models.relational import Form, FormField
+from app.models.relational import Application, Form, FormField
+from app.services.form_calculations import validate_rule
 from .agent_items import build_agent_item
 from .policies import decide_ai_permission
 from .policies import action_is_forbidden
@@ -59,6 +61,55 @@ class Presentation(BaseModel):
     controlHeight: int | None = Field(default=None, ge=24, le=64)
 
 
+FieldKey = Annotated[str, Field(pattern=r'^[a-z][a-z0-9_]{0,62}$')]
+
+
+class FieldCondition(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    sourceField: FieldKey
+    operator: Literal['equals', 'notEquals', 'contains', 'isEmpty', 'notEmpty', 'gt', 'gte', 'lt', 'lte'] = 'equals'
+    value: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode='after')
+    def require_comparison_value(self):
+        if self.operator not in {'isEmpty', 'notEmpty'} and self.value is None:
+            raise ValueError('此条件需要比较值')
+        return self
+
+
+class CalculationSettings(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expression: str = Field(min_length=1, max_length=4096)
+    precision: int | None = Field(default=None, ge=0, le=6)
+    emptyBehavior: Literal['empty', 'zero'] = 'empty'
+
+    @model_validator(mode='after')
+    def validate_expression(self):
+        try:
+            validate_rule(self.model_dump())
+        except HTTPException as exc:
+            raise ValueError(str(exc.detail)) from exc
+        return self
+
+
+class FieldReference(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    kind: Literal['businessForm', 'masterData']
+    source: str = Field(pattern=r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$',
+                        description='来源业务表单的编码，或基础档案 equipment、production_lines、materials、suppliers')
+    label_field: FieldKey
+    backfill: dict[FieldKey, FieldKey] = Field(default_factory=dict, max_length=30,
+                                                description='键是当前表单字段，值是来源记录字段')
+
+    @model_validator(mode='after')
+    def validate_archive(self):
+        if self.kind == 'masterData' and self.source not in {
+            'equipment', 'production_lines', 'materials', 'suppliers', 'material_master', 'supplier_master',
+        }:
+            raise ValueError('请选择有效的基础档案')
+        return self
+
+
 class FieldProperties(BaseModel):
     model_config = ConfigDict(extra='forbid')
     label: str | None = Field(default=None, min_length=1, max_length=200)
@@ -67,7 +118,7 @@ class FieldProperties(BaseModel):
     placeholder: str | None = Field(default=None, max_length=500)
     min: float | None = None
     max: float | None = None
-    control_type: Literal['text', 'textarea', 'code', 'number', 'select', 'datetime', 'switch', 'upload'] | None = None
+    control_type: Literal['text', 'textarea', 'code', 'number', 'select', 'datetime', 'switch', 'upload', 'relation'] | None = None
     width: Literal['quarter', 'third', 'half', 'twoThird', 'threeQuarter', 'full'] | None = None
     position: int | None = Field(default=None, ge=0, le=59)
     help_text: str | None = Field(default=None, max_length=500)
@@ -75,6 +126,11 @@ class FieldProperties(BaseModel):
     settings: InputSettings | None = None
     presentation: Presentation | None = None
     encoding: EncodingSettings | None = None
+    default_value: str | int | float | bool | None = Field(default=None, description='固定默认值，传空字符串清除')
+    visible_when: FieldCondition | None = None
+    required_when: FieldCondition | None = None
+    computed: CalculationSettings | None = None
+    reference: FieldReference | None = None
 
     @model_validator(mode='after')
     def validate_properties(self):
@@ -82,14 +138,18 @@ class FieldProperties(BaseModel):
             raise ValueError('最小值不能大于最大值')
         if self.options and len({choice.value for choice in self.options}) != len(self.options):
             raise ValueError('候选项的值不能重复')
+        if self.reference and (self.options or self.control_type not in {None, 'relation'}):
+            raise ValueError('关联来源应使用关联控件，不能与静态选项同时配置')
+        if self.computed and (self.readonly is False or self.default_value is not None):
+            raise ValueError('计算字段为只读，不接受固定默认值')
         return self
 
 
 class DraftField(FieldProperties):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    field_name: str = Field(pattern=r'^[a-z][a-z0-9_]{0,62}$')
+    field_name: FieldKey
     label: str = Field(min_length=1, max_length=200)
-    field_type: Literal['string', 'text', 'integer', 'decimal', 'date', 'datetime', 'code', 'enum', 'attachment', 'boolean'] = 'string'
+    field_type: Literal['string', 'text', 'integer', 'decimal', 'date', 'datetime', 'code', 'enum', 'attachment', 'boolean', 'relation', 'person'] = 'string'
     required: bool = False
     placeholder: str = Field(default='', max_length=500)
 
@@ -97,6 +157,14 @@ class DraftField(FieldProperties):
     def validate_native_type(self):
         if self.field_type == 'enum' and not self.options:
             raise ValueError('选择字段必须提供有效候选项')
+        if self.field_type == 'relation' and not self.reference:
+            raise ValueError('关联字段必须提供 reference 来源')
+        if self.reference and self.field_type != 'relation':
+            raise ValueError('只有 relation 字段可以配置档案来源')
+        if self.field_type == 'person' and (self.options or self.control_type not in {None, 'relation'}):
+            raise ValueError('人员字段应使用组织人员关联控件')
+        if self.computed and self.field_type not in {'string', 'text', 'integer', 'decimal'}:
+            raise ValueError('计算字段需要文本或数值类型')
         if self.encoding and self.field_type != 'code':
             raise ValueError('自动编号规则只能用于 code 字段')
         if self.field_type == 'code' and self.readonly is False:
@@ -208,13 +276,21 @@ class NewFormDraft(BaseModel):
     code: str = Field(pattern=r'^[a-z][a-z0-9_]{0,62}$')
     description: str = Field(default='', max_length=1000)
     fields: list[DraftField] = Field(min_length=1, max_length=60)
+    application_id: int | None = Field(default=None, gt=0, description='草稿所属应用的真实 ID，挂载菜单另行确认')
     menu_target: FormMenuTarget | None = None
     layout_operations: list[LayoutOperation] | None = Field(default=None, min_length=1, max_length=60)
 
     @model_validator(mode='after')
     def unique_fields(self):
-        if len({field.field_name for field in self.fields}) != len(self.fields):
+        known = {field.field_name for field in self.fields}
+        if len(known) != len(self.fields):
             raise ValueError('字段编码不能重复')
+        for field in self.fields:
+            for condition in (field.visible_when, field.required_when):
+                if condition and (condition.sourceField not in known or condition.sourceField == field.field_name):
+                    raise ValueError('字段条件必须引用当前表单的其他字段')
+            if field.reference and (field.reference.backfill.keys() - (known - {field.field_name})):
+                raise ValueError('回填目标必须是当前表单的其他字段')
         return self
 
 
@@ -311,7 +387,8 @@ def _validate_page_receipt(command, receipt):
     operations = (draft or command).get('layout_operations')
     if command['action'] in {'draft_new', 'configure_layout'} and operations and state.get('layout_operation_count') != len(operations):
         return {**receipt, 'ok': False, 'error': '设计器未确认全部布局操作，请核对当前画布。'}
-    if command['action'] == 'configure_layout' and command['form_id'] and state.get('form_id') != command['form_id']:
+    if (command['form_id'] and (command['action'] == 'configure_layout' or state.get('layout_review_ready') is True)
+            and state.get('form_id') != command['form_id']):
         return {**receipt, 'ok': False, 'error': '设计器回执中的目标表单不一致。'}
     return receipt
 
@@ -345,10 +422,13 @@ async def dispatch_page_action(bridge, command):
         if receipt.get('ok'):
             state = receipt.get('state') or {}
             layout_review = None
-            if command['action'] == 'configure_layout' and command['form_id'] and state.get('layout_review_ready') is True:
-                layout_review = {'form_layout_review': {
-                    'form_id': command['form_id'], 'operation_count': len(command['layout_operations']),
-                }}
+            if (command['action'] in {'configure_layout', 'set_field_properties'} and command['form_id']
+                    and state.get('layout_review_ready') is True):
+                review = {'form_id': command['form_id'],
+                          'operation_count': len(command.get('layout_operations') or [])}
+                if command['action'] == 'set_field_properties':
+                    review['field_name'] = command['field_name']
+                layout_review = {'form_layout_review': review}
             await finish('completed', payload=layout_review)
         else:
             await finish('failed', mask_sensitive_text(receipt.get('error') or '画布操作失败')[:240])
@@ -364,14 +444,19 @@ async def call_page_control(bridge, arguments):
         return {'status': 'validation_failed', 'message': str(exc)}
     if error := designer_permission_error(bridge.user, bridge.settings):
         return {'status': 'blocked', 'message': error}
+    draft_application = None
     if request.action == 'draft_new':
         async with db_session() as db:
             existing = await db.scalar(select(Form).where(Form.tenant_id == bridge.user['tenant_id'], Form.code == request.draft.code))
             if existing:
                 return {'status': 'validation_failed', 'message': '表单编码已存在，请为新表单选择另一个编码；不得打开或覆盖同名已有表单。'}
+            if request.draft.application_id:
+                app = await db.get(Application, request.draft.application_id)
+                if not app or app.tenant_id != bridge.user['tenant_id']:
+                    return {'status': 'validation_failed', 'message': '目标应用不存在或不可访问'}
+                draft_application = {'application_id': app.id, 'application_name': app.name}
             menu_target = None
             if request.draft.menu_target:
-                from fastapi import HTTPException
                 try:
                     app, parent = await resolve_menu_target(db, bridge.user['tenant_id'], request.draft.menu_target)
                 except HTTPException as error:
@@ -380,6 +465,8 @@ async def call_page_control(bridge, arguments):
                     'destination': ' / '.join([app.name, *([parent.title] if parent else []), request.draft.menu_target.menu_title or request.draft.name])}
         action = {'id': uuid.uuid4().hex, 'type': 'form_designer', 'form_id': 0,
                   'draft_id': uuid.uuid4().hex, 'action': request.action, 'draft': request.draft.model_dump(exclude_none=True)}
+        if draft_application:
+            action['draft'].update(draft_application)
         if menu_target:
             action['draft']['menu_target'] = menu_target
     elif request.draft_id:
@@ -452,15 +539,20 @@ async def call_page_control(bridge, arguments):
                 result = await dispatch({'id': uuid.uuid4().hex, 'type': 'form_designer', 'form_id': 0,
                     'draft_id': request.draft_id, 'action': 'review'})
         if result.get('ok'):
+            if draft_application:
+                result['state'] = {**(result.get('state') or {}), **draft_application}
             bridge.configuration_failure = None
-            if action.get('draft_id') or request.action in {'inspect_layout', 'configure_layout'}:
+            if action.get('draft_id') or request.action in {'inspect_layout', 'configure_layout', 'set_field_properties'}:
                 previous = bridge.context.get('designerContext') or {}
                 if previous.get('form_id') != (action['form_id'] or None) or previous.get('draft_id') != action.get('draft_id'):
                     previous = {}
                 bridge.context['designerContext'] = {**previous, **(result.get('state') or {}),
                     'draft_id': action.get('draft_id'), 'form_id': action['form_id'] or None}
             if request.action in {'draft_new', 'configure_fields', 'add_field', 'set_field_properties'}:
-                bridge.configuration_outcome = {'status': 'ui_draft', 'reason': '已在现有设计器更新本地草稿，请复核工作区并点击最终确认卡片。'}
+                reason = ('已在现有设计器更新本地草稿，请复核工作区并点击最终确认卡片。'
+                          if not action['form_id'] or (result.get('state') or {}).get('layout_review_ready') is True
+                          else '字段已在设计器更新，请复核后在设计器保存草稿。')
+                bridge.configuration_outcome = {'status': 'ui_draft', 'reason': reason}
             elif request.action == 'configure_layout':
                 reason = ('布局已更新。复核画布后，可在对话中点击「确认保存草稿」。'
                           if action['form_id'] and (result.get('state') or {}).get('layout_review_ready') is True
@@ -475,7 +567,7 @@ async def call_page_control(bridge, arguments):
         return {'status': 'completed' if result.get('ok') else 'blocked',
                 'result': result.get('state') or {}, 'message': result.get('error') or
                 ('已读取当前表单画布。' if request.action == 'inspect_layout' else
-                 bridge.configuration_outcome['reason'] if request.action == 'configure_layout' and result.get('ok') else
+                 bridge.configuration_outcome['reason'] if request.action in {'configure_layout', 'set_field_properties'} and result.get('ok') else
                  '页面调用已完成。修改仅存在于当前设计器，未保存或发布；等待用户点击最终确认卡片。')}
     except asyncio.TimeoutError:
         return {'status': 'blocked', 'message': '等待页面操作回执超时，已通知页面移除该操作。页面可能保留部分草稿修改，请检查当前设计器；未检测到是否存在未保存修改弹窗，不要据此认定有弹窗，也不要直接重复新建草稿。'}
@@ -491,7 +583,7 @@ def page_control_model_result(result: dict) -> dict:
     if result.get('status') != 'completed':
         return result
     state = result.get('result') or {}
-    compact = {key: state[key] for key in ('draft_id', 'form_id', 'form_code', 'saved', 'published') if key in state}
+    compact = {key: state[key] for key in ('draft_id', 'form_id', 'form_code', 'application_id', 'application_name', 'saved', 'published') if key in state}
     for key in ('layout_controls', 'layout_operation_count', 'unplaced_fields'):
         if key in state:
             compact[key] = state[key]

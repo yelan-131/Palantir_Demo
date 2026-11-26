@@ -77,13 +77,6 @@ def to_openai_function(tool: ToolDefinition) -> dict[str, Any]:
             'application_id': {'type': 'integer', 'description': '查询指定应用或其菜单时使用'},
             'application_name': {'type': 'string', 'description': '按应用名称精确查询'},
         })
-    if tool.name == 'platform.form_settings.query':
-        parameters.setdefault('properties', {}).update({
-            'application_id': {'type': 'integer', 'description': '限定到指定应用下已关联的表单'},
-            'form_name': {'type': 'string', 'description': '按表单名称搜索'},
-            'form_id': {'type': 'integer', 'description': '精确查询表单及其已发布字段'},
-            'form_code': {'type': 'string', 'description': '精确查询表单及其已发布字段'},
-        })
     if tool.name == 'platform.identity_settings.query':
         description += ' 使用 subject=roles 查询角色目录，返回可用于配置权限的数字角色 ID。'
         parameters.setdefault('properties', {})['role_name'] = {

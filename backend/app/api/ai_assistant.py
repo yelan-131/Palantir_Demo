@@ -42,6 +42,7 @@ from app.services.ai.client import get_provider
 from app.services.ai.page_controls import PageControlResult
 from app.services.ai.configuration_review import ConfigurationReviewEdit, revise_configuration
 from app.services.ai.record_review import RecordReviewEditRequest, RecordReviewRequest, review_record_fields, revise_record_review
+from app.services.ai.relationship_tools import TOOL as RELATIONSHIP_QUERY_TOOL
 from app.services.ai.confirmation_stream import ConfirmationStream
 from app.services.ai.confirmations import consume_confirmation_token
 from app.services.ai.agent_context_router import agent_context_router
@@ -957,7 +958,23 @@ async def _persist_agent_turn(body: AgentRequest, result: AgentResponse, current
         records: list[Any] = [assistant_message, run]
         if user_message:
             records.insert(0, user_message)
-        if record_tool_calls_enabled(AI_SYSTEM_SETTINGS) and (result.evidence or (body.context or {}).get("surface") == "knowledge"):
+        relationship_calls = [item for item in safe_items if item.get("tool") == RELATIONSHIP_QUERY_TOOL]
+        if record_tool_calls_enabled(AI_SYSTEM_SETTINGS) and relationship_calls:
+            inputs = {item.get("tool_call_id"): item.get("payload") or {}
+                      for item in relationship_calls if item.get("type") == "tool_call"}
+            for item in relationship_calls:
+                if item.get("type") == "tool_result":
+                    records.append(AIToolCall(
+                        tenant_id=tenant_id,
+                        call_id=f"call-{uuid.uuid4().hex[:12]}",
+                        run_id=run.run_id,
+                        tool_name=RELATIONSHIP_QUERY_TOOL,
+                        input=inputs.get(item.get("tool_call_id"), {}),
+                        output=item.get("payload") or {},
+                        status=item.get("status") or "completed",
+                        duration_ms=item.get("duration_ms") or 0,
+                    ))
+        elif record_tool_calls_enabled(AI_SYSTEM_SETTINGS) and (result.evidence or (body.context or {}).get("surface") == "knowledge"):
             records.append(
                 AIToolCall(
                     tenant_id=tenant_id,

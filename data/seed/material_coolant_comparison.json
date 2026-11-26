@@ -1,0 +1,72 @@
+{
+  "reference_grade": "A280G6 RH",
+  "comparison_grade": {
+    "record_no": "A3WG6",
+    "name": "巴斯夫 A3WG6"
+  },
+  "trial_type": {
+    "code": "demo_relation_material_trial",
+    "name": "材料耐介质试验",
+    "description": "材料在指定介质、温度与时长下的强度试验记录。",
+    "fields": [
+      {"code": "record_no", "label": "试验记录编号", "type": "string", "searchable": true},
+      {"code": "name", "label": "试验名称", "type": "string", "searchable": true},
+      {"code": "material_grade", "label": "材料牌号", "type": "string", "searchable": true},
+      {"code": "medium", "label": "试验介质", "type": "string"},
+      {"code": "temperature_c", "label": "温度（℃）", "type": "number"},
+      {"code": "duration_h", "label": "时长（h）", "type": "number"},
+      {"code": "fluid_formulation", "label": "介质配方", "type": "string", "required": false},
+      {"code": "test_method", "label": "试验方法或标准", "type": "string", "required": false},
+      {"code": "comparison_group", "label": "原文对照组", "type": "string", "required": false},
+      {"code": "tensile_initial_mpa", "label": "初始拉伸强度（MPa）", "type": "number", "required": false},
+      {"code": "tensile_after_mpa", "label": "试验后拉伸强度（MPa）", "type": "number", "required": false},
+      {"code": "flexural_initial_mpa", "label": "初始弯曲强度（MPa）", "type": "number", "required": false},
+      {"code": "flexural_after_mpa", "label": "试验后弯曲强度（MPa）", "type": "number", "required": false},
+      {"code": "source_name", "label": "来源", "type": "string"},
+      {"code": "source_url", "label": "原文链接", "type": "string"}
+    ],
+    "records": [
+      {
+        "record_no": "COOLANT-P47-A280G6-RH",
+        "name": "A280G6 RH 冷冻液耐醇解试验",
+        "material_grade": "A280G6 RH",
+        "medium": "冷冻液",
+        "temperature_c": 135,
+        "duration_h": 240,
+        "fluid_formulation": null,
+        "test_method": null,
+        "comparison_group": "bensong-public-transfer-p47-coolant",
+        "tensile_initial_mpa": 161,
+        "tensile_after_mpa": 85,
+        "flexural_initial_mpa": 222,
+        "flexural_after_mpa": 122,
+        "source_name": "本松新材《公开转让说明书》印刷第 47 页，耐醇解对比试验",
+        "source_url": "https://qccdata.qichacha.com/ReportData/PDF/889cc2db6d0e46348a74f1e0c94e08f0.pdf#page=48"
+      },
+      {
+        "record_no": "COOLANT-P47-A3WG6",
+        "name": "巴斯夫 A3WG6 冷冻液耐醇解试验",
+        "material_grade": "A3WG6",
+        "medium": "冷冻液",
+        "temperature_c": 135,
+        "duration_h": 240,
+        "fluid_formulation": null,
+        "test_method": null,
+        "comparison_group": "bensong-public-transfer-p47-coolant",
+        "tensile_initial_mpa": 178,
+        "tensile_after_mpa": 71,
+        "flexural_initial_mpa": 249,
+        "flexural_after_mpa": 101,
+        "source_name": "本松新材《公开转让说明书》印刷第 47 页，耐醇解对比试验",
+        "source_url": "https://qccdata.qichacha.com/ReportData/PDF/889cc2db6d0e46348a74f1e0c94e08f0.pdf#page=48"
+      }
+    ]
+  },
+  "trial_grade_relation": {
+    "code": "demo_relation_material_trial_grade",
+    "name": "试验对应材料牌号",
+    "relation_type": "RELATED_TO",
+    "source_object_code": "demo_relation_material_trial",
+    "target_object_code": "demo_relation_valve_material"
+  }
+}

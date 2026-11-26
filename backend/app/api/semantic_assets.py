@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 from sqlalchemy import and_, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +50,8 @@ from app.services.ontology_candidate_service import (
 from app.services.ontology_ai_candidate_service import OntologyAICandidateError, generate_ai_candidates_from_metadata
 from app.services.metadata_scan_service import parse_connection_config, scan_data_source_metadata
 from app.services.ontology_record_service import (
-    MAX_KEY_LENGTH, get_instance, get_instance_editor, list_instances, set_record_binding, set_record_link, update_instance,
+    MAX_KEY_LENGTH, get_instance, get_instance_attachment, get_instance_editor, list_instances, set_record_binding, set_record_link,
+    update_instance,
 )
 from app.services.ontology_service import (
     OntologySimilarityFeature,
@@ -1467,6 +1469,22 @@ async def get_ontology_instance(
     user: dict = Depends(get_current_user),
 ):
     return {"data": await get_instance(db, user, object_id, key)}
+
+
+@router.get("/ontology-objects/{object_id}/attachments/{property_code}/{file_id}", response_class=FileResponse)
+async def download_ontology_instance_attachment(
+    object_id: int,
+    property_code: str,
+    file_id: str,
+    key: str = Query(min_length=1, max_length=MAX_KEY_LENGTH),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    info, path = await get_instance_attachment(db, user, object_id, key, property_code, file_id)
+    return FileResponse(
+        path, filename=info["name"], media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/ontology-objects/{object_id}/record-edit")

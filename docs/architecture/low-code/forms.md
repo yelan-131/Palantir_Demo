@@ -256,7 +256,8 @@ AI 工具的通用权限、确认与注册表机制见[低代码平台](platform
 | `forms.preview_publish`、`forms.list_versions`、`forms.get_version`、`forms.get_layouts`、`forms.evaluate_rules` | `form_configuration_tools.execute_form_configuration_tool`，只读，要求管理员 |
 | `forms.update_field`、`forms.archive_field`、`forms.save_layout`、`forms.publish`、`forms.restore_draft`、`forms.update_definition`、`forms.copy`、`forms.delete` | `FORM_DESIGN_TOOLS` 白名单映射到 `form_fields`、`form_layouts`、`form_versions`、`form_admin`，要求管理员 |
 | `forms.{list,create,update,delete}_{actions,permissions,workflow_bindings}` | 同上，映射到 `form_admin` |
-| `forms.create_form_definition`、`forms.add_form_field` | `low_code_tools`：创建表单（物理表、批量字段、布局、可选应用绑定与菜单，业务表单首次发布）和追加字段（同步布局） |
+| `forms.create_form_definition`、`forms.add_form_field` | `low_code_tools` 创建表单草稿、批量字段和布局，可同时保存应用关联及审批流程草稿。追加字段会同步布局。发布和挂载菜单分别通过确认操作完成。 |
+| `platform.form_settings.query` | 按应用、名称、表单 ID 或编码查找；应用范围包括直接关联、旧表单菜单和已挂载的已发布组件页数据源。指定表单 ID 或编码并使用 `subject=layouts` 可以读取已保存布局。 |
 | `forms.publish_to_menu` | `form_menu_tools`，把表单挂到应用菜单 |
 | `forms.query_records`、`forms.get_record`、`forms.update_record`、`forms.create_dynamic_record_draft` | 通过 `services/records.py` 读写记录或生成记录草稿 |
 

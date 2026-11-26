@@ -248,17 +248,28 @@
   "platform.form_settings.query": {
     "name": "platform.form_settings.query",
     "title": "Query form settings",
-    "description": "Read low-code form configuration through admin permissions.",
+    "description": "查询表单和业务字段。优先读取已发布字段，无发布版本时读取当前字段。应用范围包含直接关联的表单、旧菜单表单和菜单下已发布组件页的表单。查询已保存布局时指定表单 ID 或编码。",
     "handler_key": "platform.query",
     "side_effect": "read",
     "risk_level": "low",
     "input_schema": {
-      "subject": "forms|fields|layouts",
-      "limit": "integer"
+      "type": "object",
+      "properties": {
+        "subject": {"type":"string","enum":["forms","fields","layouts"],"default":"forms"},
+        "application_id": {"type":"integer","minimum":1,"description":"按应用限定查找范围"},
+        "form_name": {"type":"string","description":"按业务表单名称进行部分匹配"},
+        "form_id": {"type":"integer","minimum":1,"description":"精确查询表单 ID"},
+        "form_code": {"type":"string","description":"精确查询表单编码"},
+        "limit": {"type":"integer","minimum":1,"maximum":100,"default":20}
+      }
     },
     "output_schema": {
       "items": "array",
-      "count": "integer"
+      "count": "integer",
+      "has_more": "boolean",
+      "subject": "forms|fields|layouts",
+      "application_id": "integer",
+      "application_name": "string"
     },
     "permission_check": "config",
     "dry_run_supported": true
@@ -288,18 +299,69 @@
   "forms.create_form_definition": {
     "name": "forms.create_form_definition",
     "title": "Create form definition",
-    "description": "Save a low-code form draft with fields and layouts. Publishing and adding a menu entry require separate confirmation.",
+    "description": "确认后保存业务表单草稿及其字段和布局。可关联指定应用、同时保存审批流程草稿。发布与添加菜单入口需另行确认。",
     "handler_key": "forms.create_form_definition",
     "side_effect": "configuration_write",
     "risk_level": "high",
     "input_schema": {
-      "form": "object",
-      "fields": "array",
-      "menu": "object"
+      "type": "object",
+      "required": ["form", "fields"],
+      "properties": {
+        "form": {
+          "type": "object",
+          "required": ["name", "code"],
+          "properties": {
+            "name": {"type":"string","description":"业务表单名称"},
+            "code": {"type":"string","description":"稳定表单编码"},
+            "description": {"anyOf":[{"type":"string"},{"type":"null"}]},
+            "application_id": {"anyOf":[{"type":"integer","minimum":1},{"type":"null"}],"description":"可选的应用归属，使用已核对的真实应用 ID"},
+            "storage_mode": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"省略时使用平台的表存储"},
+            "assembly_kind": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"business 为业务表单，analysis 为分析表单"},
+            "config": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"原生配置，例如 formLayout 或 viewConfigDraft"}
+          }
+        },
+        "fields": {
+          "type": "array",
+          "description": "按业务顺序提供字段的编码 field_name、显示名 label 及配置",
+          "items": {"type":"object","properties":{
+            "field_name": {"type":"string","description":"稳定字段编码"},
+            "label": {"type":"string","description":"业务显示名称"},
+            "field_type": {"type":"string","description":"例如 string、text、integer、decimal、boolean、date、datetime、enum、attachment、relation 或 code"},
+            "business_type": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"业务语义，例如 code、attachment 或 relation"},
+            "control_type": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"原生输入控件类型"},
+            "data_source": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"原生选择来源类型"},
+            "encoding_rule": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"原生编码规则，含 segments"},
+            "required": {"type":"boolean"},
+            "visible_in_list": {"type":"boolean"},
+            "visible_in_form": {"type":"boolean"},
+            "searchable": {"type":"boolean"},
+            "sortable": {"type":"boolean"},
+            "default_value": {"anyOf":[{"type":"string"},{"type":"boolean"},{"type":"null"}],"description":"固定默认值，布尔字段可直接传 true 或 false"},
+            "enum_values": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"静态选项，格式为 {values: [{label, value}]}"},
+            "validation": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"字段校验规则"},
+            "ui_config": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"业务控件配置。关系字段使用 relation_config 指定真实来源与回填，计算使用 computed，条件显隐与必填使用 visibility 和 requiredWhen"},
+            "sort_order": {"type":"integer"}
+          }}
+        },
+        "workflow": {
+          "type": "object",
+          "description": "可选的审批流程草稿，与表单一起保存",
+          "required": ["name"],
+          "properties": {
+            "name": {"type":"string"},
+            "description": {"type":"string"},
+            "config": {"type":"object","description":"审批流程定义，包含 nodes 和 edges 等原生配置"},
+            "form_config": {"type":"object"},
+            "steps": {"type":"array","items":{"type":"object"}}
+          }
+        }
+      }
     },
     "output_schema": {
       "form": "object",
       "fields": "array",
+      "application_binding": "object|null",
+      "workflow_draft_id": "integer|null",
       "route_path": "string"
     },
     "permission_check": "config",
@@ -308,14 +370,42 @@
   "forms.add_form_field": {
     "name": "forms.add_form_field",
     "title": "Add form field",
-    "description": "Add metadata fields to an existing low-code form.",
+    "description": "按真实表单 ID 或编码定位目标。确认后追加一批字段，并同步相应布局。",
     "handler_key": "forms.add_form_field",
     "side_effect": "configuration_write",
     "risk_level": "high",
     "input_schema": {
-      "form_id": "integer",
-      "form_code": "string",
-      "fields": "array"
+      "type": "object",
+      "required": ["fields"],
+      "anyOf": [{"required":["form_id"]},{"required":["form_code"]}],
+      "properties": {
+        "form_id": {"type":"integer","minimum":1},
+        "form_code": {"type":"string"},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "description": "按业务顺序提供要新增字段的编码 field_name、显示名 label 及配置",
+          "items": {"type":"object","properties":{
+            "field_name": {"type":"string","description":"稳定字段编码"},
+            "label": {"type":"string","description":"业务显示名称"},
+            "field_type": {"type":"string","description":"例如 string、text、integer、decimal、boolean、date、datetime、enum、attachment、relation 或 code"},
+            "business_type": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"业务语义，例如 code、attachment 或 relation"},
+            "control_type": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"原生输入控件类型"},
+            "data_source": {"anyOf":[{"type":"string"},{"type":"null"}],"description":"原生选择来源类型"},
+            "encoding_rule": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"原生编码规则，含 segments"},
+            "required": {"type":"boolean"},
+            "visible_in_list": {"type":"boolean"},
+            "visible_in_form": {"type":"boolean"},
+            "searchable": {"type":"boolean"},
+            "sortable": {"type":"boolean"},
+            "default_value": {"anyOf":[{"type":"string"},{"type":"boolean"},{"type":"null"}],"description":"固定默认值，布尔字段可直接传 true 或 false"},
+            "enum_values": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"静态选项，格式为 {values: [{label, value}]}"},
+            "validation": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"字段校验规则"},
+            "ui_config": {"anyOf":[{"type":"object"},{"type":"null"}],"description":"业务控件配置。关系字段使用 relation_config 指定真实来源与回填，计算使用 computed，条件显隐与必填使用 visibility 和 requiredWhen"},
+            "sort_order": {"type":"integer"}
+          }}
+        }
+      }
     },
     "output_schema": {
       "form": "object",
@@ -385,6 +475,29 @@
       "quality_event": "object"
     },
     "permission_check": "business_query"
+  },
+  "graph.query_object_relationships": {
+    "name": "graph.query_object_relationships",
+    "title": "查询对象与关系",
+    "description": "按名称或编号定位可查看的已发布对象，可指定类型消除歧义。读取一层实际关联、方向和可查看的关系依据，并返回关系探索定位。水阀忽略牌号的试算可使用 material_review 查询意图。",
+    "handler_key": "graph.query_object_relationships",
+    "side_effect": "read",
+    "permission_check": "business_query",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "object_query": {"type": "string", "description": "对象名称或编号"},
+        "object_type": {"type": "string", "description": "可选对象类型名称、编码或 ID"},
+        "intent": {"type": "string", "enum": ["relationships", "material_review"], "description": "默认为查询关系；水阀材料试算可选 material_review"},
+        "ignore_stored_grade": {"type": "boolean", "description": "本次材料试算是否忽略已填牌号，默认 false"}
+      },
+      "required": ["object_query"],
+      "additionalProperties": false
+    },
+    "output_schema": {
+      "relationship_query": "object",
+      "evidence": "array"
+    }
   },
   "graph.query_impact": {
     "name": "graph.query_impact",

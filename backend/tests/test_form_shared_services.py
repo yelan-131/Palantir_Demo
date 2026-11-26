@@ -8,8 +8,8 @@ from sqlalchemy import func, inspect, select, text
 
 from tests.test_record_service import environment
 from app.api import forms
-from app.models.relational import Application, ApplicationMenuNode, Form, FormField, FormLayout, FormVersion, WorkflowBinding, WorkflowDef, WorkflowDefVersion
-from app.services import form_fields, form_versions, form_layouts
+from app.models.relational import Application, ApplicationMenuNode, Form, FormAction, FormField, FormLayout, FormVersion, WorkflowBinding, WorkflowDef, WorkflowDefVersion
+from app.services import form_creation, form_fields, form_versions, form_layouts
 from app.services.ai.low_code_tools import execute_add_form_field, execute_create_form_definition
 from app.services.ai.form_configuration_tools import execute_form_configuration_tool
 from app.services.ai import tool_handlers
@@ -28,6 +28,7 @@ def local_audit(monkeypatch):
     monkeypatch.setattr(form_fields, 'write_audit_log', audit)
     monkeypatch.setattr(form_versions, 'write_audit_log', audit)
     monkeypatch.setattr(forms, 'write_audit_log', audit)
+    monkeypatch.setattr(form_creation, 'write_audit_log', audit)
     monkeypatch.setattr('app.services.ai.low_code_tools.write_audit_log', audit)
 
 
@@ -217,18 +218,35 @@ async def test_ai_creation_uses_shared_field_schema_and_storage(environment):
     app = Application(tenant_id=user['tenant_id'], code='ai_draft_app', name='Draft app', status='published')
     db.add(app)
     await db.flush()
-    result = await execute_create_form_definition(db, user=user, payload={
+    payload = {
         'form': {'code': 'ai_shared_contract', 'name': 'Shared contract',
                  'status': 'published', 'application_id': app.id},
         'menu': {'create': True},
         'fields': [{'field_name': 'quantity', 'label': 'Quantity', 'field_type': 'int',
-            'default_value': '2', 'validation': {'custom': True}}]})
+            'default_value': '2', 'validation': {'custom': True}}],
+        'workflow': {'name': 'Shared creation workflow', 'config': {'nodes': [], 'edges': []}},
+        '_execution_run_id': 'confirm-shared-creation',
+        '_execution_action_key': '0',
+    }
+    result = await execute_create_form_definition(db, user=user, payload=payload)
     form_id = result['form']['id']
     created = await db.get(Form, form_id)
     try:
         assert result['form']['status'] == created.status == 'draft'
         assert result['route_path'] == f'/studio/business-data/{form_id}/design?tab=form'
         assert result['application_binding']['application_id'] == app.id
+        assert result['application_binding']['application_name'] == 'Draft app'
+        actions = await db.scalars(select(FormAction.action_key).where(FormAction.form_id == form_id))
+        assert set(actions) == {'create', 'edit', 'delete', 'export'}
+        workflow = await db.get(WorkflowDef, result['workflow_draft_id'])
+        assert workflow.status == 'draft'
+        assert json.loads(workflow.config)['formId'] == form_id
+        assert await execute_create_form_definition(db, user=user, payload=payload) == result
+        with pytest.raises(HTTPException) as conflict:
+            await execute_create_form_definition(db, user=user, payload={
+                **payload, 'form': {**payload['form'], 'name': 'Different form'},
+            })
+        assert conflict.value.status_code == 409
         assert await db.scalar(select(FormVersion.id).where(FormVersion.form_id == form_id)) is None
         assert await db.scalar(select(ApplicationMenuNode.id).where(ApplicationMenuNode.form_id == form_id)) is None
         assert created.config['viewConfigMeta']['publishedVersion'] == 0
@@ -322,4 +340,4 @@ def test_new_tools_are_registered_and_allowed_by_inspection_skill():
     for name in skills['low_code.inspect_form']['allowed_tools']:
         assert tools[name]['side_effect'] == 'read'
         assert tools[name]['permission_check'] == 'config'
-        assert name in tool_handlers.TOOL_HANDLERS
+        assert tools[name]['handler_key'] in tool_handlers.TOOL_HANDLERS

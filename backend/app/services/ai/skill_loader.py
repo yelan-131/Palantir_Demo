@@ -14,10 +14,12 @@ SKILL_TOOL = 'platform.skills.read'
 FORM_SKILL = 'low_code.create_form_definition'
 PAGE_SKILL = 'low_code.manage_component_page'
 WORKFLOW_DESIGN_SKILL = 'low_code.manage_workflow_design'
+OBJECT_RELATIONSHIPS_SKILL = 'graph.explore_object_relationships'
 BUNDLE_ROOT = Path(__file__).with_name('business_skills')
 PLATFORM_READABLE_SKILLS = frozenset({
     FORM_SKILL, PAGE_SKILL, WORKFLOW_DESIGN_SKILL, 'low_code.manage_application', 'analysis.manage_dashboard',
-    'analysis.query_dashboard', 'low_code.publish_form_to_menu',
+    'analysis.query_dashboard', 'low_code.publish_form_to_menu', OBJECT_RELATIONSHIPS_SKILL,
+    'analysis.analyze_form_records', 'forms.create_record_draft', 'low_code.add_form_field', 'low_code.inspect_form',
 })
 NATIVE_ONLY_SKILLS = frozenset({
     'knowledge.answer_question',
@@ -27,12 +29,8 @@ NATIVE_ONLY_SKILLS = frozenset({
     'maintenance.create_work_order_draft',
     'supply.create_purchase_request_draft',
     'material.create_material_application_draft',
-    'analysis.analyze_form_records',
-    'forms.create_record_draft',
     'low_code.suggest_model_or_page',
-    'low_code.add_form_field',
     'workflow.submit_after_confirmation',
-    'low_code.inspect_form',
 })
 BUNDLED_SKILLS = PLATFORM_READABLE_SKILLS | NATIVE_ONLY_SKILLS
 

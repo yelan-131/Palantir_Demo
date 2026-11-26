@@ -13,6 +13,9 @@ interface RelationshipMapEdge {
   source: string;
   target: string;
   label: string;
+  kind?: 'candidate';
+  symmetric?: boolean;
+  strength?: number;
 }
 
 interface RelationshipMapProps {
@@ -21,9 +24,9 @@ interface RelationshipMapProps {
   positions?: Positions;
   selectedNodeId?: string;
   selectedEdgeId?: string;
+  highlightedEdgeIds?: ReadonlySet<string>;
   onSelectNode: (id: string) => void;
   onSelectEdge: (id: string) => void;
-  onHoverNode?: (node: (Point & { id: string }) | null) => void;
   resetSignal: number;
 }
 
@@ -45,6 +48,7 @@ type Drag = {
 
 const pressedButtonMasks = [1, 4, 2] as const;
 const dragThreshold = 4;
+const labelSettleDelay = 140;
 const startCamera = (): RelationshipCamera => ({ yaw: -0.45, pitch: 0.22, zoom: 1, offsetX: 0, offsetY: 0 });
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const noPositions: Positions = new Map();
@@ -222,6 +226,8 @@ export default function RelationshipMap(props: RelationshipMapProps) {
   const frame = useRef<number>();
   const hover = useRef<Hit>();
   const drag = useRef<Drag>();
+  const labelSlots = useRef(new Map<string, number>());
+  const labelSettleTimer = useRef<number>();
   const degrees = useRef(new Map<string, number>());
   const lanes = useRef(new Map<string, number>());
   const drawn = useRef({
@@ -255,18 +261,26 @@ export default function RelationshipMap(props: RelationshipMapProps) {
       const positions = new Map(projected.map(node => [node.id, node]));
       drawn.current = { nodes: projected, edges: [], labels: [] };
 
-      const captions: { id: string; center: Point; text: string; active: boolean }[] = [];
-      const emphasized = (edge: RelationshipMapEdge) => edge.id === model.selectedEdgeId || edge.id === hover.current?.id;
-      const edgeOrder = [...model.edges].sort((a, b) => Number(emphasized(a)) - Number(emphasized(b)));
+      const captions: { id: string; center: Point; text: string }[] = [];
+      const interactive = (id: string) => id === model.selectedEdgeId || id === hover.current?.id;
+      const highlight = (id: string) => model.highlightedEdgeIds?.has(id) ?? false;
+      const edgePriority = (id: string) => interactive(id) ? 2 : Number(highlight(id));
+      const edgeOrder = [...model.edges].sort((a, b) => edgePriority(a.id) - edgePriority(b.id));
       const adjacent = new Set<string>();
+      const highlightedNodes = new Set<string>();
       for (const edge of edgeOrder) {
         const source = positions.get(edge.source);
         const destination = positions.get(edge.target);
         if (!source || !destination) continue;
         const path = edgePath(source, destination, lanes.current.get(edge.id) ?? 0);
         drawn.current.edges.push({ id: edge.id, path });
-        const emphasizedEdge = emphasized(edge);
+        const highlightedEdge = highlight(edge.id);
+        const emphasizedEdge = interactive(edge.id) || highlightedEdge;
         const adjacentEdge = edge.source === model.selectedNodeId || edge.target === model.selectedNodeId;
+        if (highlightedEdge) {
+          highlightedNodes.add(edge.source);
+          highlightedNodes.add(edge.target);
+        }
         if (adjacentEdge) {
           adjacent.add(edge.source);
           adjacent.add(edge.target);
@@ -274,13 +288,18 @@ export default function RelationshipMap(props: RelationshipMapProps) {
         const tint = emphasizedEdge ? palette.focus : adjacentEdge ? palette.muted : palette.line;
         context.strokeStyle = tint;
         context.fillStyle = tint;
-        context.lineWidth = emphasizedEdge ? 2.15 : adjacentEdge ? 1.65 : 1;
+        const baseWidth = edge.strength === undefined
+          ? emphasizedEdge ? 2.15 : adjacentEdge ? 1.65 : 1
+          : 1 + 2 * clamp(edge.strength, 0, 1) + (emphasizedEdge ? 0.55 : 0);
+        context.lineWidth = baseWidth + (highlightedEdge ? 0.65 : 0);
         context.globalAlpha = emphasizedEdge || adjacentEdge ? 1 : clamp(0.53 + (source.depth + destination.depth) * 0.1, 0.35, 0.72);
         context.beginPath();
         context.moveTo(path.start.x, path.start.y);
         context.quadraticCurveTo(path.control.x, path.control.y, path.end.x, path.end.y);
+        if (edge.kind === 'candidate') context.setLineDash([5, 4]);
         context.stroke();
-        if (emphasizedEdge || adjacentEdge || model.edges.length < 16) {
+        if (edge.kind === 'candidate') context.setLineDash([]);
+        if (!edge.symmetric && (emphasizedEdge || adjacentEdge || model.edges.length < 16)) {
           const angle = Math.atan2(path.end.y - path.control.y, path.end.x - path.control.x);
           const size = emphasizedEdge ? 7.3 : 5.6;
           context.beginPath();
@@ -290,11 +309,10 @@ export default function RelationshipMap(props: RelationshipMapProps) {
           context.closePath();
           context.fill();
         }
-        if (emphasizedEdge || (adjacentEdge && model.edges.length <= 12 && Math.hypot(source.x - destination.x, source.y - destination.y) > 88)) {
+        if (emphasizedEdge) {
           captions.push({
             id: edge.id, center: atCurve(path, 0.5),
             text: edge.label,
-            active: emphasizedEdge,
           });
         }
       }
@@ -302,14 +320,15 @@ export default function RelationshipMap(props: RelationshipMapProps) {
 
       for (const node of projected) {
         const active = node.id === model.selectedNodeId || node.id === hover.current?.id;
-        if (active) {
+        const highlighted = highlightedNodes.has(node.id);
+        context.globalAlpha = active || highlighted ? 1 : clamp(0.94 + node.depth * 0.12, 0.73, 1);
+        if (active || highlighted) {
           context.strokeStyle = palette.focus;
-          context.lineWidth = 1.5;
+          context.lineWidth = active ? 1.5 : 1;
           context.beginPath();
-          context.arc(node.x, node.y, node.radius + 4, 0, Math.PI * 2);
+          context.arc(node.x, node.y, node.radius + (active ? 4 : 2.5), 0, Math.PI * 2);
           context.stroke();
         }
-        context.globalAlpha = active ? 1 : clamp(0.94 + node.depth * 0.12, 0.73, 1);
         context.fillStyle = node.color;
         context.beginPath();
         context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
@@ -336,8 +355,42 @@ export default function RelationshipMap(props: RelationshipMapProps) {
         reserved.push(bounds);
         drawn.current.labels.push({ hit, bounds });
       };
-      for (const edge of captions.sort((a, b) => Number(b.active) - Number(a.active))) {
-        context.font = '500 12px ' + fontFamily;
+      // Keep label sizes and placement order independent of pointer and selection highlights.
+      context.font = `500 12px ${fontFamily}`;
+      const orderedNodes = [...projected].sort((left, right) =>
+        (degrees.current.get(right.id) ?? 0) - (degrees.current.get(left.id) ?? 0) || left.id.localeCompare(right.id));
+      const unplaced: { node: ProjectedNode; label: string; candidates: Bounds[] }[] = [];
+      const drawNodeLabel = (node: ProjectedNode, label: string, bounds: Bounds) => {
+        const highlighted = node.id === model.selectedNodeId || node.id === hover.current?.id
+          || adjacent.has(node.id) || highlightedNodes.has(node.id);
+        caption(label, bounds, { kind: 'node', id: node.id }, palette.panel, highlighted ? palette.text : palette.muted);
+      };
+      for (const node of orderedNodes) {
+        const label = node.label.length > 30 ? node.label.slice(0, 29) + '…' : node.label;
+        const width = context.measureText(label).width + 8;
+        const height = 17;
+        const gap = node.radius + 7;
+        const candidates = [
+          { x: node.x + gap, y: node.y - height / 2 },
+          { x: node.x - width - gap, y: node.y - height / 2 },
+          { x: node.x - width / 2, y: node.y + gap },
+          { x: node.x - width / 2, y: node.y - height - gap },
+        ].map(point => ({ ...point, width, height }));
+        const previous = labelSlots.current.get(node.id);
+        const bounds = previous === undefined ? undefined : candidates[previous];
+        if (bounds && available(bounds, node.id)) drawNodeLabel(node, label, bounds);
+        else if (labelSettleTimer.current === undefined) unplaced.push({ node, label, candidates });
+      }
+      // Resolve collisions after camera motion stops, giving established labels their space first.
+      for (const { node, label, candidates } of unplaced) {
+        const slot = candidates.findIndex(bounds => available(bounds, node.id));
+        if (slot < 0) continue;
+        labelSlots.current.set(node.id, slot);
+        drawNodeLabel(node, label, candidates[slot]);
+      }
+
+      if (highlightedNodes.size) captions.reverse();
+      for (const edge of captions) {
         const width = context.measureText(edge.text).width + 8;
         const textX = edge.center.x - width / 2;
         const preferred = [-15, 5, -30, 20].map(offset => ({
@@ -346,25 +399,6 @@ export default function RelationshipMap(props: RelationshipMapProps) {
         if (preferred) caption(edge.text, preferred, { kind: 'edge', id: edge.id }, palette.tag, palette.text);
       }
 
-      const priority = (node: ProjectedNode) => node.id === model.selectedNodeId ? 1000
-        : node.id === hover.current?.id ? 500 : adjacent.has(node.id) ? 150 : (degrees.current.get(node.id) ?? 0) + node.depth;
-      for (const node of [...projected].sort((a, b) => priority(b) - priority(a))) {
-        const featured = priority(node) >= 150;
-        const fontSize = featured ? 14 : 12;
-        context.font = (featured ? '600 ' : '500 ') + fontSize + 'px ' + fontFamily;
-        const label = node.label.length > 30 ? node.label.slice(0, 29) + '…' : node.label;
-        const width = context.measureText(label).width + 8;
-        const height = fontSize + 5;
-        const gap = node.radius + 6;
-        const candidates = [
-          { x: node.x + gap, y: node.y - height / 2 },
-          { x: node.x - width - gap, y: node.y - height / 2 },
-          { x: node.x - width / 2, y: node.y + gap },
-          { x: node.x - width / 2, y: node.y - height - gap },
-        ].map(point => ({ ...point, width, height }));
-        const bounds = candidates.find(candidate => available(candidate, node.id));
-        if (bounds) caption(label, bounds, { kind: 'node', id: node.id }, palette.panel, featured ? palette.text : palette.muted);
-      }
     });
   }, []);
 
@@ -372,12 +406,6 @@ export default function RelationshipMap(props: RelationshipMapProps) {
     const previous = hover.current;
     if (previous?.kind === hit?.kind && previous?.id === hit?.id) return;
     hover.current = hit;
-    if (hit?.kind === 'node') {
-      const node = drawn.current.nodes.find(item => item.id === hit.id);
-      if (node) live.current.onHoverNode?.({ id: node.id, x: node.x, y: node.y });
-    } else if (previous?.kind === 'node') {
-      live.current.onHoverNode?.(null);
-    }
     schedule();
   }, [schedule]);
 
@@ -385,6 +413,8 @@ export default function RelationshipMap(props: RelationshipMapProps) {
     const fitted = fitCamera(points.current, viewport.current);
     camera.current = fitted;
     minZoom.current = Math.min(0.42, fitted.zoom * 0.8);
+    window.clearTimeout(labelSettleTimer.current);
+    labelSettleTimer.current = undefined;
   }, []);
 
   useLayoutEffect(() => {
@@ -396,6 +426,10 @@ export default function RelationshipMap(props: RelationshipMapProps) {
     const positionsChanged = scene.current.positions !== props.positions;
     const reset = scene.current.resetSignal !== props.resetSignal;
     if (nodesChanged || edgesChanged || positionsChanged || reset) updateHover();
+    if (reset) labelSlots.current.clear();
+    else if (nodesChanged) for (const id of labelSlots.current.keys()) {
+      if (!nodeIds.has(id)) labelSlots.current.delete(id);
+    }
     if (nodesChanged || positionsChanged) {
       const supplied = props.positions;
       const visible = relationshipPositions([...nodeIds].filter(id => !supplied?.has(id)));
@@ -449,18 +483,30 @@ export default function RelationshipMap(props: RelationshipMapProps) {
       updateHover();
       if (frame.current !== undefined) window.cancelAnimationFrame(frame.current);
       frame.current = undefined;
+      window.clearTimeout(labelSettleTimer.current);
+      labelSettleTimer.current = undefined;
     };
   }, [fitView, schedule, updateHover]);
+
+  function deferLabelPlacement() {
+    window.clearTimeout(labelSettleTimer.current);
+    labelSettleTimer.current = window.setTimeout(() => {
+      labelSettleTimer.current = undefined;
+      schedule();
+    }, labelSettleDelay);
+  }
 
   function changeZoom(factor: number, anchor: Point = { x: viewport.current.width / 2, y: viewport.current.height / 2 }) {
     const view = camera.current;
     const next = clamp(view.zoom * factor, minZoom.current, 3.8);
+    if (next === view.zoom) return;
     const ratio = next / view.zoom;
     const dx = anchor.x - viewport.current.width / 2;
     const dy = anchor.y - viewport.current.height / 2;
     view.offsetX = dx + (view.offsetX - dx) * ratio;
     view.offsetY = dy + (view.offsetY - dy) * ratio;
     view.zoom = next;
+    deferLabelPlacement();
     schedule();
   }
 
@@ -533,6 +579,7 @@ export default function RelationshipMap(props: RelationshipMapProps) {
         camera.current.yaw += dx * 0.008;
         camera.current.pitch = clamp(camera.current.pitch - dy * 0.008, -1.38, 1.38);
       }
+      deferLabelPlacement();
       schedule();
       return;
     }
@@ -567,19 +614,23 @@ export default function RelationshipMap(props: RelationshipMapProps) {
       case '+':
       case '=': changeZoom(1.15); break;
       case '-': changeZoom(1 / 1.15); break;
-      case '0': fitView(); break;
+      case '0': labelSlots.current.clear(); fitView(); break;
       default: return;
     }
     event.preventDefault();
+    if (event.key.startsWith('Arrow')) deferLabelPlacement();
     updateHover();
     schedule();
   }
 
+  const highlightedEdgeCount = props.edges.filter(edge => props.highlightedEdgeIds?.has(edge.id)).length;
   return <div className="relationship-map" ref={host}>
     <canvas
       ref={canvas}
       tabIndex={0}
-      aria-label="带 X、Y、Z 方位轴的对象空间关系图。实线表示记录关联，虚线表示候选关系。左键拖动旋转，右键拖动平移，中键上下拖动或滚轮缩放。方向键旋转，加减键缩放，数字零重置视角。"
+      aria-label={`带 X、Y、Z 方位轴的对象空间关系图。实线表示记录关联，虚线表示候选关系。${
+        highlightedEdgeCount ? `已高亮 ${highlightedEdgeCount} 条查询关系。` : ''
+      }左键拖动旋转，右键拖动平移，中键上下拖动或滚轮缩放。方向键旋转，加减键缩放，数字零重置视角。`}
       onPointerDown={beginDrag}
       onPointerMove={movePointer}
       onPointerUp={finishDrag}

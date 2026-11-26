@@ -2,14 +2,11 @@ import SettingsTabs from '@/components/SettingsTabs';
 import { isPlatformAdmin, useAuthStore } from '@/stores/authStore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Button,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Pagination,
   Popconfirm,
@@ -29,31 +26,18 @@ import {
   adminListRoleTemplates,
   adminListRoles,
   adminSetPermissions,
-  adminSimulatePermission,
+  adminUpdateRole,
   adminUpdateUser,
   getAISettings,
   updateAISettings,
 } from '@/services/api';
-
-interface PermissionItem {
-  id?: number;
-  resource_type: string;
-  resource_key?: string;
-  action: string;
-  effect?: string;
-  data_scope?: string;
-  condition_json?: Record<string, unknown> | null;
-  field_rules_json?: Record<string, unknown> | null;
-  priority?: number;
-  enabled?: boolean;
-}
 
 interface RoleItem {
   id: number;
   name: string;
   label: string;
   description?: string;
-  permissions: PermissionItem[];
+  permissions: unknown[];
 }
 
 interface UserItem {
@@ -65,42 +49,6 @@ interface UserItem {
   is_admin?: boolean;
   roles?: Array<{ id: number; name: string; label: string }>;
 }
-
-const resourceTypes = ['all', 'menu', 'application', 'form', 'workflow', 'report', 'audit', 'data', 'action'];
-const actions = ['*', 'view', 'create', 'edit', 'delete', 'approve', 'export', 'publish'];
-const dataScopes = ['all', 'self', 'own_org', 'org_tree', 'selected_orgs', 'condition'];
-
-const resourceTypeLabels: Record<string, string> = {
-  all: '全部资源',
-  menu: '菜单',
-  application: '应用',
-  form: '表单',
-  workflow: '流程',
-  report: '报表',
-  audit: '审计',
-  data: '数据对象',
-  action: '操作按钮',
-};
-
-const actionLabels: Record<string, string> = {
-  '*': '全部动作',
-  view: '查看',
-  create: '新建',
-  edit: '编辑',
-  delete: '删除',
-  approve: '审批',
-  export: '导出',
-  publish: '发布',
-};
-
-const dataScopeLabels: Record<string, string> = {
-  all: '全部数据',
-  self: '仅本人',
-  own_org: '本部门',
-  org_tree: '本部门及下级',
-  selected_orgs: '指定组织',
-  condition: '按条件规则',
-};
 
 const aiCapabilityOptions = [
   { label: 'Page Q&A', value: 'qa' },
@@ -129,41 +77,22 @@ const aiAgentModeOptions = [
   { label: '关闭', value: 'off' },
 ];
 
-const toOptions = (values: string[], labels: Record<string, string>) => (
-  values.map((value) => ({ label: `${labels[value] || value} (${value})`, value }))
-);
-
-function parseJson(value?: string) {
-  if (!value?.trim()) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw new Error('JSON 格式不正确');
-  }
-}
-
-function stringifyJson(value: unknown) {
-  return value ? JSON.stringify(value, null, 2) : '';
-}
-
 export default function RoleManagement() {
   const [roles, setRoles] = useState<RoleItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [bindingOpen, setBindingOpen] = useState(false);
   const [bindingRole, setBindingRole] = useState<RoleItem | null>(null);
   const [bindingUserIds, setBindingUserIds] = useState<number[]>([]);
   const [bindingSaving, setBindingSaving] = useState(false);
-  const [editingRole, setEditingRole] = useState<RoleItem | null>(null);
-  const [simulation, setSimulation] = useState<Record<string, unknown> | null>(null);
+  const [roleInfo, setRoleInfo] = useState<RoleItem | null>(null);
+  const [roleInfoSaving, setRoleInfoSaving] = useState(false);
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
   const [rolePage, setRolePage] = useState(1);
   const [rolePageSize, setRolePageSize] = useState(100);
-  const [form] = Form.useForm();
   const [createForm] = Form.useForm();
-  const [simulateForm] = Form.useForm();
+  const [roleInfoForm] = Form.useForm<{ label: string; description?: string }>();
 
   const fetchRoles = useCallback(async () => {
     setLoading(true);
@@ -232,59 +161,26 @@ export default function RoleManagement() {
     });
   };
 
-  const openPermissions = (role: RoleItem) => {
-    setEditingRole(role);
-    form.setFieldsValue({
-      permissions: (role.permissions || []).map((item) => ({
-        ...item,
-        effect: item.effect || 'allow',
-        data_scope: item.data_scope || 'all',
-        priority: item.priority ?? 100,
-        enabled: item.enabled !== false,
-        condition_json_text: stringifyJson(item.condition_json),
-        field_rules_json_text: stringifyJson(item.field_rules_json),
-      })),
-    });
-    setDrawerOpen(true);
+  const openRoleInfo = (role: RoleItem) => {
+    roleInfoForm.setFieldsValue({ label: role.label, description: role.description ?? '' });
+    setRoleInfo(role);
   };
 
-  const savePermissions = async () => {
-    if (!editingRole) return;
-    const values = await form.validateFields();
+  const saveRoleInfo = async (values: { label: string; description?: string }) => {
+    if (!roleInfo) return;
+    setRoleInfoSaving(true);
     try {
-      const permissions = (values.permissions || []).map((item: any) => ({
-        resource_type: item.resource_type,
-        resource_key: item.resource_key || '*',
-        action: item.action,
-        effect: item.effect || 'allow',
-        data_scope: item.data_scope || 'all',
-        condition_json: parseJson(item.condition_json_text),
-        field_rules_json: parseJson(item.field_rules_json_text),
-        priority: item.priority ?? 100,
-        enabled: item.enabled !== false,
-      }));
-      await adminSetPermissions({ role_id: editingRole.id, permissions });
-      message.success('权限矩阵已保存');
-      setDrawerOpen(false);
-      fetchRoles();
-    } catch (error: any) {
-      message.error(error?.message || '保存失败');
-    }
-  };
-
-  const runSimulation = async () => {
-    const values = await simulateForm.validateFields();
-    try {
-      const payload = {
-        ...values,
-        user_id: Number(values.user_id),
-        form_id: values.form_id ? Number(values.form_id) : undefined,
-        record: parseJson(values.record_json) || {},
-      };
-      const res = await adminSimulatePermission(payload);
-      setSimulation(res.data?.data || {});
-    } catch (error: any) {
-      message.error(error?.message || '模拟失败');
+      await adminUpdateRole(roleInfo.id, {
+        label: values.label.trim(),
+        description: values.description?.trim() || null,
+      });
+      message.success('角色信息已保存');
+      setRoleInfo(null);
+      void fetchRoles();
+    } catch {
+      message.error('保存角色信息失败');
+    } finally {
+      setRoleInfoSaving(false);
     }
   };
 
@@ -370,19 +266,19 @@ export default function RoleManagement() {
             loading={loading}
             size="small"
             className="role-management-table"
-            scroll={{ x: 1300, y: '100%' }}
+            scroll={{ x: 372, y: '100%' }}
             pagination={false}
             rowClassName={(role) => (role.id === selectedRoleId ? 'role-row-selected' : '')}
             onRow={(role) => ({
               onClick: () => setSelectedRoleId(role.id),
             })}
             columns={[
-              { title: '角色编码', dataIndex: 'name', width: 180 },
-              { title: '显示名称', dataIndex: 'label', width: 170 },
-              { title: '描述', dataIndex: 'description', width: 330, ellipsis: true },
+              { title: '角色编码', dataIndex: 'name', width: 92, ellipsis: true },
+              { title: '显示名称', dataIndex: 'label', width: 112, ellipsis: true },
+              { title: '描述', dataIndex: 'description', ellipsis: true },
               {
                 title: '绑定用户',
-                width: 280,
+                width: 108,
                 render: (_value, role: RoleItem) => {
                   const boundUsers = getBoundUsers(role);
                   return boundUsers.length ? (
@@ -398,28 +294,6 @@ export default function RoleManagement() {
                     <Typography.Text type="secondary">未绑定</Typography.Text>
                   );
                 },
-              },
-              {
-                title: '权限',
-                width: 150,
-                align: 'center',
-                render: (_value, role: RoleItem) => <Tag color="blue">{role.permissions?.length || 0} 条</Tag>,
-              },
-              {
-                title: '操作',
-                width: 190,
-                fixed: 'right',
-                render: (_value, role: RoleItem) => (
-                  <Space size={4} onClick={(event) => event.stopPropagation()}>
-                    <Button size="small" icon={<EditOutlined />} onClick={() => openPermissions(role)}>权限</Button>
-                    <Button size="small" onClick={() => openUserBinding(role)}>用户</Button>
-                    {role.name !== 'admin' && (
-                      <Popconfirm title="确定删除该角色？" onConfirm={() => deleteRole(role)}>
-                        <Button size="small" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>
-                    )}
-                  </Space>
-                ),
               },
             ]}
           />
@@ -442,165 +316,37 @@ export default function RoleManagement() {
         <RolePreviewPanel
           role={selectedRole}
           users={users}
-          totalRoles={roles.length}
-          totalPermissions={permissionCount}
-          onEdit={openPermissions}
+          onEditDetails={openRoleInfo}
           onBindUsers={openUserBinding}
           onDelete={deleteRole}
         />
       </div>
 
-      <Drawer
-        title={`配置角色权限 - ${editingRole?.label || ''}`}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        width="min(560px, calc(100vw - 180px))"
-        extra={<Button type="primary" onClick={savePermissions}>保存</Button>}
+      <Modal
+        title="编辑角色信息"
+        open={roleInfo !== null}
+        onOk={() => roleInfoForm.submit()}
+        onCancel={() => setRoleInfo(null)}
+        confirmLoading={roleInfoSaving}
+        cancelButtonProps={{ disabled: roleInfoSaving }}
+        closable={!roleInfoSaving}
+        maskClosable={!roleInfoSaving}
+        keyboard={!roleInfoSaving}
+        okText="保存"
+        forceRender
       >
-        <SettingsTabs
-          items={[
-            {
-              key: 'rules',
-              label: '权限规则',
-              children: (
-                <Form form={form} layout="vertical" className="role-permission-editor">
-                  <Form.List name="permissions">
-                    {(fields, { add, remove }) => (
-                      <div className="role-permission-rule-list">
-                        <div className="role-permission-rule-toolbar">
-                          <Button
-                            icon={<PlusOutlined />}
-                            onClick={() => add({
-                              resource_type: 'form',
-                              resource_key: '*',
-                              action: 'view',
-                              effect: 'allow',
-                              data_scope: 'all',
-                              priority: 100,
-                              enabled: true,
-                            })}
-                          >
-                            添加授权
-                          </Button>
-                          <Typography.Text type="secondary">
-                            {fields.length} 条授权，拒绝优先；高级条件默认收起
-                          </Typography.Text>
-                        </div>
-                        {fields.map((field, index) => (
-                          <div key={field.key} className="role-permission-rule-card">
-                            <div className="role-permission-rule-head">
-                              <div className="role-permission-rule-title">
-                                <Typography.Text strong>授权 {index + 1}</Typography.Text>
-                                <label className="role-permission-enable">
-                                  <Form.Item {...field} name={[field.name, 'enabled']} valuePropName="checked" noStyle>
-                                    <Switch size="small" />
-                                  </Form.Item>
-                                  <span>启用</span>
-                                </label>
-                              </div>
-                              <Button size="small" danger onClick={() => remove(field.name)}>删除</Button>
-                            </div>
-                            <div className="role-permission-card-body">
-                              <section className="role-permission-target-row">
-                                <Typography.Text type="secondary">授权对象</Typography.Text>
-                                <div className="role-permission-target-fields">
-                                  <Form.Item {...field} name={[field.name, 'resource_type']} rules={[{ required: true }]}>
-                                    <Select placeholder="资源类型" options={toOptions(resourceTypes, resourceTypeLabels)} />
-                                  </Form.Item>
-                                  <Form.Item {...field} name={[field.name, 'resource_key']}>
-                                    <Input placeholder="全部填 *，或输入资源编码" />
-                                  </Form.Item>
-                                </div>
-                              </section>
-                              <div className="role-permission-action-grid">
-                                <Form.Item {...field} name={[field.name, 'effect']} label="授权结果" rules={[{ required: true }]}>
-                                  <Select options={[{ label: '允许', value: 'allow' }, { label: '拒绝', value: 'deny' }]} />
-                                </Form.Item>
-                                <Form.Item {...field} name={[field.name, 'action']} label="可执行动作" rules={[{ required: true }]}>
-                                  <Select options={toOptions(actions, actionLabels)} />
-                                </Form.Item>
-                                <Form.Item {...field} name={[field.name, 'data_scope']} label="数据范围">
-                                  <Select options={toOptions(dataScopes, dataScopeLabels)} />
-                                </Form.Item>
-                              </div>
-                            </div>
-                            <details className="role-permission-advanced">
-                              <summary>高级规则（条件、字段、优先级）</summary>
-                              <div className="role-permission-advanced-grid">
-                                <Form.Item {...field} name={[field.name, 'priority']} label="优先级">
-                                  <InputNumber min={1} />
-                                </Form.Item>
-                                <Form.Item
-                                  {...field}
-                                  name={[field.name, 'condition_json_text']}
-                                  label="条件规则"
-                                >
-                                  <Input.TextArea rows={2} placeholder='{"rules":[{"field":"org_id","op":"in","value":"$current_org_ids"}]}' />
-                                </Form.Item>
-                                <Form.Item
-                                  {...field}
-                                  name={[field.name, 'field_rules_json_text']}
-                                  label="字段规则"
-                                >
-                                  <Input.TextArea rows={2} placeholder='{"fields":{"cost":{"visible":false,"editable":false}}}' />
-                                </Form.Item>
-                              </div>
-                            </details>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Form.List>
-                </Form>
-              ),
-            },
-            {
-              key: 'simulation',
-              label: '权限模拟',
-              children: (
-                <>
-                  <Alert
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="用一个用户和一条资源请求测试最终权限结果"
-                    description="模拟会返回 allow/deny、命中的规则和原因，适合排查为什么某个用户看不到表单或不能编辑字段。"
-                  />
-                  <Form form={simulateForm} layout="inline" style={{ rowGap: 12 }}>
-                    <Form.Item name="user_id" label="用户 ID" rules={[{ required: true }]}>
-                      <InputNumber min={1} />
-                    </Form.Item>
-                    <Form.Item name="resource_type" label="资源类型" initialValue="form">
-                      <Select style={{ width: 160 }} options={toOptions(resourceTypes, resourceTypeLabels)} />
-                    </Form.Item>
-                    <Form.Item name="resource_key" label="资源 Key" initialValue="*">
-                      <Input style={{ width: 150 }} />
-                    </Form.Item>
-                    <Form.Item name="action" label="动作" initialValue="view">
-                      <Select style={{ width: 130 }} options={toOptions(actions, actionLabels)} />
-                    </Form.Item>
-                    <Form.Item name="form_id" label="表单 ID">
-                      <InputNumber min={1} />
-                    </Form.Item>
-                    <Form.Item name="field_name" label="字段">
-                      <Input style={{ width: 120 }} />
-                    </Form.Item>
-                    <Form.Item name="record_json" label="记录 JSON">
-                      <Input style={{ width: 240 }} placeholder='{"org_id":1}' />
-                    </Form.Item>
-                    <Button onClick={runSimulation}>模拟</Button>
-                  </Form>
-                  {simulation && (
-                    <pre style={{ marginTop: 12, background: 'var(--mf-panel-soft)', padding: 12, borderRadius: 10 }}>
-                      {JSON.stringify(simulation, null, 2)}
-                    </pre>
-                  )}
-                </>
-              ),
-            },
-          ]}
-        />
-      </Drawer>
+        <Form form={roleInfoForm} layout="vertical" onFinish={saveRoleInfo} disabled={roleInfoSaving}>
+          <Form.Item label="角色编码">
+            <Input value={roleInfo?.name} readOnly />
+          </Form.Item>
+          <Form.Item name="label" label="显示名称" rules={[{ required: true, whitespace: true }]}>
+            <Input maxLength={200} />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={`绑定用户 - ${bindingRole?.label || ''}`}
@@ -632,10 +378,14 @@ export default function RoleManagement() {
   );
 }
 
-function AIRolePolicyPanel({ role }: { role: RoleItem }) {
+function AIRolePolicyPanel({ role, editable, onEditEnd }: {
+  role: RoleItem;
+  editable: boolean;
+  onEditEnd: () => void;
+}) {
   const [form] = Form.useForm();
-  const [settings, setSettings] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(false);
+  const [settings, setSettings] = useState<Record<string, any> | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const loadPolicy = useCallback(async () => {
@@ -652,29 +402,31 @@ function AIRolePolicyPanel({ role }: { role: RoleItem }) {
         agentMode: role.name === 'viewer' ? 'readonly' : 'save_after_confirm',
       };
       setSettings(nextSettings);
+      form.resetFields();
       form.setFieldsValue(policy);
     } catch {
+      setSettings(null);
       message.error('AI 策略加载失败');
     } finally {
       setLoading(false);
     }
   }, [form, role.name]);
 
-  useEffect(() => { loadPolicy(); }, [loadPolicy]);
+  useEffect(() => { loadPolicy(); }, [loadPolicy, editable]);
 
-  const savePolicy = async () => {
-    const values = await form.validateFields();
+  const savePolicy = async (values: Record<string, unknown>) => {
+    if (!settings || loading || saving || !editable) return;
     setSaving(true);
     try {
       const policies = Array.isArray(settings.rolePolicies) ? settings.rolePolicies : [];
       const nextPolicy = { ...values, role: role.name };
       const found = policies.some((item: any) => item.role === role.name);
       const nextPolicies = found
-        ? policies.map((item: any) => (item.role === role.name ? nextPolicy : item))
+        ? policies.map((item: any) => (item.role === role.name ? { ...item, ...nextPolicy } : item))
         : [...policies, nextPolicy];
       await updateAISettings({ rolePolicies: nextPolicies });
       message.success('AI 角色策略已保存');
-      loadPolicy();
+      onEditEnd();
     } catch {
       message.error('AI 角色策略保存失败');
     } finally {
@@ -691,14 +443,20 @@ function AIRolePolicyPanel({ role }: { role: RoleItem }) {
             <Typography.Text strong>{role.label} 的 AI 策略</Typography.Text>
           </Space>
           <Space>
-            <Button size="small" onClick={loadPolicy} loading={loading}>刷新</Button>
-            <Button size="small" type="primary" onClick={savePolicy} loading={saving}>保存</Button>
+            {editable ? (
+              <>
+                <Button size="small" onClick={onEditEnd} disabled={saving}>取消</Button>
+                <Button size="small" type="primary" onClick={() => form.submit()} loading={saving} disabled={loading || !settings}>保存</Button>
+              </>
+            ) : (
+              <Button size="small" onClick={loadPolicy} loading={loading}>刷新</Button>
+            )}
           </Space>
         </Space>
         <Typography.Text type="secondary">
           全局 AI 策略按角色编码匹配，控制 AI 能力、可访问的业务域和写入确认方式。
         </Typography.Text>
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" onFinish={savePolicy} disabled={!editable || loading || saving || !settings}>
           <Form.Item name="enabled" label="启用该角色 AI 策略" valuePropName="checked">
             <Switch />
           </Form.Item>
@@ -720,21 +478,21 @@ function AIRolePolicyPanel({ role }: { role: RoleItem }) {
 function RolePreviewPanel({
   role,
   users,
-  totalRoles,
-  totalPermissions,
-  onEdit,
+  onEditDetails,
   onBindUsers,
   onDelete,
 }: {
   role: RoleItem | null;
   users: UserItem[];
-  totalRoles: number;
-  totalPermissions: number;
-  onEdit: (role: RoleItem) => void;
+  onEditDetails: (role: RoleItem) => void;
   onBindUsers: (role: RoleItem) => void;
   onDelete: (role: RoleItem) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState('overview');
+  const [editingPolicyRoleId, setEditingPolicyRoleId] = useState<number | null>(null);
+  const roleId = role?.id;
+
+  useEffect(() => { setEditingPolicyRoleId(null); }, [roleId]);
   const canManageGlobalSettings = useAuthStore(state => isPlatformAdmin(state.user));
 
   if (!role) {
@@ -746,17 +504,21 @@ function RolePreviewPanel({
   }
 
   const permissions = role.permissions || [];
-  const allowCount = permissions.filter((item) => (item.effect || 'allow') === 'allow').length;
-  const denyCount = permissions.filter((item) => item.effect === 'deny').length;
-  const scopedCount = permissions.filter((item) => item.data_scope && item.data_scope !== 'all').length;
-  const disabledCount = permissions.filter((item) => item.enabled === false).length;
   const boundUsers = users.filter((user) => user.roles?.some((item) => item.id === role.id || item.name === role.name));
-  const resourceStats = resourceTypes
-    .map((type) => ({
-      type,
-      count: permissions.filter((item) => item.resource_type === type).length,
-    }))
-    .filter((item) => item.count > 0);
+  const visibleTab = activeTab === 'users' || (canManageGlobalSettings && activeTab === 'ai-policy')
+    ? activeTab
+    : 'overview';
+  const editingPolicy = editingPolicyRoleId === role.id;
+  const editCurrentSection = () => {
+    switch (visibleTab) {
+      case 'users':
+        return onBindUsers(role);
+      case 'ai-policy':
+        return setEditingPolicyRoleId(role.id);
+      default:
+        return onEditDetails(role);
+    }
+  };
 
   const tabs = [
     {
@@ -778,53 +540,10 @@ function RolePreviewPanel({
       ),
     },
     {
-      key: 'summary',
-      label: '权限概览',
-      children: (
-        <section className="role-impact-card">
-          <Typography.Text strong>权限概览</Typography.Text>
-          <div className="role-preview-stats">
-            <div><span>允许</span><strong>{allowCount}</strong></div>
-            <div><span>拒绝</span><strong>{denyCount}</strong></div>
-            <div><span>数据范围</span><strong>{scopedCount}</strong></div>
-            <div><span>停用规则</span><strong>{disabledCount}</strong></div>
-          </div>
-        </section>
-      ),
-    },
-    {
-      key: 'rules',
-      label: `权限规则 (${permissions.length})`,
-      children: (
-        <div className="role-rule-list">
-          {permissions.length ? permissions.slice(0, 12).map((item, index) => (
-            <div className="role-rule-item" key={`${item.resource_type}-${item.resource_key}-${item.action}-${index}`}>
-              <span>{index + 1}</span>
-              <div>
-                <strong>{resourceTypeLabels[item.resource_type] || item.resource_type}</strong>
-                <small>{item.resource_key || '*'}</small>
-              </div>
-              <Tag color={(item.effect || 'allow') === 'allow' ? 'green' : 'red'}>
-                {(item.effect || 'allow') === 'allow' ? '允许' : '拒绝'}
-              </Tag>
-              <Tag color="blue">{actionLabels[item.action] || item.action}</Tag>
-            </div>
-          )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无权限规则" />}
-          {permissions.length > 12 && (
-            <Typography.Text type="secondary">还有 {permissions.length - 12} 条规则，请进入权限矩阵查看。</Typography.Text>
-          )}
-        </div>
-      ),
-    },
-    {
       key: 'users',
       label: `用户 (${boundUsers.length})`,
       children: (
         <div className="role-user-list">
-          <div className="role-user-list-head">
-            <Typography.Text strong>绑定用户</Typography.Text>
-            <Button size="small" onClick={() => onBindUsers(role)}>绑定用户</Button>
-          </div>
           {boundUsers.length ? boundUsers.map((user) => (
             <div className="role-user-row" key={user.id}>
               <div>
@@ -841,30 +560,13 @@ function RolePreviewPanel({
     {
       key: 'ai-policy',
       label: 'AI 策略',
-      children: <AIRolePolicyPanel role={role} />,
-    },
-    {
-      key: 'scope',
-      label: '资源分布',
       children: (
-        <div className="role-scope-list">
-          {resourceStats.length ? resourceStats.map((item) => (
-            <div key={item.type}>
-              <span>{resourceTypeLabels[item.type] || item.type}</span>
-              <strong>{item.count}</strong>
-            </div>
-          )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无资源分布" />}
-          <section className="role-section-card">
-            <Typography.Text strong>全局统计</Typography.Text>
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="角色总数">{totalRoles}</Descriptions.Item>
-              <Descriptions.Item label="权限规则总数">{totalPermissions}</Descriptions.Item>
-              <Descriptions.Item label="当前角色占比">
-                {totalPermissions ? `${Math.round((permissions.length / totalPermissions) * 100)}%` : '0%'}
-              </Descriptions.Item>
-            </Descriptions>
-          </section>
-        </div>
+        <AIRolePolicyPanel
+          key={role.id}
+          role={role}
+          editable={editingPolicy}
+          onEditEnd={() => setEditingPolicyRoleId((current) => (current === role.id ? null : current))}
+        />
       ),
     },
   ];
@@ -879,8 +581,14 @@ function RolePreviewPanel({
           </Space>
         </div>
         <Space className="role-head-actions" wrap>
-          <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(role)}>权限矩阵</Button>
-          <Button size="small" onClick={() => onBindUsers(role)}>绑定用户</Button>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={editCurrentSection}
+            disabled={visibleTab === 'ai-policy' && editingPolicy}
+          >
+            编辑
+          </Button>
           {role.name !== 'admin' && (
             <Popconfirm title="确定删除该角色？" onConfirm={() => onDelete(role)}>
               <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
@@ -891,8 +599,11 @@ function RolePreviewPanel({
 
       <SettingsTabs
         className="role-preview-tabs"
-        activeKey={!canManageGlobalSettings && activeTab === 'ai-policy' ? 'overview' : activeTab}
-        onChange={setActiveTab}
+        activeKey={visibleTab}
+        onChange={(tab) => {
+          setActiveTab(tab);
+          setEditingPolicyRoleId(null);
+        }}
         items={canManageGlobalSettings ? tabs : tabs.filter(tab => tab.key !== 'ai-policy')}
       />
 

@@ -757,7 +757,12 @@ function AppContent() {
         </Content>
       </Layout>
 
-      <AiChatWidget enabled={preferences.aiBubbleVisible} pageTitle={runtimeTitle} applicationName={activeArea === 'business' && !isAccountPage || isBusinessDataDesign ? currentApplication?.name : undefined} />
+      <AiChatWidget
+        enabled={preferences.aiBubbleVisible}
+        pageTitle={runtimeTitle}
+        applicationName={activeArea === 'business' && !isAccountPage || isBusinessDataDesign ? currentApplication?.name : undefined}
+        applicationId={activeArea === 'business' && !isAccountPage || isBusinessDataDesign ? currentApplication?.id : undefined}
+      />
 
 
       <Modal

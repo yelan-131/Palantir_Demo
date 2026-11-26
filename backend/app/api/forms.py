@@ -9,7 +9,6 @@ from app.services.record_domains import prepare_domain_create, validate_domain_u
 
 import json
 import copy
-import hashlib
 import logging
 import re
 from datetime import datetime, timezone
@@ -122,6 +121,7 @@ from app.services.form_schemas import (  # noqa: F401; compatibility exports
     FormApplicationSubmit,
 )
 
+from app.services.form_creation import _validate_form_code, create_form as _create_form
 from app.services.form_definition import (
     _uid,
     _ensure_form_permission,
@@ -271,11 +271,6 @@ async def form_reference_options(form_id: int, field_name: str, body: FormRulePr
 logger = logging.getLogger(__name__)
 
 INITIAL_WORKFLOW_VERSION = "v1"
-
-
-def _validate_form_code(code: str) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", code):
-        raise HTTPException(400, f"Invalid form code: {code!r}")
 
 
 def _form_layout_field_names(config: Optional[dict]) -> list[str]:
@@ -689,117 +684,6 @@ async def create_form(
     except Exception:
         await db.rollback()
         raise
-
-
-async def _create_form(body: FormCreate, db: AsyncSession, user: dict):
-    from app.models.relational import Application, ApplicationForm, Form, FormAction, FormLayout
-
-    tenant_id = current_tenant_id(user)
-    _validate_form_code(body.code)
-    draft = body.designer_draft
-    config = dict(body.config)
-    receipt = None
-    if draft:
-        from app.services.field_uniqueness import lock
-        await lock(db, tenant_id)
-        payload = json.dumps(body.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        receipt = {"id": draft.draft_id, "digest": hashlib.sha256(payload.encode()).hexdigest()}
-        config.update(
-            formLayout=draft.layout,
-            viewConfigDraft=draft.view,
-            viewConfigMeta={
-                "draftVersion": 1, "publishedVersion": 0,
-                "draftSavedAt": datetime.now(timezone.utc).isoformat(), "status": "draft",
-            },
-        )
-        for key in ("viewConfig", "publishedSchemaVersion", "publishedAt"):
-            config.pop(key, None)
-    # The retry marker is issued by the server only after a complete save.
-    config.pop("_designerDraftReceipt", None)
-    storage_mode = body.storage_mode
-    table_name = body.table_name
-    if storage_mode == "dynamic" and not table_name:
-        storage_mode = "physical_table"
-        table_name = _physical_table_name_for_form(tenant_id, body.code, config)
-    if table_name:
-        _validate_physical_table_name(tenant_id, table_name)
-
-    existing = await db.scalar(select(Form).where(Form.code == body.code, Form.tenant_id == tenant_id))
-    if existing:
-        if receipt and existing.owner_id == current_user_id(user):
-            saved = (existing.config or {}).get("_designerDraftReceipt")
-            if receipt == saved:
-                result = _form_payload(existing)
-                await db.rollback()
-                return {"data": result}
-            if isinstance(saved, dict) and receipt["id"] == saved.get("id"):
-                raise HTTPException(409, "该草稿已保存，请打开已保存的表单继续编辑")
-        raise HTTPException(409, "该表单编码已被其他表单占用" if draft else "Form code already exists")
-
-    if body.application_id is not None:
-        app = await db.get(Application, body.application_id)
-        if not app or app.tenant_id != tenant_id:
-            raise HTTPException(404, "Application not found")
-
-    form = Form(
-        tenant_id=tenant_id,
-        name=body.name,
-        code=body.code,
-        description=body.description,
-        model_id=body.model_id,
-        table_name=table_name,
-        storage_mode=storage_mode,
-        status="draft" if draft else body.status,
-        owner_id=_uid(user),
-        config=config,
-    )
-    db.add(form)
-    await db.flush()
-    if draft:
-        from app.services.form_fields import add_form_fields
-        from app.services.workflow_definitions import stage_workflow_definition
-
-        await add_form_fields(
-            form.id, [field.model_dump() for field in draft.fields], db, user, defer_commit=True,
-        )
-        workflow = draft.workflow.model_copy(update={
-            "status": "draft",
-            "config": {
-                **(draft.workflow.config or {}),
-                "formId": form.id, "formCode": form.code, "formName": form.name,
-                "savedAt": datetime.now(timezone.utc).isoformat(),
-            },
-        })
-        definition = await stage_workflow_definition(db, workflow, user)
-        form.config = {**config, "workflowDesigner": {"draftWorkflowId": definition.id},
-                       "_designerDraftReceipt": receipt}
-        db.add(FormLayout(
-            tenant_id=tenant_id, form_id=form.id, layout_type="view",
-            config={"draft": draft.view, "meta": config["viewConfigMeta"]},
-        ))
-    else:
-        await _ensure_physical_form_table(db, form, [])
-
-    if body.application_id is not None:
-        db.add(ApplicationForm(tenant_id=tenant_id, application_id=body.application_id, form_id=form.id))
-
-    db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="list", config={"columns": []}))
-    db.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form",
-                      config=draft.layout if draft else {"sections": []}))
-    for idx, (key, label) in enumerate([("create", "Create"), ("edit", "Edit"), ("delete", "Delete"), ("export", "Export")]):
-        db.add(FormAction(tenant_id=tenant_id, form_id=form.id, action_key=key, label=label, sort_order=idx))
-
-    await db.commit()
-    await db.refresh(form)
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="create",
-        resource_type="form",
-        resource_id=form.id,
-        new_values=body.dict(),
-    )
-    return {"data": _form_payload(form)}
 
 
 @router.post("/{form_id}/copy")

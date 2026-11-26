@@ -2,10 +2,10 @@
 
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +52,13 @@ class UserUpdate(BaseModel):
 class RoleCreate(BaseModel):
     name: str
     label: str
+    description: Optional[str] = None
+
+
+class RoleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
     description: Optional[str] = None
 
 
@@ -788,6 +795,39 @@ async def create_role(body: RoleCreate, user_ctx: dict = Depends(require_admin))
     if result is not None:
         return result
     return _admin_db_fallback({"id": len(_MOCK_ROLES) + 10, "name": body.name})
+
+
+@router.put("/roles/{role_id}")
+async def update_role(
+    role_id: Annotated[int, Path(gt=0, le=2**31 - 1)],
+    body: RoleUpdate,
+    user_ctx: dict = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新角色展示信息，保留角色编码和权限。"""
+    from app.models.relational import Role
+
+    tenant_id = current_tenant_id(user_ctx)
+    role = await db.scalar(select(Role).where(Role.id == role_id, Role.tenant_id == tenant_id).with_for_update())
+    if role is None:
+        raise HTTPException(404, "Role not found")
+    old_values = {"label": role.label, "description": role.description}
+    new_values = {**old_values, **body.model_dump(exclude_unset=True)}
+    result = {"id": role.id, "name": role.name, **new_values}
+    if old_values != new_values:
+        role.label = new_values["label"]
+        role.description = new_values["description"]
+        await db.commit()
+        await write_audit_log(
+            action="update_role",
+            resource_type="role",
+            resource_id=role_id,
+            user_id=current_user_id(user_ctx),
+            tenant_id=tenant_id,
+            old_values=old_values,
+            new_values=new_values,
+        )
+    return result
 
 
 @router.put("/roles/{role_id}/permissions")

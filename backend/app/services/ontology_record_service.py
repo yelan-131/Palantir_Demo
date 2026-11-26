@@ -4,6 +4,7 @@ import hmac
 import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -16,7 +17,7 @@ from app.core.principal import current_tenant_id, current_user_id
 from app.models.relational import (
     DataSource, Form, MappedFormSyncBinding, OntologyMapping, OntologyObject, OntologyRecordMetadata, OntologyRelation,
 )
-from app.services import field_uniqueness, form_rules, records
+from app.services import field_uniqueness, form_files, form_rules, records
 from app.services.designer_permissions import field_settings, require_action
 from app.services.form_application_lifecycle import guard_edit
 from app.services.form_rules import config as field_config
@@ -196,14 +197,20 @@ async def _iter_instances(db, user, view, *, filter_field=None, filter_value=Non
         yield item, masked_codes, raw
 
 
-async def list_instances(db, user, object_id, *, q, page, page_size) -> dict:
+async def list_instances(db, user, object_id, *, q, page, page_size, exact_name_fields: tuple[str, ...] | None = None) -> dict:
     obj = await _published_type(db, current_tenant_id(user), object_id=object_id)
     view = await _active_view(db, user, obj)
     query = q.strip().casefold() if q else ""
     offset = (page - 1) * page_size
     total, items = 0, []
     async for item, masked, _ in _iter_instances(db, user, view):
-        if query and query not in item["key"].casefold() and not any(
+        if query and exact_name_fields is not None:
+            visible_names = (item["values"].get(code) for code in exact_name_fields if code not in masked)
+            if query != item["key"].strip().casefold() and not any(
+                isinstance(value, str) and query == value.strip().casefold() for value in visible_names
+            ):
+                continue
+        elif query and query not in item["key"].casefold() and not any(
             code not in masked and isinstance(value, (str, int, float)) and query in str(value).casefold()
             for code, value in item["values"].items()
         ):
@@ -424,6 +431,25 @@ async def get_instance(db, user, object_id, key) -> dict:
         ),
         "sources": await _mapped_sources(db, view, visible_fields),
     }
+
+
+async def get_instance_attachment(db, user, object_id, key, property_code, file_id) -> tuple[dict, Path]:
+    obj = await _published_type(db, current_tenant_id(user), object_id=object_id)
+    view = await _active_view(db, user, obj)
+    item, masked, _ = await _find_instance(db, user, view, key)
+    field_name = view.properties.get(property_code)
+    field = next((field for field in view.fields if field.field_name == field_name), None)
+    if field is None or field.field_type != "json" or property_code in masked:
+        raise HTTPException(404, "附件不存在")
+    ui = field.ui_config or {}
+    if ui.get("controlType") != "upload":
+        raise HTTPException(404, "附件不存在")
+    attachments = item["values"].get(property_code)
+    if not isinstance(attachments, list) or not any(
+        isinstance(attachment, dict) and attachment.get("id") == file_id for attachment in attachments
+    ):
+        raise HTTPException(404, "附件不存在")
+    return form_files.metadata(view.form.tenant_id, view.form.id, field.field_name, file_id)
 
 
 def _edit_options(field):

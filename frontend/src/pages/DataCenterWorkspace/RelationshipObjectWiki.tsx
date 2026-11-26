@@ -8,10 +8,15 @@ import {
 } from '../../services/objectRuntime';
 import { formatServerDateTime } from '../../utils/dateTime';
 import { createUuid } from '../../utils/uuid';
+import RelationshipAttachmentImage, {
+  RelationshipPdfAttachment, relationshipAttachmentImages, relationshipPdfAttachments, valveSectionDrawingView,
+} from './RelationshipAttachmentImages';
 import type { ManufacturingMatchRecord } from './manufacturingMatch';
 import type { RelationshipNode } from './relationshipGraph';
 import type { RelationshipNeighbor } from './relationshipSimilarityScene';
-import { relationshipMatchStatus, relationshipNodeLabel, relationshipPropertyLabel, type RelationshipCardMatch } from './RelationshipNodePreview';
+import { RelationshipMaterialTrialMarkdown } from './RelationshipTrialEvidence';
+import type { MaterialTrial } from './relationshipTrialComparison';
+import { relationshipMatchStatus, relationshipNodeLabel, relationshipPropertyLabel, type RelationshipCardMatch } from './relationshipCardDetails';
 import {
   RelationshipMarkdownInput, RelationshipObjectClearField, RelationshipObjectEditField, RelationshipObjectEditorForm,
   type RelationshipObjectEditSnapshot,
@@ -27,13 +32,15 @@ export interface RelationshipObjectWikiProps {
     label: string;
     edgeId: string;
     kind?: 'candidate';
-    direction: 'incoming' | 'outgoing';
+    direction: 'incoming' | 'outgoing' | 'peer';
   }[];
   onOpenRelated?: (id: string) => void;
   onSelectRelationship?: (id: string) => void;
   referenceRecords?: readonly RelationshipNode[];
   comparisons?: readonly RelationshipNeighbor[];
   trials?: readonly ManufacturingMatchRecord[];
+  materialTrials?: readonly MaterialTrial[];
+  valveDurability?: ReactNode;
   selectedTrialKey?: string;
   matches?: readonly RelationshipCardMatch[];
   editSnapshot?: RelationshipObjectEditSnapshot;
@@ -145,7 +152,7 @@ export function RelationshipWikiBody({
 
 export default function RelationshipObjectWiki({
   node, model, related = [], onOpenRelated, onSelectRelationship, referenceRecords = [], comparisons = [],
-  trials, selectedTrialKey, matches = [], editSnapshot, onSubmitEdit, recordMetadataDraft, onRecordMetadataChange,
+  trials, materialTrials, valveDurability, selectedTrialKey, matches = [], editSnapshot, onSubmitEdit, recordMetadataDraft, onRecordMetadataChange,
   markdownImportTarget, onMarkdownImportingChange, saving,
 }: RelationshipObjectWikiProps) {
   const [loaded, setLoaded] = useState<{ node: RelationshipNode; record?: ObjectRecordDetail }>();
@@ -213,13 +220,21 @@ export default function RelationshipObjectWiki({
 
   function propertyRow(code: string, value: unknown) {
     const field = editFields.get(code);
+    const images = masked?.includes(code) ? [] : relationshipAttachmentImages(value)
+      .map(file => ({ file, drawingView: valveSectionDrawingView(key, code, file.id) }));
+    const pdfs = masked?.includes(code) ? [] : relationshipPdfAttachments(value);
     const origins = mappedSourceLabels(sources?.[code]);
     const defaultLabel = code === 'wiki_markdown' ? 'Markdown 正文' : relationshipPropertyLabel(code, model);
-    return <div key={code} className="relationship-object-wiki__property relationship-object-wiki__property--bound">
+    const drawingClass = images.some(item => item.drawingView) ? ' relationship-object-wiki__property--drawing' : '';
+    return <div key={code} className={`relationship-object-wiki__property relationship-object-wiki__property--bound${drawingClass}`}>
       <dt>{propertyName(code, defaultLabel, Boolean(field))}</dt>
       <dd className="relationship-object-wiki__property-value">
         <div className="relationship-object-wiki__value-slot">
-          <span className="relationship-object-wiki__value" aria-hidden={field ? true : undefined}>{formattedValue(value)}</span>
+          {images.length > 0 || pdfs.length > 0 ? <div className="relationship-object-wiki__value">
+            {images.map(({ file, drawingView }) => <RelationshipAttachmentImage key={`${typeId}:${key}:${code}:${file.id}`}
+              objectId={typeId} recordKey={key} property={code} file={file} drawingView={drawingView} />)}
+            {pdfs.map(file => <RelationshipPdfAttachment key={file.id} objectId={typeId} recordKey={key} property={code} file={file} />)}
+          </div> : <span className="relationship-object-wiki__value" aria-hidden={field ? true : undefined}>{formattedValue(value)}</span>}
           {field && <RelationshipObjectEditField field={field} disabled={saving} />}
         </div>
         {field && <div className="relationship-object-wiki__property-controls">
@@ -269,6 +284,7 @@ export default function RelationshipObjectWiki({
   }
 
   function renderEmbed(source: string) {
+    if (source === '材料耐介质试验') return <RelationshipMaterialTrialMarkdown trials={materialTrials ?? []} />;
     const [target, property] = source.split('#', 2);
     const match = property && findReference(target.trim());
     if (!match) return undefined;
@@ -294,6 +310,8 @@ export default function RelationshipObjectWiki({
         <RelationshipRecordTags key={editingMetadata ? 'edit' : 'read'} tags={tags} disabled={saving}
           onChange={editingMetadata ? tags => onRecordMetadataChange({ ...recordMetadataDraft, tags }) : undefined} />
       </header>
+
+      {valveDurability}
 
       <section className="relationship-object-wiki__section relationship-object-wiki__section--properties" aria-label="对象属性">
         {(visibleProperties.length > 0 || customProperties.length > 0) && <dl className="relationship-object-wiki__properties">
@@ -365,7 +383,7 @@ export default function RelationshipObjectWiki({
               {onOpenRelated ? noteLink(neighbor, relationshipNodeLabel(neighbor)) : <strong>{relationshipNodeLabel(neighbor)}</strong>}
               {relationshipNodeLabel(neighbor) !== neighbor.key && <Typography.Text code>{neighbor.key}</Typography.Text>}
             </div>
-            <span>{direction === 'outgoing' ? '出向' : '入向'} · {label} · {neighbor.typeName}</span>
+            <span>{direction === 'peer' ? '' : direction === 'outgoing' ? '出向 · ' : '入向 · '}{label} · {neighbor.typeName}</span>
             {onSelectRelationship && <Button type="link" size="small" onClick={() => onSelectRelationship(edgeId)}
               disabled={Boolean(editSnapshot)} aria-label={`查看${label}依据 · ${neighbor.key}`}>
               {kind === 'candidate' ? '查看候选依据' : '查看匹配依据'}

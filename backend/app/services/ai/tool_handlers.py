@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import literal, or_, select
 from fastapi import HTTPException
 
 from app.core.db import db_session
@@ -65,6 +65,13 @@ async def _forms_get_record(payload: dict[str, Any], context: ToolHandlerContext
         return await get_form_record(session, user=context.current_user or {}, payload=payload)
 
 
+async def _graph_query_object_relationships(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
+    from .relationship_tools import query_object_relationships
+
+    async with db_session() as session:
+        return await query_object_relationships(session, context.current_user or {}, payload)
+
+
 async def _forms_update_record(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
     async with db_session() as session:
         return await update_form_record(session, user=context.current_user or {}, payload=payload)
@@ -89,6 +96,33 @@ async def _semantic_low_code_plan(payload: dict[str, Any], context: ToolHandlerC
         },
     )
     return plan.__dict__
+
+
+async def _component_page_form_ids(session, tenant_id: int, application_id: int) -> set[int]:
+    from app.models.relational import ComponentPage, ComponentPageVersion
+
+    page_routes = select(ApplicationMenuNode.route_path).where(
+        ApplicationMenuNode.tenant_id == tenant_id,
+        ApplicationMenuNode.application_id == application_id,
+        ApplicationMenuNode.node_type == "page",
+    )
+    versions = await session.scalars(
+        select(ComponentPageVersion.definition)
+        .join(ComponentPage, ComponentPage.id == ComponentPageVersion.page_id)
+        .where(
+            ComponentPage.tenant_id == tenant_id,
+            ComponentPageVersion.tenant_id == tenant_id,
+            ComponentPageVersion.version == ComponentPage.published_version,
+            ComponentPage.published_version > 0,
+            (literal("/pages/") + ComponentPage.code).in_(page_routes),
+        )
+    )
+    form_ids = set()
+    for definition in versions:
+        sources = [definition.get("sourceFormId")]
+        sources.extend((widget.get("dataBinding") or {}).get("formId") for widget in definition.get("widgets", []))
+        form_ids.update(source for source in sources if type(source) is int and source > 0)
+    return form_ids
 
 
 async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) -> dict[str, Any]:
@@ -125,8 +159,18 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
             return {"items": items, "count": len(items), "subject": "applications"}
 
         if context.tool_name == "platform.form_settings.query":
+            subject = payload.get("subject") or "forms"
+            form_id = payload.get("form_id")
+            form_code = payload.get("form_code")
+            if subject == "layouts" and not (form_id or form_code):
+                raise HTTPException(422, "查询布局需要 form_id 或 form_code")
+
+            application_id = payload.get("application_id")
             statement = select(Form).where(Form.tenant_id == tenant_id)
-            if application_id := payload.get('application_id'):
+            if application_id is not None:
+                application = await session.get(Application, application_id)
+                if not application or application.tenant_id != tenant_id:
+                    raise HTTPException(404, "目标应用不存在或不可访问")
                 bindings = select(ApplicationForm.form_id).where(
                     ApplicationForm.tenant_id == tenant_id,
                     ApplicationForm.application_id == application_id,
@@ -136,20 +180,26 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
                     ApplicationMenuNode.application_id == application_id,
                     ApplicationMenuNode.form_id.is_not(None),
                 )
-                statement = statement.where(Form.id.in_(bindings.union(menus)))
+                sources = await _component_page_form_ids(session, tenant_id, application_id)
+                statement = statement.where(or_(Form.id.in_(bindings.union(menus)), Form.id.in_(sources)))
             if form_name := str(payload.get('form_name') or '').strip():
                 statement = statement.where(Form.name.contains(form_name, autoescape=True))
-            form_id = payload.get("form_id")
-            form_code = payload.get("form_code")
             if form_id:
                 statement = statement.where(Form.id == int(form_id))
             elif form_code:
                 statement = statement.where(Form.code == str(form_code))
             rows = (
-                await session.execute(statement.order_by(Form.id).limit(limit))
+                await session.execute(statement.order_by(Form.id).limit(limit + 1))
             ).scalars().all()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
             items = [{"id": row.id, "name": row.name, "code": row.code, "status": row.status} for row in rows]
-            if form_id or form_code or payload.get("subject") == "fields":
+            if subject == "layouts":
+                from app.services.form_layouts import list_form_layouts
+
+                for row, item in zip(rows, items):
+                    item["layouts"] = (await list_form_layouts(row.id, session, context.current_user or {}))["data"]
+            elif form_id or form_code or subject == "fields":
                 from app.services.records import runtime_fields
                 from app.core.permissions import allowed_form_fields
                 for row, item in zip(rows, items):
@@ -158,7 +208,10 @@ async def _platform_query(payload: dict[str, Any], context: ToolHandlerContext) 
                     item["fields"] = [{"field_name": f.field_name, "label": f.label, "field_type": f.field_type,
                         "required": f.required, "enum_values": f.enum_values, "ui_config": f.ui_config}
                         for f in fields if not f.archived and f.field_name in allowed]
-            return {"items": items, "count": len(items), "subject": "forms"}
+            result = {"items": items, "count": len(items), "has_more": has_more, "subject": subject}
+            if application_id is not None:
+                result.update(application_id=application.id, application_name=application.name)
+            return result
 
         if context.tool_name == "platform.identity_settings.query":
             if payload.get("subject") == "roles":
@@ -234,6 +287,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "knowledge.search": _knowledge_search,
     "forms.query_records": _forms_query_records,
     "forms.get_record": _forms_get_record,
+    "graph.query_object_relationships": _graph_query_object_relationships,
     "forms.update_record": _forms_update_record,
     "forms.create_dynamic_record_draft": _create_record_draft,
     "forms.create_form_definition": _forms_create_form_definition,

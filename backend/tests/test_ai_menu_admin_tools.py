@@ -40,6 +40,9 @@ async def test_menu_tools_preview_and_preserve_tree(environment):
     )
     entry = await run("create_entry", **entry_review)
     assert entry["route_path"] == f"/pages/{page.code}"
+    assert entry["menu_id"] == entry["id"]
+    assert entry["application_name"] == app.name
+    assert entry["destination"] == f"{app.name} / 入口"
     legacy = ApplicationMenuNode(tenant_id=1, application_id=app.id, title="旧业务入口", node_type="form",
                                  form_id=form.id, parent_id=child["id"], route_path=f"/dynamic/{form.code}")
     db.add(legacy)

@@ -94,12 +94,12 @@ The application loads this file as deployment-level Agent configuration. The Pyt
     "planner_tool": "ai.semantic_plan_low_code_form",
     "tool": "forms.create_form_definition",
     "required": ["form.name", "form.code", "fields"],
-    "optional": ["form.description", "menu.create", "menu.title", "menu.icon"],
+    "optional": ["form.description", "form.application_id", "form.config", "workflow"],
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
     "supported_field_types": ["boolean", "date", "datetime", "decimal", "enum", "integer", "json", "number", "relation", "string", "text"],
     "semantic_operations": ["create_form", "rename_form", "add_field", "update_field", "remove_field", "confirm", "qa"],
     "delta_schema": {
-      "create_form": {"writes": ["form", "fields", "menu"], "requires_confirmation": true},
+      "create_form": {"writes": ["form", "fields", "workflow"], "requires_confirmation": true},
       "rename_form": {"writes": ["form.name"], "requires_confirmation": true},
       "add_field": {"writes": ["fields"], "requires_confirmation": true},
       "update_field": {"writes": ["fields"], "requires_confirmation": true},
@@ -110,15 +110,15 @@ The application loads this file as deployment-level Agent configuration. The Pyt
     "questions": [
       "表单名称和用途是什么？",
       "需要哪些字段？哪些字段必填？",
-      "是否创建菜单入口？如果创建，菜单名称是什么？",
+      "是否归属已有应用，或同时保存审批流程草稿？",
       "是否有枚举字段、关联字段或特殊字段类型？"
     ],
-    "example": "表单名称：物料主数据；字段：物料编码、物料名称、物料类型、安全库存；物料编码和物料名称必填；创建菜单入口。"
+    "example": "表单名称：物料主数据；字段：物料编码、物料名称、物料类型、安全库存；物料编码和物料名称必填。"
   },
   "low_code.add_form_field": {
     "planner_tool": "ai.semantic_plan_low_code_form",
     "tool": "forms.add_form_field",
-    "required": ["form.id|form.code", "fields"],
+    "required": ["form_id|form_code", "fields"],
     "optional": ["field.required", "field.searchable", "field.sortable", "field.enum_values", "field.ui_config"],
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
     "supported_field_types": ["boolean", "date", "datetime", "decimal", "enum", "integer", "json", "number", "relation", "string", "text"],

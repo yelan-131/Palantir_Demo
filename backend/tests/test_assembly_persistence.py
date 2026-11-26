@@ -12,7 +12,63 @@ from app.api import applications, forms, admin
 from app.services import applications as applications_service
 from app.services import form_admin
 from app.api.deps import get_db, get_current_user
-from app.models.relational import Base, Tenant, User
+from app.models.relational import Base, Role, Tenant, User
+
+
+@pytest.mark.asyncio
+async def test_role_display_update_is_scoped_and_audited(monkeypatch):
+    engine = create_async_engine('sqlite+aiosqlite://')
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(lambda db: Base.metadata.create_all(db, tables=[Tenant.__table__, Role.__table__]))
+    async with sessions() as db:
+        db.add_all([Tenant(id=1, name='One', slug='one'), Tenant(id=2, name='Two', slug='two')])
+        await db.flush()
+        db.add_all([
+            Role(id=1, tenant_id=1, name='reviewer', label='原名称', description='现有说明'),
+            Role(id=2, tenant_id=2, name='other', label='其他租户'),
+        ])
+        await db.commit()
+
+    actor = {'uid': 1, 'tenant_id': 1, 'is_admin': True}
+
+    async def database():
+        async with sessions() as db:
+            yield db
+
+    audit = AsyncMock()
+    monkeypatch.setattr(admin, 'write_audit_log', audit)
+    app = FastAPI()
+    app.include_router(admin.router, prefix='/admin')
+    app.dependency_overrides[get_db] = database
+    app.dependency_overrides[get_current_user] = lambda: actor
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            url = '/admin/roles/1'
+            response = await client.put(url, json={'label': '  审核员  '})
+            assert response.status_code == 200, response.text
+            assert response.json() == {'id': 1, 'name': 'reviewer', 'label': '审核员', 'description': '现有说明'}
+            audit.assert_awaited_once_with(action='update_role', resource_type='role', resource_id=1,
+                user_id=1, tenant_id=1, old_values={'label': '原名称', 'description': '现有说明'},
+                new_values={'label': '审核员', 'description': '现有说明'})
+            clear = await client.put(url, json={'label': '审核员', 'description': None})
+            assert clear.status_code == 200 and clear.json()['description'] is None
+            for payload in (
+                {'label': '   '}, {'label': 'a' * 201}, {'label': None},
+                {'label': '新名称', 'name': 'rename'}, {'label': '新名称', 'permissions': []},
+            ):
+                assert (await client.put(url, json=payload)).status_code == 422
+            assert (await client.put('/admin/roles/2', json={'label': '越权'})).status_code == 404
+            actor['is_admin'] = False
+            assert (await client.put(url, json={'label': '越权'})).status_code == 403
+        assert audit.await_count == 2
+        async with sessions() as db:
+            saved = await db.get(Role, 1)
+            assert (saved.name, saved.label, saved.description) == ('reviewer', '审核员', None)
+            assert (await db.get(Role, 2)).label == '其他租户'
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

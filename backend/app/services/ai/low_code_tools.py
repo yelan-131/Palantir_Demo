@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,10 @@ from app.core.identifiers import assert_safe_identifier
 from app.core.principal import current_tenant_id, current_user_id
 from app.core.audit import write_audit_log
 from app.models.relational import Application, ApplicationForm, Form, FormField, FormLayout
+from app.services.field_uniqueness import lock
+from app.services.form_creation import find_saved_form_draft, form_draft_receipt, stage_form_definition
+from app.services.form_schemas import FormCreate
+from app.services.workflow_definitions import WorkflowDefCreate
 
 
 FIELD_TYPE_ALIASES = {
@@ -59,8 +64,8 @@ async def _ensure_physical_form_table(session: AsyncSession, table_name: str, fi
 CREATE_FORM_DEFINITION_CONTRACT = {
     "tool": "forms.create_form_definition",
     "required": ["form.name", "form.code", "fields"],
-    "optional": ["form.description", "form.application_id"],
-    "effect": "只保存草稿。发布或挂载菜单需要单独确认。",
+    "optional": ["form.description", "form.application_id", "workflow"],
+    "effect": "保存表单草稿，可关联目标应用并保存流程草稿。发布或挂载菜单需要单独确认。",
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values", "ui_config"],
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
 }
@@ -79,7 +84,7 @@ CREATE_FORM_DEFINITION_CONTRACT["field_rules"] = {
 
 ADD_FORM_FIELD_CONTRACT = {
     "tool": "forms.add_form_field",
-    "required": ["form.id|form.code", "fields"],
+    "required": ["form_id|form_code", "fields"],
     "optional": ["field.required", "field.searchable", "field.sortable", "field.enum_values", "field.ui_config"],
     "field_schema": ["field_name", "label", "field_type", "required", "searchable", "sortable", "enum_values"],
     "supported_field_types": sorted(SUPPORTED_FIELD_TYPES),
@@ -542,128 +547,131 @@ async def execute_create_form_definition(
     form_data = dict(payload.get("form") or {})
     fields = payload.get("fields") or []
     validate_field_rule_definitions(fields)
-    field_configs = [field for field in fields if isinstance(field, dict)]
     base_config = form_data.get("config") if isinstance(form_data.get("config"), dict) else None
-
     code = _slugify(str(form_data.get("code") or "ai_generated_form"))
     assert_safe_identifier(code)
-    if await session.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == code)):
-        if not (code.startswith("ai_") or (form_data.get("config") or {}).get("createdByAgent")):
-            raise HTTPException(status_code=409, detail="Form code already exists")
-        base_code = code[:56].rstrip("_")
-        for index in range(2, 100):
-            candidate = f"{base_code}_{index}"
-            assert_safe_identifier(candidate)
-            if not await session.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == candidate)):
-                code = candidate
-                break
-        else:
-            raise HTTPException(status_code=409, detail="Form code already exists")
     assembly_kind = _infer_assembly_kind(
         f"{form_data.get('name') or ''} {form_data.get('description') or ''}",
         {"assemblyKind": form_data.get("assembly_kind") or (base_config or {}).get("assemblyKind")},
     )
-    form_config = (
-        _standard_analytics_config(base_config, field_configs, form_code=code, form_name=str(form_data.get("name") or code))
-        if assembly_kind == "analysis"
-        else _standard_form_config(base_config, field_configs)
-    )
-
     application_id = form_data.get("application_id")
-    app = None
-    if application_id is not None:
-        app = await session.get(Application, int(application_id))
-        if not app or app.tenant_id != tenant_id:
-            raise HTTPException(status_code=404, detail="Application not found")
+    receipt = None
+    audit_payload = {key: value for key, value in payload.items() if not key.startswith("_")}
+    if run_id := payload.get("_execution_run_id"):
+        action_key = payload.get("_execution_action_key", "0")
+        receipt = form_draft_receipt(f"agent:{run_id}:{action_key}", {
+            key: value for key, value in audit_payload.items() if key != "menu"
+        })
 
-    for key in ("publishedSchemaVersion", "publishedAt", "_designerDraftReceipt"):
-        form_config.pop(key, None)
-    if assembly_kind == 'analysis':
-        form_config.pop('analyticsDesign', None)
-        form_config['analyticsDesignMeta'] = {**(form_config.get('analyticsDesignMeta') or {}),
-            'status': 'draft', 'publishedVersion': 0, 'publishedAt': None}
-    # Derived server-side from the final (possibly deduped) code and the
-    # caller's tenant. Payload-supplied names are ignored so an AI plan can
-    # neither point a form at another tenant's namespace nor at a core table.
-    table_name = _physical_table_name(code, assembly_kind, tenant_id=tenant_id)
-    storage_mode = str(form_data.get("storage_mode") or "physical_table")
-    if storage_mode == "dynamic":
-        storage_mode = "physical_table"
+    await lock(session, tenant_id)
+    form = await find_saved_form_draft(session, user, receipt) if receipt else None
+    if form is None:
+        if await session.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == code)):
+            if not (code.startswith("ai_") or (base_config or {}).get("createdByAgent")):
+                raise HTTPException(409, "Form code already exists")
+            base_code = code[:56].rstrip("_")
+            for index in range(2, 100):
+                candidate = f"{base_code}_{index}"
+                assert_safe_identifier(candidate)
+                if not await session.scalar(select(Form.id).where(Form.tenant_id == tenant_id, Form.code == candidate)):
+                    code = candidate
+                    break
+            else:
+                raise HTTPException(409, "Form code already exists")
 
-    form = Form(
-        tenant_id=tenant_id,
-        name=str(form_data.get("name") or code),
-        code=code,
-        description=form_data.get("description"),
-        table_name=table_name,
-        storage_mode=storage_mode,
-        status="draft",
-        owner_id=current_user_id(user),
-        config=form_config,
-    )
-    session.add(form)
-    await session.flush()
+        normalized_fields = []
+        for index, field_data in enumerate(fields):
+            if not isinstance(field_data, dict):
+                raise HTTPException(422, "每个字段必须是一个对象")
+            raw = dict(field_data)
+            raw["field_name"] = _slugify(str(raw.get("field_name") or raw.get("name") or f"field_{index + 1}"))
+            raw.setdefault("sort_order", index)
+            raw.setdefault("searchable", _default_searchable_for_field(raw, index))
+            normalized_fields.append(raw)
 
-    from app.services.form_fields import add_form_fields
-    normalized_fields = []
-    for index, field_data in enumerate(fields):
-        if not isinstance(field_data, dict):
-            raise HTTPException(422, "每个字段必须是一个对象")
-        raw = dict(field_data)
-        raw["field_name"] = _slugify(str(raw.get("field_name") or f"field_{index + 1}"))
-        raw.setdefault("sort_order", index)
-        raw.setdefault("searchable", _default_searchable_for_field(raw, index))
-        normalized_fields.append(raw)
-    if normalized_fields:
-        await add_form_fields(form.id, normalized_fields, session, user, defer_commit=True)
-    else:
-        from app.services.form_engine import _ensure_physical_form_table as ensure_storage
-        await ensure_storage(session, form, [])
-    created_fields = list((await session.scalars(select(FormField).where(
-        FormField.form_id == form.id, FormField.tenant_id == tenant_id)
-        .order_by(FormField.sort_order, FormField.id))).all())
+        name = str(form_data.get("name") or code)
+        form_config = (
+            _standard_analytics_config(base_config, normalized_fields, form_code=code, form_name=name)
+            if assembly_kind == "analysis"
+            else _standard_form_config(base_config, normalized_fields)
+        )
+        for key in ("publishedSchemaVersion", "publishedAt", "_designerDraftReceipt"):
+            form_config.pop(key, None)
+        if assembly_kind == "analysis":
+            form_config.pop("analyticsDesign", None)
+            form_config["analyticsDesignMeta"] = {
+                **(form_config.get("analyticsDesignMeta") or {}),
+                "status": "draft", "publishedVersion": 0, "publishedAt": None,
+            }
 
-    view_config = form_config.get("viewConfigDraft") or _standard_view_config(field_configs)
-    form_layout = form_config.get("formLayout") or _standard_form_layout(field_configs)
-    analytics_design = form_config.get("analyticsDesignDraft") or form_config.get("analyticsDesign")
-    list_columns = [
-        {"field_name": field.field_name, "label": field.label, "width": 160}
-        for field in created_fields
-        if field.visible_in_list
-    ]
-    form_items = [
-        {"field_name": field.field_name, "label": field.label, "col_span": 1}
-        for field in created_fields
-        if field.visible_in_form
-    ]
-    if assembly_kind != "analysis":
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="list", config={"viewConfig": view_config, "columns": list_columns}))
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="view", config={"draft": view_config, "meta": form_config.get("viewConfigMeta")}))
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form", config=form_layout or {"sections": [{"title": "业务信息", "fields": form_items}]}))
+        storage_mode = str(form_data.get("storage_mode") or "physical_table")
+        try:
+            body = FormCreate(
+                name=name, code=code, description=form_data.get("description"), application_id=application_id,
+                table_name=_physical_table_name(code, assembly_kind, tenant_id=tenant_id),
+                storage_mode="physical_table" if storage_mode == "dynamic" else storage_mode,
+                status="draft", config=form_config,
+            )
+            workflow_data = payload.get("workflow")
+            workflow = WorkflowDefCreate.model_validate(workflow_data) if workflow_data is not None else None
+        except ValidationError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
-    if assembly_kind == "analysis":
-        session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="analytics", config={"draft": analytics_design, "published": form_config.get('analyticsDesign'), "meta": form_config.get("analyticsDesignMeta")}))
+        form = await stage_form_definition(
+            body, session, user, fields=normalized_fields, workflow=workflow,
+            application_alias=name, include_default_actions=assembly_kind != "analysis",
+        )
+        if receipt:
+            form.config = {**form.config, "_designerDraftReceipt": receipt}
 
+        if assembly_kind == "analysis":
+            session.add(FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="analytics", config={
+                "draft": form_config.get("analyticsDesignDraft"),
+                "published": form_config.get("analyticsDesign"),
+                "meta": form_config.get("analyticsDesignMeta"),
+            }))
+        else:
+            view_config = form_config.get("viewConfigDraft")
+            view_meta = form_config.get("viewConfigMeta")
+            columns = [
+                {"field_name": field["field_name"], "label": field.get("label", field["field_name"]), "width": 160}
+                for field in normalized_fields if field.get("visible_in_list", True)
+            ]
+            session.add_all([
+                FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="list",
+                           config={"viewConfig": view_config, "columns": columns}),
+                FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="view",
+                           config={"draft": view_config, "meta": view_meta}),
+                FormLayout(tenant_id=tenant_id, form_id=form.id, layout_type="form",
+                           config=form_config["formLayout"]),
+            ])
+
+        await session.commit()
+        await session.refresh(form)
+        await write_audit_log(
+            tenant_id=tenant_id, user_id=current_user_id(user), action="ai_create_form_definition",
+            resource_type="form", resource_id=form.id, new_values=audit_payload,
+        )
+
+    created_fields = (await session.scalars(select(FormField).where(
+        FormField.form_id == form.id, FormField.tenant_id == tenant_id,
+    ).order_by(FormField.sort_order, FormField.id))).all()
     binding = None
-    if app is not None:
-        binding = ApplicationForm(tenant_id=tenant_id, application_id=app.id, form_id=form.id, alias=form.name)
-        session.add(binding)
+    if application_id is not None:
+        row = (await session.execute(select(ApplicationForm.id, Application.id, Application.name)
+            .join(Application, Application.id == ApplicationForm.application_id).where(
+                ApplicationForm.tenant_id == tenant_id, Application.tenant_id == tenant_id,
+                ApplicationForm.form_id == form.id, Application.id == int(application_id),
+            ))).one_or_none()
+        if row:
+            binding = {"id": row[0], "application_id": row[1], "application_name": row[2]}
 
-    await session.commit()
-    await session.refresh(form)
-    await write_audit_log(
-        tenant_id=tenant_id,
-        user_id=current_user_id(user),
-        action="ai_create_form_definition",
-        resource_type="form",
-        resource_id=form.id,
-        new_values=payload,
-    )
-
+    workflow_config = (form.config or {}).get("workflowDesigner")
     return {
         "form": {"id": form.id, "name": form.name, "code": form.code, "status": form.status},
         "fields": [{"id": field.id, "field_name": field.field_name, "label": field.label} for field in created_fields],
-        "application_binding": {"id": binding.id, "application_id": binding.application_id} if binding else None,
+        "application_binding": binding,
+        "workflow_draft_id": workflow_config.get("draftWorkflowId") if isinstance(workflow_config, dict) else None,
         "menu_node": None,
         "route_path": f"/studio/business-data/{form.id}/design" + ("" if assembly_kind == "analysis" else "?tab=form"),
     }

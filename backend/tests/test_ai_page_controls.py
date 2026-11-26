@@ -53,7 +53,10 @@ async def test_page_call_waits_for_real_browser_receipt_and_does_not_write(monke
     assert started['type'] == 'page_action' and started['status'] == 'running'
     assert started['item_id'] == events[1][1]['id']
     future = next(iter(bridge.page_actions.values()))
-    future.set_result({'ok': True, 'state': {'label': '新名称', 'saved': False, 'published': False}})
+    state = {'label': '新名称', 'saved': False, 'published': False, 'form_id': 7}
+    if operation == 'set_field_properties':
+        state['layout_review_ready'] = True
+    future.set_result({'ok': True, 'state': state})
     result = await task
     assert result['status'] == 'completed' and result['result']['saved'] is False
     assert bridge.configuration_outcome['status'] == outcome
@@ -61,6 +64,10 @@ async def test_page_call_waits_for_real_browser_receipt_and_does_not_write(monke
     assert bridge.items == [events[-1][1]]
     assert bridge.items[0]['item_id'] == started['item_id']
     assert bridge.items[0]['status'] == 'completed'
+    if operation == 'set_field_properties':
+        assert bridge.items[0]['payload']['form_layout_review'] == {
+            'form_id': 7, 'operation_count': 0, 'field_name': 'quantity',
+        }
     assert not bridge.page_actions
     db.commit.assert_not_awaited()
 
@@ -110,6 +117,54 @@ DRAFT = {'name': '入库单', 'code': 'new_inbound', 'fields': [
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('allowed', [False, True])
+async def test_native_draft_forwards_application_and_field_rules(monkeypatch, allowed):
+    from app.services.ai import page_controls as mod
+    from app.services.ai.harness_runtime import PlatformBridge
+
+    db = AsyncMock()
+    db.scalar.return_value = None
+    db.get.return_value = SimpleNamespace(id=3, name='仓储管理', tenant_id=1 if allowed else 2)
+    manager = AsyncMock()
+    manager.__aenter__.return_value = db
+    monkeypatch.setattr(mod, 'db_session', lambda: manager)
+    monkeypatch.setattr(mod, 'decide_ai_permission', lambda *args, **kwargs: SimpleNamespace(allowed=True))
+    bridge = PlatformBridge(user={'tenant_id': 1, 'sub': 'admin', 'is_admin': True}, settings={}, context={})
+    fields = [
+        {'field_name': 'source', 'label': '物料档案', 'field_type': 'relation',
+         'reference': {'kind': 'masterData', 'source': 'materials', 'label_field': 'name',
+                       'backfill': {'material': 'name'}}},
+        {'field_name': 'material', 'label': '物料', 'visible_when': {'sourceField': 'source', 'operator': 'notEmpty'}},
+        {'field_name': 'quantity', 'label': '数量', 'field_type': 'decimal', 'default_value': 2.5},
+        {'field_name': 'total', 'label': '合计', 'field_type': 'decimal',
+         'computed': {'expression': 'quantity * 2', 'precision': 2}},
+        {'field_name': 'owner', 'label': '人员', 'field_type': 'person',
+         'required_when': {'sourceField': 'quantity', 'operator': 'gt', 'value': '0'}},
+    ]
+
+    async def dispatch(_bridge, action):
+        draft = action['draft']
+        assert draft['application_id'] == 3 and draft['application_name'] == '仓储管理'
+        for actual, expected in zip(draft['fields'], fields, strict=True):
+            assert all(actual.get(key) == value for key, value in expected.items() if key != 'computed')
+        assert draft['fields'][3]['computed']['expression'] == 'quantity * 2'
+        return {'ok': True, 'state': {'draft_id': action['draft_id'], 'saved': False, 'fields': draft['fields']}}
+
+    send = AsyncMock(side_effect=dispatch)
+    monkeypatch.setattr(mod, 'dispatch_page_action', send)
+    result = await mod.call_page_control(bridge, {'action': 'draft_new',
+        'draft': {**DRAFT, 'application_id': 3, 'fields': fields}})
+    assert result['status'] == ('completed' if allowed else 'validation_failed')
+    db.commit.assert_not_awaited()
+    if allowed:
+        payload = mod.page_control_model_result(result)['result']
+        assert payload['application_id'] == 3 and payload['application_name'] == '仓储管理'
+        send.assert_awaited_once()
+    else:
+        send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_timeout_cancels_browser_queue_without_claiming_an_unsaved_dialog(monkeypatch):
     from app.services.ai import page_controls as mod
     from app.services.ai.harness_runtime import PlatformBridge
@@ -141,6 +196,9 @@ async def test_timeout_cancels_browser_queue_without_claiming_an_unsaved_dialog(
     {**DRAFT, 'fields': [DRAFT['fields'][0], DRAFT['fields'][0]]},
     {**DRAFT, 'fields': [{'field_name': 'bad-key', 'label': '字段'}]},
     {**DRAFT, 'fields': [{'field_name': 'qty', 'label': ' ', 'field_type': 'integer'}]},
+    {**DRAFT, 'fields': [{**DRAFT['fields'][0], 'field_type': 'relation'}]},
+    {**DRAFT, 'fields': [{**DRAFT['fields'][0], 'visible_when': {'sourceField': 'missing', 'value': 'X'}}]},
+    {**DRAFT, 'fields': [{**DRAFT['fields'][0], 'computed': {'expression': 'quantity.__class__'}}]},
 ])
 def test_new_draft_rejects_invalid_definition(draft):
     with pytest.raises(ValidationError):

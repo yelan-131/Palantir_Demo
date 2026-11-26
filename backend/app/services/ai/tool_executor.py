@@ -153,7 +153,7 @@ class AgentToolExecutor:
                 if not isinstance(snapshot, str) or not snapshot:
                     raise HTTPException(409, "缺少操作的确认快照，请重新发起操作")
                 arguments[snapshot_field] = snapshot
-            if harness_tool in {'forms.update_record', 'forms.create_dynamic_record_draft'}:
+            if harness_tool in {'forms.create_form_definition', 'forms.update_record', 'forms.create_dynamic_record_draft'}:
                 arguments['_execution_run_id'] = run.get('run_id')
                 arguments['_execution_action_key'] = execution_key
             result = await dispatch_tool_handler(str(harness_tool), arguments, current_user=current_user, settings=settings_snapshot())
@@ -161,7 +161,9 @@ class AgentToolExecutor:
 
         if skill == "low_code.create_form_definition":
             async with db_session() as session:
-                result = await execute_create_form_definition(session, user=current_user, payload=payload)
+                result = await execute_create_form_definition(session, user=current_user, payload={
+                    **payload, "_execution_run_id": run.get("run_id"), "_execution_action_key": execution_key,
+                })
             await self._mark_executed(update_ai_draft_status, source_draft_id, current_user, run, result)
             if audit_ai_event:
                 audit_ai_event(current_user, "agent_tool_executed", {"skill": skill, "tool": "forms.create_form_definition", "result": result})

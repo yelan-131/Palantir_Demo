@@ -1,18 +1,21 @@
 from datetime import datetime, timedelta
+from io import BytesIO
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import semantic_assets
 from app.api.deps import get_current_user, get_db
+from app.config import settings
 from app.models.relational import (
     Base, DataSource, DynamicRecord, Form, FormPermission, FormVersion, MappedFormSyncBinding,
     OntologyField, OntologyMapping, OntologyObject, OntologyRelation, Role, Tenant, User, UserRole,
 )
+from app.services import form_files
 
 
 ROOT = "/semantic-assets"
@@ -124,6 +127,42 @@ async def instance(client, object_id, key):
     response = await client.get(f"{ROOT}/ontology-objects/{object_id}/record", params={"key": key})
     assert response.status_code == 200, response.text
     return response.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_object_attachment_download_checks_record_membership_and_field_access(object_client, monkeypatch, tmp_path):
+    client, sessions, user = object_client
+    monkeypatch.setattr(settings, "FORM_FILE_STORAGE_DIR", str(tmp_path))
+    contents = b"section drawing attachment"
+    upload = UploadFile(BytesIO(contents), filename="section.png")
+    attachment = await form_files.save(upload, 1, 1, "drawings", 1, {"fileTypes": ".png"})
+    async with sessions.begin() as db:
+        version = await db.scalar(select(FormVersion).where(FormVersion.form_id == 1))
+        version.snapshot = {**version.snapshot, "fields": [*version.snapshot["fields"], published_field(
+            1, "drawings", kind="json", ui_config={"controlType": "upload"},
+        )]}
+        db.add(OntologyField(tenant_id=1, object_id=1, code="section_drawings", name="截面图", field_type="json"))
+        order = await db.get(DynamicRecord, 1)
+        order.data = {**order.data, "drawings": [attachment]}
+        db.add(DynamicRecord(tenant_id=1, form_id=1, status="active", data={"order_no": "UNRELATED"}))
+    binding = await client.put(f"{ROOT}/ontology-objects/1/record-binding", json={
+        "form_id": 1, "key_field": "order_no", "property_fields": {"work_order_id": "order_no", "section_drawings": "drawings"},
+    })
+    assert binding.status_code == 200, binding.text
+
+    user["is_admin"] = False
+    route = f"{ROOT}/ontology-objects/1/attachments/section_drawings/{attachment['id']}"
+    download = await client.get(route, params={"key": ORDER})
+    assert download.status_code == 200, download.text
+    assert download.content == contents
+    assert download.headers["content-type"] == "application/octet-stream"
+    assert download.headers["content-disposition"] == 'attachment; filename="section.png"'
+    assert download.headers["cache-control"] == "private, no-store"
+    assert (await client.get(route, params={"key": "UNRELATED"})).status_code == 404
+
+    async with sessions.begin() as db:
+        db.add(FormPermission(tenant_id=1, form_id=1, role_id=1, action="view", field_name="drawings", effect="deny"))
+    assert (await client.get(route, params={"key": ORDER})).status_code == 404
 
 
 @pytest.mark.asyncio

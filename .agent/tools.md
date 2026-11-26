@@ -157,11 +157,11 @@
   "platform.form_settings.query": {
     "name": "platform.form_settings.query",
     "title": "Query form settings",
-    "description": "Read low-code form configuration such as form definitions, fields, layouts, and publish status through admin permissions.",
+    "description": "Find form definitions, fields, or saved layouts. Prefer published fields when a version exists. Application scope includes direct form bindings, legacy form menus, and data sources of published component pages mounted in the application.",
     "side_effect": "read",
     "risk_level": "low",
-    "input_schema": {"subject": "forms|fields|layouts", "limit": "integer"},
-    "output_schema": {"items": "array", "count": "integer"},
+    "input_schema": {"subject": "forms|fields|layouts", "application_id": "integer", "form_name": "string", "form_id": "integer", "form_code": "string", "limit": "integer"},
+    "output_schema": {"items": "array", "count": "integer", "has_more": "boolean", "subject": "forms|fields|layouts", "application_id": "integer"},
     "permission_check": "config",
     "dry_run_supported": true
   },
@@ -195,18 +195,18 @@
   "forms.create_form_definition": {
     "name": "forms.create_form_definition",
     "title": "Create form definition",
-    "description": "Create a low-code form definition, fields, layouts, and optional application menu binding.",
+    "description": "Save a low-code form draft, fields, and layouts, with an optional app association and approval workflow draft. Publishing or adding a menu entry requires a separate tool.",
     "side_effect": "configuration_write",
     "risk_level": "high",
-    "input_schema": {"form": "object", "fields": "array", "menu": "object"},
-    "output_schema": {"form": "object", "fields": "array", "route_path": "string"},
+    "input_schema": {"form": "object", "fields": "array", "workflow": "object"},
+    "output_schema": {"form": "object", "fields": "array", "application_binding": "object|null", "workflow_draft_id": "integer|null", "route_path": "string"},
     "permission_check": "config",
     "audit_required": true
   },
   "forms.add_form_field": {
     "name": "forms.add_form_field",
     "title": "Add form field",
-    "description": "Add one or more metadata fields to an existing low-code form without directly altering physical business tables.",
+    "description": "Add one or more fields through the shared form engine and synchronize the associated layouts.",
     "side_effect": "configuration_write",
     "risk_level": "high",
     "input_schema": {

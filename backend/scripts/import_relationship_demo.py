@@ -2,7 +2,7 @@
 
 Run from backend: python -m scripts.import_relationship_demo FIXTURE --tenant default
 Add --apply to commit the import, or --verify to inspect an existing import.
-Without either flag, use a disposable PostgreSQL database for the rehearsal.
+Without either flag, rehearse the import and roll it back.
 """
 
 import argparse
@@ -11,7 +11,7 @@ import json
 import re
 from pathlib import Path
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, inspect, select
 
 from app.database import AsyncSessionLocal
 from app.models.relational import Form, FormAction, FormField, FormLayout, OntologyObject, OntologyRelation, Tenant, User
@@ -48,8 +48,9 @@ async def verify(db, user, fixture):
     for demo in fixture['objects']:
         obj = objects[demo['code']]
         page = await ontology_record_service.list_instances(db, user, obj.id, q=None, page=1, page_size=100)
-        expected = {row['record_no']: row for row in demo['records']}
-        actual = {row['key']: row['values'] for row in page['items']}
+        field_codes = [field['code'] for field in demo['fields'] if (field.get('ui_config') or {}).get('controlType') != 'upload']
+        expected = {row['record_no']: {code: row.get(code) for code in field_codes} for row in demo['records']}
+        actual = {row['key']: {code: row['values'].get(code) for code in field_codes} for row in page['items']}
         if page['total'] != len(expected) or actual != expected:
             raise ValueError(f"Object records differ from the fixture: {demo['code']}")
         outgoing = [rel for rel in fixture['relations'] if rel['source_object_code'] == demo['code']]
@@ -77,10 +78,12 @@ async def import_fixture(db, user, fixture):
         if conflicts:
             raise ValueError(f"Existing {model.__tablename__} would be overwritten: {', '.join(conflicts)}")
 
+    connection = await db.connection()
+    table_schema = 'public' if connection.dialect.name == 'postgresql' else None
     for demo in fixture['objects']:
         code = demo['code']
         table_name = _physical_table_name_for_form(tenant_id, code, None)
-        if await db.scalar(text('SELECT to_regclass(:table_name)'), {'table_name': f'public.{table_name}'}):
+        if await connection.run_sync(lambda sync: inspect(sync).has_table(table_name, schema=table_schema)):
             raise ValueError(f'Existing business table would be overwritten: {table_name}')
         form = Form(tenant_id=tenant_id, code=code, name=f"【演示】{demo['name']}", description=demo['description'],
                     table_name=table_name, storage_mode='physical_table', status='draft', owner_id=actor_id)
@@ -89,9 +92,10 @@ async def import_fixture(db, user, fixture):
         children = {'tenant_id': tenant_id, 'form_id': form.id}
         for position, field in enumerate(demo['fields'], start=1):
             key = field['code']
-            db.add(FormField(**children, field_name=key, label=field['label'], field_type=field['type'], required=True,
+            ui_config = field.get('ui_config')
+            db.add(FormField(**children, field_name=key, label=field['label'], field_type=field['type'], required=field.get('required', True),
                              searchable=field.get('searchable', False), sort_order=position,
-                             ui_config={'rules': {'unique': {'enabled': True}}} if key == 'record_no' else None))
+                             ui_config={'rules': {'unique': {'enabled': True}}} if key == 'record_no' else ui_config))
         for layout_type, config in (('form', {'sections': []}), ('list', {'columns': []})):
             db.add(FormLayout(**children, layout_type=layout_type, config=config))
         for position, (action, label) in enumerate((('create', '新增'), ('edit', '编辑'), ('delete', '删除'), ('export', '导出'))):
@@ -99,7 +103,7 @@ async def import_fixture(db, user, fixture):
         await db.flush()
         await publish_form(form.id, db, user, defer_commit=True)
         fields = [{'code': field['code'], 'name': field['label'], 'type': field['type'],
-                   'required': True, 'searchable': field.get('searchable', False)} for field in demo['fields']]
+                   'required': field.get('required', True), 'searchable': field.get('searchable', False)} for field in demo['fields']]
         obj = await ontology_service.create_or_update_object(db, tenant_id=tenant_id, actor_id=actor_id,
             status='published', data={'code': code, 'name': demo['name'], 'description': demo['description'], 'fields': fields})
         await ontology_record_service.set_record_binding(db, user, obj.id, {
@@ -114,7 +118,7 @@ async def import_fixture(db, user, fixture):
 
     for item in fixture['relations']:
         relation = await ontology_service.create_or_update_relation(db, tenant_id=tenant_id, actor_id=actor_id,
-            data={**item, 'description': '制造质量追溯演示关系'})
+            data={**item, 'description': item.get('description', '制造质量追溯演示关系')})
         await ontology_record_service.set_record_link(db, user, relation.id, {
             'source_field': item['source_field'], 'target_field': 'record_no',
         })

@@ -6,22 +6,35 @@ import { useAiWorkbench } from './context';
 import { AiLayoutTargetError, type AiLayoutOperation } from '@/utils/aiFormLayout';
 import type { ComponentOperation } from '@/pages/ComponentPages/componentOperations';
 
+interface FieldCondition {
+  sourceField: string;
+  operator: 'equals' | 'notEquals' | 'contains' | 'isEmpty' | 'notEmpty' | 'gt' | 'gte' | 'lt' | 'lte';
+  value?: string;
+}
+
 export interface FieldProperties {
   label?: string; required?: boolean; readonly?: boolean; placeholder?: string; min?: number; max?: number;
-  control_type?: 'text' | 'textarea' | 'code' | 'number' | 'select' | 'datetime' | 'switch' | 'upload';
+  control_type?: 'text' | 'textarea' | 'code' | 'number' | 'select' | 'datetime' | 'switch' | 'upload' | 'relation';
   width?: 'quarter' | 'third' | 'half' | 'twoThird' | 'threeQuarter' | 'full';
   position?: number; help_text?: string;
   options?: Array<{ label: string; value: string }>;
   settings?: Pick<import('@/utils/formControls').ControlSettings, 'rows' | 'maxLength' | 'precision' | 'unit' | 'displayMode' | 'selectionMode' | 'maxFiles' | 'maxFileSize' | 'fileTypes' | 'checkedText' | 'uncheckedText'>;
   presentation?: import('@/utils/formLayout').ControlPresentation;
+  default_value?: string | number | boolean;
+  visible_when?: FieldCondition;
+  required_when?: FieldCondition;
+  computed?: import('@/utils/formCalculations').CalculationRule;
+  reference?: { kind: 'businessForm' | 'masterData'; source: string; label_field: string; backfill?: Record<string, string> };
   encoding?: { prefix: string; date_pattern: 'YYYYMMDD' | 'YYMMDD' | 'YYYYMM' | 'YYMM'; sequence_length: number; reset_cycle: 'day' | 'month' | 'year' | 'none' };
 }
 export interface DraftField extends FieldProperties {
   field_name: string; label: string; required: boolean; placeholder: string;
-  field_type: 'string' | 'text' | 'integer' | 'decimal' | 'date' | 'datetime' | 'code' | 'enum' | 'attachment' | 'boolean';
+  field_type: 'string' | 'text' | 'integer' | 'decimal' | 'date' | 'datetime' | 'code' | 'enum' | 'attachment' | 'boolean' | 'relation' | 'person';
 }
 export interface NewFormDraft {
   name: string; code: string; description: string; fields: DraftField[];
+  application_id?: number;
+  application_name?: string;
   layout_operations?: AiLayoutOperation[];
   menu_target?: { application_id: number; parent_id?: number; menu_title?: string; destination: string };
 }

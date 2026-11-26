@@ -92,4 +92,4 @@ async def publish_form_to_menu(db, user, payload, *, prepare=False):
             parent_id=target.parent_id, title=title, sort_order=(last if last is not None else -1) + 1), db, user, defer_commit=True)
         node_id = created['data']['id']
     await db.commit()
-    return {'form_id': form.id, 'menu_id': node_id, 'application_id': app.id, 'route_path': route, 'destination': destination}
+    return {'form_id': form.id, 'menu_id': node_id, 'application_id': app.id, 'application_name': app.name, 'route_path': route, 'destination': destination}

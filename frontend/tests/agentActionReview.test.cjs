@@ -12,7 +12,10 @@ const names = ['mapServerMessage', 'mapAgentActions', 'getConfirmationItemPayloa
   'getCompletedToolResults', 'pickExecutionResult', 'getStoredExecutionResult', 'findActiveSession'];
 const functions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text))
   .map(node => node.getText(ast)).join('\n');
-const context = { mapAgentSteps: () => [], mapTraceFromItems: () => [], formatServerTime: () => '', getContextSources: () => ({}) };
+const context = {
+  mapAgentSteps: () => [], mapTraceFromItems: () => [], formatServerTime: () => '',
+  getContextSources: () => ({}), getRelationshipQuery: () => undefined,
+};
 vm.createContext(context);
 vm.runInContext(ts.transpileModule(functions, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
 
@@ -67,6 +70,21 @@ test('saved form drafts link to the designer and call out separate publication',
   assert.equal(result.title, '表单草稿已保存');
   assert.equal(result.detail, '发布需要单独确认');
   assert.equal(result.href, '/studio/business-data/17/design?tab=form');
+});
+
+test('form drafts and menu delivery show the application from the stored result', () => {
+  const draft = context.getExecutionResult({
+    form: { id: 17, status: 'draft' },
+    application_binding: { application_id: 2, application_name: '巡检应用' },
+    route_path: '/studio/business-data/17/design?tab=form',
+  });
+  assert.equal(draft.detail, '应用 巡检应用 · 发布需要单独确认');
+  const menu = context.getExecutionResult({
+    menu_id: 2, page_code: 'inspection', route_path: '/pages/inspection',
+    destination: '巡检应用 / 质量管理 / 检验台账',
+  });
+  assert.equal(menu.title, '组件页面已挂载到应用菜单');
+  assert.equal(menu.detail, '巡检应用 / 质量管理 / 检验台账');
 });
 
 test('reloading a completed batch restores its saved form link from the execution snapshot', () => {

@@ -41,6 +41,19 @@
     "domain": "knowledge",
     "output_schema": {"type": "ontology_intake", "confirmation_checklist": true}
   },
+  "graph.explore_object_relationships": {
+    "name": "graph.explore_object_relationships",
+    "title": "探索对象与关系",
+    "description": "按名称或编号定位对象，读取它与其他对象的关系、关联依据和可查看的属性，支持在关系探索中查看。",
+    "capability_level": "assisted",
+    "risk_level": "low",
+    "default_tool": "graph.query_object_relationships",
+    "allowed_tools": ["graph.query_object_relationships"],
+    "required_permissions": ["business_query"],
+    "confirmation_policy": "none",
+    "permission_capability": "business_query",
+    "output_schema": {"type": "relationship_query", "requires_evidence": true}
+  },
   "quality.create_capa_draft": {
     "name": "quality.create_capa_draft",
     "title": "起草质量纠正与预防措施",
@@ -100,7 +113,7 @@
   "analysis.analyze_form_records": {
     "name": "analysis.analyze_form_records",
     "title": "分析业务记录",
-    "description": "查询有权查看的业务表单记录，归纳趋势、类别分布和异常。适用于按时间、班组或问题类别分析巡检等业务数据。",
+    "description": "按指定或当前应用查询有权查看的业务表单记录，归纳趋势、类别分布和异常。",
     "capability_level": "assisted",
     "risk_level": "low",
     "default_tool": "forms.query_records",
@@ -114,7 +127,7 @@
   "forms.create_record_draft": {
     "name": "forms.create_record_draft",
     "title": "填写一条业务记录草稿",
-    "description": "按现有业务表单的字段整理用户提供的信息，经确认后保存一条记录草稿。适用于需要先填写、再复核或提交的登记和申请。",
+    "description": "按指定或当前应用定位业务表单，整理业务记录、登记或申请的字段，经确认后保存记录草稿。",
     "capability_level": "assisted",
     "risk_level": "medium",
     "default_tool": "forms.create_dynamic_record_draft",
@@ -142,11 +155,13 @@
   "low_code.create_form_definition": {
     "name": "low_code.create_form_definition",
     "title": "配置业务数据表单",
-    "description": "配置数据表单的字段、填写规则及草稿。业务列表、登记入口和看板按通用页面技能交付。",
+    "description": "根据应用和页面上下文定位业务表单，为新建或调整表单规划字段、填写规则和布局，生成可复核的草稿。登记入口、业务列表和看板使用通用页面技能。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "forms.create_form_definition",
     "allowed_tools": [
+      "platform.application_settings.query",
+      "platform.form_settings.query",
       "ai.semantic_plan_low_code_form",
       "forms.create_form_definition"
     ],
@@ -165,11 +180,12 @@
   "low_code.add_form_field": {
     "name": "low_code.add_form_field",
     "title": "给现有表单添加字段",
-    "description": "为现有业务表单准备新增字段，经确认后写入字段配置并同步相关布局。适用于补充字段、控件或字段规则。",
+    "description": "根据指定或当前应用定位现有业务表单，准备新增字段、控件或规则，经确认后写入字段配置并同步相关布局。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "forms.add_form_field",
-    "allowed_tools": ["ai.semantic_plan_low_code_form", "forms.add_form_field"],
+    "allowed_tools": ["platform.application_settings.query", "platform.form_settings.query",
+      "ai.semantic_plan_low_code_form", "forms.add_form_field"],
     "required_permissions": ["config"],
     "confirmation_policy": "confirm_token",
     "permission_capability": "config",
@@ -209,11 +225,13 @@
   "low_code.inspect_form": {
     "name": "low_code.inspect_form",
     "title": "检查表单配置和发布影响",
-    "description": "查看表单布局、历史版本，预演字段规则并检查发布影响。适用于排查表单配置问题，或在发布前确认阻塞项。",
+    "description": "按应用或当前表单查询业务表单配置，包括字段、布局、历史版本、规则预演和发布影响。",
     "capability_level": "qa",
     "risk_level": "low",
     "default_tool": "forms.preview_publish",
     "allowed_tools": [
+      "platform.application_settings.query",
+      "platform.form_settings.query",
       "forms.preview_publish",
       "forms.list_versions",
       "forms.get_version",
@@ -287,7 +305,7 @@
   "low_code.publish_form_to_menu": {
     "name": "low_code.publish_form_to_menu",
     "title": "发布兼容的旧表单入口",
-    "description": "在用户明确需要旧表单入口时发布标准表单并挂载。通用页面使用页面发布和菜单工具。",
+    "description": "在用户明确需要旧表单入口时，核对目标应用并发布、挂载标准表单。通用页面使用页面发布和菜单工具。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "forms.publish_to_menu",
@@ -343,7 +361,7 @@
   "low_code.manage_component_page": {
     "name": "low_code.manage_component_page",
     "title": "搭建和发布通用页面",
-    "description": "搭建或修改业务列表、登记入口、台账、看板和混合页面，配置组件、保存草稿、发布页面并挂载到应用菜单。",
+    "description": "按指定或当前应用搭建或修改业务列表、登记入口、台账、看板和混合页面，配置组件、发布页面并挂载到应用菜单。",
     "capability_level": "agentic",
     "risk_level": "high",
     "default_tool": "pages.list",

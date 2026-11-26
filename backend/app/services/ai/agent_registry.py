@@ -22,6 +22,35 @@ from .workflow_design_tools import registry_definitions as workflow_design_defin
 
 AGENT_REGISTRY_SETTINGS_KEY = "ai.agent_registry"
 LEGACY_REGISTRY_TENANT_ID = 1
+INITIAL_RELEASE_VERSION = "1.0"
+_RELEASE_REVISION_FIELD = "_release_version_revision"
+_VERSION_FIELDS = {"version", "release_version", "version_bump", _RELEASE_REVISION_FIELD}
+_ADMIN_FIELDS = {"created_by", "created_at", "updated_at", "updated_by", "created_by_name", "updated_by_name"}
+
+LEGACY_FORM_TOOL_SCHEMAS = {
+    "forms.create_form_definition": {"form": "object", "fields": "array", "menu": "object"},
+    "forms.add_form_field": {"form_id": "integer", "form_code": "string", "fields": "array"},
+    "platform.form_settings.query": {"subject": "forms|fields|layouts", "limit": "integer"},
+}
+LEGACY_FORM_TOOL_DESCRIPTIONS = {
+    "forms.create_form_definition": {
+        "Create a low-code form definition, fields, layouts, and optional application menu binding.",
+        "Create a low-code form definition, fields, layouts, and optional menu binding.",
+        "Save a low-code form draft with fields and layouts. Publishing and adding a menu entry require separate confirmation.",
+    },
+    "forms.add_form_field": {
+        "Add metadata fields to an existing low-code form.",
+        "Add one or more metadata fields to an existing low-code form without directly altering physical business tables.",
+    },
+    "platform.form_settings.query": {
+        "Read low-code form configuration through admin permissions.",
+        "Read low-code form configuration such as form definitions, fields, layouts, and publish status through admin permissions.",
+    },
+}
+LEGACY_FORM_TOOL_OUTPUT_SCHEMAS = {
+    "forms.create_form_definition": {"form": "object", "fields": "array", "route_path": "string"},
+    "platform.form_settings.query": {"items": "array", "count": "integer"},
+}
 
 
 class AgentRegistryError(ValueError):
@@ -167,12 +196,31 @@ def _active_definitions(skills, tools):
     return validate_registry_payload(skills, tools)
 
 
-def _skill_definition(row: AIAgentSkillDefinition) -> dict[str, Any]:
-    return {**(row.definition or {}), "name": row.name, "enabled": row.enabled}
+def _registry_definition(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> dict[str, Any]:
+    definition = {key: value for key, value in (row.definition or {}).items() if key not in _VERSION_FIELDS}
+    if isinstance(row, AIAgentToolDefinition):
+        definition["handler_key"] = row.handler_key
+    return {**definition, "name": row.name, "enabled": row.enabled}
 
 
-def _tool_definition(row: AIAgentToolDefinition) -> dict[str, Any]:
-    return {**(row.definition or {}), "name": row.name, "handler_key": row.handler_key, "enabled": row.enabled}
+def _release_version_parts(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> tuple[int, int]:
+    revision = max(1, row.version or 1)
+    definition = row.definition or {}
+    base_revision = definition.get(_RELEASE_REVISION_FIELD)
+    stored_version = definition.get("release_version")
+    if type(base_revision) is int and 1 <= base_revision <= revision and isinstance(stored_version, str):
+        parts = stored_version.split(".")
+        if len(parts) in (2, 3) and all(part.isascii() and part.isdecimal() and len(part) <= 10 for part in parts):
+            # Older versions stored an unused middle segment. The revision anchor
+            # also accounts for upgrades that increment only the numeric revision.
+            major, patch = int(parts[0]), int(parts[-1])
+            if major >= 1:
+                return major, patch + revision - base_revision
+    return 1, revision - 1
+
+
+def _format_release_version(parts: tuple[int, int]) -> str:
+    return ".".join(map(str, parts))
 
 
 def _refresh_stored_input_schemas(tools: dict[str, dict[str, Any]]) -> None:
@@ -212,12 +260,31 @@ def _refresh_stored_input_schemas(tools: dict[str, dict[str, Any]]) -> None:
         query["input_schema"] = definition["input_schema"]
         if query.get("description") == "查询租户应用。subject=menus 时传 application_id 查询菜单树节点及入口。":
             query["description"] = definition["description"]
+    if LEGACY_FORM_TOOL_SCHEMAS.keys() & tools.keys():
+        seed = _load_registry_seed("tools.json")
+        for name in LEGACY_FORM_TOOL_SCHEMAS.keys() & tools.keys():
+            tools[name].update(form_tool_upgrade_fields(tools[name], seed[name]))
+
+
+def form_tool_upgrade_fields(tool: dict[str, Any], default: dict[str, Any]) -> dict[str, Any]:
+    """Return only the fields that still match a known bundled definition."""
+    name = default["name"]
+    if tool["handler_key"] != default["handler_key"]:
+        return {}
+    updates = {}
+    if tool.get("input_schema") == LEGACY_FORM_TOOL_SCHEMAS[name]:
+        updates["input_schema"] = default["input_schema"]
+    if name in LEGACY_FORM_TOOL_OUTPUT_SCHEMAS and tool.get("output_schema") == LEGACY_FORM_TOOL_OUTPUT_SCHEMAS[name]:
+        updates["output_schema"] = default["output_schema"]
+    if tool.get("description") in LEGACY_FORM_TOOL_DESCRIPTIONS[name]:
+        updates["description"] = default["description"]
+    return updates
 
 
 def _admin_record(row: AIAgentSkillDefinition | AIAgentToolDefinition) -> dict[str, Any]:
-    definition = _tool_definition(row) if isinstance(row, AIAgentToolDefinition) else _skill_definition(row)
     return {
-        **definition,
+        **_registry_definition(row),
+        "release_version": _format_release_version(_release_version_parts(row)),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "updated_by": row.updated_by,
@@ -260,24 +327,39 @@ async def load_agent_registry(*, include_disabled: bool = False, tenant_id: int 
         tool_rows = (await session.scalars(_tenant_definitions(AIAgentToolDefinition, owner))).all()
         if not initialized and not skill_rows and not tool_rows:
             source = "bundled"
-            all_skills, all_tools = _bundled_defaults()
+            skills, tools = _bundled_defaults()
+            all_skills, all_tools = skills, tools
+            if include_disabled:
+                all_skills, all_tools = (
+                    {name: {**definition, "release_version": INITIAL_RELEASE_VERSION}
+                     for name, definition in definitions.items()}
+                    for definitions in (skills, tools)
+                )
         else:
-            skills = {row.name: _skill_definition(row) for row in skill_rows}
-            tools = {row.name: _tool_definition(row) for row in tool_rows}
+            skills = {row.name: _registry_definition(row) for row in skill_rows}
+            tools = {row.name: _registry_definition(row) for row in tool_rows}
             _refresh_stored_input_schemas(tools)
             all_skills = {row.name: _admin_record(row) for row in skill_rows} if include_disabled else skills
             all_tools = {row.name: {**_admin_record(row), **tools[row.name]} for row in tool_rows} if include_disabled else tools
         if include_disabled:
             await _add_registry_actor_names(session, [*all_skills.values(), *all_tools.values()], tenant_id)
     if not include_disabled or tenant_id is None:
-        if source == "bundled":
-            skills, tools = all_skills, all_tools
         skills, tools = _active_definitions(skills, tools)
         if tenant_id is None:
             set_runtime_agent_registry(skills=skills, tools=tools)
         if not include_disabled:
             all_skills, all_tools = skills, tools
     return {"skills": all_skills, "tools": all_tools, "source": source, "handlerKeys": list_tool_handler_keys()}
+
+
+def _registry_content(model, definition):
+    content = {key: value for key, value in definition.items()
+               if key != "enabled" and key not in _ADMIN_FIELDS and key not in _VERSION_FIELDS}
+    try:
+        # Legacy definitions omit fields that editors now submit with their defaults.
+        return {**content, **model.model_validate(content).model_dump()}
+    except ValueError:
+        return content
 
 
 def _validate_registry_transition(skills, tools, previous_skills, previous_tools, *, seed_import=False):
@@ -291,8 +373,9 @@ def _validate_registry_transition(skills, tools, previous_skills, previous_tools
                 continue
             old = previous.get(name)
             if old and old.get("enabled", True):
-                updated = {**definition, "enabled": True}
-                previous_definition = dict(old)
+                model = SkillDefinition if kind == "技能" else ToolDefinition
+                updated = _registry_content(model, definition)
+                previous_definition = _registry_content(model, old)
                 if kind == "技能":
                     for field in ("instructions", "title", "description"):
                         updated.pop(field, None)
@@ -312,17 +395,35 @@ def _validate_registry_transition(skills, tools, previous_skills, previous_tools
                         raise AgentRegistryError(f"无法启用技能 {name}：工具 {dependency} 未启用或处理器未实现")
 
 
+async def lock_agent_registry_write(session, tenant_id: int) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(1095911239, :tenant)"), {"tenant": tenant_id})
+    elif session.get_bind().dialect.name == "sqlite":
+        # Begin the write transaction before reading the old snapshot.
+        await session.execute(text("UPDATE system_settings SET key = key WHERE key = :key"),
+                              {"key": _registry_settings_key(tenant_id)})
+
+
+def _prepare_versions(definitions: dict[str, dict[str, Any]]) -> dict[str, str | None]:
+    bumps = {}
+    for name, definition in definitions.items():
+        bump = definition.get("version_bump")
+        if bump not in (None, "patch", "major"):
+            raise AgentRegistryError(f"{name} 的版本更新类型必须为 patch 或 major")
+        bumps[name] = bump
+        for field in _ADMIN_FIELDS | _VERSION_FIELDS:
+            definition.pop(field, None)
+    return bumps
+
+
 async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: str | None = None,
                                       seed_import: bool = False, tenant_id: int | None = None) -> dict[str, Any]:
     skills, tools = validate_registry_payload(payload.get("skills"), payload.get("tools"))
+    skill_bumps, tool_bumps = _prepare_versions(skills), _prepare_versions(tools)
     owner = tenant_id if tenant_id is not None else LEGACY_REGISTRY_TENANT_ID
     settings_key = _registry_settings_key(owner)
     async with db_session() as session:
-        if session.get_bind().dialect.name == "postgresql":
-            await session.execute(text("SELECT pg_advisory_xact_lock(1095911239, :tenant)"), {"tenant": owner})
-        elif session.get_bind().dialect.name == "sqlite":
-            # Begin the write transaction before reading the old snapshot.
-            await session.execute(text("UPDATE system_settings SET key = key WHERE key = :key"), {"key": settings_key})
+        await lock_agent_registry_write(session, owner)
         skill_rows = {
             row.name: row
             for row in (await session.scalars(_tenant_definitions(AIAgentSkillDefinition, owner))).all()
@@ -332,16 +433,15 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
             for row in (await session.scalars(_tenant_definitions(AIAgentToolDefinition, owner))).all()
         }
         initialized = await session.scalar(select(SystemSetting.id).where(SystemSetting.key == settings_key))
-        previous_skills = {name: _skill_definition(row) for name, row in skill_rows.items()}
-        previous_tools = {name: _tool_definition(row) for name, row in tool_rows.items()}
+        previous_skills = {name: _registry_definition(row) for name, row in skill_rows.items()}
+        previous_tools = {name: _registry_definition(row) for name, row in tool_rows.items()}
+        _refresh_stored_input_schemas(previous_tools)
         if not initialized and not skill_rows and not tool_rows and tenant_id is not None:
             previous_skills, previous_tools = _bundled_defaults()
         builtin_skills, builtin_tools = load_seed_registry() if seed_import else _bundled_defaults()
 
         for definitions, rows, builtin in ((skills, skill_rows, builtin_skills), (tools, tool_rows, builtin_tools)):
             for name, definition in definitions.items():
-                for field in ("created_by", "created_at", "updated_at", "updated_by", "created_by_name", "updated_by_name"):
-                    definition.pop(field, None)
                 previous = rows.get(name)
                 creator = (previous.definition or {}).get("created_by") if previous is not None else updated_by
                 if name in builtin and (previous is None or not creator):
@@ -354,36 +454,36 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
         for model, definitions in ((AIAgentSkillDefinition, skills), (AIAgentToolDefinition, tools)):
             await session.execute(delete(model).where(model.tenant_id == owner, model.name.not_in(definitions)))
 
-        for name, definition in skills.items():
-            row = skill_rows.get(name)
-            if row is not None and _skill_definition(row) == {**definition, "enabled": definition.get("enabled", True)}:
-                continue
-            if row is None:
-                row = AIAgentSkillDefinition(name=name, tenant_id=owner)
-                session.add(row)
-            row.title = str(definition.get("title") or name)
-            row.description = str(definition.get("description") or "")
-            row.definition = definition
-            row.enabled = bool(definition.get("enabled", True))
-            row.version = int(definition.get("version") or (row.version or 1))
-            row.source = "database"
-            row.updated_by = updated_by
-
-        for name, definition in tools.items():
-            row = tool_rows.get(name)
-            if row is not None and _tool_definition(row) == {**definition, "enabled": definition.get("enabled", True)}:
-                continue
-            if row is None:
-                row = AIAgentToolDefinition(name=name, tenant_id=owner)
-                session.add(row)
-            row.title = str(definition.get("title") or name)
-            row.description = str(definition.get("description") or "")
-            row.handler_key = str(definition.get("handler_key") or "not_implemented")
-            row.definition = definition
-            row.enabled = bool(definition.get("enabled", True))
-            row.version = int(definition.get("version") or (row.version or 1))
-            row.source = "database"
-            row.updated_by = updated_by
+        for row_model, model, definitions, rows, previous, bumps in (
+            (AIAgentSkillDefinition, SkillDefinition, skills, skill_rows, previous_skills, skill_bumps),
+            (AIAgentToolDefinition, ToolDefinition, tools, tool_rows, previous_tools, tool_bumps),
+        ):
+            for name, definition in definitions.items():
+                row = rows.get(name)
+                enabled = bool(definition.get("enabled", True))
+                if row is None:
+                    row = row_model(name=name, tenant_id=owner, version=1)
+                    session.add(row)
+                    version = INITIAL_RELEASE_VERSION
+                elif _registry_content(model, definition) == _registry_content(model, previous[name]):
+                    if row.enabled != enabled:
+                        row.definition = {**(row.definition or {}), "enabled": enabled}
+                        row.enabled = enabled
+                        row.updated_by = updated_by
+                    continue
+                else:
+                    major, patch = _release_version_parts(row)
+                    next_parts = (major + 1, 0) if bumps[name] == "major" else (major, patch + 1)
+                    version = _format_release_version(next_parts)
+                    row.version = max(1, row.version or 1) + 1
+                row.title = str(definition.get("title") or name)
+                row.description = str(definition.get("description") or "")
+                if isinstance(row, AIAgentToolDefinition):
+                    row.handler_key = str(definition.get("handler_key") or "not_implemented")
+                row.definition = {**definition, "release_version": version, _RELEASE_REVISION_FIELD: row.version}
+                row.enabled = enabled
+                row.source = "database"
+                row.updated_by = updated_by
 
         await _save_registry_settings(session, key=settings_key, updated_by=updated_by, source="database")
         await session.flush()
@@ -395,6 +495,7 @@ async def save_agent_registry_payload(payload: dict[str, Any], *, updated_by: st
         )).all()
         saved_skills = {row.name: _admin_record(row) for row in saved_skill_rows}
         saved_tools = {row.name: _admin_record(row) for row in saved_tool_rows}
+        _refresh_stored_input_schemas(saved_tools)
         await _add_registry_actor_names(session, [*saved_skills.values(), *saved_tools.values()], tenant_id)
         await session.commit()
 

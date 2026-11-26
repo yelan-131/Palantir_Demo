@@ -909,13 +909,16 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   const initialFieldPayloads = () => baseConfig.fields.map((baseField, index) => {
     const control = layoutControls.find(item => item.fieldKey === baseField.key);
     const field = control ? { ...baseField, name: control.name, required: control.rules.required.enabled, placeholder: control.placeholder ?? baseField.placeholder } : baseField;
+    const controlType = getEffectiveControlTypeForControl(control, field) || inferFieldControlType(field);
+    const dataSource = controlType === 'relation' ? control?.optionSource || field.optionSource : field.optionSource;
+    const options = controlType === 'select' && control?.dataSourceKind === 'static' ? enumOptions(control.optionSource) : [];
     return {
       field_name: field.key,
       label: field.name,
       field_type: mapDesignerFieldType(field),
       business_type: getFieldBusinessType(field),
-      control_type: inferFieldControlType(field),
-      data_source: field.optionSource,
+      control_type: controlType,
+      data_source: dataSource,
       encoding_rule: control?.encodingRule || (isEncodingField(field) ? field.encodingRule || makeEncodingRule(field) : undefined),
       required: Boolean(field.required),
       visible_in_list: field.listVisible !== false,
@@ -923,14 +926,14 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       searchable: Boolean(field.searchable),
       sortable: Boolean(field.sortable),
       default_value: getDesignerFieldDefaultValue(field),
-      enum_values: control?.optionSource && enumOptions(control.optionSource).length ? { values: enumOptions(control.optionSource) } : field.enumValues as Record<string, unknown> | undefined || (field.optionSource ? { source: field.optionSource } : undefined),
+      enum_values: controlType === 'select' ? (options.length ? { values: options } : field.enumValues as Record<string, unknown> | undefined) : undefined,
       validation: field.validation ? { message: field.validation } : undefined,
       ui_config: {
         placeholder: field.placeholder,
         locked: Boolean(field.locked),
         designerType: field.type,
         businessType: getFieldBusinessType(field),
-        controlType: inferFieldControlType(field),
+        controlType,
       },
       sort_order: index,
     };
@@ -1121,6 +1124,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         description: baseConfig.description,
         storage_mode: 'dynamic',
         status: 'draft',
+        application_id: aiFormDraft.application_id,
         config: {
           source: 'form-settings',
           permissionDesignDraft: { version: 1, roles: Object.fromEntries(
@@ -1493,7 +1497,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       }
       if (action.action === 'confirm_layout_draft') {
         if (!current.platformForm || current.layoutReviewId !== action.id) {
-          throw new Error('当前草稿已变更，请重新复核布局后保存。');
+          throw new Error('当前草稿已变更，请重新复核后保存。');
         }
         if (!await current.saveDraft()) throw new Error('草稿保存未完成，请检查设计器提示后重试。');
         return { form_id: action.form_id, saved: true, published: false };
@@ -1560,6 +1564,10 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
         const properties = action.properties || {};
         const field = current.fields.find(field => field.key === control.fieldKey);
         const updated = applyNativeFieldProperties(control, field, properties);
+        if (control.fieldKey && properties.default_value !== undefined) {
+          const fieldKey = control.fieldKey;
+          setFieldDefaultValueDrafts(previous => ({ ...previous, [fieldKey]: String(properties.default_value) }));
+        }
         current.commitLayoutChange(controls => {
           const next = controls.map(item => item.id === control.id ? updated : item);
           if (properties.position !== undefined) {
@@ -1578,7 +1586,8 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
       return new Promise<Record<string, unknown>>(resolve => setPageCallCompletion({
         resolve, layoutOperationCount: operations?.length,
         includeLayout: action.action === 'inspect_layout' || Boolean(operations?.length),
-        layoutReviewId: action.action === 'configure_layout' && action.form_id > 0 ? action.id : undefined,
+        layoutReviewId: action.form_id > 0 && ['configure_layout', 'set_field_properties'].includes(action.action)
+          ? action.id : undefined,
       }));
     });
   }, [platformForm?.id, aiFormDraft, isResolvingPlatformConfig, isAnalysisDesigner, permissionOnly, registerPageController, baseConfig.fields]);
@@ -1588,6 +1597,7 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
     if (reviewId) setLayoutReview({ id: reviewId, snapshot: draftSaveSnapshot });
     const selected = layoutControls.find(control => control.id === selectedControlId);
     pageCallCompletion.resolve({ form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id,
+      application_id: aiFormDraft?.application_id, application_name: aiFormDraft?.application_name,
       ...(reviewId && { layout_review_ready: true }),
       ...(pageCallCompletion.includeLayout && { layout_controls: describeAiLayout(layoutControls),
         unplaced_fields: baseConfig.fields.filter(field => !layoutControls.some(control => control.fieldKey === field.key))
@@ -1603,10 +1613,14 @@ export default function FormSettingsPage({ formId, initialTab = 'form', requeste
   }, [pageCallCompletion, layoutControls, selectedControlId, hasUnsavedChanges, platformForm?.id, aiFormDraft, draftReviewReady, baseConfig.fields, draftSaveSnapshot]);
   useEffect(() => {
     if ((!platformForm?.id && !aiFormDraft) || isResolvingPlatformConfig) return;
-    setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, review_ready: draftReviewReady, layout_review_id: layoutReviewId, unsaved_changes: hasUnsavedChanges,
+    setDesignerContext({ kind: baseConfig.kind, form_id: platformForm?.id || null, draft_id: platformForm ? undefined : aiFormDraft?.id, form_code: platformForm?.code || aiFormDraft?.code, form_name: baseConfig.name, application_id: aiFormDraft?.application_id,
+      application_name: aiFormDraft?.application_name, review_ready: draftReviewReady, layout_review_id: layoutReviewId, unsaved_changes: hasUnsavedChanges,
       selected_field: layoutControls.find(control => control.id === selectedControlId)?.fieldKey,
       fields: layoutControls.filter(control => control.fieldKey).map(control => ({ field_name: control.fieldKey,
         label: control.name, required: control.rules.required.enabled, readonly: control.rules.readonly.enabled,
+        conditional_required: control.rules.required.enabled && Boolean(control.rules.required.conditions?.sourceField || control.rules.required.conditionGroups?.length),
+        conditional_visibility: control.rules.visible.enabled && Boolean(control.rules.visible.conditions?.sourceField || control.rules.visible.conditionGroups?.length),
+        computed: Boolean(control.computed),
         min: control.typeSettings?.min, max: control.typeSettings?.max,
         control_type: getEffectiveControlTypeForControl(control, baseConfig.fields.find(field => field.key === control.fieldKey)),
         width: control.width, settings: control.typeSettings, presentation: control.presentation,

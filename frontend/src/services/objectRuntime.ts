@@ -118,6 +118,10 @@ export const listObjectRecords = (id: number, params: { q?: string; page: number
 export const readObjectRecord = (id: number, key: string, signal?: AbortSignal) =>
   api.get<{ data: ObjectRecordDetail }>(`/semantic-assets/ontology-objects/${id}/record`, { params: { key }, signal });
 
+export const readObjectRecordAttachment = (id: number, key: string, property: string, fileId: string, signal?: AbortSignal) =>
+  api.get<Blob>(`/semantic-assets/ontology-objects/${id}/attachments/${encodeURIComponent(property)}/${encodeURIComponent(fileId)}`,
+    { params: { key }, responseType: 'blob', signal });
+
 export const readObjectRecordForEdit = (id: number, key: string, signal?: AbortSignal) =>
   api.get<{ data: RelationshipObjectEditSnapshot }>(`/semantic-assets/ontology-objects/${id}/record-edit`, { params: { key }, signal });
 

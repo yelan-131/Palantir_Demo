@@ -212,7 +212,13 @@ async def execute_menu_tool(operation, session, *, user, payload, prepare=False)
         if isinstance(request, CreateMenuEntry):
             values["node_type"] = "page" if request.page_code else "form"
         values["sort_order"] = max((item.sort_order for item in _siblings(nodes, parent_id)), default=-1) + 1
-        return (await _create_application_menu_node(app.id, MenuNodeCreate(**values), session, user))["data"]
+        created = (await _create_application_menu_node(app.id, MenuNodeCreate(**values), session, user))["data"]
+        if isinstance(request, CreateMenuEntry):
+            return {
+                **created, "menu_id": created["id"], "application_name": app.name,
+                "destination": " / ".join(part for part in (app.name, menu_path, created["title"]) if part),
+            }
+        return created
     if isinstance(request, UpdateMenuEntry):
         changes = request.model_dump(exclude_unset=True, exclude={"application_id", "node_id"})
         return (await _update_application_menu_node(app.id, node.id, MenuNodeUpdate(**changes), session, user))["data"]

@@ -1,0 +1,52 @@
+{
+  "objects": [
+    {
+      "code": "demo_relation_valve_durability",
+      "name": "水阀冷冻液耐久要求",
+      "description": "按产品记录维护冷冻液试验工况和老化后强度下限。参考工况用于查找材料试验，产品验收工况需由产品规范确认。",
+      "fields": [
+        {"code": "record_no", "label": "要求编号", "type": "string", "searchable": true},
+        {"code": "name", "label": "要求名称", "type": "string", "searchable": true},
+        {"code": "valve_no", "label": "水阀规格编号", "type": "string", "searchable": true},
+        {"code": "medium", "label": "试验介质", "type": "string", "required": false},
+        {"code": "temperature_c", "label": "试验温度（℃）", "type": "number", "required": false},
+        {"code": "duration_h", "label": "试验时长（h）", "type": "number", "required": false},
+        {"code": "condition_basis", "label": "工况依据（reference / confirmed）", "type": "string", "required": false},
+        {"code": "tensile_min_mpa", "label": "老化后拉伸强度下限（MPa）", "type": "number", "required": false},
+        {"code": "flexural_min_mpa", "label": "老化后弯曲强度下限（MPa）", "type": "number", "required": false},
+        {"code": "fluid_formulation", "label": "冷冻液配方", "type": "string", "required": false},
+        {"code": "test_method", "label": "试验方法或标准", "type": "string", "required": false},
+        {"code": "source_name", "label": "工况资料来源", "type": "string", "required": false},
+        {"code": "source_url", "label": "工况原文链接", "type": "string", "required": false}
+      ],
+      "records": [
+        {
+          "record_no": "VALVE-02-COOLANT",
+          "name": "两通阀冷冻液耐久要求",
+          "valve_no": "VALVE-02",
+          "medium": "冷冻液",
+          "temperature_c": 135,
+          "duration_h": 240,
+          "condition_basis": "reference",
+          "tensile_min_mpa": null,
+          "flexural_min_mpa": null,
+          "fluid_formulation": null,
+          "test_method": null,
+          "source_name": "参考工况取自本松新材《公开转让说明书》印刷第 47 页材料试验",
+          "source_url": "https://qccdata.qichacha.com/ReportData/PDF/889cc2db6d0e46348a74f1e0c94e08f0.pdf#page=48"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "code": "demo_relation_valve_durability_product",
+      "name": "耐久要求对应水阀规格",
+      "description": "按水阀规格编号关联冷冻液耐久要求。",
+      "relation_type": "RELATED_TO",
+      "source_object_code": "demo_relation_valve_durability",
+      "target_object_code": "demo_relation_valve_product",
+      "source_field": "valve_no"
+    }
+  ]
+}

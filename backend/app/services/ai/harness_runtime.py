@@ -33,14 +33,14 @@ from .workflow_design_tools import WRITE_TOOLS as WORKFLOW_DESIGN_WRITES, execut
 from .agent_definition import load_agent_system_prompt, use_agent_registry
 from .agent_items import build_agent_item, from_legacy_step
 from .policies import decide_ai_permission, decide_tool_permission
-from .schemas import AgentRequest, AgentResponse, SkillAction
+from .schemas import AgentRequest, AgentResponse, RelationshipQueryResult, SkillAction
 from .model_catalog import resolve_model_settings
 from .harness_parameters import effective_harness_parameters
 from .settings import load_persisted_ai_settings, maybe_mask_sensitive_payload, settings_snapshot, settings_to_provider_config
 from .tenant_context import require_tenant_id
 from .context_builder import estimate_tokens, fit_context_to_budget
 from .tool_registry import tool_registry, to_openai_function
-from .skill_loader import FORM_SKILL, SKILL_TOOL, available_skill_catalog, read_business_skill
+from .skill_loader import FORM_SKILL, OBJECT_RELATIONSHIPS_SKILL, SKILL_TOOL, available_skill_catalog, read_business_skill
 from .harness_skills import completed_native_skill, stage_native_skills
 from .skills import get_skill
 from .configuration_completion import REPORT_TOOL, REPORT_SCHEMA, REPORT_DESCRIPTION
@@ -49,6 +49,7 @@ from .query_audit import FORM_QUERY_TOOLS, audit_query_policy_denial
 from .workbench_preview import PREVIEW_TOOLS, build_workbench_preview, merge_proposed_fields
 from . import application_navigation
 from . import component_page_controls
+from . import relationship_tools
 
 SDK_VERSION = "0.2.1rc2"
 PATCH = Path(__file__).with_name("harness-platform.patch.yml")
@@ -64,7 +65,10 @@ NAVIGATION_TOOLS = {
         '实际打开应用内有权访问的菜单页。指定菜单页名称，也可指定所属应用；等浏览器确认后再报告结果。',
     ),
 }
-DIRECT_TOOLS = {'platform.application_settings.query', 'platform.form_settings.query', 'knowledge.search', *NAVIGATION_TOOLS}
+DIRECT_TOOLS = {
+    'platform.application_settings.query', 'platform.form_settings.query', 'knowledge.search',
+    relationship_tools.TOOL, *NAVIGATION_TOOLS,
+}
 
 SKILLS_PATCH = Path(__file__).with_name("harness-skills.patch.yml")
 BRIDGES: dict[str, "PlatformBridge"] = {}
@@ -93,6 +97,7 @@ class PlatformBridge:
     loaded_skills: dict[str, dict[str, str]] = field(default_factory=dict)
     configuration_outcome: dict[str, Any] | None = None
     configuration_failure: dict[str, Any] | None = None
+    relationship_query: RelationshipQueryResult | None = None
     call_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     native_skills: bool = field(default_factory=lambda: os.getenv("AI_HARNESS_NATIVE_SKILLS", "true").lower() != "false")
@@ -306,7 +311,19 @@ class PlatformBridge:
         tool = next((t for t in tools.values() if tool_alias(t.name) == alias), None)
         if tool is None or tool.handler_key == "not_implemented":
             return {"status": "blocked", "message": "工具已移除、禁用或尚未实现"}
-        decision = decide_tool_permission(self.user, self.settings, tool.name)
+        relationship_skill = None
+        if tool.name == relationship_tools.TOOL:
+            relationship_skill = get_skill(OBJECT_RELATIONSHIPS_SKILL)
+            if not relationship_skill or tool.name not in relationship_skill.allowed_tools:
+                return {"status": "blocked", "message": "对象与关系查询技能不可用。"}
+            skill_decision = decide_ai_permission(
+                self.user, self.settings, relationship_skill.permission_capability or 'qa',
+                skill=relationship_skill.name, domain=relationship_skill.domain, risk_level=relationship_skill.risk_level,
+            )
+            if not skill_decision.allowed:
+                return {"status": "blocked", "message": skill_decision.reason}
+        skill_name = relationship_skill.name if relationship_skill else None
+        decision = decide_tool_permission(self.user, self.settings, tool.name, skill_name=skill_name)
         if not decision.allowed:
             if tool.name in FORM_QUERY_TOOLS:
                 await audit_query_policy_denial(self.user, self.settings, decision, tool=tool.name)
@@ -411,11 +428,22 @@ class PlatformBridge:
                     if preview else "操作尚未执行。请向用户说明操作内容，并结束本轮等待平台确认。")
             return {"status": "waiting_confirmation", "message": note, "tool": tool.name, "payload": {key: value for key, value in arguments.items() if not key.endswith("_snapshot")}}
         from .tool_envelope import tool_execution_envelope
-        result = await tool_execution_envelope.execute_tool(tool_name=tool.name, payload=arguments, current_user=self.user, settings=self.settings, confirmed=False, event_sink=self.event_sink)
+        if relationship_skill and not any(item.get('type') == 'skill_use' and item.get('skill') == skill_name for item in self.items):
+            item = self.record_skill_use(relationship_skill.name, relationship_skill.title)
+            if self.event_sink:
+                await self.event_sink('item.updated', item)
+        result = await tool_execution_envelope.execute_tool(
+            tool_name=tool.name, payload=arguments, current_user=self.user, skill_name=skill_name,
+            settings=self.settings, confirmed=False, event_sink=self.event_sink,
+        )
         self.items.extend(result.get("items") or [])
         output = result.get("result") or {}
         if tool.name == "knowledge.search":
             self.evidence.extend(output.get("results") or [])
+        if (tool.name == relationship_tools.TOOL and result.get("status") == "completed"
+                and output.get("relationship_query")):
+            self.relationship_query = RelationshipQueryResult.model_validate(output["relationship_query"])
+            self.evidence.extend(output.get("evidence") or [])
         return maybe_mask_sensitive_payload({"status": result.get("status"), "result": output, "error": result.get("error")}, self.settings)
 
 
@@ -470,10 +498,12 @@ def harness_options(settings: dict[str, Any], user: dict[str, Any], *, token: st
         '不要只输出文字清单、假装已生成卡片或要求用户回复确认。收到 waiting_confirmation 后结束本轮。'
         + '根据本轮请求和对话决定下一步。问候直接回答，查询只用只读工具。当前页面仅用于识别对象，不能授权改动。'
         '按需读取匹配的 Skill，用 platform.tools.describe 加载所需工具，再用 platform.tools.invoke 调用。'
-        '编辑或交付表单前先定位真实应用和表单，优先复用明确匹配的对象。多个合理候选请用户选。查询成功且查无匹配时，按用户要求准备新建。'
+        '新建、编辑、查询或交付表单和业务记录前先确定应用范围。优先按用户指定的应用，其次使用与本次对象相关的当前应用，核对真实应用 ID 和表单。'
+        '多个合理候选请用户选择；用户明确查询整个租户或跨应用时可以扩大范围。按已核实应用查无匹配时，按用户要求准备新建。'
+        '查询结果说明实际查了哪个应用或租户范围。交付说明实际写入的应用、菜单路径、组件页面和来源表单，按回执说明草稿或发布状态。'
         '已打开的表单或草稿可用于明确指向当前对象的请求。明确要求独立新建时先检查同名候选，再用独立名称或编码。'
         '网页支持时优先用 ui.form_designer 搭建草稿。无匹配能力或关键业务信息缺失时如实说明。'
-        'forms.create_form_definition 只保存草稿。发布或挂载需先取得已保存表单的真实 ID，再另行确认。'
+        'forms.create_form_definition 只保存草稿，可用 form.application_id 关联已核实应用。发布或挂载需先取得已保存表单的真实 ID，再另行确认。'
         + '填写已有表单记录使用 forms.create_dynamic_record_draft。'
         '修改已有记录先读取定位原记录，再调用 forms.update_record，只传需改字段；不得用新增记录代替修改。'
         '工具返回403时停止该操作，不换表单编码或猜ID重试；补充ID不能提升权限，不建议以此绕过授权。'
@@ -712,6 +742,17 @@ class HarnessRuntime:
         if not decision.allowed:
             return AgentResponse(answer=decision.reason)
         bridge = PlatformBridge(user=user, settings=settings, context=context, event_sink=event_sink)
+        if not request.is_confirmation_follow_up and context.get("surface") != "knowledge":
+            arguments = relationship_tools.parse_relationship_query(request.message)
+            if arguments is not None:
+                result = await bridge.call_tool(tool_alias(relationship_tools.TOOL), arguments)
+                answer = (result.get("result") or {}).get("message") or result.get("message") or result.get("error")
+                return AgentResponse(
+                    answer=answer or "未能读取对象关系。",
+                    items=bridge.items, evidence=bridge.evidence, relationship_query=bridge.relationship_query,
+                )
+            if context.get("surface") == relationship_tools.SURFACE:
+                return AgentResponse(answer="请用对象名称或编号提出关系查询，例如「查三通阀有哪些关系」。")
         navigation = application_navigation.explicit_navigation_request(request.message)
         if navigation and not request.is_confirmation_follow_up and application_navigation.navigation_available(bridge, navigation[0]):
             tool, arguments = navigation
@@ -849,7 +890,11 @@ class HarnessRuntime:
                 bridge.items.append(item)
                 if event_sink:
                     await event_sink('item.updated', item)
-            return AgentResponse(answer=answer, actions=bridge.pending, evidence=bridge.evidence, items=bridge.items, requires_confirmation=bool(bridge.pending), risk_level=highest, mode="agentic" if bridge.pending else "qa", usage=usage)
+            return AgentResponse(
+                answer=answer, actions=bridge.pending, evidence=bridge.evidence, items=bridge.items,
+                requires_confirmation=bool(bridge.pending), risk_level=highest, mode="agentic" if bridge.pending else "qa",
+                usage=usage, relationship_query=bridge.relationship_query if not bridge.pending else None,
+            )
         except asyncio.TimeoutError:
             if bridge.pending:
                 return AgentResponse(answer='配置已准备，请复核确认卡片。模型说明超时，尚未执行写入。',

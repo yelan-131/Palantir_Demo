@@ -87,6 +87,20 @@
   border-bottom: 1px solid color-mix(in srgb, var(--mf-border), transparent 50%);
 }
 .relationship-object-wiki__property:last-child { border-bottom: 0; }
+.relationship-object-wiki__property--drawing { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.relationship-section-drawing-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--mf-border);
+  border-radius: 4px;
+  background: #fff;
+  cursor: zoom-in;
+}
+.relationship-section-drawing-button:focus-visible { outline: 2px solid var(--mf-primary); outline-offset: 2px; }
+.relationship-section-drawing { position: relative; display: block; width: 100%; overflow: hidden; background: #fff; }
+.relationship-section-drawing img { position: absolute; display: block; max-width: none; }
+.relationship-section-drawing-preview { width: 100%; margin-inline: auto; }
 .relationship-object-wiki__properties dt {
   padding-block: 5px;
   color: var(--mf-muted);
@@ -197,6 +211,7 @@
 .relationship-object-wiki__trials { margin-block: 8px; }
 .relationship-object-wiki__trials :is(th, td) { white-space: nowrap; }
 .relationship-object-wiki__trials th { font-weight: 500; }
+.relationship-attachment-download.ant-btn { max-width: 100%; height: auto; padding-inline: 0; white-space: normal; text-align: start; overflow-wrap: anywhere; }
 .relationship-object-wiki__trials .ant-tag { margin-inline: 6px 0; }
 .relationship-object-wiki__matched-trial { background: var(--mf-panel-soft); }
 .relationship-object-wiki__match { padding: 5px 0; }

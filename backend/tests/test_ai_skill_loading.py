@@ -117,6 +117,16 @@ def test_catalog_is_small_and_body_is_loaded_only_on_request():
     assert 'instructions' not in str(catalog)
 
 
+@pytest.mark.parametrize('name', [
+    'analysis.analyze_form_records', 'forms.create_record_draft', 'low_code.add_form_field', 'low_code.inspect_form',
+])
+def test_application_scoped_form_skills_can_be_read_over_platform_mcp(name):
+    settings = merge_ai_settings({'apiKey': 'test-key', 'agentMode': 'confirm', 'rolePolicies': []})
+    result = skill_loader.read_business_skill(name, user=USER, settings=settings, context={})
+    assert result['status'] == 'completed'
+    assert '当前应用' in result['skill']['instructions']
+
+
 def test_edited_form_steps_override_bundled_instructions(monkeypatch):
     skill = skill_loader.get_skill(skill_loader.FORM_SKILL)
     edited = skill.model_copy(update={'instructions': '1. 核对草稿。'})

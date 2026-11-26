@@ -191,6 +191,35 @@ class AgentRequest(BaseModel):
         self._confirmation_follow_up = True
 
 
+class RelationshipRecordReference(BaseModel):
+    object_type_id: int
+    object_key: str
+
+
+class RelationshipEvidenceReference(RelationshipRecordReference):
+    label: str
+
+
+class RelationshipQueryEdge(BaseModel):
+    relation_id: int
+    source_type_id: int
+    source_key: str
+    target_type_id: int
+    target_key: str
+    label: str
+
+
+class RelationshipQueryResult(RelationshipRecordReference):
+    object_name: str
+    relation_depth: Literal[1] = 1
+    intent: Literal["relationships", "material_review"] = "relationships"
+    material_parameter_review: bool
+    evidence_records: list[RelationshipEvidenceReference] = Field(default_factory=list)
+    comparison_materials: list[RelationshipRecordReference] = Field(default_factory=list)
+    edges: list[RelationshipQueryEdge] = Field(default_factory=list)
+    truncated: bool = False
+
+
 class AgentResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -207,6 +236,7 @@ class AgentResponse(BaseModel):
     frozen_context: FrozenContext | None = None
     usage: dict[str, Any] = Field(default_factory=dict)
     token_budget: dict[str, Any] | None = None
+    relationship_query: RelationshipQueryResult | None = None
 
     @model_validator(mode="before")
     @classmethod

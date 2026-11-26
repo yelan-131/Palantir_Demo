@@ -74,7 +74,7 @@ import './ai-settings.css';
 import './account.css';
 import '../../components/AiChatWidget/aiPanels.css';
 import AISettingsWorkspace, { AISettingsSaveActions } from './AISettingsWorkspace';
-import { getSkillDisplayDescription, getSkillDisplayTitle, getToolHelp, toolAvailability, toolEffects } from './aiRegistryHelp';
+import { getSkillDisplayTitle, getToolHelp, toolAvailability, toolEffects } from './aiRegistryHelp';
 
 cytoscape.use(dagre);
 
@@ -783,16 +783,12 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
         ...skillEditor.imported, enabled: false, risk_level: 'medium', allowed_tools: [], default_tool: null,
       });
     } else if (instance && selectedSkill) {
-      instance.setFieldsValue({
-        ...selectedSkill,
-        title: getSkillDisplayTitle(selectedSkill.name, selectedSkill.title),
-        description: getSkillDisplayDescription(selectedSkill.name, selectedSkill.description),
-      });
+      instance.setFieldsValue(selectedSkill);
     }
   }, [selectedSkill, skillEditor.imported]);
 
   const saveSkill = async () => {
-    const { instructions, ...values } = await skillForm.validateFields();
+    const { instructions, version_bump, ...values } = await skillForm.validateFields();
     const next = [...registrySkills];
     const item = {
       ...(selectedSkill ? {} : { capability_level: 'assisted', confirmation_policy: 'confirm_token' }),
@@ -800,6 +796,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
       ...selectedSkill, ...values, enabled: values.enabled !== false,
       title: values.title?.trim() || values.name,
       ...(typeof instructions === 'string' ? { instructions } : {}),
+      ...(selectedSkill && version_bump === 'major' ? { version_bump } : {}),
     };
     if (skillEditor.index === null) next.push(item);
     else next[skillEditor.index] = item;
@@ -830,11 +827,18 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
       notify('error', '配置格式有误', '输入和输出 Schema 必须是有效的 JSON');
       return;
     }
-    const { input_schema_json, output_schema_json, ...rest } = values;
+    const { input_schema_json, output_schema_json, version_bump, ...rest } = values;
     void input_schema_json;
     void output_schema_json;
     const next = [...registryTools];
-    const item = { ...selectedTool, ...rest, enabled: rest.enabled !== false, input_schema: inputSchema, output_schema: outputSchema };
+    const item = {
+      ...selectedTool,
+      ...rest,
+      enabled: rest.enabled !== false,
+      input_schema: inputSchema,
+      output_schema: outputSchema,
+      ...(selectedTool && version_bump === 'major' ? { version_bump } : {}),
+    };
     if (toolEditor.index === null) next.push(item);
     else next[toolEditor.index] = item;
     if (await persistAgentRegistry({ ...agentRegistry, skills: registrySkills, tools: next })) setToolEditor({ open: false, index: null });
@@ -1012,28 +1016,51 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
   type RegistryRecordInfo = {
     created_by?: string; created_by_name?: string; created_at?: string;
     updated_by?: string; updated_by_name?: string; updated_at?: string;
+    release_version?: string;
   };
   type RegistryTableRecord = RegistryRecordInfo & { name: string; title?: string; enabled?: boolean; handler_key?: string };
   const registryActor = (value?: string, name?: string) => {
     if (value === 'admin') return '超级管理员（admin）';
     return name || (value && (/^\d+$/.test(value) ? `未知用户（ID ${value}）` : value)) || '未记录';
   };
+  const registryVersionColumn = {
+    title: '版本号', dataIndex: 'release_version', width: 84, render: (value?: string) => value || '—',
+  };
   const registryAuditColumns = [
-    { title: '创建人', dataIndex: 'created_by', width: 148, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.created_by_name) },
-    { title: '创建时间', dataIndex: 'created_at', width: 172, render: (value?: string) => formatServerDateTime(value, '—') },
-    { title: '更新人', dataIndex: 'updated_by', width: 148, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.updated_by_name) },
-    { title: '更新时间', dataIndex: 'updated_at', width: 172, render: (value?: string) => formatServerDateTime(value, '—') },
+    { title: '创建人', dataIndex: 'created_by', width: 128, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.created_by_name) },
+    { title: '创建时间', dataIndex: 'created_at', width: 150, render: (value?: string) => formatServerDateTime(value, '—') },
+    { title: '更新人', dataIndex: 'updated_by', width: 128, ellipsis: true, render: (value: string, record: RegistryTableRecord) => registryActor(value, record.updated_by_name) },
+    { title: '更新时间', dataIndex: 'updated_at', width: 150, render: (value?: string) => formatServerDateTime(value, '—') },
   ];
   const registryRecordInfo = (record: RegistryRecordInfo) => (
     <section className="ai-registry-dialog-section">
       <h4>记录信息</h4>
       <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
+        { key: 'version', label: '版本号', children: record.release_version || '—' },
         { key: 'creator', label: '创建人', children: registryActor(record.created_by, record.created_by_name) },
         { key: 'created', label: '创建时间', children: formatServerDateTime(record.created_at, '—') },
         { key: 'updater', label: '更新人', children: registryActor(record.updated_by, record.updated_by_name) },
         { key: 'updated', label: '更新时间', children: formatServerDateTime(record.updated_at, '—') },
       ]} />
     </section>
+  );
+  const registryVersionEditor = (record?: RegistryRecordInfo) => (
+    <Row gutter={16}>
+      <Col xs={24} sm={8}>
+        <Form.Item label={record ? '当前版本' : '初始版本'}>
+          <Typography.Text>{record ? record.release_version || '—' : '1.0'}</Typography.Text>
+        </Form.Item>
+      </Col>
+      {record && <Col xs={24} sm={16}>
+        <Form.Item name="version_bump" label="更新幅度" initialValue="patch"
+          extra="实际修改保存后升版。大更新将第二位置零。">
+          <Select options={[
+            { value: 'patch', label: '小更新（第二位加 1）' },
+            { value: 'major', label: '大更新（第一位加 1）' },
+          ]} />
+        </Form.Item>
+      </Col>}
+    </Row>
   );
   const advancedSections = [
     {
@@ -1044,7 +1071,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
           <Table
             size="small"
             pagination={false}
-            scroll={{ x: 1084, y: '100%' }}
+            scroll={{ x: 900, y: '100%' }}
             rowKey={(record: any) => record.name || record.title}
             dataSource={registrySkills}
             rowClassName="ai-registry-row"
@@ -1061,8 +1088,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
                   }}>{getSkillDisplayTitle(name, record.title)}</button>
                 ),
               },
-              { title: '默认工具', dataIndex: 'default_tool', ellipsis: true, render: name => getToolHelp(name)?.title || name || '—' },
-              { title: '风险', dataIndex: 'risk_level', width: 72 },
+              registryVersionColumn,
               ...registryAuditColumns,
             ]}
             locale={{ emptyText: '尚未注册技能' }}
@@ -1071,7 +1097,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
           <Table
             size="small"
             pagination={false}
-            scroll={{ x: 1214, y: '100%' }}
+            scroll={{ x: 1150, y: '100%' }}
             rowKey={(record: any) => record.name || record.title}
             dataSource={registryTools}
             rowClassName="ai-registry-row"
@@ -1090,7 +1116,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
               },
               { title: '处理器', dataIndex: 'handler_key', ellipsis: true },
               { title: '操作类型', dataIndex: 'side_effect', width: 130, render: value => toolEffects[value] || value || '—' },
-              { title: '风险', dataIndex: 'risk_level', width: 72 },
+              registryVersionColumn,
               ...registryAuditColumns,
             ]}
             locale={{ emptyText: '尚未注册工具' }}
@@ -1385,6 +1411,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
                 ]}>
                   <Input placeholder="analyze-form-records" disabled={Boolean(selectedSkill)} />
                 </Form.Item>
+                {registryVersionEditor(selectedSkill)}
                 <Form.Item name="description" label={<code>description</code>} rules={[
                   { required: true, whitespace: true, message: '请说明技能的用途和适用场景' },
                   { max: 1024, message: '技能描述最多 1024 个字符' },
@@ -1511,6 +1538,7 @@ function AISettingsPanel({ canManageGlobalSettings }: { canManageGlobalSettings:
                   </Form.Item>
                 </Col>
               </Row>
+              {registryVersionEditor(selectedTool)}
               <Form.Item name="description" label="描述">
                 <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} />
               </Form.Item>

@@ -5,7 +5,7 @@ import {
   type RuntimeObjectType,
 } from '../../services/objectRuntime';
 
-const MAX_LOCAL_NODES = 60;
+export const MAX_LOCAL_NODES = 60;
 const MAX_LOCAL_EDGES = 120;
 const MAX_OVERVIEW_NODES = 150;
 const MAX_OVERVIEW_EDGES = 320;
@@ -38,6 +38,8 @@ export interface RelationshipEdge {
   relationId: number | string;
   code: string;
   kind?: 'candidate';
+  symmetric?: boolean;
+  strength?: number;
   evidence?: {
     sourceField: string;
     sourceValue: string;
@@ -56,7 +58,7 @@ export interface RelationshipGraph {
 }
 
 export const relationshipNodeId = (typeId: number, key: string) => JSON.stringify([typeId, key]);
-const relationshipEdgeId = (relationId: number | string, source: string, target: string) => JSON.stringify([String(relationId), source, target]);
+export const relationshipEdgeId = (relationId: number | string, source: string, target: string) => JSON.stringify([String(relationId), source, target]);
 
 export function renameRelationshipNode(graph: RelationshipGraph, record: RelationshipNode, key: string, values: Record<string, unknown>): RelationshipGraph {
   const id = relationshipNodeId(record.typeId, key);

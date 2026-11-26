@@ -885,6 +885,7 @@ export const adminUpdateOrgUnit = (id: number, data: Record<string, unknown>) =>
 export const adminDeleteOrgUnit = (id: number) => api.delete(`/admin/org-units/${id}`);
 export const adminListRoles = () => api.get('/admin/roles');
 export const adminCreateRole = (data: Record<string, unknown>) => api.post('/admin/roles', data);
+export const adminUpdateRole = (id: number, data: { label: string; description: string | null }) => api.put(`/admin/roles/${id}`, data);
 export const adminDeleteRole = (id: number) => api.delete(`/admin/roles/${id}`);
 export const adminSetPermissions = (data: Record<string, unknown>) => api.put('/admin/roles/0/permissions', data);
 export const adminListRoleTemplates = () => api.get('/admin/role-templates');
